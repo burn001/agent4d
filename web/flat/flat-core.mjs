@@ -73,11 +73,32 @@ export function boxCenterXZ(pts) {
 export function fitNeed(pts, c, aspect, mh = FLAT.FIT_MH, mv = FLAT.FIT_MV) {
   let D = 0;
   const ax = Math.max(0.2, aspect) * mh;
-  for (const { p, r = 0 } of pts) {
-    const need = Math.max((Math.abs(p.x - c.x) + r) / ax, (Math.abs(p.z - c.z) + r) / mv);
+  for (const { p, r = 0, e } of pts) {
+    let need;
+    if (!e) need = Math.max((Math.abs(p.x - c.x) + r) / ax, (Math.abs(p.z - c.z) + r) / mv);
+    else { // 화면 고정 몫 e(반높이 단위 — px / (H/2)): 그 방향의 화면 끝을 그만큼 당김(z 가 커지면 화면 아래)
+      const dx = p.x - c.x, dz = p.z - c.z, m = (v, k) => Math.max(v * 0.15, v - k);
+      need = Math.max((dx + r) / m(ax, e.r), (r - dx) / m(ax, e.l), (dz + r) / m(mv, e.b), (r - dz) / m(mv, e.t));
+    }
     if (need > D) D = need;
   }
   return D;
+}
+/** 평행 투영 맞춤: 화면 상자(반지름·화면 고정 몫 포함)의 가운데로 시선점을 옮기고 거리를 다시 — 반환 {c, D} */
+export function refineFit2D(pts, c0, aspect, mh = FLAT.FIT_MH, mv = FLAT.FIT_MV, iters = 3) {
+  let c = { x: c0.x, y: 0, z: c0.z };
+  let D = fitNeed(pts, c, aspect, mh, mv);
+  for (let it = 0; it < iters && pts.length; it++) {
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const { p, r = 0, e } of pts) {
+      x0 = Math.min(x0, p.x - r - (e ? e.l * D : 0)); x1 = Math.max(x1, p.x + r + (e ? e.r * D : 0));
+      z0 = Math.min(z0, p.z - r - (e ? e.t * D : 0)); z1 = Math.max(z1, p.z + r + (e ? e.b * D : 0));
+    }
+    const nc = { x: (x0 + x1) / 2, y: 0, z: (z0 + z1) / 2 };
+    if (Math.abs(nc.x - c.x) < 1e-4 * D && Math.abs(nc.z - c.z) < 1e-4 * D) break;
+    c = nc; D = fitNeed(pts, c, aspect, mh, mv);
+  }
+  return { c, D };
 }
 /** 노드가 적을 때 너무 붙지 않게: 최소 반지름 MIN_R 을 담는 D */
 export const fitMinD = (aspect, mh = FLAT.FIT_MH, mv = FLAT.FIT_MV) => Math.max(FLAT.MIN_R / (Math.max(0.2, Math.min(1, aspect)) * mh), FLAT.MIN_R / mv);

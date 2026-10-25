@@ -103,7 +103,7 @@ function drawCard(view, ctx, { e, v, ph, hPx }, now, L, anchorOf) {
   const x0 = Math.round(cx - w / 2), y0 = Math.round(cy - h / 2);
   if (x0 > view.W || y0 > view.H || x0 + w < 0 || y0 + h < 0) return; // 화면 밖
   if (alpha > 0.15 && h >= 6 && ph.phase !== 'fold' && view._cardRects) view._cardRects.push([x0, y0, x0 + w, y0 + h]);
-  if (alpha > 0.15 && ph.phase !== 'fold' && view._cardHits) view._cardHits.push({ x0, y0, x1: x0 + w, y1: y0 + h, id: v.id, e });
+  if (alpha > 0.15 && ph.phase !== 'fold' && view._cardHits) view._cardHits.push({ x0, y0, x1: x0 + w, y1: y0 + h, id: v.id, e, ax: nx, ay: ny }); // ax·ay = 카드 기준점(px, 복셀은 책상) — 맞춤
   const cat = e.cat;
   const ink = cat === 'skill' ? view.tokens.skill : cat === 'say' ? P.text : catColor(cat, L);
   const resCol = e.res === 'error' ? P.error : e.res === 'stopped' ? P.stopped : P.done;

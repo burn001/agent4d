@@ -161,8 +161,21 @@ export class Bubbles {
     }
   }
 
+  /** 노드별 보이는 이름표: id → [{p: 세계 기준점, b: 기준점 기준 px 상자 {x0,x1,y0,y1}(y 아래)}] — 자동 카메라 전체 맞춤이 담는다.
+   *  잠깐 뜨는 말풍선은 담지 않는다(뜰 때마다 줌이 드나들지 않게) */
+  fitLabels(out) {
+    for (const it of this.lpool.items) {
+      if (!it.o.visible || !it.key || it.el.style.visibility === 'hidden') continue;
+      const w = (it._mw || 80) + 4, h = it._mh || 18, p = it.o.position;
+      push(out, it.key, { p: { x: p.x, y: p.y, z: p.z }, b: { x0: -w / 2, x1: w / 2, y0: 0, y1: h + 6 } });
+    }
+    return out;
+  }
+
   dispose() { this.bpool.dispose(); this.lpool.dispose(); this.rpool.dispose(); this.bubbles.clear(); }
 }
+
+function push(m, id, x) { const a = m.get(id); if (a) a.push(x); else m.set(id, [x]); }
 
 function fill(pool, arr, place, base) {
   const items = pool.items;

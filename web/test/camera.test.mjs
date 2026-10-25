@@ -131,7 +131,7 @@ test('전체 맞춤 거리: 모든 점이 여백 안, 점이 늘면 멀어지고
 });
 
 test('맞춤 유지(히스테리시스): 작은 변화엔 그대로, 넘치면 바로, 줄어들면 잠시 뒤에, 거리 범위 지킴', () => {
-  const h = new FitHold({ grow: 1.0, shrink: 0.72, shift: 0.22, hold: 2.5, headroom: 1.1 });
+  const h = new FitHold({ grow: 1.0, shrink: 0.72, shift: 0.22, hold: 2.5, headroom: 1.1, fastShrink: 0 }); // 크게 줄 때 빨리 다가가기는 아래 따로
   const C = (x) => ({ x, y: 0, z: 0 });
   assert.equal(h.step(0, { c: C(0), D: 100 }, Infinity), true, '처음은 맞춤');
   assert.ok(Math.abs(h.D - 110) < 1e-9);
@@ -165,4 +165,81 @@ test('§78 자동 카메라 깊이: 가까운 자식 고르기·수동 최소 �
   assert.ok(ZOOM.NODE_K > 0 && ZOOM.NODE_K <= 1 && ZOOM.NODE_MIN_R_K > 0 && ZOOM.NODE_MIN_R_K <= 1);
   // 2D 노드 샷 바닥(MIN_R 7 × K / 0.93)이 수동 최소 D_MIN 4 보다 크다 — 자동이 수동 한계보다 붙지 않음
   assert.ok((7 * ZOOM.NODE_MIN_R_K) / 0.93 >= 4);
+});
+
+test('§41.5 맞춤 대상: 활성(작업 중·열린 도구, 끝나지 않음)만 — 활성이 없으면 보이는 노드 전부', async () => {
+  const { isFitActive, pickFitIds } = await import('../camera-core.mjs');
+  assert.equal(isFitActive(V('active')), true);
+  assert.equal(isFitActive(V('idle')), false);
+  assert.equal(isFitActive(V('idle'), 1), true, '열린 도구');
+  assert.equal(isFitActive(V('done'), 1), false, '끝난 노드는 열린 도구가 남아도 아님');
+  assert.equal(isFitActive(V('stopped')), false);
+  assert.equal(isFitActive(V('error')), false);
+  assert.deepEqual(pickFitIds([['a', false], ['b', true], ['c', true]]), ['b', 'c']);
+  assert.deepEqual(pickFitIds([['a', false], ['b', false]]), ['a', 'b'], '활성이 없으면 전부');
+  assert.deepEqual(pickFitIds([]), []);
+});
+
+test('§41.5 패널 자리 기억: 0.5초 칸 합집합을 keep 초 동안, 지나면 비움 · 모서리 점', async () => {
+  const { PanelMemo, boxCorners } = await import('../camera-core.mjs');
+  const m = new PanelMemo(4, 0.5);
+  assert.equal(m.get('a', 0), null);
+  m.put('a', 0.1, { x0: 1, x1: 3, y0: -1, y1: 1 });
+  m.put('a', 0.3, { x0: -2, x1: 0, y0: 0, y1: 2 }); // 같은 칸 → 합침
+  assert.deepEqual(m.get('a', 0.3), { x0: -2, x1: 3, y0: -1, y1: 2 });
+  m.put('a', 2.0, { x0: 0, x1: 1, y0: 0, y1: 5 });
+  assert.deepEqual(m.get('a', 3), { x0: -2, x1: 3, y0: -1, y1: 5 }, '닫힌 패널 자리도 keep 초 동안');
+  assert.deepEqual(m.get('a', 4.6), { x0: 0, x1: 1, y0: 0, y1: 5 }, '오래된 칸은 빠짐');
+  assert.equal(m.get('a', 9), null);
+  const cs = boxCorners({ x: 10, y: 0, z: 5 }, { x0: -1, x1: 2, y0: 0, y1: 3 }, { x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 }, 0);
+  assert.equal(cs.length, 4);
+  assert.deepEqual(cs.map((q) => [q.p.x, q.p.y]), [[9, 0], [9, 3], [12, 0], [12, 3]]);
+  assert.ok(cs.every((q) => q.p.z === 5 && q.panel));
+});
+
+test('§41.5 투영 맞춤: 노드 + 패널 모서리가 여백 6% 띠를 한 축 꽉 채움, 패널 쪽으로 가운데가 옮겨 감', async () => {
+  const { refineFit, requiredDist, boxCenter, FIT } = await import('../camera-core.mjs');
+  // 위에서 비스듬히(고도 35°) 보는 카메라
+  const el = (35 * Math.PI) / 180, dir = { x: 0, y: Math.sin(el), z: Math.cos(el) };
+  const F = { x: -dir.x, y: -dir.y, z: -dir.z };
+  const rl = Math.hypot(F.z, F.x); const R = { x: -F.z / rl, y: 0, z: F.x / rl };
+  const U = { x: R.y * F.z - R.z * F.y, y: R.z * F.x - R.x * F.z, z: R.x * F.y - R.y * F.x };
+  const t = Math.tan((50 * Math.PI) / 360), aspect = 16 / 9;
+  const tanH = t * aspect * (1 - FIT.M), tanV = t * (1 - FIT.M);
+  const node = { p: { x: 0, y: 0, z: 0 }, r: 1.5 };
+  const panel = [[3, 1], [3, 3], [6, 1], [6, 3]].map(([x, y]) => ({ p: { x: R.x * x + U.x * y, y: R.y * x + U.y * y, z: R.z * x + U.z * y }, r: 0.12 }));
+  const pts = [node, ...panel];
+  const { c, D } = refineFit(pts, boxCenter(pts), R, U, F, tanH, tanV, 4);
+  // 모든 점이 화면 안, 가로나 세로 한쪽이 여백 끝에 닿음
+  let mx = 0, my = 0, x0 = Infinity, x1 = -Infinity;
+  for (const { p, r } of pts) {
+    const dx = p.x - c.x, dy = p.y - c.y, dz = p.z - c.z;
+    const x = dx * R.x + dy * R.y + dz * R.z, y = dx * U.x + dy * U.y + dz * U.z, z = dx * F.x + dy * F.y + dz * F.z;
+    const dep = D + z;
+    mx = Math.max(mx, (Math.abs(x) + r) / dep / tanH); my = Math.max(my, (Math.abs(y) + r) / dep / tanV);
+    x0 = Math.min(x0, (x - r) / dep); x1 = Math.max(x1, (x + r) / dep);
+  }
+  assert.ok(mx <= 1 + 1e-6 && my <= 1 + 1e-6, '잘림 없음');
+  assert.ok(Math.max(mx, my) > 0.97, '한 축이 꽉 참');
+  assert.ok(Math.abs((x0 + x1) / 2) < 0.02 * tanH, '투영 상자 가운데가 화면 가운데');
+  // 노드만 맞출 때보다 멀지만, 노드를 크게 담은 경계구(예전 반지름 r×1.15+0.9 의 구 전체)보다는 가깝다
+  assert.ok(D > requiredDist([node], node.p, R, U, F, tanH, tanV));
+});
+
+test('§41.5 히스테리시스: 작은 넘침(GROW 안)은 기다리고, 크게 줄면 FAST_HOLD 초 뒤 다가감', async () => {
+  const { FitHold, FIT } = await import('../camera-core.mjs');
+  const C = (x) => ({ x, y: 0, z: 0 });
+  const h = new FitHold();
+  h.step(0, { c: C(0), D: 100 }, Infinity);
+  const D0 = h.D;
+  assert.equal(h.step(0.5, { c: C(0), D: D0 }, D0 * 1.01), false, '1% 넘침은 그대로(여백 안)');
+  assert.equal(h.step(1, { c: C(0), D: D0 * 1.1 }, D0 * 1.1), true, '크게 넘치면 바로 물러남');
+  const D1 = h.D;
+  assert.equal(h.step(2, { c: C(0), D: D1 * 0.4 }, D1 * 0.4), false, '크게 줄어도 바로는 아님');
+  assert.equal(h.step(2 + FIT.FAST_HOLD - 0.05, { c: C(0), D: D1 * 0.4 }, D1 * 0.4), false);
+  assert.equal(h.step(2 + FIT.FAST_HOLD + 0.01, { c: C(0), D: D1 * 0.4 }, D1 * 0.4), true, '활성 집합이 줄면 짧게만 기다림');
+  const D2 = h.D;
+  assert.equal(h.step(4, { c: C(0), D: D2 * 0.8 }, D2 * 0.8), false, '조금 줄면 평소대로(2초)');
+  assert.equal(h.step(5.5, { c: C(0), D: D2 * 0.8 }, D2 * 0.8), false);
+  assert.equal(h.step(6.1, { c: C(0), D: D2 * 0.8 }, D2 * 0.8), true);
 });

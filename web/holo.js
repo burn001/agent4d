@@ -598,6 +598,25 @@ export class HoloLayer {
     return best;
   }
 
+  /**
+   * 노드별 펼친 패널 자리: id → 세계 좌표 모서리 점 [{x,y,z}…](빌보드 — 지난 프레임 update 의 카메라 오른쪽·위로 네 모서리).
+   * 자동 카메라 전체 맞춤이 노드와 함께 담는다. out = Map
+   */
+  panelCorners(out = new Map()) {
+    out.clear();
+    if (!this.enabled) return out;
+    const R = this._r, U = this._u;
+    for (let i = 0; i < (this._nr || 0); i++) {
+      const q = this._rw[i];
+      if (!q || !q.id) continue;
+      let a = out.get(q.id);
+      if (!a) { a = []; out.set(q.id, a); }
+      const hw = q.w / 2, hh = q.h / 2;
+      for (const sx of [-1, 1]) for (const sy of [-1, 1]) a.push({ x: q.x + R.x * hw * sx + U.x * hh * sy, y: q.y + R.y * hw * sx + U.y * hh * sy, z: q.z + R.z * hw * sx + U.z * hh * sy });
+    }
+    return out;
+  }
+
   /** 지금 펼친 패널의 화면 사각형 [x0, y0, x1, y1](px) — 노드 라벨이 피한다. 빌보드라 중심 깊이의 축척으로 충분 */
   panelRects(camera, W, H, out = []) {
     if (!this.enabled) return out;

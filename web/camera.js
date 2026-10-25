@@ -1,7 +1,7 @@
 // 카메라: OrbitControls + 자동 투어 + 수동 조작 10초 규칙
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { STALE_DWELL, isShown, isLive, isBusy, scoreOf, pickBest, shotLost, shotStale, shownAncestor, fitFrame, flightPose, boxCenter, requiredDist, refineFit, FitHold, safeBand, ZOOM, autoFloor, nearestKids } from './camera-core.mjs';
+import { STALE_DWELL, isShown, isLive, isBusy, scoreOf, pickBest, shotLost, shotStale, shownAncestor, fitFrame, flightPose, boxCenter, requiredDist, refineFit, FitHold, safeBand, ZOOM, autoFloor, nearestKids, FIT, isFitActive, pickFitIds, PanelMemo, boxCorners, pxToE } from './camera-core.mjs';
 import { stageInsets } from './screen-insets.js';
 import { bestPose, perspPose, needRepack } from './overview/fill-pack.mjs';
 import { legacyPack } from './overview/pack-view.js';
@@ -123,6 +123,8 @@ export class CameraDirector {
     // 예전엔 overview 로 바꾸고 비행 없이 머물기 보간만 해서, 새 카메라 기본 자리에서 8초 동안 엉뚱한 곳을 보았다
     if (this.shot.type === 'cluster' && this.scope.mode !== 'all') this.shot = { type: 'overview' };
     this.fit.reset(); // 화각·고도가 다른 새 카메라 기준으로 다시 맞춤
+    if (this._panMemo) this._panMemo.clear(); // 패널·라벨 자리는 표현마다 다르다
+    if (this._labMemo) this._labMemo.clear();
     this._orbitDir = 1;
     this._startTransition();
   }
@@ -462,55 +464,111 @@ export class CameraDirector {
     return pts.filter((q) => q.p);
   }
 
-  /** 맞춤 대상 점: 지금 범위의 보이는(숨김·퇴장·희미 아닌) 노드 전부. 전체 보기 무선택이면 살아 있는 섬들의 노드 */
-  _fitPts() {
+  /** 맞춤에 쓸 카메라 방향(시선점 → 카메라): 비행 중이면 도착 방향, 아니면 지금 실제 방향(고도 제한으로 고치지 않음 — 맞춤 유지는 방향을
+   *  바꾸지 않으므로, 고친 방향으로 재면 실제 화면과 어긋나 한쪽이 비거나 잘렸다) */
+  _fitDir() {
+    if (this.trans && this.trans.dir) return this.trans.dir;
+    const d = this._v.copy(this.camera.position).sub(this.controls.target);
+    return d.lengthSq() > 1e-6 ? d.normalize().clone() : this._dirFrom(this.controls.target);
+  }
+
+  /** 카메라 방향 dir(시선점 → 카메라)의 화면 기저: F 앞, R = F × 위(0,1,0) 정규화, U = R × F */
+  _fitBasis(dir) {
+    const F = { x: -dir.x, y: -dir.y, z: -dir.z };
+    const rl = Math.hypot(F.z, F.x) || 1;
+    const R = { x: -F.z / rl, y: 0, z: F.x / rl };
+    const U = { x: R.y * F.z - R.z * F.y, y: R.z * F.x - R.x * F.z, z: R.x * F.y - R.y * F.x };
+    return { F, R, U };
+  }
+
+  /**
+   * 맞춤 대상 점: 지금 범위(전체 보기 무선택 = 보이는 노드 전체, 프로젝트 선택 = 그 섬, 세션 선택 = 그 트리)의
+   * **활성** 노드(끝나지 않았고 작업 중이거나 열린 도구가 있음 — 없으면 보이는 노드 전부) + 그 노드의 펼친 도구 패널 자리(최근 PANEL_KEEP 초).
+   * 섬 바닥·섬 상자·작업 대상 층·복셀 방 모서리는 담지 않는다(예전엔 담아 노드가 작게 보였다). basis = 이번 맞춤의 화면 기저
+   */
+  _fitPts(basis) {
     const view = this.view, all = this.scope.mode === 'all';
     const fp = all ? this.scope.focusProject : null, fsid = all ? this.scope.focusSession : null;
-    const pts = [];
+    const list = [];
     for (const [id, v] of view.vis) {
       if (!this._shownId(id)) continue;
       if (fsid && (!v.node || v.node.rootSessionId !== fsid)) continue;
       if (fp && !fsid && this._clusterOf(id) !== fp) continue;
-      const p = view.nodeTarget ? view.nodeTarget(id) : v.target;
-      if (p) pts.push({ p, r: (view.nodeRadius ? view.nodeRadius(id) : v.r || 1) * FIT_PAD_K + FIT_PAD });
+      list.push([id, isFitActive(v, v.icons ? v.icons.size || 0 : 0)]);
     }
-    if (view.fitExtra3d) view.fitExtra3d(pts, this.scope); // 노드 말고도 담을 자리(복셀: 방 모서리 — 캐릭터만 맞추면 벽이 잘림)
-    if (!pts.length && all && view.clusters) { // 살아 있는 노드가 없으면 섬(선택 섬 또는 전부)
-      const c = fp && view.clusterTarget ? view.clusterTarget(fp) : null;
-      if (c) pts.push({ p: c.center, r: c.r });
-      else for (const k of view.clusters()) pts.push({ p: k.center, r: k.r });
+    const ids = pickFitIds(list);
+    const now = this._now || performance.now() / 1000;
+    const B = basis || this._fitBasis(this._fitDir());
+    const pan = view.fitPanels ? view.fitPanels(this._panMap || (this._panMap = new Map())) : null;
+    const memo = this._panMemo || (this._panMemo = new PanelMemo());
+    const lmemo = this._labMemo || (this._labMemo = new PanelMemo(FIT.LABEL_KEEP));
+    const unit = ((view.container && view.container.clientHeight) || 1) / 2 / Math.tan((this.camera.fov * Math.PI) / 360); // 반화각 탄젠트 1 = 이만큼 px
+    const labs = view.fitLabels ? view.fitLabels(this._labMap || (this._labMap = new Map())) : null;
+    const lanc = this._lanc || (this._lanc = new Map()); // 기억 칸 → 마지막 세계 기준점(노드 기준 오프셋)
+    const pts = [];
+    for (const id of ids) {
+      const p = view.nodeTarget ? view.nodeTarget(id) : null;
+      if (!p) continue;
+      const nr = view.fitNodeR ? view.fitNodeR(id) : view.nodeRadius ? view.nodeRadius(id) : 1;
+      pts.push({ p, r: nr * FIT.NODE_K + FIT.NODE_PAD });
+      // 라벨·이름표·말풍선(DOM, 화면 크기 고정): 세계 기준점 + 기준점 기준 px 상자 → 화면 고정 몫 e(LABEL_KEEP 초 기억)
+      const o = (view.nodePos && view.nodePos(id)) || p;
+      const ls = labs && labs.get(id);
+      if (ls) for (let k = 0; k < ls.length; k++) { const key = id + '|' + k; lmemo.put(key, now, ls[k].b); lanc.set(key, { x: ls[k].p.x - o.x, y: ls[k].p.y - o.y, z: ls[k].p.z - o.z }); }
+      for (let k = 0; k < 4; k++) {
+        const key = id + '|' + k, b = lmemo.get(key, now), a = b && lanc.get(key);
+        if (!b) { lanc.delete(key); if (k) break; continue; }
+        if (a) pts.push({ p: { x: p.x + a.x, y: p.y + a.y, z: p.z + a.z }, r: 0, e: pxToE(b, unit), label: true });
+      }
+      const cs = pan && pan.get(id);
+      if (cs && cs.length) {
+        const o = (view.nodePos && view.nodePos(id)) || p; // 패널은 그려진 노드 자리 기준(target 으로 옮겨 감)
+        let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+        for (const c of cs) {
+          const dx = c.x - o.x, dy = c.y - o.y, dz = c.z - o.z;
+          const x = dx * B.R.x + dy * B.R.y + dz * B.R.z, y = dx * B.U.x + dy * B.U.y + dz * B.U.z;
+          if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+        }
+        memo.put(id, now, { x0, x1, y0, y1 });
+      }
+      const b = memo.get(id, now);
+      if (b) for (const q of boxCorners(p, b, B.R, B.U)) pts.push(q);
     }
     return pts;
   }
 
-  /** 전체 맞춤 구도: 지금 카메라 방향에서 모든 점이 여백 안에 들어오는 거리. 히스테리시스(FitHold)로 작은 변화엔 그대로 */
+  /**
+   * 전체 맞춤 구도: 대상 점(활성 노드·패널 모서리)을 지금 카메라 방향으로 투영해, 맞춤 띠(하단 덮개·라벨 자리를 뺀 화면)의
+   * 가로·세로 여백 6% 안을 꽉 채우는 거리와 투영 상자 가운데로 옮긴 시선점(refineFit). 히스테리시스(FitHold)로 작은 변화엔 그대로
+   */
   _fitFrame() {
     const now = this._now || performance.now() / 1000;
     if (this._fitCache && this._fitCache.at === now) return this._fitCache.f;
     const pr = this._prefs();
-    const pts = this._fitPts();
     const fov = (this.camera.fov * Math.PI) / 180;
     const aspect = Math.max(0.4, this.camera.aspect || 1);
-    const dmin = Math.max(pr.distMin, (pr.minR / Math.sin(fov / 2)) * pr.nodeScale / Math.min(1, aspect)); // 노드가 하나뿐일 때 너무 붙지 않게
+    const t = Math.tan(fov / 2);
+    const B = this._fitBasis(this._fitDir());
+    const pts = this._fitPts(B);
+    // 노드가 하나뿐일 때의 바닥: minR × MIN_R_K 구가 띠 높이(짧은 쪽)를 채우는 거리, 수동 최소 거리보다는 멀리(예전 minR × nodeScale 구 — 너무 멀었다)
+    const dmin = autoFloor((pr.minR * FIT.MIN_R_K) / (t * Math.min(1, aspect)), this.controls && this.controls.minDistance);
     const dmax = Math.max(pr.distMax, pr.overviewDistMax || pr.distMax);
     let f;
-    if (!pts.length) f = { center: new THREE.Vector3(), dist: Math.max(dmin, 40), r: 10, n: 0 };
-    else {
-      const dir = this.trans && this.trans.dir ? this.trans.dir : this._dirFrom(this.controls.target);
-      const F = { x: -dir.x, y: -dir.y, z: -dir.z };
-      // R = F × 위(0,1,0) = (−F.z, 0, F.x) 정규화, U = R × F
-      const rl = Math.hypot(F.z, F.x) || 1;
-      const R = { x: -F.z / rl, y: 0, z: F.x / rl };
-      const U = { x: R.y * F.z - R.z * F.y, y: R.z * F.x - R.x * F.z, z: R.x * F.y - R.y * F.x };
+    if (!pts.length) { // 보이는 노드가 없으면 그 자리에 머문다(섬으로 물러나지 않음)
+      const d = this.camera.position.distanceTo(this.controls.target);
+      f = { center: this.controls.target.clone(), dist: d, r: d * t, n: 0 };
+    } else {
+      const { R, U, F } = B;
       // 화면 아래 이벤트 띠·매크로 타임라인·재생 막대와 라벨 자리를 뺀 띠에 담는다
-      const band = this._band();
-      const t = Math.tan(fov / 2), tanV = t * FIT_MV * band.k, tanH = t * aspect * FIT_MH * this._labelKx();
-      const want = refineFit(pts, boxCenter(pts), R, U, F, tanH, tanV, 3); // 투영 상자 기준 2～3회 보정
-      const here = this.fit.c ? requiredDist(pts, this.fit.c, R, U, F, tanH, tanV) : Infinity;
+      const band = this._band(true); // 라벨은 점마다(e) 담으므로 띠에서 라벨 자리를 따로 빼지 않음
+      const tanV = t * (1 - FIT.M) * band.k, tanH = t * aspect * (1 - FIT.M);
+      // 띠 가운데(덮개 위)를 맞춤 식 안에서(vOff): 시선점은 화면 가운데 그대로, 띠 위·아래 끝까지 각각 잰다 — 예전처럼 맞춘 뒤 시선점을
+      // 옮기면 원근 때문에 가까운(화면 아래) 점이 더 많이 올라가 아래가 비었다
+      const vOff = band.yc * t;
+      const want = refineFit(pts, boxCenter(pts), R, U, F, tanH, tanV, 4, vOff); // 투영 상자 가운데로 3～4회 보정 — 가로나 세로 한쪽이 여백 끝까지
+      const here = this.fit.c ? requiredDist(pts, this.fit.c, R, U, F, tanH, tanV, vOff) : Infinity;
       this.fit.step(now, want, here, dmin, dmax, { freeze: !!this.view.exitSettling }); // 퇴장 연출 중엔 줄이지 않고, 끝난 뒤 한 번만
-      // 띠 가운데로: 시선점을 화면 아래쪽(−U)으로 옮겨 내용이 띠 가운데(덮개 위)에 오게
-      const sh = -band.yc * t * this.fit.D;
-      f = { center: new THREE.Vector3(this.fit.c.x + U.x * sh, this.fit.c.y + U.y * sh, this.fit.c.z + U.z * sh), dist: this.fit.D, r: want.D * t, n: pts.length };
+      f = { center: new THREE.Vector3(this.fit.c.x, this.fit.c.y, this.fit.c.z), dist: this.fit.D, r: want.D * t, n: pts.length };
     }
     this._fitCache = { at: now, f };
     return f;
@@ -604,7 +662,9 @@ export class CameraDirector {
     else view.yaw0 = this.scope.mode === 'all' ? 0 : curAz;
     // 정사영 근사(bestPose)가 아니라 실제 원근 맞춤으로 자세를 고른다(perspPose — 높은 고도에서 원근 때문에 작아지는 것까지)
     const fov = (this.camera.fov * Math.PI) / 180, t = Math.tan(fov / 2), band = this._band();
-    const pose = perspPose(pts, view, t * Math.max(0.4, this.camera.aspect || 1) * FIT_MH * this._labelKx(), t * FIT_MV * band.k) || bestPose(rects, view);
+    const fm = this.camMode === 'fit' ? 1 - FIT.M : null; // 맞춤 여백(라벨은 점마다)
+    const bd = fm ? this._band(true) : band;
+    const pose = perspPose(pts, view, t * Math.max(0.4, this.camera.aspect || 1) * (fm || FIT_MH * this._labelKx()), t * (fm || FIT_MV) * bd.k) || bestPose(rects, view);
     const el = (pose.el * Math.PI) / 180, az = (pose.yaw * Math.PI) / 180;
     return new THREE.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el));
   }
@@ -666,10 +726,11 @@ export class CameraDirector {
   }
 
   /** 맞춤 띠: 무대를 덮는 아래 UI·라벨 자리를 뺀 세로 비율 k 와 띠 가운데 yc(NDC) */
-  _band() {
+  _band(noLabels = false) {
     const v = this.view;
     const ins = stageInsets(v.container);
     const H = ins.H || (v.container && v.container.clientHeight) || 1;
+    if (noLabels) return safeBand(H, ins.top, ins.bottom); // 전체 맞춤: 덮개만(라벨은 점마다)
     // 라벨이 칩 아래(흐름)면 맨 아래 노드 밑에 라벨 두세 줄, 위(Planet)면 맨 위 노드 위에 한두 줄
     // 라벨 자리: 기본(흐름 = 아래, Planet = 위) + 실제로 맨 위·아래 노드 밖으로 나간 라벨 높이
     const lr = v.labelReserve ? v.labelReserve() : null;

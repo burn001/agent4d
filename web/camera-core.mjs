@@ -173,6 +173,68 @@ export function flightPose(fromTgt, fromPos, toCenter, toDir, toDist, e) {
 
 // ---------------- 전체 맞춤(기본 자동 카메라) ----------------
 
+/**
+ * 맞춤 상수(3D camera.js·2D flat/camera2d.js 공용, 조정은 여기서만).
+ * - M: 화면 여백(가로·세로 각각 화면 반폭·반높이의 6%) — 상단 바·실황 패널은 무대 밖, 하단 타임라인·재생 막대·라벨 자리는 safeBand 로 이미 뺌
+ * - NODE_K·NODE_PAD: 맞춤 점 반지름 = 노드 반지름 × NODE_K + NODE_PAD(예전 3D 1.15·0.9, 2D 1.3·1.6 — 패널·라벨 자리를 뭉뚱그린 덧댐이었다)
+ * - MIN_R_K: 노드 하나만 남았을 때 바닥 반지름 = 표현의 minR × MIN_R_K(예전 1 — 노드 하나여도 멀리 머물렀다)
+ * - PANEL_KEEP: 닫힌 도구 패널 자리를 이 시간(초)만큼 더 담아 둔다(패널이 열리고 닫힐 때마다 줌이 출렁이지 않게). LABEL_KEEP: 노드 라벨(글이 자주 바뀜)은 짧게
+ * - GROW: 지금 구도로 필요한 거리가 이 배를 넘을 때만 바로 물러남(여백 6% 안의 작은 넘침은 기다림). HEADROOM: 다시 맞출 때 더 물러나는 여유(예전 1.03 — GROW 가 대신함)
+ * - SHRINK: 필요한 거리가 지금의 이 배보다 작은 상태가 2초 이어지면 다가감(예전 0.86 — 14% 헐거워도 그대로였다)
+ * - FAST_SHRINK·FAST_HOLD: 필요한 거리가 지금의 FAST_SHRINK 배 아래로 크게 줄면(활성 집합이 바뀜) 2초 대신 FAST_HOLD 초 뒤 다가감
+ */
+export const FIT = { M: 0.06, NODE_K: 1.1, NODE_PAD: 0.35, MIN_R_K: 0.6, PANEL_KEEP: 4, LABEL_KEEP: 1, PANEL_PAD: 0.12, GROW: 1.03, HEADROOM: 1.0, SHRINK: 0.9, FAST_SHRINK: 0.62, FAST_HOLD: 0.8 };
+
+/** 맞춤에서 '활성' 노드: 끝나지 않았고(done·stopped 아님) 작업 중(active)이거나 열린 도구가 있다 */
+export function isFitActive(v, open = 0) {
+  const st = v && v.node && v.node.status;
+  if (ENDED(st)) return false;
+  return open > 0 || st === 'active';
+}
+
+/** 맞춤 대상 고르기: list = [[id, active]](이미 보이는·범위 안 노드만). 활성이 하나라도 있으면 활성만, 없으면 전부 */
+export function pickFitIds(list) {
+  const act = list.filter((x) => x[1]).map((x) => x[0]);
+  return act.length ? act : list.map((x) => x[0]);
+}
+
+/**
+ * 노드별 패널 자리 기억: 노드 기준 화면 평면 오프셋 상자 {x0, x1, y0, y1}(3D = 카메라 오른쪽·위, 2D = 세계 x·z)를
+ * 0.5초 칸으로 모아 keep 초 동안의 합집합을 돌려준다 — 짧게 열렸다 닫히는 도구 패널마다 줌이 드나들지 않게.
+ */
+export class PanelMemo {
+  constructor(keep = FIT.PANEL_KEEP, bucket = 0.5) { this.keep = keep; this.bucket = bucket; this.m = new Map(); }
+  clear() { this.m.clear(); }
+  /** 이번 프레임의 노드 id → 상자(없으면 넣지 않음) */
+  put(id, now, b) {
+    if (!b) return;
+    const k = Math.floor(now / this.bucket);
+    let a = this.m.get(id);
+    if (!a) { a = []; this.m.set(id, a); }
+    const last = a[a.length - 1];
+    if (last && last.k === k) { const o = last.b; o.x0 = Math.min(o.x0, b.x0); o.x1 = Math.max(o.x1, b.x1); o.y0 = Math.min(o.y0, b.y0); o.y1 = Math.max(o.y1, b.y1); }
+    else a.push({ k, b: { ...b } });
+  }
+  /** keep 초 안에 본 상자들의 합집합(없으면 null). 오래된 칸은 지운다 */
+  get(id, now) {
+    const a = this.m.get(id);
+    if (!a) return null;
+    const k0 = Math.floor((now - this.keep) / this.bucket);
+    while (a.length && a[0].k < k0) a.shift();
+    if (!a.length) { this.m.delete(id); return null; }
+    const u = { ...a[0].b };
+    for (let i = 1; i < a.length; i++) { const o = a[i].b; u.x0 = Math.min(u.x0, o.x0); u.x1 = Math.max(u.x1, o.x1); u.y0 = Math.min(u.y0, o.y0); u.y1 = Math.max(u.y1, o.y1); }
+    return u;
+  }
+}
+
+/** 오프셋 상자 b 를 노드 자리 p 기준 네 모서리 점으로(R·U = 화면 오른쪽·위 단위벡터, 2D 는 R=(1,0,0)·U=(0,0,1)) */
+export function boxCorners(p, b, R, U, r = FIT.PANEL_PAD) {
+  const out = [];
+  for (const x of [b.x0, b.x1]) for (const y of [b.y0, b.y1]) out.push({ p: { x: p.x + R.x * x + U.x * y, y: (p.y || 0) + R.y * x + U.y * y, z: p.z + R.z * x + U.z * y }, r, panel: true });
+  return out;
+}
+
 /** 점들의 축 정렬 상자 중심 */
 export function boxCenter(pts) {
   if (!pts.length) return { x: 0, y: 0, z: 0 };
@@ -185,17 +247,27 @@ export function boxCenter(pts) {
 }
 
 /**
- * 시선점 c, 카메라 기저(R 오른쪽·U 위·F 앞, 단위벡터)에서 모든 점 {p, r} 이 화면 안(가로 tanH·세로 tanV, 여백 반영한 반화각 탄젠트)에
+ * 시선점 c, 카메라 기저(R 오른쪽·U 위·F 앞, 단위벡터)에서 모든 점 {p, r, e?} 이 화면 안(가로 tanH·세로 tanV, 여백 반영한 반화각 탄젠트)에
  * 들어오는 최소 카메라 거리. 카메라 = c − F·D, 점의 깊이 = D + (p−c)·F.
+ * e = {l, r, t, b}(선택): 점 둘레에 화면 크기가 고정된 것(DOM 라벨 등)이 나가는 몫 — 반화각 탄젠트 단위(px × tan(fov/2) / (H/2)).
+ * 그 방향의 화면 끝을 그만큼 당겨서 본다(거리가 바뀌어도 화면 크기가 같으므로 세계 반지름으로 넣으면 다가갈 때 과하게 남는다).
  */
-export function requiredDist(pts, c, R, U, F, tanH, tanV) {
+const EMIN = 0.15; // 화면 고정 몫이 화면 끝을 이만큼(반화각 비율) 넘게 먹으면 더 줄이지 않음(라벨이 화면보다 넓을 때 무한대 방지)
+export function requiredDist(pts, c, R, U, F, tanH, tanV, vOff = 0) {
   let D = 0;
-  for (const { p, r } of pts) {
+  const vt0 = tanV + vOff, vb0 = tanV - vOff; // vOff: 맞춤 띠 가운데의 세로 자리(반화각 탄젠트, 위) — 띠 위·아래 끝까지
+  for (const { p, r, e } of pts) {
     const dx = p.x - c.x, dy = p.y - c.y, dz = p.z - c.z;
     const x = dx * R.x + dy * R.y + dz * R.z;
     const y = dx * U.x + dy * U.y + dz * U.z;
     const z = dx * F.x + dy * F.y + dz * F.z;
-    const need = Math.max((Math.abs(x) + r) / tanH - z, (Math.abs(y) + r) / tanV - z, r - z + 1);
+    let need;
+    if (!e && !vOff) need = Math.max((Math.abs(x) + r) / tanH - z, (Math.abs(y) + r) / tanV - z, r - z + 1);
+    else {
+      const E = e || { l: 0, r: 0, t: 0, b: 0 };
+      const hr = Math.max(tanH * EMIN, tanH - E.r), hl = Math.max(tanH * EMIN, tanH - E.l), vt = Math.max(tanV * EMIN, vt0 - E.t), vb = Math.max(tanV * EMIN, vb0 - E.b);
+      need = Math.max((x + r) / hr - z, (r - x) / hl - z, (y + r) / vt - z, (r - y) / vb - z, r - z + 1);
+    }
     if (need > D) D = need;
   }
   return D;
@@ -203,27 +275,34 @@ export function requiredDist(pts, c, R, U, F, tanH, tanV) {
 
 /**
  * 투영 상자 맞춤: 원근에서는 3D 상자 중심이 화면 가운데가 아니라 한쪽이 남는다. 지금 중심·거리로 점들을 투영해
- * 화면 상자(반지름 포함)의 가운데가 화면 가운데에 오도록 시선점을 옮기고 거리를 다시 구하기를 iters 번.
- * 결과: 가로나 세로 중 한쪽이 여백(tanH·tanV) 끝까지 꽉 찬다. 반환 {c, D}
+ * 화면 상자(반지름·화면 고정 몫 e 포함)의 가운데가 화면 가운데에 오도록 시선점을 옮기고 거리를 다시 구하기를 iters 번.
+ * 결과: 가로나 세로 중 한쪽이 여백(tanH·tanV) 끝까지 꽉 찬다. vOff = 띠 가운데 세로 자리(— 시선점을 나중에 옮기면 원근 때문에
+ * 가까운 점이 더 많이 밀려 아래가 비었다). 반환 {c, D}
  */
-export function refineFit(pts, c0, R, U, F, tanH, tanV, iters = 3) {
+export function refineFit(pts, c0, R, U, F, tanH, tanV, iters = 3, vOff = 0) {
   let c = { x: c0.x, y: c0.y, z: c0.z };
-  let D = requiredDist(pts, c, R, U, F, tanH, tanV);
+  let D = requiredDist(pts, c, R, U, F, tanH, tanV, vOff);
   for (let it = 0; it < iters && pts.length; it++) {
     let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-    for (const { p, r } of pts) {
+    for (const { p, r, e } of pts) {
       const dx = p.x - c.x, dy = p.y - c.y, dz = p.z - c.z;
       const x = dx * R.x + dy * R.y + dz * R.z, y = dx * U.x + dy * U.y + dz * U.z, z = dx * F.x + dy * F.y + dz * F.z;
       const depth = Math.max(1e-3, D + z);
-      x0 = Math.min(x0, (x - r) / depth); x1 = Math.max(x1, (x + r) / depth);
-      y0 = Math.min(y0, (y - r) / depth); y1 = Math.max(y1, (y + r) / depth);
+      x0 = Math.min(x0, (x - r) / depth - (e ? e.l : 0)); x1 = Math.max(x1, (x + r) / depth + (e ? e.r : 0));
+      y0 = Math.min(y0, (y - r) / depth - (e ? e.b : 0)); y1 = Math.max(y1, (y + r) / depth + (e ? e.t : 0));
     }
-    const mx = ((x0 + x1) / 2) * D, my = ((y0 + y1) / 2) * D; // 화면 가운데 어긋남(시선점 깊이 평면의 세계 거리)
+    const mx = ((x0 + x1) / 2) * D, my = ((y0 + y1) / 2 - vOff) * D; // 화면(띠) 가운데 어긋남(시선점 깊이 평면의 세계 거리)
     if (Math.abs(mx) < 1e-4 && Math.abs(my) < 1e-4) break;
     c = { x: c.x + R.x * mx + U.x * my, y: c.y + R.y * mx + U.y * my, z: c.z + R.z * mx + U.z * my };
-    D = requiredDist(pts, c, R, U, F, tanH, tanV);
+    D = requiredDist(pts, c, R, U, F, tanH, tanV, vOff);
   }
   return { c, D };
+}
+
+/** 화면 px 상자(노드 화면 자리 기준 {x0, x1, y0, y1}, y 아래 +)를 화면 고정 몫 e(단위 = unit px 당 1)로 */
+export function pxToE(b, unit) {
+  if (!b) return null;
+  return { l: Math.max(0, -b.x0) / unit, r: Math.max(0, b.x1) / unit, t: Math.max(0, -b.y0) / unit, b: Math.max(0, b.y1) / unit };
 }
 
 /**
@@ -234,8 +313,8 @@ export function refineFit(pts, c0, R, U, F, tanH, tanV, iters = 3) {
  * step() 은 바뀌었으면 true.
  */
 export class FitHold {
-  constructor({ grow = 1.0, shrink = 0.86, shift = 0.12, hold = 2.0, headroom = 1.03, maxFreeze = 6 } = {}) { // 꽉 차게(여유 3%, 14% 넘게 헐거우면 2초 뒤 다가감)
-    Object.assign(this, { grow, shrink, shift, hold, headroom, maxFreeze });
+  constructor({ grow = FIT.GROW, shrink = FIT.SHRINK, shift = 0.12, hold = 2.0, headroom = FIT.HEADROOM, maxFreeze = 6, fastShrink = FIT.FAST_SHRINK, fastHold = FIT.FAST_HOLD } = {}) { // 꽉 차게(3% 넘치면 바로 물러남, 10% 넘게 헐거우면 2초 뒤·38% 넘게면 0.8초 뒤 다가감)
+    Object.assign(this, { grow, shrink, shift, hold, headroom, maxFreeze, fastShrink, fastHold });
     this.c = null; this.D = 0; this._since = null; this.changes = 0;
   }
   reset() { this.c = null; this.D = 0; this._since = null; this._settle = false; this._frozenAt = null; }
@@ -256,12 +335,14 @@ export class FitHold {
       this._settle = false; // 너무 길게 이어짐: 평소 규칙
     } else this._frozenAt = null;
     const off = Math.hypot(want.c.x - this.c.x, want.c.y - this.c.y, want.c.z - this.c.z);
-    const loose = clamp(want.D * this.headroom) < this.D * this.shrink || off > this.D * this.shift;
+    const nd = clamp(want.D * this.headroom);
+    const loose = nd < this.D * this.shrink || off > this.D * this.shift;
     const settle = this._settle; this._settle = false;
     if (!loose) { this._since = null; return false; }
     if (settle) return commit();
     if (this._since == null) this._since = now;
-    if (now - this._since >= this.hold) return commit();
+    // 활성 집합이 바뀌어 필요한 거리가 크게 줄면(fastShrink 배 아래) 짧게만 기다린다
+    if (now - this._since >= (nd < this.D * this.fastShrink ? Math.min(this.hold, this.fastHold) : this.hold)) return commit();
     return false;
   }
 }

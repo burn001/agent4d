@@ -1,11 +1,11 @@
 // 2D(저사양) 표현의 카메라. 3D CameraDirector 와 같은 바깥 모양(app.js 가 쓰는 메서드·필드)을
 // three 없이 2D 팬·줌으로: 휠(커서 기준)·끌기·핀치·WASD/QE, 자동 카메라 = 살아 있는 노드 전체 맞춤(2D판, FitHold 히스테리시스),
 // '따라가기'는 활동 노드를 8초마다 확대(간이), 수동 조작 10초 뒤 복귀, 빈 곳 클릭 즉시 복귀(resumeAuto), 일시정지 얼림(enabled=false).
-import { isShown, isLive, scoreOf, pickBest, shotLost, FitHold, safeBand, ZOOM, autoFloor, nearestKids } from '../camera-core.mjs';
+import { isShown, isLive, scoreOf, pickBest, shotLost, FitHold, safeBand, ZOOM, autoFloor, nearestKids, FIT, isFitActive, pickFitIds, PanelMemo, pxToE } from '../camera-core.mjs';
 import { stageInsets } from '../screen-insets.js';
 import { t } from '../i18n.mjs';
 import { promptCamPlan } from '../missile-core.mjs'; // 입력 때 메인으로
-import { FLAT, toWorld, zoomAt, panBy, boxCenterXZ, fitNeed, fitMinD, flyPose, dampTo, clampD } from './flat-core.mjs';
+import { FLAT, toWorld, zoomAt, panBy, boxCenterXZ, fitNeed, refineFit2D, fitMinD, flyPose, dampTo, clampD } from './flat-core.mjs';
 const HAS = (view, id) => { const v = view && view.vis && view.vis.get(id); return !!(v && !v.gone && !v.hidden); };
 
 const SWITCH_EVERY = 8, RESUME_AFTER = 10, IDLE_OVERVIEW = 30, TRANSITION = 1.6;
@@ -61,6 +61,8 @@ export class Director2D {
     this.dragging = false; this._ptrs.clear();
     this.trans = null; this.focusFly = false;
     this.fit.reset();
+    if (this._panMemo) this._panMemo.clear(); // 카드·라벨 자리는 표현마다 다르다
+    if (this._labMemo) this._labMemo.clear();
     this._startTransition();
   }
   _unbind() {
@@ -252,45 +254,70 @@ export class Director2D {
     if (fp) return this._clusterOf(id) === fp;
     return true;
   }
-  _fitPts() {
-    const view = this.view, pts = [];
+  /**
+   * 맞춤 대상 점(3D camera.js 와 같은 규칙): 지금 범위의 활성 노드(없으면 보이는 노드 전부) + 그 노드가 최근 PANEL_KEEP 초에
+   * 펼친 도구 카드·노드 라벨 자리. 2D 카드·라벨은 화면 크기(px)로 그려지므로 노드 화면 자리 기준 px 상자를 화면 고정 몫 e 로 담는다.
+   * 섬·작업 대상 층·복셀 방 모서리는 담지 않는다
+   */
+  _fitPts(now = performance.now() / 1000) {
+    const view = this.view, list = [];
     for (const [id, v] of view.vis) {
       if (!this._shown(id) || !this._inScope(id, v)) continue;
-      pts.push({ p: v.target, r: v.r * FLAT.FIT_PAD_K + FLAT.FIT_PAD });
+      list.push([id, isFitActive(v, v.icons ? v.icons.size || 0 : 0)]);
     }
-    // 표현이 노드 말고도 담고 싶은 자리(복셀 2D 평면도: 지금 범위의 방 모서리 — 캐릭터만 맞추면 방이 잘림)
-    if (view.fitExtra) view.fitExtra(pts, this.scope);
-    if (!pts.length && this.scope.mode === 'all' && view.clusters) {
-      const fp = this.scope.focusProject;
-      const c = fp && view.clusterTarget ? view.clusterTarget(fp) : null;
-      if (c) pts.push({ p: c.center, r: c.r });
-      else for (const k of view.clusters()) pts.push({ p: k.center, r: k.r });
+    const ids = pickFitIds(list);
+    const memo = this._panMemo || (this._panMemo = new PanelMemo());
+    const lmemo = this._labMemo || (this._labMemo = new PanelMemo(FIT.LABEL_KEEP));
+    // 지난 프레임 카드(px) → 노드별 {기준점 세계 오프셋, 기준점 기준 px 상자}. 카드 크기·노드와의 간격은 화면 px 로 그려지고, 기준점(복셀은 책상)은 세계 자리
+    const cur = this._curPx || (this._curPx = new Map()); cur.clear();
+    const { W, H } = this._size();
+    for (const h of view._cardHits || []) {
+      const v = h && view.vis.get(h.id);
+      if (!v || h.ax == null) continue;
+      const x0 = h.x0 - h.ax, y0 = h.y0 - h.ay, x1 = h.x1 - h.ax, y1 = h.y1 - h.ay;
+      let c = cur.get(h.id);
+      if (!c) {
+        const w = toWorld(this.cam, W, H, h.ax, h.ay), o = v.pos || v.target;
+        cur.set(h.id, c = { dx: w.x - o.x, dz: w.z - o.z, b: { x0, y0, x1, y1 } });
+      } else { const b = c.b; b.x0 = Math.min(b.x0, x0); b.y0 = Math.min(b.y0, y0); b.x1 = Math.max(b.x1, x1); b.y1 = Math.max(b.y1, y1); }
+    }
+    const unit = (H || 1) / 2; // 반높이 = 1
+    const anc = this._anc || (this._anc = new Map()); // 노드 → 마지막 카드 기준점 오프셋(세계)
+    const pts = [];
+    for (const id of ids) {
+      const v = view.vis.get(id);
+      const nr = view.fitNodeR ? view.fitNodeR(id) : v.r;
+      const c = cur.get(id);
+      if (c) { memo.put(id, now, c.b); anc.set(id, { dx: c.dx, dz: c.dz }); }
+      if (v.labelOn && v._lrel) { const r = v._lrel; lmemo.put(id, now, { x0: r[0], y0: r[1], x1: r[2], y1: r[3] }); }
+      pts.push({ p: v.target, r: nr * FIT.NODE_K + FIT.NODE_PAD, e: pxToE(lmemo.get(id, now), unit) });
+      const b = memo.get(id, now), a = b && anc.get(id);
+      if (b && a) pts.push({ p: { x: v.target.x + a.dx, y: 0, z: v.target.z + a.dz }, r: 0, e: pxToE(b, unit), panel: true });
     }
     return pts;
   }
   _fitFrame(now) {
     const { W, H } = this._size();
     const aspect = W / H;
-    const pts = this._fitPts();
-    const dmin = Math.max(FLAT.D_MIN, fitMinD(aspect));
-    if (!pts.length) return { x: 0, z: 0, D: Math.max(dmin, 30) };
-    const c = boxCenterXZ(pts);
-    // 화면 아래 이벤트 띠·매크로 타임라인·재생 막대와 라벨 자리를 뺀 띠에 담는다
-    const band = this._band(H);
-    const mv = FLAT.FIT_MV * band.k;
-    // 가로: 양 끝 노드 밖으로 나간 라벨 폭만큼 좁힘
-    const lr = this.view.labelReserve ? this.view.labelReserve() : null;
-    const mh = FLAT.FIT_MH * (lr ? Math.max(0.6, 1 - (2 * Math.max(lr.left || 0, lr.right || 0)) / W) : 1);
-    const want = { c, D: fitNeed(pts, c, aspect, mh, mv) };
+    const pts = this._fitPts(now);
+    // 노드 하나뿐일 때 바닥: MIN_R × MIN_R_K(예전 MIN_R 그대로 — 너무 멀었다), 수동 최소 D_MIN 보다는 멀리
+    const dmin = Math.max(FLAT.D_MIN, fitMinD(aspect, 1 - FIT.M, 1 - FIT.M) * FIT.MIN_R_K);
+    if (!pts.length) return { x: this.cam.x, z: this.cam.z, D: this.cam.D }; // 보이는 노드가 없으면 그 자리(섬으로 물러나지 않음)
+    // 화면 아래 이벤트 띠·매크로 타임라인·재생 막대를 뺀 띠에 담는다 — 라벨은 점마다(e)
+    const band = this._band(H, true);
+    const mv = (1 - FIT.M) * band.k, mh = 1 - FIT.M;
+    // 평행 투영: 화면 상자(반지름·카드·라벨 포함) 가운데로, 가로·세로 중 한쪽이 여백 끝까지
+    const want = refineFit2D(pts, boxCenterXZ(pts), aspect, mh, mv, 3);
     const here = this.fit.c ? fitNeed(pts, this.fit.c, aspect, mh, mv) : Infinity;
     this.fit.step(now, want, here, dmin, FLAT.D_MAX, { freeze: !!this.view.exitSettling });
     // 시선점을 아래로(내용이 띠 가운데, 덮개 위로 올라감)
     return { x: this.fit.c.x, z: this.fit.c.z + this.fit.D * band.yc, D: this.fit.D };
   }
   /** 맞춤 띠(3D camera.js _band 와 같은 규칙) */
-  _band(H) {
+  _band(H, noLabels = false) {
     const v = this.view;
     const ins = stageInsets(v.container || this._el);
+    if (noLabels) return safeBand(ins.H || H, ins.top, ins.bottom); // 전체 맞춤: 덮개만(라벨은 점마다)
     // 라벨 자리: 기본(흐름 = 아래, Planet = 위) + 실제로 맨 위·아래 노드 밖으로 나간 라벨 높이
     const lr = v.labelReserve ? v.labelReserve() : null;
     const labB = Math.max(v.labelBelow ? 46 : 0, lr ? lr.bottom : 0), labT = Math.max(v.labelBelow ? 0 : 30, lr ? lr.top : 0);

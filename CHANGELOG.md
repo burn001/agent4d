@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/) (0.x until a stable 1.0).
 
+## [0.1.2] - 2026-10-25
+
+### Changed
+- Automatic camera, "Framing: all" (default): frames the active agents (working or with an open tool; all visible nodes when none is active) together with their tool hologram panels and labels as large as possible, instead of the whole island floors. Islands, the work-target layer and voxel room corners are no longer part of the fit. The fit projects the targets along the current camera direction and fills the free screen area (minus the bottom timeline and replay bar) to a 6% margin on one axis, centred on the projected box; screen-sized labels and 2D cards are handled in screen space. A single node is framed closer. It still ignores small changes, backs off at once only when something would be cut, and moves in 2 s after the target gets 10% smaller (0.8 s when the active set shrinks a lot). Same rules in 3D and 2D for Flow, Planet and Voxel.
+
+### Fixed
+- The fitted framing sat too high in 3D (empty band at the bottom) because the bottom-overlay offset was applied after fitting; the camera direction used for fitting could also differ from the real one.
+
 ## [0.1.1] - 2026-10-25
 
 ### Added

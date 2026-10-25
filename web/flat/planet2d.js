@@ -113,6 +113,8 @@ export class Planet2DView extends FlatView {
   setArtFoot(pid, nodeId) { if (this.pArt) { this.pArt.st.setFoot(pid, nodeId); this.invalidate(); } }
   setArtSelected(t) { if (this.pArt) { this.pArt.st.sel = t || null; this.invalidate(); } }
   fitExtra(pts, scope) { if (this.pArt) this.pArt.fitPoints(pts, scope); }
+  /** 전체 맞춤이 담는 노드 겉 반지름: 궤도계 바깥(카드 기준점과 같은 식) */
+  fitNodeR(id) { const v = this.vis.get(id); if (!v) return 1; return v.r * (v._po ? Math.max(1, Math.min(orbitExtent(v), 3.4) * 0.9) : 1); }
 
   _updateExtra(now) {
     // 도구 입자가 날면 30fps. 일하는 노드가 없어도 궤도가 아주 느리게 돌도록 쉬는 동안 약 7fps 로 다시 그림(_schedule)

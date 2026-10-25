@@ -6,7 +6,7 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { PromptFx } from '../prompt-fx.js'; // 사용자 입력 빛줄기(화면 공간 오버레이)
 import { computeOffice, stationFor, CAT_FACILITY, hashStr } from './layout.js';
 import { readTokens, palette } from './palette.js';
-import { BoxBatch, UNIT_BOX, buildRoomStatic, buildCorridor, drawFacilities, drawDeskEmitter, drawMachine, ring, roomFrame, endXf } from './props.js';
+import { BoxBatch, UNIT_BOX, buildRoomStatic, buildCorridor, drawFacilities, drawDeskEmitter, drawMachine, ring, roomFrame, endXf, DESK_TOP } from './props.js';
 import { xfAngle, toLocal } from './xf.mjs';
 import { Character, drawCharacter, drawCharacterFar } from './character.js';
 import { crewSpots } from './character-core.mjs';
@@ -422,6 +422,23 @@ export class VoxelView {
   /** 계획 보드 앵커의 제자리: 캐릭터는 걸어 다녀도 자기 책상 자리(seat), 장치(기동기 등)는 그 자리 */
   planHome(id) { const v = this.vis.get(id); if (!v) return null; const ch = this.chars.get(id); return ch && ch.seat ? v.target.clone().set(ch.seat.x, 1, ch.seat.z) : v.target.clone(); }
   nodeRadius(id) { const v = this.vis.get(id); return v ? v.r : 1; }
+  /** 전체 맞춤이 담는 노드 겉 반지름 */
+  fitNodeR(id) { return this.nodeRadius(id); }
+  /** 노드별 이름표(세계 기준점 + px 상자) — Map id → [{p, b}] */
+  fitLabels(out) { out.clear(); return this.bubbles ? this.bubbles.fitLabels(out) : out; }
+  /** 노드별 펼친 책상 모니터 모서리(세계) — Map id → [{x,y,z}]. 방(벽·바닥)은 담지 않는다 */
+  fitPanels(out) {
+    out.clear();
+    const now = performance.now() / 1000; // vx-holo update 와 같은 시계
+    for (const ch of this.chars.values()) {
+      const m = ch._monFit;
+      if (!m || !(ch._monK > 0.05) || ch.state === 'gone' || ch.offstage || now - m.t > 0.5) continue;
+      const a = [];
+      for (const s of [-1, 1]) { const x = m.x + m.px * m.hw * s, z = m.z + m.pz * m.hw * s; a.push({ x, y: DESK_TOP, z }, { x, y: m.top, z }); }
+      out.set(ch.id, a);
+    }
+    return out;
+  }
   get size() { return this.vis.size; }
   children(id) {
     if (this._kidsDirty) this._computeKids();

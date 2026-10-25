@@ -208,6 +208,7 @@ export class VxHolo {
       const { sx, sy } = openShape(ch._monK);
       const my = DESK_TOP + 0.16 + (H * sy) / 2;
       ch._monTop = DESK_TOP + 0.16 + H * sy;
+      ch._monFit = { x: mx, z: mz, hw: (W * sx) / 2, px: fz, pz: -fx, top: ch._monTop, t: now }; // 전체 맞춤이 담는 모니터 자리(가로 = 얼굴 방향에 수직)
       if (px < 3) continue;
       const ph = main ? book.phaseOf(main, now) : null;
       const cat = main ? main.cat : 'other';

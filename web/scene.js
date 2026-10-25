@@ -1046,6 +1046,20 @@ export class SceneView {
   nodeTarget(id) { const v = this.vis.get(id); return v ? v.target : null; }
   nodePos(id) { const v = this.vis.get(id); return v ? v.group.position : null; }
   nodeRadius(id) { const v = this.vis.get(id); return v ? v.r : 1; }
+  /** 전체 맞춤이 담는 노드 겉 반지름(Planet: 궤도계 바깥 holoR) */
+  fitNodeR(id) { const v = this.vis.get(id); return v ? (this.holoR ? this.holoR(v) : v.r * (v.size || 1)) : 1; }
+  /** 노드별 라벨(세계 기준점 = 라벨 자리 + px 상자, 라벨 패스가 잰 _lrel) — Map id → [{p, b}] */
+  fitLabels(out) {
+    out.clear();
+    for (const v of this.vis.values()) {
+      if (!v.labelOn || !v._lrel || !v.label) continue;
+      const g = v.group.position, l = v.label.position, r = v._lrel;
+      out.set(v.id, [{ p: { x: g.x + l.x, y: g.y + l.y, z: g.z + l.z }, b: { x0: r[0], y0: r[1], x1: r[2], y1: r[3] } }]);
+    }
+    return out;
+  }
+  /** 노드별 펼친 홀로그램 패널 모서리(세계) — Map id → [{x,y,z}] */
+  fitPanels(out) { return this.holo ? this.holo.panelCorners(out) : (out.clear(), out); }
   children(id) { return this.childrenOf.get(id) || []; }
   get size() { return this.vis.size; }
 
