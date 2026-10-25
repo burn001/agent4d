@@ -79,7 +79,8 @@ const H = { 'x-ccviz-token': TOKEN };
 test('/healthz 인증 없음', async () => {
   const r = await get(`${base}/healthz`);
   assert.equal(r.status, 200);
-  assert.deepEqual(JSON.parse(r.body), { ok: true, version: '0.1.0' });
+  const { version } = JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
+  assert.deepEqual(JSON.parse(r.body), { ok: true, version }); // 근거는 package.json 하나
 });
 
 test('토큰 없으면 401 (HTML/JSON)', async () => {

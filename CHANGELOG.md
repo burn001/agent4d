@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/) (0.x until a stable 1.0).
 
+## [0.1.1] - 2026-10-25
+
+### Added
+- Claude Code skill `skills/agent4d`: copy it to `~/.claude/skills/agent4d/` and ask Claude Code to "open agent4d" or "show my agents in 3D". It finds the install (`AGENT4D_HOME`, `~/agent4d`, or `agent4d` on `PATH`), starts the local server if needed and shows the link; it opens a public tunnel only when you ask. README section "Use with Claude Code (skill)" (also in the Korean README).
+
 ## [0.1.0] - 2026-10-25
 
 Initial public release, published as **Agent4D** — your coding agents in 3D space + time. The project was developed as cc-agent-viz; the command is now `agent4d`, and `ccviz` keeps working as an alias. The state folder stays `~/.cc-agent-viz/` (with the older `~/.cc-session-viz/` fallback). Licensed under the Apache License 2.0 (an earlier snapshot of this release was briefly published under MIT).

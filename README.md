@@ -54,6 +54,7 @@ _All screenshots and loops use the built-in mock data (`?mock=1&lang=en`). Proje
 - [Requirements](#requirements)
 - [Install](#install)
 - [Run](#run)
+- [Use with Claude Code (skill)](#use-with-claude-code-skill)
 - [Background music](#background-music)
 - [Remote access (optional)](#remote-access-optional)
 - [Usage-limit gauge (opt-in)](#usage-limit-gauge-opt-in)
@@ -131,6 +132,23 @@ npm run demo        # synthetic session tree: reads no transcripts, makes no net
 ```
 
 Then open `http://127.0.0.1:7788/?t=<viewToken>` (the token is `viewToken` in the config file). On a running server you can also add `&mock=1` (one session) or `&mock=1&scope=all` (all projects) to the link to drive the UI from built-in mock data, and `&view=planet` or `&view=voxel` to pick a view.
+
+## Use with Claude Code (skill)
+
+The repository ships a Claude Code skill in `skills/agent4d/`. Copy it into your personal skills folder and you can ask Claude Code things like "open agent4d", "show my agents in 3D" or "stop agent4d". The skill finds your install (`AGENT4D_HOME`, then `~/agent4d`, then `agent4d` on `PATH`), starts the local server if needed and shows you the link. It never starts a public tunnel unless you ask for one.
+
+```bash
+# inside the clone (macOS / Linux / Git Bash)
+mkdir -p ~/.claude/skills && cp -r skills/agent4d ~/.claude/skills/
+```
+
+```powershell
+# Windows PowerShell, inside the clone
+New-Item -ItemType Directory -Force "$HOME\.claude\skills" | Out-Null
+Copy-Item -Recurse -Force skills\agent4d "$HOME\.claude\skills\"
+```
+
+If your clone is not at `~/agent4d`, set `AGENT4D_HOME` to its folder. Start a new Claude Code session after copying so the skill is picked up.
 
 ## Background music
 

@@ -57,6 +57,7 @@ _스크린샷과 움직이는 화면은 모두 내장 가짜 데이터(`?mock=1&
 - [요구 사항](#요구-사항)
 - [설치](#설치)
 - [실행](#실행)
+- [Claude Code 에서 쓰기(스킬)](#claude-code-에서-쓰기스킬)
 - [배경음악](#배경음악)
 - [원격 접속(선택)](#원격-접속선택)
 - [사용 한도 게이지(옵트인)](#사용-한도-게이지옵트인)
@@ -125,6 +126,23 @@ npm run demo        # 합성 세션 트리 — transcript 를 읽지 않고 네�
 ```
 
 그다음 `http://127.0.0.1:7788/?t=<viewToken>` 을 엽니다(토큰은 설정 파일의 `viewToken`). 서버가 떠 있으면 링크에 `&mock=1`(세션 하나) 또는 `&mock=1&scope=all`(전체 프로젝트)을 붙여 내장 가짜 데이터로 화면을 움직일 수 있고, `&view=planet`·`&view=voxel` 로 표현을 고를 수 있습니다.
+
+## Claude Code 에서 쓰기(스킬)
+
+레포의 `skills/agent4d/` 에 Claude Code 스킬이 들어 있습니다. 개인 스킬 폴더에 복사하면 Claude Code 에게 "open agent4d", "show my agents in 3D", "agent4d 열어줘", "agent4d 꺼줘" 같은 말로 부탁할 수 있습니다. 스킬은 설치 위치를 찾고(`AGENT4D_HOME` → `~/agent4d` → `PATH` 의 `agent4d`), 필요하면 로컬 서버를 켠 뒤 링크를 보여 줍니다. 공개 터널은 사용자가 요청할 때만 엽니다.
+
+```bash
+# 클론 안에서(macOS·Linux·Git Bash)
+mkdir -p ~/.claude/skills && cp -r skills/agent4d ~/.claude/skills/
+```
+
+```powershell
+# Windows PowerShell, 클론 안에서
+New-Item -ItemType Directory -Force "$HOME\.claude\skills" | Out-Null
+Copy-Item -Recurse -Force skills\agent4d "$HOME\.claude\skills\"
+```
+
+클론이 `~/agent4d` 가 아니면 `AGENT4D_HOME` 을 그 폴더로 지정하십시오. 복사한 뒤 Claude Code 세션을 새로 시작해야 스킬이 잡힙니다.
 
 ## 배경음악
 
