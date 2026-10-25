@@ -46,7 +46,12 @@ export class Planet2DView extends FlatView {
   /** 노드 그린 반지름(세계): scene.js 와 같음 — RADIUS × 0.68, 배치 장치는 2배, 본체 축소 bodyK(둘레는 궤도계) */
   _nodeR(node, kind) { const dev = isLauncher(node); return RADIUS[kind] * NODE_SCALE * (dev ? 2 : 1) * bodyK(kind, dev); }
   /** 라벨 거리: scene.js CSS2D 라벨 자리(반지름 × 1.2 + 0.5, 아래 붙는 종류는 + 0.4) */
-  _labelGap(v, s, k) { return Math.min(90, (v.r * k * 1.2 + (this.labelUp(v) ? 0.5 : 0.4)) * s + 2); }
+  _labelGap(v, s, k) {
+    // 가까이(본체 11px 이상 — 궤도계가 다 보이는 크기)면 라벨 뒤 배경색 옅은 번짐(.pl-halo, 3D 와 같은 규칙)
+    const near = v.r * k * s >= 11;
+    if (near !== !!v._plNear && v.labelEl) { v._plNear = near; v.labelEl.classList.toggle('pl-halo', near); }
+    return Math.min(90, (v.r * k * 1.2 + (this.labelUp(v) ? 0.5 : 0.4)) * s + 2);
+  }
 
   applyTheme() {
     super.applyTheme();

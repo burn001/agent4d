@@ -172,6 +172,9 @@ body.panel-collapsed #stage { right: 40px; }
 .node-label .ndev { display: block; font-size: 10px; font-weight: 600; color: var(--skill); }
 .node-label.compact .ndev { font-size: 9.5px; }
 .node-label.focus { background: var(--chip-bg); border: 1px solid var(--border); }
+/* Planet 근접: 라벨 뒤 배경색 옅은 번짐 — 궤도선·소행성대가 글 뒤로 물러나게(테두리·상자 없이 가장자리는 투명) */
+.node-label.pl-halo:not(.focus) { background: radial-gradient(farthest-side, color-mix(in srgb, var(--bg) 86%, transparent) 62%, color-mix(in srgb, var(--bg) 55%, transparent) 82%, transparent);
+  padding: 6px 22px; margin: -5px -16px; }
 /* 라벨 배치: 자리가 없어 다른 노드에 걸친 고정 라벨(루트·섬 메인·배치 장치)은 흐리게 */
 .node-label.crowded { opacity: .5; }
 /* 노드 라벨은 도구 패널 글·말풍선보다 위(CSS2D 가 거리순으로 매기는 z-index 를 덮음 — 라벨끼리는 배치가 겹치지 않게 한다) */

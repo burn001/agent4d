@@ -128,8 +128,25 @@ export function selectionLabel(sel, projects, archive = null) {
   if (sel.scope === 'project') return name || tr('app.proj.project');
   let title = '';
   if (p) { const s = sessionsOf(p).find((x) => x.sessionId === sel.sessionId); if (s) title = s.title || ''; }
+  if (!title) title = sel.title || ''; // 목록(최근 10개) 밖 세션: 단일 세션 스냅샷의 루트 제목(sessionHint)
   if (!title) title = String(sel.sessionId || '').slice(0, 8);
-  return name ? `${name} › ${trunc(title, 30)}` : trunc(title, 30);
+  const nm = name || sel.projectName || '';
+  return nm ? `${nm} › ${trunc(title, 30)}` : trunc(title, 30);
+}
+
+const normPath = (s) => String(s || '').replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase();
+/** 세션 링크(?scope=session:)로 연 세션이 /projects 목록(프로젝트마다 최근 10개)에 없을 때 — 단일 세션 스냅샷의
+ *  루트 노드 cwd 로 프로젝트를 찾는다(30일 안 프로젝트의 path 와 같으면 그 projectId·이름, 없으면 cwd 끝 폴더 이름).
+ *  돌려줌 {projectId|null, projectName|null, title|null} (순수) */
+export function sessionHint(root, projects) {
+  const meta = (root && root.meta) || {};
+  const cwd = meta.cwd || '';
+  const title = meta.title || null;
+  if (!cwd) return { projectId: null, projectName: null, title };
+  const p = (projects || []).find((x) => x.path && normPath(x.path) === normPath(cwd));
+  if (p) return { projectId: p.projectId, projectName: p.name || null, title };
+  const base = String(cwd).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || null;
+  return { projectId: null, projectName: base, title };
 }
 
 // ───────────────────────── 마운트 ─────────────────────────

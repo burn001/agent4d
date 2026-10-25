@@ -15,7 +15,7 @@ const trunc = (s, n) => { s = String(s ?? ''); return s.length > n ? s.slice(0, 
 /** 섬 이름표 문구(순수) */
 export function islandLabelHtml(c) {
   const n = c.liveSessions || (c.mains ? c.mains.length : 0);
-  const cnt = c.inactive ? _t('scene.island.inactive', { n: c.sessions || c.hiddenMains || 0 }) : _t('scene.island.sessions', { n });
+  const cnt = c.inactive ? _t('scene.island.justEnded', { n: c.sessions || c.hiddenMains || 0 }) : _t('scene.island.sessions', { n });
   const dot = c.busy ? 'busy' : c.live && !c.inactive ? 'idle' : 'off';
   return `<i class="ov-dot ${dot}"></i><b>${esc(trunc(c.name || c.projectId, 28))}</b><span>${esc(cnt)}</span>`;
 }

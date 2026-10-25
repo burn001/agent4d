@@ -175,6 +175,7 @@ export class CameraDirector {
     if (!t) return;
     this.hold = { follow: !!follow };
     this._manual();
+    if (t.type === 'plan') return; // 계획 보드 크게 보기: 보드는 월드 고정 — 카메라는 그 자리에 멈추고 카드만
     this.shot = t.type === 'cluster' ? { type: 'cluster', pid: t.pid } : { type: 'node', id: t.id };
     this._startTransition(1.0);
     this.focusFly = true;

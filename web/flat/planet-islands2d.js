@@ -23,8 +23,18 @@ export function drawPlanetIslands(view, ctx, now, s) {
   if (!list.some((c) => c.round > 0)) { drawIslands(view, ctx, now, s); return; }
   const t = view.tokens, L = !!t.isLight;
   const p = {};
-  for (const c of list) {
+  // 반지름이 바뀌면 그리는 원은 0.6초쯤에 걸쳐 부드럽게(3D islands.js 와 같은 비율) — 처음·새 섬은 바로
+  const rr = view._roundR || (view._roundR = new Map());
+  const dt = Math.min(0.1, Math.max(0, now - (view._roundAt ?? now)));
+  view._roundAt = now;
+  const kR = 1 - Math.exp(-dt * 7);
+  for (let c of list) {
     if (!(c.round > 0)) continue;
+    let r0 = rr.get(c.projectId);
+    if (!(r0 > 0) || Math.abs(c.round - r0) <= 0.05) r0 = c.round;
+    else r0 += (c.round - r0) * kR;
+    rr.set(c.projectId, r0);
+    if (r0 !== c.round) c = { ...c, round: r0 };
     toScreen(view.cam, view.W, view.H, c.center.x, c.center.z, p);
     const R = c.round * s;
     if (R < 2 || p.x + R < 0 || p.x - R > view.W || p.y + R < 0 || p.y - R > view.H) continue;

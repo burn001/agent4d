@@ -72,6 +72,7 @@ export function mountPlans(h) {
   const fx = new PlanFx();
   let on = planInitial(h.params.get('plans'), h.lsGet(PLAN_STORE_KEY));
   let layer = null, svg = null, raf = 0, driver = null;
+  let openBox = null; // 크게 보기로 연 보드 자리(화면 원 {x, y, r}) — 카드 자리 앵커
   const boards = new Map(); // 메인 id → {el, sig, pos, side, w, h, rows:[[{x,y}]], secs:[{y}]}
   const links = []; // svg path 풀
   let hover = null;
@@ -229,8 +230,17 @@ export function mountPlans(h) {
     const W = innerWidth, H = innerHeight;
     if (layer) layer.classList.toggle('vx', !!(view && view.constructor && view.constructor.modeId === 'voxel')); // 복셀: 게시판 모양
     const cands = [];
+    openBox = null;
     if (view) for (const [mid, entries] of groups) {
-      if (mid === opened) continue;
+      // 크게 보기로 연 보드: 판은 숨기고(카드가 대신함) 그 월드 자리의 화면 상자만 잰다 — 카드가 그 자리 곁에 뜸(카메라는 안 움직임)
+      if (mid === opened) {
+        const an = boardAnchor(entries, mid, nodes, (id) => shownNode(view, id));
+        const pj = shownNode(view, an.id) ? boardProject(view, an.id) : null;
+        const sc = pj ? boardScreen(pj.p, pj.ppw, pj.wb, W, H) : null;
+        if (sc && !sc.hidden && sc.box) openBox = { x: sc.box.x + sc.box.w / 2, y: sc.box.y + sc.box.h / 2, r: Math.min(240, Math.max(sc.box.w, sc.box.h) / 2) };
+        const ob = boards.get(mid); if (ob && !ob.el.hidden) ob.el.hidden = true;
+        continue;
+      }
       // 앵커 = 러너 계획의 러너(없으면 메인) 하나 — 안 보이면(퇴장·페이드 끝·숨김) 보드도 숨김, 다른 노드로 옮기지 않음
       const an = boardAnchor(entries, mid, nodes, (id) => shownNode(view, id));
       if (!shownNode(view, an.id)) continue;
@@ -343,5 +353,7 @@ export function mountPlans(h) {
   return {
     get on() { return on; }, setOn: (v) => setOn(v, { save: false }), event, reset, inspectHtml, sheetHtml, kick, sync,
     get boards() { return boards; }, fx, stats,
+    /** 크게 보기 카드 앵커: 연 보드의 이번 프레임 화면 원(없으면 null — 화면 밖이면 카드는 앵커 노드 곁) */
+    openAnchor: () => openBox,
   };
 }

@@ -187,3 +187,32 @@ test('원근(view.fov) 평가: 섬 2개 가로 화면 좌우·세로 화면 위�
   const port = chooseArrangement(list, V(0.6));
   assert.ok(spreadZ(list, port) > spreadX(list, port));
 });
+
+// ── 다시 배치 진동(2026-10-25): 다중 세션에서 섬이 늘고 줄 때마다 약 10～30초마다 섬 전체가 자리를 바꾸던 것 ──
+import { REPACK_HOLD_MS, REPACK_MIN_MS } from '../overview/layout.mjs';
+test('computeOverview: 섬 크기가 오르내리고 라벨 몫 비율이 흔들려도 다시 배치는 드물게(유지 + 비키기, 기다림·최소 간격)', () => {
+  const w = world(4, 3);
+  const extra = (on) => { for (let c = 0; c < 9; c++) { const id = `a:proj-1-x${c}`; if (on) w.nodes.set(id, N(id, 's:proj-1-m0', 'subagent', 'proj-1')); else w.nodes.delete(id); } };
+  let ov = null, repacks = 0, held = 0;
+  const whys = new Set();
+  for (let t = 0; t <= 180000; t += 500) {
+    extra(Math.floor(t / 9000) % 2 === 1);                    // 9초마다 서브에이전트 9개가 생겼다 사라짐(크기 ±25% 넘게)
+    const lab = Math.floor(t / 7000) % 2 ? 1.5 : 1.9;            // 라벨 몫만 바뀐 비율(화면·패널 그대로)
+    const view = { ...V3(lab), baseAspect: 2.0 };
+    const o = computeOverview(w.nodes, w.roots, w.projects, ov, { nowMs: t, view });
+    if (ov && o.packSeq !== ov.packSeq) { repacks++; whys.add(o.repackWhy); }
+    if (o.repackWhy === 'held') held++;
+    for (let i = 0; i < o.clusters.length; i++) for (let j = i + 1; j < o.clusters.length; j++) {
+      const A = o.clusters[i], B = o.clusters[j];
+      assert.ok(Math.abs(A.center.x - B.center.x) >= A.box.hw + B.box.hw - 1e-6 || Math.abs(A.center.z - B.center.z) >= A.box.hd + B.box.hd - 1e-6, `겹침 t=${t}`);
+    }
+    ov = o;
+  }
+  assert.ok(repacks <= Math.ceil(180000 / REPACK_MIN_MS) + 1, `다시 배치 ${repacks}번 (${[...whys]})`);
+  assert.ok(held > 0);
+  // 화면 비율 자체가 바뀌면(가로 → 세로) 기다리지 않고 바로
+  const o2 = computeOverview(w.nodes, w.roots, w.projects, ov, { nowMs: 180500, view: { ...V3(0.6), baseAspect: 0.62 } });
+  assert.equal(o2.repackWhy, 'aspect');
+  assert.equal(o2.packSeq, ov.packSeq + 1);
+  assert.ok(REPACK_HOLD_MS >= 5000);
+});

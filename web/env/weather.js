@@ -14,7 +14,7 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* 저
 /** 표현별 크기: 세계 단위 배율(s)·안개 층 높이(바닥 기준 위로, s 배)·안개를 걷어 두는 가운데 반경(카메라 거리 배) */
 const TUNE = {
   flow: { s: 1, fogLayers: [0.25, 0.75, 1.0], clear: 0.14 },
-  planet: { s: 3, fogLayers: [0.4, 1.4, 2.6], clear: 0.14 },
+  planet: { s: 3, fogLayers: [0.4, 1.4, 2.6], clear: 0.14, splashK: 0.6, splashA: 0.55 }, // 물방울 고리는 작고 옅게 — 원형 궤도계 섬의 고리와 겹쳐 어지럽지 않게
   voxel: { s: 1.4, fogLayers: [0.2, 0.9, 2.2], clear: 0.22 },
 };
 
@@ -238,7 +238,7 @@ export class WeatherLayer {
       P.rain.u.uTime.value = t; P.rain.u.uCenter.value.copy(foc); P.rain.u.uW.value = W; P.rain.u.uH.value = H; P.rain.u.uGround.value = gy;
       P.rain.u.uLen.value = H * 0.045; P.rain.u.uAlpha.value = c.rain * (this.isLight ? 0.42 : 0.32);
       P.splash.u.uTime.value = t; P.splash.u.uCenter.value.copy(foc); P.splash.u.uW.value = W * 0.8; P.splash.u.uGround.value = gy;
-      P.splash.u.uSize.value = 0.5 * s; P.splash.u.uPx.value = px; P.splash.u.uAlpha.value = c.rain * (this.isLight ? 0.5 : 0.42);
+      P.splash.u.uSize.value = 0.5 * s * (this.tune.splashK || 1); P.splash.u.uPx.value = px; P.splash.u.uAlpha.value = c.rain * (this.isLight ? 0.5 : 0.42) * (this.tune.splashA || 1);
     }
     const nv = c.snow > 0.002;
     P.snow.m.visible = nv;

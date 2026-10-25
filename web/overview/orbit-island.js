@@ -78,15 +78,15 @@ export function makeOrbitDisc() {
   const mat = new THREE.ShaderMaterial({ uniforms: u, vertexShader: VS, fragmentShader: FS, transparent: true, depthWrite: false, side: THREE.DoubleSide });
   mat.extensions = { derivatives: true };
   const mesh = new THREE.Mesh(GEO(), mat);
-  mesh.renderOrder = -2;
+  mesh.renderOrder = -1; // 흐름 섬 테두리(-1)처럼 기상 안개 판(-1.8)·물방울(-1.7) 뒤에 — 안개가 고리·눈금을 덮어 지우지 않게
   mesh.frustumCulled = false;
   mesh.raycast = () => {};
   return mesh;
 }
 
 /** 클러스터 c(round·stars·orbit) → 원판 uniform(크기·고리·항성). 섬 지역 좌표 → 원판 좌표(÷R) */
-export function syncOrbitDisc(mesh, c) {
-  const R = Math.max(1, c.round || c.r || 1);
+export function syncOrbitDisc(mesh, c, Rnow = 0) {
+  const R = Math.max(1, Rnow > 0 ? Rnow : c.round || c.r || 1); // Rnow: 반지름이 바뀌는 동안 그리는 값(islands.js 보간)
   const u = mesh.material.uniforms;
   mesh.scale.setScalar(R);
   u.uR.value = R;

@@ -4,6 +4,7 @@ import { SceneView } from './scene.js';
 import { PlanetArt3D } from './art-layer3d.js';
 import { PlanetDeco } from './planet-deco.js';
 import { bodyK } from './planet-core.mjs';
+const LABEL_NEAR_PX = 11;
 
 export class PlanetView extends SceneView {
   static modeId = 'planet';
@@ -39,6 +40,13 @@ export class PlanetView extends SceneView {
     v.mesh.scale.setScalar(r);
   }
   _disposeVis(v) { if (this.deco) this.deco.detach(v); super._disposeVis(v); }
+  /** 가까이서 보면 라벨이 궤도선·소행성대 위에 얹히던 것 — 본체 화면 반지름 px 가 궤도계가 다 보이는 크기(LABEL_NEAR_PX,
+   *  orbitLod 2 단계와 같은 11px)를 넘으면 라벨을 궤도 쪽으로 조금 띄우고(본체 px × 0.5, 상한 34px) 라벨 뒤에 배경색 옅은 번짐(.pl-halo) */
+  _labelGapPx(v, px) {
+    const near = px >= LABEL_NEAR_PX;
+    if (near !== !!v._plNear) { v._plNear = near; v.labelEl.classList.toggle('pl-halo', near); }
+    return near ? Math.round(Math.min(34, px * 0.5)) : 0;
+  }
 
   /** {on, book, fx, style}: 켜면 층을 만들고, 끄면 걷는다 */
   setArtifacts({ on, book, fx, style } = {}) {

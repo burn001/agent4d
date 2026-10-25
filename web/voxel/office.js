@@ -156,7 +156,7 @@ export class VoxelView {
       releaseStation: (ch) => this._releaseStation(ch),
       breakSpot: (ch) => (ch.room && ch.room.type === 'office' ? breakSpot(ch.room, this._breakIdx(ch)) : null),
       crewOf: (ch) => crewSpots(this.chars.values(), ch, this._crewBuf || (this._crewBuf = [])), // 팀장 지휘·감독
-      overseeSpot: (ch) => overseeSpot(ch.room),
+      overseeSpot: (ch, crew) => overseeSpot(ch.room, crew), // 볼 팀원 책상 앞 통로
       onError: (ch) => this.bubbles.say(ch.id, _t('scene.vx.errorBubble'), { type: 'error', dur: 2, now: this._now }) };
     this._fx = { t: 0, now: 0, skill: null, error: null, ok: null, text: null, focus: false, hover: false, metaSkill: false, doneLead: false, idle: false, catColor: null, monK: 0, mugC: null, coffeeC: null, bagC: null, shoeC: null, cardC: null };
     this._labels = Array.from({ length: 24 }, () => ({ id: null, text: '', html: null, cls: '', x: 0, y: 0, z: 0 }));

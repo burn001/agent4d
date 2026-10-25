@@ -250,3 +250,45 @@ test('지휘·감독: 자율 루프 팀장이 가끔 책상 옆으로 나와 팀
   for (let t = 0; t < SUPERVISE.PERIOD * 2.2; t += ctx2.dt) { ctx2.now += ctx2.dt; ch2.update(ctx2); assert.equal(ch2.sup, null); }
   for (let t = 0; t < 40; t += 0.25) { const a = superviseAct(7, t); assert.ok(a.k >= 0 && a.k <= 1); }
 });
+
+test('지휘·감독 자리 = 볼 팀원 책상 앞 통로, 팀원과 마주 봄(§91.6 — 예전엔 팀원 등을 가리킴) · 돌린 방도', () => {
+  for (const k of [0, 1, 2, 3]) {
+    const { lay, room } = office(k);
+    const s = lay.seat.get('a1');
+    const crew = { x: s.x, z: s.z, lx: s.deskLX, lz: s.deskLZ };
+    const sp = overseeSpot(room, crew);
+    assert.ok(sp && inside(sp, room.bounds), `안 k=${k}`);
+    // 팀원이 보는 쪽(자리 → 책상)에 섬: 책상보다 더 앞
+    const fx = s.deskX - s.x, fz = s.deskZ - s.z, fl = Math.hypot(fx, fz);
+    const ax = sp.x - s.x, az = sp.z - s.z;
+    assert.ok((ax * fx + az * fz) / fl > fl + 0.6, `책상 앞 k=${k}`);
+    // 팀장이 팀원을 바라봄(face)
+    const dir = { x: Math.sin(sp.face), z: Math.cos(sp.face) };
+    assert.ok(((s.x - sp.x) * dir.x + (s.z - sp.z) * dir.z) / Math.hypot(s.x - sp.x, s.z - sp.z) > 0.95, `마주 봄 k=${k}`);
+  }
+  // 캐릭터: 칸마다 그 팀원 책상 앞으로 걸어가 가리킴(yaw = 팀원 쪽), 팀원이 둘이면 칸에 따라 다른 책상
+  const { lay, room, nodes } = office();
+  const seat = lay.seat.get('m');
+  nodes[0].status = 'idle';
+  const ch = new Character('m', nodes[0], { lead: true });
+  const crew = ['a0', 'a2'].map((id) => { const s = lay.seat.get(id); return { x: s.x, z: s.z, lx: s.deskLX, lz: s.deskLZ, at: true }; });
+  // 자리를 비운 팀원(책상 좌표 없음)은 예전 자리(팀장 책상 곁)
+  const away = overseeSpot(room, { x: 0, z: 0, lx: undefined, lz: undefined, at: false });
+  assert.ok(Math.hypot(away.x - seat.x, away.z - seat.z) < 3);
+  const ctx = { now: 0, dt: 0.05, ts: 1, room, seat, stationSpot: () => null, releaseStation: () => {}, crewOf: () => crew, overseeSpot: (c, e) => overseeSpot(c.room, e) };
+  const spots = new Set();
+  let posed = 0;
+  for (let t = 0; t < SUPERVISE.PERIOD * 4.2; t += ctx.dt) {
+    ctx.now += ctx.dt; ch.update(ctx);
+    if (ch.sup) {
+      posed++;
+      spots.add(ch.target.key);
+      const near = crew.some((c) => { const sp = overseeSpot(room, c); return Math.hypot(ch.pos.x - sp.x, ch.pos.z - sp.z) < 0.3; });
+      assert.ok(near, '책상 앞 자리에서 가리킴');
+      // 가리키는 쪽 = 앞(+z 의 반대, 팀원 자리 쪽)
+      assert.ok(Math.cos(ch.sup.yaw) < -0.8, `팀원 쪽 yaw ${ch.sup.yaw}`);
+    }
+  }
+  assert.ok(posed > 40, '감독 자세가 나옴');
+  assert.ok(spots.size >= 2, '칸마다 다른 팀원 책상');
+});

@@ -65,7 +65,8 @@ export default {
     'scene.cab.more': '{file} +{n}',
     // 전체 보기 섬 이름표
     'scene.island.sessions': plural('{n} session', '{n} sessions'),
-    'scene.island.inactive': (v) => `${Number(v.n) === 1 ? '1 session' : `${v.n} sessions`} · inactive`,
+    // 방금 끝난 세션만 남은 섬(10분 유예, 흐린 표시) — 2시간 기준 '비활성'(목록에서 빠짐)과 다른 말
+    'scene.island.justEnded': (v) => `${Number(v.n) === 1 ? '1 session' : `${v.n} sessions`} · just ended`,
     // 배경 카드
     'scene.env.aria': 'Background settings',
     'scene.env.title': 'Background',
@@ -135,7 +136,7 @@ export default {
     'scene.dash.avg': '평균 {t}',
     'scene.cab.more': '{file} 외 {n}',
     'scene.island.sessions': '세션 {n}',
-    'scene.island.inactive': '세션 {n} · 비활성',
+    'scene.island.justEnded': '세션 {n} · 방금 끝남',
     'scene.env.aria': '배경 설정',
     'scene.env.title': '배경',
     'scene.env.grid': '바닥 그리드',

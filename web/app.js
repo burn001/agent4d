@@ -13,7 +13,7 @@ import { HOLO_KIND } from './holo-core.mjs';
 import { RENDERERS, RENDERER_LABEL, DEFAULT_RENDERER, isRenderer, storedRenderer, nextRenderer, normRenderer, normDim, initialDim, renderer2dFor, DIM_LABEL } from './renderers.js';
 import { ReplayEngine, createLocalReplayApi } from './replay/engine.mjs';
 import { mountReplayUI, fmtClock } from './replay/ui.mjs';
-import { serializeSelection, parseSelection, selectionLabel, sessionsOf } from './projects.js';
+import { serializeSelection, parseSelection, selectionLabel, sessionsOf, sessionHint } from './projects.js';
 import { mountProjectSelector } from './projsel.js';
 import { mountMacroTimeline } from './macro/macro.js';
 import { mountArchiveCard } from './replay/archive-card.js'; // 보관함 설명 카드
@@ -260,6 +260,7 @@ const inspector = mountInspector({
   getArt: () => (art && art.on ? art : null), // 대상 팝업
   planHtml: (n, nowMs) => (plans ? plans.inspectHtml(n, nowMs) : ''), // 노드 팝업 계획 항목
   planSheet: (id, nowMs) => (plans ? plans.sheetHtml(id, nowMs) : null), // 계획 보드 크게 보기
+  planAnchor: () => (plans && plans.openAnchor ? plans.openAnchor() : null), // 카드는 보드 자리 곁(카메라 이동 없음)
   onFoot: (n, on) => { if (view.setArtFoot) view.setArtFoot(streamAll ? n.projectId || null : '_', on ? n.id : null); }, // 발자국 강조
   onFocus: (t, { follow }) => {
     if (view.setArtSelected) view.setArtSelected(t.type === 'artifact' ? { pid: t.pid, id: t.id } : null);
@@ -519,7 +520,17 @@ function onSnapshot(snap, o = {}) {
   if (art) art.snapshot(); // 그 시점 기본 장부(재생이면 재생 시각까지)
   if (plans) plans.reset();
   if (!o.keepCamera) director.overview(true);
+  fillSessionHint();
   statsDirty = true;
+}
+
+/** 세션 링크로 연 지난 세션(projects 최근 목록 밖): 루트 cwd·제목으로 선택기 이름표를 '프로젝트 › 제목' 으로 */
+function fillSessionHint() {
+  if (!pl || streamAll || replaying || sel.scope !== 'session' || sel.sessionId !== store.sessionId || !store.root) return;
+  if (sel.projectId && sel.title && sel.projectName) return;
+  const h = sessionHint(store.nodes.get(store.root), store.projects);
+  const next = { ...sel, projectId: sel.projectId || h.projectId || undefined, projectName: sel.projectName || h.projectName || undefined, title: sel.title || h.title || undefined };
+  if (next.projectId !== sel.projectId || next.projectName !== sel.projectName || next.title !== sel.title) { sel = next; pl.setSelection(sel); refreshScopeUi(); }
 }
 
 function onEvent(ev, opts = {}) {
@@ -818,6 +829,7 @@ function onProjects(d) {
   if (Array.isArray(d.roots)) store.roots = d.roots;
   syncSessColors();
   if (pl) pl.setProjects(store.projects);
+  fillSessionHint();
   if (streamAll && view.setScope) view.setScope(scopeArgs());
   if (streamAll) liveSessionId = currentSessionId();
   if (art) art.projectsChanged(); // 새 섬의 기본 장부

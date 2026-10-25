@@ -66,7 +66,7 @@ export class Voxel2DView extends FlatView {
       releaseStation: (ch) => this._releaseStation(ch),
       breakSpot: (ch) => this.vx.breakSpot(ch), // 탕비실
       crewOf: (ch) => crewSpots(this.chars.values(), ch, this._crewBuf || (this._crewBuf = [])), // 팀장 지휘·감독
-      overseeSpot: (ch) => overseeSpot(ch.room),
+      overseeSpot: (ch, crew) => overseeSpot(ch.room, crew), // 볼 팀원 책상 앞 통로
       onError: (ch) => { if (this.bubbles.push(ch.id, 'error', tr('flat.vx.error'))) this.invalidate(); },
     };
     this.vsess = new VxSessCore(this); // 라운지·이사·충돌·메시지(3D 복셀과 같은 규칙)

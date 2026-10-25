@@ -82,9 +82,12 @@ export class Islands {
       // Planet: 원형 궤도계 원판 하나(예전 바닥판·고리·안쪽 고리·쌍성 장식은 숨김)
       if (c.round > 0) {
         if (!it.orb) { it.orb = makeOrbitDisc(); it.g.add(it.orb); }
+        // 반지름이 바뀌면 원판은 0.6초쯤에 걸쳐 부드럽게(update) — 처음·새 섬은 바로
+        if (!(it.orbR > 0) || born) it.orbR = c.round;
+        it.orbT = c.round;
         const ok = c.round.toFixed(1) + JSON.stringify(c.stars || []) + (c.orbit ? c.orbit.r.toFixed(1) : '') + !!c.inactive;
-        if (it.orbKey !== ok) { it.orbKey = ok; syncOrbitDisc(it.orb, c); }
-      } else if (it.orb) { it.g.remove(it.orb); it.orb.material.dispose(); it.orb = null; it.orbKey = null; }
+        if (it.orbKey !== ok) { it.orbKey = ok; syncOrbitDisc(it.orb, c, it.orbR); }
+      } else if (it.orb) { it.g.remove(it.orb); it.orb.material.dispose(); it.orb = null; it.orbKey = null; it.orbR = 0; }
       for (const k of ['disc', 'ring']) it[k].visible = !it.orb;
       if (c.box) {
         // 둥근 사각형: 상자 크기가 바뀔 때만 도형을 다시 만든다(배율 1)
@@ -100,7 +103,7 @@ export class Islands {
         it.inner.scale.setScalar(c.r);
       }
       it.inner.visible = !it.orb && !c.inactive && Math.max(c.box ? c.box.hw : c.r, c.box ? c.box.hd : c.r) > 14 && !c.orbit && !c.zones;
-      it.label.position.set(0, 0.2, (c.round > 0 ? c.round : c.box ? c.box.hd : c.r) + 1.2);
+      it.label.position.set(0, 0.2, (c.round > 0 ? it.orbR || c.round : c.box ? c.box.hd : c.r) + 1.2);
       this._syncDeco(it, c);
       const html = islandLabelHtml(c);
       if (html !== it.html) { it.el.innerHTML = html; it.html = html; }
@@ -185,6 +188,11 @@ export class Islands {
       if (it.orb) it.orb.material.uniforms.uTime.value = now % 10000;
       const p = it.g.position;
       if (it.tx != null && (Math.abs(it.tx - p.x) > 1e-3 || Math.abs(it.tz - p.z) > 1e-3)) { p.x += (it.tx - p.x) * k; p.z += (it.tz - p.z) * k; }
+      if (it.orb && it.orbT > 0 && Math.abs(it.orbT - it.orbR) > 0.02) {
+        it.orbR = Math.abs(it.orbT - it.orbR) < 0.05 ? it.orbT : it.orbR + (it.orbT - it.orbR) * k;
+        syncOrbitDisc(it.orb, it.c, it.orbR);
+        it.label.position.z = it.orbR + 1.2;
+      }
     }
     for (const it of this.items.values()) {
       if (!it.c.busy) { if (it.ring.material.opacity !== it.baseRing) it.ring.material.opacity = it.baseRing; continue; }

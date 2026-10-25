@@ -191,11 +191,19 @@ export class Character {
     if (this.lead && !tool && ctx.crewOf && ctx.overseeSpot && (ctx.ts || 1) < BREAK.MAX_TS && this.node.status !== 'error') {
       const a = superviseAct(this.hash, now);
       const crew = a.on ? ctx.crewOf(this) : null;
-      const sp = crew && crew.length ? ctx.overseeSpot(this) : null;
+      // 이번 칸에 볼 팀원 하나 — 자기 책상에 있는 팀원을 먼저(그 책상 앞 통로로). 모두 자리를 비웠으면 아무나(팀장 책상 곁에서)
+      let c = null;
+      if (crew && crew.length) {
+        let nAt = 0;
+        for (const e of crew) if (e.at) nAt++;
+        if (nAt) { let i = a.slot % nAt; for (const e of crew) if (e.at && i-- === 0) { c = e; break; } } else c = crew[a.slot % crew.length];
+      }
+      const sp = c ? ctx.overseeSpot(this, c) : null;
       if (sp) {
         ctx.releaseStation(this);
-        if (!(this.target && this.target.type === 'oversee')) this._goTo({ key: 'oversee', type: 'oversee', spot: sp, cat: null, toolId: null }, ctx);
-        if (this.state === 'seated') { const c = crew[a.slot % crew.length]; this.sup = { yaw: Math.atan2(c.x - this.pos.x, c.z - this.pos.z), k: a.k }; }
+        const key = 'oversee:' + sp.x.toFixed(2) + ',' + sp.z.toFixed(2);
+        if (!(this.target && this.target.key === key)) this._goTo({ key, type: 'oversee', spot: sp, cat: null, toolId: null }, ctx);
+        if (this.state === 'seated') this.sup = { yaw: Math.atan2(c.x - this.pos.x, c.z - this.pos.z), k: a.k };
         return;
       }
     }
@@ -325,13 +333,18 @@ export class Character {
 
 const easeOutBack = (x) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
 
-/** 팀장 lead 와 같은 방에서 자율 루프 팀원 책상(seat.kind 'op')에 있는 일하는 팀원의 위치들(out 재사용) */
+/** 팀장 lead 와 같은 방에서 자율 루프 팀원 책상(seat.kind 'op')에 있는 일하는 팀원들(out 재사용)
+ *  항목 = {x, z(지금 위치), lx, lz(그 책상의 방 지역 좌표, 책상 앞 통로 감독 자리)}, 캐릭터마다 객체 하나를 다시 씀 */
 export function crewSpots(chars, lead, out = []) {
   out.length = 0;
   for (const c of chars) {
     if (c === lead || c.room !== lead.room || !c.seat || c.seat.kind !== 'op') continue;
     if (c.state === 'gone' || c.state === 'leave' || c.endAt != null) continue;
-    out.push(c.pos);
+    const e = c._crewE || (c._crewE = {});
+    e.x = c.pos.x; e.z = c.pos.z;
+    const at = c.atDesk(); // 자리를 비웠으면(시설로 걸어감) 책상 앞에 서도 빈 책상 — 책상 좌표를 주지 않아 예전 자리(팀장 책상 곁)에서 가리킴
+    e.lx = at ? c.seat.deskLX : undefined; e.lz = at ? c.seat.deskLZ : undefined; e.at = at;
+    out.push(e);
   }
   return out;
 }

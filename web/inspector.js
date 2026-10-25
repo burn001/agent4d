@@ -213,7 +213,7 @@ export function mountInspector(h) {
     sheet = sheetMode(innerWidth);
     el.classList.toggle('sheet', sheet);
     if (!sheet) {
-      const a = anchorOf(view, target);
+      const a = (target.type === 'plan' && h.planAnchor && h.planAnchor(target.id)) || anchorOf(view, target); // 계획 보드 카드는 보드 자리 곁
       if (a) {
         const want = placeCard(a, { w: el.offsetWidth || 320, h: el.offsetHeight || 240 }, bounds);
         if (!pos) pos = { x: want.x, y: want.y };
@@ -403,7 +403,7 @@ export function mountInspector(h) {
     if (isNode && n && artOn) b.push(`<button type="button" class="ins-btn" data-act="foot" aria-pressed="${footNode === n.id}" title="${esc(tr('cards.ins.foot.t'))}">${esc(tr(footNode === n.id ? 'cards.ins.foot.off' : 'cards.ins.foot.on'))}</button>`);
     if (!isNode && target && target.type === 'cluster' && canScope) b.push(`<button type="button" class="ins-btn" data-act="project" title="${esc(tr('cards.ins.project.t'))}">${esc(tr('cards.ins.project'))}</button>`);
     if (isNode && n && h.canReplay()) b.push(`<button type="button" class="ins-btn" data-act="replay" title="${esc(tr(rep ? 'cards.ins.replay.t.at' : 'cards.ins.replay.t.open'))}">${esc(tr(rep ? 'cards.ins.replay.at' : 'cards.ins.replay.open'))}</button>`);
-    if (target && target.type !== 'artifact') b.push(`<button type="button" class="ins-btn" data-act="follow" aria-pressed="${follow}" title="${esc(tr('cards.ins.follow.t'))}">${esc(tr(follow ? 'cards.ins.following' : 'cards.ins.follow'))}</button>`);
+    if (target && target.type !== 'artifact' && target.type !== 'plan') b.push(`<button type="button" class="ins-btn" data-act="follow" aria-pressed="${follow}" title="${esc(tr('cards.ins.follow.t'))}">${esc(tr(follow ? 'cards.ins.following' : 'cards.ins.follow'))}</button>`);
     b.push(`<button type="button" class="ins-btn ghost" data-act="close">${esc(tr('cards.ins.close'))}</button>`);
     foot.innerHTML = b.join('');
   }

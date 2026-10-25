@@ -21,6 +21,10 @@ export const ISLAND_MIN_K = 0.5;
 export const ISLAND_MAX_BOOST = 2.2;
 // 원형 섬(정사각 상자)은 줄 배치가 가용 비율에 더 민감해(라벨 자리 → 비율 → 배치 되먹임) 다시 배치 문턱을 넓힘(의 25% → 40%)
 export const ROUND_REPACK_TOL = 0.4;
+// 원형 섬 반지름 데드밴드(2026-10-25): 보이는 노드 기준 반지름이 이전(키우기 전 값)과 이 비율·ROUND_DEAD_MIN 안이면 이전 값 —
+// 서브에이전트가 생기고 끝날 때마다 원판·고리·바닥 글씨가 조금씩 흔들리지 않게(여유 CLUSTER_PAD 가 그 안의 차이를 덮는다)
+export const ROUND_DEADBAND = 0.08;
+export const ROUND_DEAD_MIN = 2;
 
 const num = (v) => (Number.isFinite(v) ? v : 0);
 const tsOf = (iso) => { const t = Date.parse(iso || ''); return Number.isFinite(t) ? t : 0; };
@@ -367,6 +371,7 @@ export function computeOverview(nodes, roots, projects, prev, opts = {}) {
   // 2. 섬 목록: 루트가 있는 프로젝트 + live/recent 프로젝트(temp 는 루트가 있을 때만)
   const prevOrder = (prev && prev.mainOrder) || new Map();
   const clusters = [];
+  const prevRound0 = new Map(((prev && prev.clusters) || []).filter((c) => c && c.round0 > 0).map((c) => [c.projectId, c.round0])); // 원형 섬 데드밴드
   const pids = new Set(mains.keys());
   for (const q of projById.values()) if (!q.temp && (q.live || q.recent)) pids.add(q.projectId);
   for (const pid of pids) {
@@ -472,7 +477,7 @@ export function computeOverview(nodes, roots, projects, prev, opts = {}) {
     let box = inactive ? { hw: CLUSTER_MIN_R, hd: CLUSTER_MIN_R } : { hw: Math.max(CLUSTER_MIN_R, hw + CLUSTER_PAD), hd: Math.max(CLUSTER_MIN_R, hd + CLUSTER_PAD) };
     // Planet 원형 궤도계: 항성(live 메인 하나면 그 메인, 여럿이면 공전 중심) 을 섬 중심으로 옮기고
     // 섬 = 그 점 중심 원(반지름 = 가장 먼 노드 경계 + 여유), 상자는 그 원의 외접 정사각형(배치·카메라 맞춤은 상자 그대로)
-    let round = 0, stars = null;
+    let round = 0, round0 = 0, stars = null;
     if (roundOpt && !inactive && place.size) {
       let sx = 0, sz = 0;
       if (pods.length === 1) { const pl = place.get(anchors[0].nodeId); if (pl) { sx = pl.x; sz = pl.z; } }
@@ -493,6 +498,7 @@ export function computeOverview(nodes, roots, projects, prev, opts = {}) {
           for (const [id, p] of rotLocal(it.m.local, pl.rot)) pts.push({ x: pl.x + p.x, z: pl.z + p.z, e: nodeExtent(it.m.sub.get(id)), id });
           for (const g of it.m.guests || []) for (const [id, p] of g.local) pts.push({ x: pl.x + g.offset.x + p.x, z: pl.z + g.offset.z + p.z, e: nodeExtent(g.sub.get(id)), id });
           for (const q of pts) {
+            if (hidden.has(q.id)) continue; // 숨긴 노드(끝난 루트·그 하위)는 반지름·고리에 넣지 않음 — 보이는 노드 기준
             far = Math.max(far, Math.hypot(q.x, q.z) + q.e);
             if (q.id !== a.nodeId) ds.push(Math.hypot(q.x - pa.x, q.z - pa.z));
           }
@@ -500,6 +506,9 @@ export function computeOverview(nodes, roots, projects, prev, opts = {}) {
         stars.push({ x: pa.x, z: pa.z, nodeId: a.nodeId, rings: tierRings(ds, 3 * spread) });
       });
       round = Math.max(CLUSTER_MIN_R, far + CLUSTER_PAD);
+      const pr = prevRound0.get(pid);
+      if (pr > 0 && Math.abs(round - pr) <= Math.max(ROUND_DEAD_MIN, pr * ROUND_DEADBAND) && far <= pr) round = pr; // 데드밴드(노드가 가장자리를 넘지 않을 때만)
+      round0 = round;
       box = { hw: round, hd: round };
     }
     else if (roundOpt) { round = box.hw; stars = []; } // 빈(inactive) 섬도 원
@@ -517,7 +526,7 @@ export function computeOverview(nodes, roots, projects, prev, opts = {}) {
       sessions: q.sessions || list.length,
       liveSessions: q.liveSessions || shown.filter((m) => !m.recent).length,
       hiddenMains: list.length - shown.length,
-      box, r: inactive ? CLUSTER_MIN_R : round || Math.hypot(box.hw, box.hd), round, stars,
+      box, r: inactive ? CLUSTER_MIN_R : round || Math.hypot(box.hw, box.hd), round, round0, stars,
       mains: mOut, anchorOf: Object.fromEntries([...assign].map(([k, v]) => [k, v])),
       _list: list, _shown: shown, _place: place, _act: Math.max(0, ...list.map((m) => m.act)),
       center: null,
@@ -548,9 +557,14 @@ export function computeOverview(nodes, roots, projects, prev, opts = {}) {
   }
 
   // 3. 섬 자리: 이전 자리를 되도록 유지 — 크기가 크게 바뀌거나 겹치면 그때만 다시 줄 배치(packRows)
-  const repacked = placeClusters(clusters, prev, aspect, view, roundOpt ? ROUND_REPACK_TOL : undefined);
+  // '' = 자리 유지, 'held' = 더 촘촘한 배치가 있지만 기다리는 중, 그 밖 = 다시 배치한 까닭(aspect·fresh·clash·state·gain·waste)
+  const repackWhy = placeClusters(clusters, prev, aspect, view, roundOpt ? ROUND_REPACK_TOL : undefined, nowMs);
+  const repacked = !!repackWhy && repackWhy !== 'held';
+  const gainSince = repackWhy === 'held' ? (prev && Number.isFinite(prev.gainSince) ? prev.gainSince : nowMs) : null;
+  const packAt = repacked || !(prev && Number.isFinite(prev.packAt)) ? nowMs : prev.packAt;
   // 배치를 고른 가용 비율·배치 차례: 자리 유지 중엔 이전 값을 물려받아, 비율이 조금씩 쌓여 바뀌어도 결국 다시 배치
   const packAspect = view ? (repacked || !(prev && prev.packAspect > 0) ? view.aspect : prev.packAspect) : null;
+  const packBase = view && view.baseAspect > 0 ? (repacked || !(prev && prev.packBase > 0) ? view.baseAspect : prev.packBase) : null;
   const packSeq = ((prev && prev.packSeq) || 0) + (repacked ? 1 : 0);
 
   // 4. 전역 좌표
@@ -574,7 +588,7 @@ export function computeOverview(nodes, roots, projects, prev, opts = {}) {
   }
   for (const [d] of mergedInto) if (!mainOrder.has(d)) mainOrder.set(d, 1000 + mainOrder.size);
   for (const [d] of mergedInto) parentOf.set(d, null); // 관계는 끊긴 그대로(띄움 점선)
-  return { clusters, pos, parentOf, rootOf, hidden, projectOf, mainOrder, roots: R, guestOf, mergedInto, packAspect, packSeq };
+  return { clusters, pos, parentOf, rootOf, hidden, projectOf, mainOrder, roots: R, guestOf, mergedInto, packAspect, packSeq, repackWhy, gainSince, packAt, packBase };
 }
 
 /**
@@ -600,8 +614,13 @@ const unionScore = (list, aspect) => {
   for (const c of list) { x0 = Math.min(x0, c.center.x - c.box.hw); x1 = Math.max(x1, c.center.x + c.box.hw); z0 = Math.min(z0, c.center.z - c.box.hd); z1 = Math.max(z1, c.center.z + c.box.hd); }
   return list.length ? Math.max((x1 - x0) / aspect, z1 - z0) : 0;
 };
-export const RESIZE_TOL = 0.25;  // 섬 크기가 이보다 많이 바뀌면(비율) 다시 줄 배치
+export const RESIZE_TOL = 0.25;  // (2026-10-25 부터 자리 유지 판정에 안 씀 — 크기 변화는 비키기·REPACK_HOLD_MS 로) 바깥 호환용
 export const WASTE_TOL = 1.45;   // 자리 유지 배치가 새 줄 배치보다 이만큼 넓으면 다시 줄 배치
+// 2026-10-25 다시 배치 진동 막기: 다중 세션에서 섬이 늘고 줄 때마다(서브에이전트 생김·끝나 숨김) 약 10～30초마다
+// 섬 전체가 자리를 바꾸던 것. 크기 변화는 자리 유지 + 비키기로 받고, '더 촘촘한 배치가 있다'(gain·waste)는
+// REPACK_HOLD_MS 동안 이어지고 마지막 다시 배치 뒤 REPACK_MIN_MS 가 지났을 때만. 비율·새 섬·겹침·활성 상태 변화는 바로.
+export const REPACK_HOLD_MS = 8000;
+export const REPACK_MIN_MS = 60000;
 
 /** 줄 배치: 순서 = 이전 순서 → 새 섬(활성 먼저), 비활성 섬은 아래 따로 줄. 활성 묶음 가운데가 원점.
  *  view가 있으면 활성 섬은 줄·열·크기 순 후보 중 맞춤 배율 최대(chooseArrangement) */
@@ -657,19 +676,27 @@ function packFresh(clusters, prev, aspect, view = null) {
 }
 
 /**
- * 섬 자리 정하기. 이전 결과가 있고 남은 섬들의 크기 변화가 RESIZE_TOL 안이면 그 자리 그대로(겹치지 않을 때),
+ * 섬 자리 정하기. 이전 결과가 있고 남은 섬들의 활성 상태가 같으면 그 자리 그대로(커져 닿으면 비킴, 겹침이 안 풀리면 다시),
  * 새 섬만 기존 섬 옆 빈자리(전체 상자가 가장 덜 커지는 곳). 사라진 섬 자리는 비워 둔다. 그렇게 해서
  * 새로 줄 배치한 것보다 WASTE_TOL 배 넘게 넓어지면 다시 줄 배치.
  */
-function placeClusters(clusters, prev, aspect, view = null, repackTol = undefined) {
-  // 가용 비율이 크게 바뀌면(가로↔세로·패널 접기/펴기) 자리 유지보다 다시 배치가 먼저
-  if (view && prev && needRepack(prev.packAspect, view.aspect, repackTol)) { packFresh(clusters, prev, aspect, view); return true; }
+function placeClusters(clusters, prev, aspect, view = null, repackTol = undefined, nowMs = 0) {
+  // 촘촘한 배치를 위한 다시 배치(gain·waste·라벨 몫 비율)는 이어진 시간·최소 간격을 지켰을 때만(진동 막기)
+  const since = prev && Number.isFinite(prev.gainSince) ? prev.gainSince : nowMs;
+  const lastAt = prev && Number.isFinite(prev.packAt) ? prev.packAt : -Infinity;
+  const mayGain = nowMs - since >= REPACK_HOLD_MS && nowMs - lastAt >= REPACK_MIN_MS;
+  // 가용 비율이 크게 바뀌면(가로↔세로·패널 접기/펴기) 자리 유지보다 다시 배치가 먼저. 단 화면·패널은 그대로이고
+  // 라벨이 노드 밖으로 나간 몫(labelReserve)만 바뀐 것이면 — 배치 → 카메라 → 라벨 → 비율 되먹임 — gain 처럼 기다림
+  let heldAspect = false;
+  if (view && prev && needRepack(prev.packAspect, view.aspect, repackTol)) {
+    const labelOnly = view.baseAspect > 0 && prev.packBase > 0 && !needRepack(prev.packBase, view.baseAspect, repackTol);
+    if (!labelOnly || mayGain) { packFresh(clusters, prev, aspect, view); return 'aspect'; }
+    heldAspect = true;
+  }
   const prevC = new Map(((prev && prev.clusters) || []).filter((c) => c && c.center && c.box).map((c) => [c.projectId, c]));
   const kept = clusters.filter((c) => prevC.has(c.projectId));
-  const ok = kept.length > 0 && kept.every((c) => {
-    const p = prevC.get(c.projectId);
-    return Math.abs(c.box.hw - p.box.hw) <= p.box.hw * RESIZE_TOL + 1 && Math.abs(c.box.hd - p.box.hd) <= p.box.hd * RESIZE_TOL + 1 && !!c.inactive === !!p.inactive;
-  });
+  // 크기는 자리 유지를 막지 않는다(커지면 아래 비키기, 줄어 생긴 빈자리는 gain·waste 가 오래 이어질 때만) — 활성 상태가 바뀐 섬만
+  const ok = kept.length > 0 && kept.every((c) => !!c.inactive === !!prevC.get(c.projectId).inactive);
   if (ok) {
     for (const c of kept) c.center = { x: prevC.get(c.projectId).center.x, z: prevC.get(c.projectId).center.z };
     // 조금 커져 이웃에 닿으면 뒤 순서(나중에 생긴) 섬만 가장 덜 겹친 축으로 살짝 비킨다 — 그래도 안 풀리면 다시 줄 배치
@@ -720,15 +747,17 @@ function placeClusters(clusters, prev, aspect, view = null, repackTol = undefine
         const L = clusters.filter((c) => !c.inactive).length ? clusters.filter((c) => !c.inactive) : clusters;
         const keepS = scaleOf(L, view, CLUSTER_TAG);
         packFresh(clusters, prev, aspect, view);
-        if (scaleOf(L, view, CLUSTER_TAG) <= keepS * KEEP_GAIN) { clusters.forEach((c, i) => { c.center = saved[i]; }); return false; }
-        return true;
+        if (scaleOf(L, view, CLUSTER_TAG) <= keepS * KEEP_GAIN) { clusters.forEach((c, i) => { c.center = saved[i]; }); return heldAspect ? 'held' : ''; }
+        if (!mayGain) { clusters.forEach((c, i) => { c.center = saved[i]; }); return 'held'; }
+        return 'gain';
       }
       packFresh(clusters, prev, aspect, view);
       const freshScore = unionScore(clusters.filter((c) => !c.inactive).length ? clusters.filter((c) => !c.inactive) : clusters, aspect);
-      if (keepScore <= freshScore * WASTE_TOL) { clusters.forEach((c, i) => { c.center = saved[i]; }); return false; }
-      return true;
+      if (keepScore <= freshScore * WASTE_TOL) { clusters.forEach((c, i) => { c.center = saved[i]; }); return heldAspect ? 'held' : ''; }
+      if (!mayGain) { clusters.forEach((c, i) => { c.center = saved[i]; }); return 'held'; }
+      return 'waste';
     }
   }
   packFresh(clusters, prev, aspect, view);
-  return true;
+  return !kept.length ? 'fresh' : ok ? 'clash' : 'state';
 }

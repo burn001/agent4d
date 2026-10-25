@@ -19,10 +19,12 @@ export function packView(el, o = {}) {
   const labT = Math.max(o.labelBelow ? 0 : 30, lr ? lr.top || 0 : 0), labB = Math.max(o.labelBelow ? 46 : 0, lr ? lr.bottom || 0 : 0);
   const side = lr ? Math.min(W * 0.2, Math.max(lr.left || 0, lr.right || 0)) : 0;
   const a = availRect(W, H, { top: ins.top + labT, bottom: ins.bottom + labB, left: side, right: side });
-  if (o.flat) return { aspect: a.aspect, elevMin: 90, elevMax: 90 };
+  // 라벨이 실제로 나간 몫(lr)을 뺀 비율 — 이것이 그대로인데 aspect 만 바뀌면 라벨 되먹임이라 다시 배치를 기다린다(layout.mjs)
+  const base = lr ? availRect(W, H, { top: ins.top + (o.labelBelow ? 0 : 30), bottom: ins.bottom + (o.labelBelow ? 46 : 0), left: 0, right: 0 }).aspect : a.aspect;
+  if (o.flat) return { aspect: a.aspect, baseAspect: base, elevMin: 90, elevMax: 90 };
   const p = o.prefs || {};
   const lo = p.elevMin ?? 20, hi = p.elevMax ?? 55;
-  const v = { aspect: a.aspect, fov: p.fov ?? 50, elevMin: lo, elevMax: hi, elevDef: Math.max(lo, Math.min(hi, Number.isFinite(o.elev) ? o.elev : (lo + hi) / 2)), hy: o.hy ?? 1.5 };
+  const v = { aspect: a.aspect, baseAspect: base, fov: p.fov ?? 50, elevMin: lo, elevMax: hi, elevDef: Math.max(lo, Math.min(hi, Number.isFinite(o.elev) ? o.elev : (lo + hi) / 2)), hy: o.hy ?? 1.5 };
   if (p.azCenter != null && p.azRange != null) { v.yaw0 = p.azCenter; v.yawMin = p.azCenter - p.azRange; v.yawMax = p.azCenter + p.azRange; }
   return v;
 }

@@ -4,7 +4,7 @@
 //   · 사무실 안 새 자리(지역 좌표 → 세계): 탕비실 쉬는 자리, 특별 상호작용 시설(발송대·문서고·원격 부스·컨베이어·신호등 보드)
 //   · 바닥 조명 라인(팀장 ↔ 팀원 길) · 길 위 점 · 흐르는 대시 자리
 //   · 대기 동작(커피·기지개·생각·둘러보기) 시간표 · 쉬러 가기 판단 · 역할(복장) · 홀로그램 모니터 열림 목표
-import { pathBetween, hashStr, LEAD_DESK } from './layout.js';
+import { pathBetween, hashStr, LEAD_DESK, SEAT_BACK } from './layout.js';
 import { toWorld, xfAngle, windowWall } from './xf.mjs';
 
 const PI = Math.PI;
@@ -126,15 +126,26 @@ export function breakDecision(s) {
 }
 
 // ---------------- 지휘·감독(팀장) ----------------
-/** 팀장이 지휘하러 나와 서는 자리(세계): 팀장 책상 왼쪽 앞(기동기는 오른쪽 옆). 사무실이 아니거나 팀장 책상이 없으면 null */
-export function overseeSpot(room) {
+/** 팀장이 지휘하러 나와 서는 자리(세계). desk = 이번에 볼 팀원의 책상(방 지역 좌표 {lx, lz}) 이면 **그 책상 앞 통로**
+ *  (책상 중심 + OVERSEE_FRONT, 팀원 쪽(−z)을 봄) — 팀원 책상·팀장 책상이 모두 앞(z)을 보므로 예전 자리(팀장 책상 왼쪽 앞)에서는
+ *  팀원 등을 가리켰다(→). desk 가 없으면 예전 자리. 사무실이 아니거나 팀장 책상이 없으면 null */
+export const OVERSEE_FRONT = 1.25;
+export const OVERSEE_SIDE = -0.8; // 책상 정면에서 왼쪽으로 조금 — 기본 카메라(앞 오른쪽 위)에서 팀장이 팀원을 가리지 않게
+export function overseeSpot(room, desk = null) {
   if (!room || room.type !== 'office' || !room.leadDesk) return null;
+  const rot = xfAngle(room.xf && room.local ? room.xf : null);
+  if (desk && Number.isFinite(desk.lx) && Number.isFinite(desk.lz)) {
+    const p = roomPoint(room, desk.lx + OVERSEE_SIDE, desk.lz + OVERSEE_FRONT);
+    p.face = Math.atan2(-OVERSEE_SIDE, -(OVERSEE_FRONT + SEAT_BACK)) + rot; // 앉은 팀원(책상 뒤 SEAT_BACK) 쪽
+    return p;
+  }
   const p = roomPoint(room, LEAD_DESK.x - 1.75, LEAD_DESK.z + 1.05);
-  p.face = xfAngle(room.xf && room.local ? room.xf : null);
+  p.face = rot;
   return p;
 }
-/** 자율 루프 팀장: 팀원(회차)이 일하는 동안 PERIOD 초마다 DUR 초 동안 몸을 돌려 팀원 쪽을 가리키며 둘러본다 */
-export const SUPERVISE = { PERIOD: 15, DUR: 4.5 };
+/** 자율 루프 팀장: 팀원(회차)이 일하는 동안 PERIOD 초마다 DUR 초 동안 그 팀원 책상 앞으로 나가 마주 보고 가리키며 둘러본다
+ *  (— 걸어가는 데 2초쯤 들어 예전 15초·4.5초에서 늘림) */
+export const SUPERVISE = { PERIOD: 20, DUR: 7.5 };
 /** 팀장 감독 동작 칸(순수). seed = 해시, t = 초 → {on, k(0..1 칸 안 진행), slot(몇 번째 칸 — 볼 팀원 고르기)} */
 export function superviseAct(seed, t) {
   const u = t / SUPERVISE.PERIOD + (seed % 89) / 17;

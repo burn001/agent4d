@@ -96,3 +96,32 @@ test('원호 글씨: 눈금 안쪽 띠, 넘치면 줄임, 띠는 먼 쪽(−z)·
   assert.ok(B.pos[(4 * 2 + 1) * 3 + 1] > 0, '세우면 위로');
   assert.equal(A.index.length, 8 * 6);
 });
+
+test('round 반지름 = 보이는 노드 기준 · 데드밴드(작은 변화는 그대로, 노드가 가장자리를 넘거나 크게 줄면 바뀜) · §84 판정도 같은 반지름 (2026-10-25)', async () => {
+  const { ROUND_DEADBAND } = await import('../overview/layout.mjs');
+  const w = world(1, 10);
+  const a = computeOverview(w.nodes, w.roots, w.projects, null, opts(true)).clusters[0];
+  // 바깥 고리의 자식 하나가 끝나 숨겨져(배치에서 빠짐) 반지름이 조금 줄 때 — 데드밴드 안이면 그대로
+  const w2 = world(1, 9);
+  const raw2 = computeOverview(w2.nodes, w2.roots, w2.projects, null, opts(true)).clusters[0].round;
+  const b = computeOverview(w2.nodes, w2.roots, w2.projects, { clusters: [a] }, opts(true)).clusters[0];
+  if (Math.abs(raw2 - a.round) <= Math.max(2, a.round * ROUND_DEADBAND)) assert.equal(b.round, a.round);
+  else assert.equal(b.round, raw2);
+  // 크게 줄면(자식이 모두 끝남) 보이는 노드 기준으로 줄어듦
+  const w3 = world(1, 0);
+  const raw3 = computeOverview(w3.nodes, w3.roots, w3.projects, null, opts(true)).clusters[0].round;
+  const c = computeOverview(w3.nodes, w3.roots, w3.projects, { clusters: [a] }, opts(true)).clusters[0];
+  const dead = (prev, raw) => Math.abs(raw - prev) <= Math.max(2, prev * ROUND_DEADBAND);
+  assert.ok(raw3 < a.round && !dead(a.round, raw3), `${raw3} vs ${a.round}`);
+  assert.equal(c.round, raw3);
+  // 커지면 바로(노드가 원 밖으로 나가지 않게)
+  const w4 = world(1, 16);
+  const d = computeOverview(w4.nodes, w4.roots, w4.projects, { clusters: [c] }, opts(true));
+  const cd = d.clusters[0];
+  for (const [id, p] of d.pos) assert.ok(Math.hypot(p.x - cd.center.x, p.z - cd.center.z) + nodeExtent(w4.nodes.get(id)) <= cd.round + 1e-6, id);
+  // 원형 영역 판정은 같은 c.round
+  const pad = projectAreaPad(cd.box.hw, cd.box.hd);
+  const edge = cd.round + islandPickTol(cd.round) + pad;
+  assert.ok(pickIslandAt([cd], cd.center.x + edge - 0.01, cd.center.z, pad));
+  assert.ok(!pickIslandAt([cd], cd.center.x + edge + 0.5, cd.center.z, pad));
+});

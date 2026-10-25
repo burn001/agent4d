@@ -9,12 +9,12 @@ const cab = (files) => VxSessCore.prototype.cabText.call(null, [{ files }]);
 
 test('섬 이름표: 한국어 기본, 영어는 복수형', () => {
   assert.match(islandLabelHtml({ projectId: 'p', name: 'p', mains: [1, 2] }), /<span>세션 2<\/span>/);
-  assert.match(islandLabelHtml({ projectId: 'p', name: 'p', inactive: true, sessions: 3 }), /세션 3 · 비활성/);
+  assert.match(islandLabelHtml({ projectId: 'p', name: 'p', inactive: true, sessions: 3 }), /세션 3 · 방금 끝남/);
   _setLangForTest('en');
   try {
     assert.match(islandLabelHtml({ projectId: 'p', name: 'p', mains: [1] }), /<span>1 session<\/span>/);
     assert.match(islandLabelHtml({ projectId: 'p', name: 'p', mains: [1, 2] }), /<span>2 sessions<\/span>/);
-    assert.match(islandLabelHtml({ projectId: 'p', name: 'p', inactive: true, sessions: 3 }), /3 sessions · inactive/);
+    assert.match(islandLabelHtml({ projectId: 'p', name: 'p', inactive: true, sessions: 3 }), /3 sessions · just ended/);
   } finally { _setLangForTest('ko'); }
 });
 

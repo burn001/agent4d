@@ -1,7 +1,7 @@
 // 프로젝트 목록 순수 함수 시험
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { relTime, groupProjects, tierOf, dotOf, countsText, sessionsOf, serializeSelection, parseSelection, selectionLabel, sameSelection, findSessionProject } from '../projects.js';
+import { relTime, groupProjects, tierOf, dotOf, countsText, sessionsOf, serializeSelection, parseSelection, selectionLabel, sameSelection, findSessionProject, sessionHint } from '../projects.js';
 
 const NOW = Date.parse('2026-10-23T09:00:00Z');
 const ago = (min) => new Date(NOW - min * 60000).toISOString();
@@ -95,4 +95,21 @@ test('재생 고르기: 프로젝트 필터·사람이 읽는 이름(§30.5)', a
   assert.equal(g[0].label, 'Projects-2026');
   assert.deepEqual(g[0].items.map((s) => s.sessionId), ['a1', 'a2']);
   assert.equal(groupSessions(resp, { project: 'all', names }).length, 2);
+});
+
+test('세션 링크 — 최근 목록 밖 지난 세션은 루트 cwd·제목으로 이름표 (§42.1)', () => {
+  const ps = sample();
+  const root = { id: 's:abcdef1234', meta: { cwd: 'd:/alpha/', title: '지난 작업' } };
+  const h = sessionHint(root, ps);
+  assert.deepEqual(h, { projectId: 'alpha', projectName: 'ALPHA', title: '지난 작업' });
+  // 고친 전: 프로젝트 없이 id 8자리만
+  assert.equal(selectionLabel({ scope: 'session', sessionId: 'abcdef1234' }, ps), 'abcdef12');
+  assert.equal(selectionLabel({ scope: 'session', sessionId: 'abcdef1234', ...h }, ps), 'ALPHA › 지난 작업');
+  // 30일 밖(목록에 없는) 프로젝트: cwd 끝 폴더 이름
+  const h2 = sessionHint({ meta: { cwd: 'C:\\work\\zeta\\' } }, ps);
+  assert.deepEqual(h2, { projectId: null, projectName: 'zeta', title: null });
+  assert.equal(selectionLabel({ scope: 'session', sessionId: 'abcdef1234', ...h2 }, ps), 'zeta › abcdef12');
+  assert.deepEqual(sessionHint(null, ps), { projectId: null, projectName: null, title: null });
+  // 직렬화는 id 만
+  assert.equal(serializeSelection({ scope: 'session', sessionId: 'abcdef1234', ...h }), 'session:abcdef1234');
 });
