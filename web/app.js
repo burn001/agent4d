@@ -328,6 +328,25 @@ function clusterAt(v, x, y) {
 }
 /** 단일 프로젝트 모드(전체 보기 스트림·실시간에서 프로젝트나 그 안 세션을 고름)면 그 projectId */
 function focusPid() { return streamAll && !replaying && sel.scope !== 'all' && sel.scope !== 'archive' ? focusProjectOf(sel) || null : null; }
+/** 도구 패널 툴팁: "Bash · 명령 요약" + 눌러서 자세히 */
+let holoTipEl = null, holoTipKey = '';
+function holoTip(hp, ev) {
+  if (!hp) { if (holoTipEl && !holoTipEl.hidden) holoTipEl.hidden = true; holoTipKey = ''; return; }
+  if (!holoTipEl) { holoTipEl = document.createElement('div'); holoTipEl.className = 'holo-tip'; holoTipEl.setAttribute('role', 'tooltip'); document.body.appendChild(holoTipEl); }
+  const e = hp.e, key = e.id + '|' + (e.label && e.label.target);
+  if (key !== holoTipKey) {
+    holoTipKey = key;
+    holoTipEl.textContent = '';
+    const b = document.createElement('b'); b.textContent = (e.label && e.label.tool) || e.tool || '';
+    const s = document.createElement('span'); s.textContent = e.label && e.label.target ? '· ' + e.label.target : '';
+    const m = document.createElement('small'); m.textContent = tr('scene.holo.tipHint');
+    holoTipEl.append(b, s, m);
+    holoTipEl.style.setProperty('--hc', e.cat === 'skill' ? 'var(--skill)' : catColor(e.cat, !!(view && view.tokens && view.tokens.isLight)));
+  }
+  holoTipEl.hidden = false;
+  const x = Math.min(window.innerWidth - 20, ev.clientX + 14), y = Math.min(window.innerHeight - 40, ev.clientY + 16);
+  holoTipEl.style.left = x + 'px'; holoTipEl.style.top = y + 'px';
+}
 function bindCanvas(v) {
   const canvas = v.renderer.domElement;
   canvas.addEventListener('pointermove', (e) => {
@@ -336,12 +355,14 @@ function bindCanvas(v) {
       hoverRaf = 0;
       if (view !== v) return;
       const id = v.pick(hoverEv.clientX, hoverEv.clientY);
-      v.setHover(id);
+      const hp = !id && v.pickPanel ? v.pickPanel(hoverEv.clientX, hoverEv.clientY) : null; // 도구 패널
+      v.setHover(id || (hp ? hp.id : null));
       if (ctxUi) ctxUi.hover(id, hoverEv);
-      canvas.style.cursor = id || clusterAt(v, hoverEv.clientX, hoverEv.clientY) ? 'pointer' : '';
+      holoTip(hp, hoverEv);
+      canvas.style.cursor = id || hp || clusterAt(v, hoverEv.clientX, hoverEv.clientY) ? 'pointer' : '';
     });
   });
-  canvas.addEventListener('pointerleave', () => { if (view === v) v.setHover(null); if (ctxUi) ctxUi.hover(null); });
+  canvas.addEventListener('pointerleave', () => { if (view === v) v.setHover(null); if (ctxUi) ctxUi.hover(null); holoTip(null); });
   canvas.addEventListener('pointerdown', (e) => {
     downAt = { x: e.clientX, y: e.clientY, t: performance.now() };
     // 단일 프로젝트 영역 판정은 누른 순간의 카메라로(자동 카메라가 손 떼기 전까지 움직여도 누른 자리 기준)
@@ -354,6 +375,9 @@ function bindCanvas(v) {
     const id = v.pick(e.clientX, e.clientY);
     // 클릭 = 상세 팝업 + 카메라가 다가감(범위 전환은 팝업 버튼·더블클릭)
     if (id) { inspector.open({ type: 'node', id }); return; }
+    // 홀로그램 도구 패널 = 그 노드 상세 카드를 그 도구 호출 자리로
+    const hp = v.pickPanel ? v.pickPanel(e.clientX, e.clientY) : null;
+    if (hp) { holoTip(null); inspector.open({ type: 'node', id: hp.id, tool: hp.e.id || null }); return; }
     const fp = focusPid(); // 단일 프로젝트 모드
     // 바닥층 대상(파일·DB·저장소…) = 대상 팝업(누가 언제 무엇을). 숨은(다른) 프로젝트 대상은 집지 않음
     const ap = v.pickArtifact ? v.pickArtifact(e.clientX, e.clientY) : null;

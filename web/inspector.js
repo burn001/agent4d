@@ -167,6 +167,7 @@ export function mountInspector(h) {
   function open(t, o = {}) {
     if (!t || (t.type === 'node' && !h.nodes.has(t.id))) return;
     const same = targetKey(t) === targetKey(target) && !leaving;
+    if (same && t.type === 'node' && (t.tool || null) !== (target.tool || null)) { target = t; dirty = true; bodyHtml = ''; } // 같은 노드의 다른 도구 패널
     lastInput = performance.now();
     if (!same) {
       const swap = !!target && !leaving && !el.hidden;
@@ -184,6 +185,7 @@ export function mountInspector(h) {
       clearTimeout(settleT); settleT = setTimeout(() => { if (target) el.classList.add('settled'); }, 280); // 등장 뒤엔 rAF 보간만
     } else el.classList.remove('leave');
     render(true);
+    if (t.tool) requestAnimationFrame(() => { const li = el.querySelector('.ins-tl li.hl'); if (li && li.scrollIntoView) li.scrollIntoView({ block: 'nearest' }); }); // 패널에서 열면 그 도구 호출 줄로
     h.onFocus(t, { follow, same });
     if (o.focus !== false) { try { el.focus({ preventScroll: true }); } catch (e) { /* 무시 */ } }
     if (!raf) { lastT = performance.now(); raf = requestAnimationFrame(loop); }
@@ -322,7 +324,7 @@ export function mountInspector(h) {
     const tools = book.tools(n.id).slice().reverse();
     if (tools.length) {
       parts.push(`<section class="ins-sec"><h4>${esc(tr('cards.ins.h.tools'))} <small>${tools.length}</small></h4><ol class="ins-tl">${tools.map((t) =>
-        `<li class="${t.ok === false ? 'err' : ''}">${ST_MARK(t)}<b>${esc(t.tool)}</b><span class="ins-tt" title="${esc(t.text)}">${esc(t.text)}</span><small>${esc(fmtMs(t.ms))}</small></li>`).join('')}</ol></section>`);
+        `<li class="${t.ok === false ? 'err' : ''}${target && target.tool && t.id === target.tool ? ' hl' : ''}" data-tu="${esc(t.id || '')}">${ST_MARK(t)}<b>${esc(t.tool)}</b><span class="ins-tt" title="${esc(t.text)}">${esc(t.text)}</span><small>${esc(fmtMs(t.ms))}</small></li>`).join('')}</ol></section>`);
     } else if (n.status !== 'done') parts.push(`<section class="ins-sec"><h4>${esc(tr('cards.ins.h.tools'))}</h4><p class="ins-dim">${esc(tr('cards.ins.noTools'))}</p></section>`);
     // 실제 출력(서버가 마스킹한 몇 줄)
     const tail = book.tail(n.id);

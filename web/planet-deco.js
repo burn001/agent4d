@@ -1,6 +1,6 @@
 // Planet 3D 행성 연출 — PlanetView 가 노드마다 붙인다. 외부 에셋 없이 three 지오메트리 + 셰이더 주입.
 //  · 메인 = 기계 행성: 몸체 셰이더(패널 이음선·패널 명암·해치 여닫이·이음선을 따라 도는 조명 점·이음선 사이 코어 광 맥동),
-//    기운 궤도 링(점선 토막 + 밝은 운반체 셋)·적도 기어 띠(톱니), 몸체와 함께 도는 안테나(도구 호출 때 솟고 끝이 깜빡임).
+//    적도 기어 띠(고정된 네 번째 휠) + 다축 뚜르비용(planet-tourb.js — 예전 기운 점선 링·안테나를 대신함).
 //  · 서브에이전트(구) = 위도 띠·흐르는 구름(위도마다 속도가 다른 차등 회전)·활동 때 표면 발광 맥동 + 대기 테두리 빛 + 작은 위성.
 //    워크플로 에이전트·claude -p 는 모양을 그대로 두고 작은 위성만.
 //  · 상태(planet-core.mjs MECH·SUB): 도구 호출 > 생각 중 > 대기 > 완료로 링 속도·발광·해치·안테나가 달라지고 부드럽게 넘어간다.
@@ -12,6 +12,8 @@ import * as THREE from 'three';
 import { MECH, SUB, ORBIT, planetMode, approach, pxRadius, planetLod, orbitLod, orbitSpec, hash01, subType, SETTLE_S, settleK } from './planet-core.mjs';
 import { OrbitSystem, OrbitSparks } from './planet-orbits.js';
 import { injectSubType, mkSubU, buildSubType, stepSubType, setSubTypeColors, disposeSubType } from './planet-sub.js';
+import { Escapement, tourbLod, TOURB_LOD } from './tourbillon-core.mjs'; // 뚜르비용
+import { TourbMain, SubCages } from './planet-tourb.js';
 
 const TAU = Math.PI * 2;
 let GEO = null;
@@ -51,18 +53,12 @@ function geo() {
   if (GEO) return GEO;
   GEO = {
     body: new THREE.SphereGeometry(1, 48, 28),            // 메인 몸체(이십면체 대신 — 이음선은 셰이더)
-    dashRing: mergeBoxes(ringOf(60, 1.62, 0.1, 0.022, 0.05, (i) => i % 20 === 0)), // 궤도 링 점선(운반체 자리는 비움)
-    carriers: mergeBoxes(ringOf(3, 1.62, 0.16, 0.06, 0.09)),                     // 링 위 밝은 운반체 셋
     gearBand: new THREE.TorusGeometry(1.035, 0.04, 6, 64),                        // 적도 기어 띠
     teeth: mergeBoxes(ringOf(30, 1.075, 0.07, 0.085, 0.07)),
-    mast: new THREE.CylinderGeometry(0.022, 0.03, 1, 6, 1),
-    tip: new THREE.SphereGeometry(0.075, 8, 6),
-    dish: new THREE.ConeGeometry(0.12, 0.07, 10, 1, true),
     moon: new THREE.SphereGeometry(1, 14, 10),
     atmo: new THREE.SphereGeometry(1, 28, 18),
   };
   GEO.gearBand.rotateX(Math.PI / 2);
-  GEO.mast.translate(0, 0.5, 0);
   return GEO;
 }
 
@@ -162,6 +158,7 @@ export class PlanetDeco {
     this.map = new Map(); // id → deco
     this.stats = { main: 0, sub: 0, lod: [0, 0, 0], olod: [0, 0, 0, 0], ms: 0 };
     this.sparks = new OrbitSparks(view.scene);
+    this.cages = new SubCages(view.scene); // 서브 단일 케이지(장면 전체 인스턴싱)
   }
 
   /** 노드 v 에 연출을 붙인다(메인·서브·워크플로 에이전트·claude -p, 배치 장치·백그라운드·모니터·워크플로 제외) */
@@ -179,6 +176,7 @@ export class PlanetDeco {
     d.orbits = new OrbitSystem(orbitSpec(okind, v.id, d.subType ? { type: d.subType } : {}), hash01(v.id, 'seed'));
     d.oroot = new THREE.Group(); d.oroot.add(d.orbits.group); v.group.add(d.oroot);
     d.emitAcc = 0;
+    if (d.type === 'mech' || d.type === 'sub') { d.esc = new Escapement(hash01(v.id, 'tourb')); d.tbx = (hash01(v.id, 'tbx') - 0.5) * 0.9; d.tbz = (hash01(v.id, 'tbz') - 0.5) * 0.9; }
     this.map.set(v.id, d);
     this.applyTheme(d);
   }
@@ -197,24 +195,14 @@ export class PlanetDeco {
     const metal = new THREE.MeshStandardMaterial({ roughness: 0.38, metalness: 0.55, transparent: true });
     const light = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false });
     const root = new THREE.Group();          // 몸체 크기를 따르는 묶음
-    const tilt = new THREE.Group(); tilt.rotation.set(0.16, 0, 0.36); root.add(tilt);
-    const ring = new THREE.Mesh(G.dashRing, metal); tilt.add(ring);
-    const carriers = new THREE.Mesh(G.carriers, light); ring.add(carriers);
+    // 예전 기운 점선 링·운반체·안테나 → 다축 뚜르비용. 적도 기어 띠는 고정된 네 번째 휠(케이지가 그 위를 돈다)
     const gear = new THREE.Group(); root.add(gear);
     gear.add(new THREE.Mesh(G.gearBand, metal));
     const teeth = new THREE.Mesh(G.teeth, metal); gear.add(teeth);
-    const spinG = new THREE.Group(); root.add(spinG); // 몸체 자전과 함께 도는 부품
-    const ant = new THREE.Group();
-    const la = 0.95, lo = 0.6; // 북위 54° 근처, 법선 방향으로 선다
-    ant.position.set(Math.cos(la) * Math.cos(lo), Math.sin(la), Math.cos(la) * Math.sin(lo)).multiplyScalar(0.98);
-    ant.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), ant.position.clone().normalize());
-    const mast = new THREE.Mesh(G.mast, metal); ant.add(mast);
-    const dish = new THREE.Mesh(G.dish, metal); dish.rotation.x = Math.PI; ant.add(dish);
-    const tip = new THREE.Mesh(G.tip, light); ant.add(tip);
-    spinG.add(ant);
-    for (const o of [ring, carriers, teeth, mast, dish, tip, ...gear.children]) o.raycast = () => {};
+    for (const o of [teeth, ...gear.children]) o.raycast = () => {};
+    const tb = new TourbMain(root);
     v.group.add(root);
-    return { type: 'mech', U, metal, light, root, tilt, ring, carriers, gear, teeth, spinG, ant, mast, dish, tip };
+    return { type: 'mech', U, metal, light, root, gear, teeth, tb };
   }
 
   _sub(v) {
@@ -242,6 +230,7 @@ export class PlanetDeco {
     this.map.delete(v.id);
     d.root.removeFromParent();
     for (const m of [d.metal, d.light, d.atmoMat]) if (m) m.dispose();
+    if (d.tb) d.tb.dispose();
     if (d.x) disposeSubType(d.x, v);
     d.orbits.dispose(); d.oroot.removeFromParent();
   }
@@ -260,6 +249,7 @@ export class PlanetDeco {
       d._colKey = null;
     }
     if (this.sparks) this.sparks.setLight(L);
+    if (this.cages) this.cages.theme(L);
   }
 
   /** 매 프레임(SceneView._frame 끝, 렌더 직전) */
@@ -273,6 +263,7 @@ export class PlanetDeco {
     const L = !!(view.tokens && view.tokens.isLight);
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const pxK = H / (2 * Math.tan((fov * Math.PI) / 360)); // 세계 1 이 거리 1 에서 몇 px
+    this.cages.begin();
     for (const [id, d] of this.map) {
       const v = view.vis.get(id);
       if (!v || v.hidden || v.gone || !v.group.visible) continue;
@@ -303,17 +294,15 @@ export class PlanetDeco {
         d.emitAcc += dt * oc.emit * (d.type === 'mech' ? 1.4 : 1);
         while (d.emitAcc >= 1) { d.emitAcc -= 1; this._emit(v, d, s); }
       } else d.emitAcc = 0;
+      if (d.esc) d.esc.step(dt, mode, { reduced }); // 이스케이프먼트(박·밸런스·케이지)
       if (d.type === 'mech') {
         st.main++;
         const c = approach(d.cur, MECH[mode], dt, 2.5);
-        const sp = reduced ? c.spin * 0.2 : c.spin;
-        d.spinA += dt * sp;
-        d.ring.rotation.y = d.spinA;
-        d.gear.rotation.y = -d.spinA * 0.55;
-        d.spinG.rotation.y = v.mesh.rotation.y;
+        d.tb.theme(L, v.mat.color);
+        d.tb.step(d.esc, tourbLod(px), op);
         d.U.uT.value = T; d.U.uGlow.value = c.glow + sk * 0.6; d.U.uLights.value = c.lights; d.U.uHatch.value = c.hatch;
         d.U.uPulse.value = reduced ? 0.2 : c.pulse; d.U.uDetail.value = lod === 0 ? 0 : Math.min(1, (px - 4) / 8);
-        if (lod !== d.lod) { d.lod = lod; d.root.visible = lod >= 1; d.teeth.visible = lod >= 2; d.ant.visible = lod >= 2; }
+        if (lod !== d.lod) { d.lod = lod; d.gear.visible = lod >= 1; d.teeth.visible = lod >= 2; }
         if (lod >= 1) {
           if (d._colKey !== v.mat.color.getHexString() + L) {
             d._colKey = v.mat.color.getHexString() + L;
@@ -322,16 +311,6 @@ export class PlanetDeco {
             d.light.color.copy(v.mat.color).lerp(_c.set(0xffffff), 0.55);
           }
           d.metal.opacity = op; d.metal.depthWrite = op >= 0.99;
-          const blink = 0.55 + 0.45 * Math.sin(T * (2 + 6 * c.ant));
-          d.light.opacity = op * Math.min(1, 0.25 + c.glow);
-          d.carriers.visible = c.glow > 0.08;
-          if (lod >= 2) {
-            const ext = 0.32 + 0.68 * c.ant;
-            d.mast.scale.set(1, 0.5 * ext, 1);
-            d.dish.position.y = 0.5 * ext; d.tip.position.y = 0.5 * ext + 0.05;
-            d.dish.rotation.y += dt * (0.5 + 3 * c.ant);
-            d.tip.scale.setScalar(c.ant > 0.5 ? 0.8 + 0.5 * blink : 0.8);
-          }
         }
       } else if (d.type === 'sub') {
         st.sub++;
@@ -347,6 +326,7 @@ export class PlanetDeco {
         }
         if (lod >= 1 && d.atmoMat) d.atmoMat.uniforms.uOpacity.value = op * (L ? 0.3 : 0.42) * (0.55 + 0.6 * c.glow) * (d.subType === 'comet' ? 1.4 : d.subType === 'lava' ? 0.6 : 1);
         stepSubType(d.x, v, T, dt, c, d.act, s, op, lod, L, d.orbits, this._away(v, _dir), this.sparks, reduced);
+        if (px >= TOURB_LOD.SUB_PX) this.cages.put(_wp, s, d.tbx, d.tbz, d.esc.cage, op, v.mat.color); // 단일 케이지
         // 용암: 도구 때 표면 분출
         if (d.subType === 'lava' && d.act > 0.3 && olod >= 2 && !reduced && Math.random() < dt * 10 * d.act) {
           _dir.set(Math.random() - 0.5, Math.random() * 0.8 + 0.2, Math.random() - 0.5).normalize();
@@ -355,6 +335,7 @@ export class PlanetDeco {
         }
       }
     }
+    this.cages.end();
     this.sparks.update(dt, pxK * 0.12 * dpr);
     st.ms = performance.now() - t0;
   }
@@ -384,5 +365,5 @@ export class PlanetDeco {
     this.sparks.emit(_p2, _dir, reach * 1.6, 0.12, 0.85, _c.copy(v.mat.color).lerp(_c2.set(0xffffff), 0.45), 1.6);
   }
 
-  dispose() { for (const id of [...this.map.keys()]) { const v = this.view.vis.get(id); if (v) this.detach(v); } this.map.clear(); if (this.sparks) { this.sparks.dispose(); this.sparks = null; } }
+  dispose() { for (const id of [...this.map.keys()]) { const v = this.view.vis.get(id); if (v) this.detach(v); } this.map.clear(); if (this.sparks) { this.sparks.dispose(); this.sparks = null; } if (this.cages) { this.cages.dispose(); this.cages = null; } }
 }

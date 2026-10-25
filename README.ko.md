@@ -1,16 +1,24 @@
 # cc-agent-viz
 
+[![version](https://img.shields.io/github/v/release/burn001/cc-agent-viz?label=version)](CHANGELOG.md) [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 [English](README.md) · **한국어**
 
 Claude Code 에이전트가 지금 무엇을 하는지 브라우저 3D 화면으로 실시간 보여 줍니다. cc-agent-viz 는 메인 에이전트와 서브에이전트, 워크플로 에이전트, 안에서 띄운 `claude -p` 실행, 백그라운드 셸·모니터를 하나의 살아 있는 트리로 그리는 로컬·읽기 전용 뷰어입니다. 명령줄 도구 이름은 `ccviz` 입니다.
 
 > **비공식 프로젝트입니다.** cc-agent-viz 는 Anthropic 이 만들거나 보증·지원하는 도구가 아닙니다. "Claude", "Claude Code" 는 Anthropic, PBC 의 상표이며, 여기서는 이 도구가 무엇과 함께 동작하는지 설명하는 데만 씁니다.
 
-![전체 프로젝트, 흐름(Flow) 표현 (가짜 데이터)](docs/screenshots/overview-flow-dark.png)
+![전체 프로젝트, 흐름 표현, 다크 테마](docs/screenshots/flow-dark.png)
 
-| 세션 하나, 흐름, 라이트 테마 | 전체 프로젝트, Planet | 세션 하나, 복셀 오피스 |
+| | 다크 | 라이트 |
 |---|---|---|
-| ![세션 하나, 흐름 표현, 라이트 테마](docs/screenshots/session-flow-light.png) | ![전체 프로젝트, Planet 표현](docs/screenshots/overview-planet-dark.png) | ![세션 하나, 복셀 오피스 표현, 라이트 테마](docs/screenshots/session-voxel-light.png) |
+| **흐름** | ![전체 프로젝트, 흐름, 다크](docs/screenshots/flow-dark.png) | ![세션 하나, 흐름, 라이트, 작업 대상 층](docs/screenshots/flow-light.png) |
+| **Planet** | ![세션 하나, Planet, 다크 — 뚜르비용 에이전트](docs/screenshots/planet-dark.png) | ![전체 프로젝트, Planet, 라이트 — 원형 궤도계 섬](docs/screenshots/planet-light.png) |
+| **복셀 오피스** | ![전체 프로젝트, 복셀 오피스, 다크](docs/screenshots/voxel-dark.png) | ![세션 하나, 복셀 오피스, 라이트](docs/screenshots/voxel-light.png) |
+
+| 내 프롬프트가 내 자리에서 날아감 | Planet 아래 작업 대상 층 | 저사양용 2D |
+|---|---|---|
+| ![메인으로 날아가는 프롬프트 빛줄기](docs/screenshots/prompt-beam-dark.png) | ![편집·새 파일·push 장면](docs/screenshots/work-targets-planet-dark.png) | ![흐름 2D](docs/screenshots/flow-2d-dark.png) |
 
 ![흐름 표현 실시간 화면(빨리 감기)](docs/screenshots/flow-live.gif)
 
@@ -45,6 +53,10 @@ _스크린샷은 모두 내장 가짜 데이터(`?mock=1&lang=en`)로 찍었습�
 - **소리**(켜기 전에는 꺼져 있음). 코드로 합성한 배경음악 12곡과, 브라우저에서 실시간 합성하는 효과음.
 - **언어.** 웹 화면과 CLI 모두 기본은 영어이고, 한국어 로케일이면 한국어로 나옵니다. 둘 다 강제로 고를 수 있습니다([자주 묻는 질문](#자주-묻는-질문문제-해결) 참고).
 - **원격 접속**(선택). Cloudflare quick tunnel 과 작은 Cloudflare Worker 로, 재시작해도 바뀌지 않는 토큰 보호 고정 링크를 만듭니다.
+
+## 지원 하네스
+
+지금은 **Claude Code** 만 읽습니다. 다른 에이전트 하네스(Codex CLI·Gemini CLI·OpenClaw·Hermes 등) 어댑터는 커뮤니티 PR 로 받습니다 — 표와 이슈 링크는 [영어 README](README.md#supported-harnesses), 구현 안내는 [docs/ADAPTERS.md](docs/ADAPTERS.md)(영어).
 
 ## 요구 사항
 

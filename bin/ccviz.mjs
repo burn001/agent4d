@@ -28,6 +28,7 @@ import { redact } from "../server/redact.mjs";
 import { wantRemote } from "../server/config.mjs";
 import { ccvizHome } from "../server/home.mjs";
 import { t, remainText, langFlag, stripLangFlag, normCliLang } from "../server/cli-i18n.mjs";
+import { readVersion } from "../server/version.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
@@ -666,6 +667,8 @@ async function cmdStatus() {
   const tunUp = st.cloudflaredPid ? ownedAlive(st.cloudflaredPid, "cloudflared") : false;
   const relayUp = st.relayPid ? ownedAlive(st.relayPid, "node") : false;
   const local = await httpStatus(`http://127.0.0.1:${port}/healthz`, { timeout: 2000 });
+  const sv = local === 200 ? (await httpJson(`http://127.0.0.1:${port}/healthz`, { timeout: 2000 })).json : null; // 버전
+  log(`ccviz v${readVersion()}${sv && sv.version && sv.version !== readVersion() ? ` (server v${sv.version})` : ""}`);
   const tun = st.tunnelUrl ? await httpStatus(`${st.tunnelUrl}/healthz`, { timeout: 6000 }) : null;
   const h = cfg.workerUrl ? await httpJson(`${cfg.workerUrl}/_health`, { timeout: 10000 }) : { text: t("st.notDeployed") };
   const off = t("st.off");
@@ -879,6 +882,7 @@ async function main() {
   const argv = stripLangFlag(raw);
   const opts = parseArgs(argv);
   const cmd = opts._[0];
+  if (cmd === "version" || opts.version || opts.v || argv.includes("-v") || argv.includes("--version")) { log(`ccviz v${readVersion()}`); return; }
   switch (cmd) {
     case "start":
       return cmdStart(opts);

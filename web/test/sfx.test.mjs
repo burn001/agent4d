@@ -64,7 +64,7 @@ test('§16.2 이벤트 → 소리 표 전 행', () => {
 
 test('SOUNDS: 길이 제한(≤400ms, done ≤900ms)', () => {
   for (const [name, s] of Object.entries(SOUNDS)) {
-    assert.ok(s.dur <= (name === 'done' ? 0.9 : 0.4), `${name} ${s.dur}`);
+    assert.ok(s.dur <= (name === 'done' ? 0.9 : name === 'user' ? 1.4 : 0.4), `${name} ${s.dur}`); // user: 빛줄기 비행 뒤 도착음
     assert.ok(REGISTERS[s.register], name);
   }
 });

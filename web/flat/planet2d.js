@@ -17,7 +17,7 @@ const DG_DASH = [0, 0, 0, 0]; // 끊긴 선 무늬(재사용)
 import { toScreen, camScale, planetShape, planetColor, mixColor, retractPt } from './flat-core.mjs';
 import { drawCards, drawRings, drawDeviceFace, drawIslands } from './flat-draw.js';
 import { drawPlanetIslands } from './planet-islands2d.js'; // 섬 = 원형 궤도계
-import { drawMechPlanet, drawSubPlanet } from './planet-deco2d.js'; // 행성 연출
+import { drawMechPlanet, drawSubPlanet, drawTourb2D } from './planet-deco2d.js'; // 행성 연출 · 뚜르비용
 import { stepOrbits, drawOrbits, drawBursts, emitTool, nearestSat, orbitExtent } from './planet-orbits2d.js'; // 궤도계
 import { bodyK } from '../planet-core.mjs';
 import { FLAT } from './flat-core.mjs';
@@ -274,9 +274,11 @@ export class Planet2DView extends FlatView {
     if (shape === 'ico') {
       // 메인 = 기계 행성: 이음선·코어 광·해치·기어 띠·궤도 링·안테나
       drawMechPlanet(this, ctx, v, x, y, R, alpha, now, col, edge, pulse);
+      drawTourb2D(this, ctx, v, x, y, R, alpha, now, true);
     } else if (shape === 'sphere') {
       // 서브에이전트 = 구름 띠·대기·위성
       drawSubPlanet(this, ctx, v, x, y, R, alpha, now, col, edge, 1);
+      drawTourb2D(this, ctx, v, x, y, R, alpha, now, false);
     } else if (shape === 'torus') {
       // 워크플로 도넛(기울여 놓고 z 축으로 돎) = 납작한 고리
       ctx.lineWidth = Math.max(1.5, R * 0.36);

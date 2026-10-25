@@ -187,6 +187,7 @@ function ensureCss() {
 
 const TETHER_CAP = 256;
 
+const TAG_MAX = 8; // 꼬리표 상한
 export class HoloLayer {
   /**
    * @param scene THREE.Scene
@@ -248,6 +249,14 @@ export class HoloLayer {
       scene.add(o);
       this.labels.push({ o, el, b, s, r, key: null, cls: '' });
     }
+    // 작은 패널 꼬리표: 글·라벨이 빠진(LOD) 패널도 위쪽 가장자리에 도구 이름을 작게 — 빈 모니터처럼 보이지 않게
+    this.tags = [];
+    for (let i = 0; i < TAG_MAX; i++) {
+      const el = document.createElement('div'); el.className = 'holo-tag';
+      const o = new CSS2DObject(el); o.center.set(0.5, 1); o.visible = false; scene.add(o);
+      this.tags.push({ o, el, key: null });
+    }
+    this._tagC = [];
     this.overflow = new Map(); // nodeId → CSS2DObject(+N)
     this._kidCache = new Map();
     this._m = new THREE.Matrix4();
@@ -372,6 +381,7 @@ export class HoloLayer {
     const cand = this._cand; cand.length = 0;
     const lodN = this.stats.lod; lodN[0] = lodN[1] = lodN[2] = 0;
     let n = 0, nt = 0, ntc = 0, nr = 0;
+    const tagC = this._tagC; let ntg = 0;
     const tc = this._tc;
     const rw = this._rw || (this._rw = []); // 라벨 배치가 피할 패널 자리(세계 중심·크기)
     const seenOv = this._seenOv; seenOv.clear();
@@ -443,9 +453,16 @@ export class HoloLayer {
           ntc++;
         }
         n++;
+        // 꼬리표 후보: 위쪽 가장자리(패널 높이 10px 이상, 펼쳐진 것)
+        if (epx >= 10 && e.cat !== 'say' && ph.phase !== 'fold' && ph.sy > 0.6 && ph.alpha * fade > 0.3) {
+          const tg = tagC[ntg] || (tagC[ntg] = { e: null, x: 0, y: 0, z: 0, px: 0, fade: 1 });
+          const hy = (He * ph.sy) / 2;
+          tg.e = e; tg.x = p.x + up.x * hy; tg.y = p.y + up.y * hy; tg.z = p.z + up.z * hy; tg.px = epx + (focused ? 1e4 : 0) + (isShot ? 5e3 : 0); tg.fade = ph.alpha * fade;
+          ntg++;
+        }
         if (ph.sy > 0.3 && ph.alpha * fade > 0.15) {
           const q = rw[nr] || (rw[nr] = { x: 0, y: 0, z: 0, w: 0, h: 0, id: null });
-          q.x = p.x; q.y = p.y; q.z = p.z; q.w = We * ph.sx; q.h = He * ph.sy; q.id = nid;
+          q.x = p.x; q.y = p.y; q.z = p.z; q.w = We * ph.sx; q.h = He * ph.sy; q.id = nid; q.e = e; // 집기: 이 패널의 도구 호출
           // 작은 패널의 짧은 라벨(패널 바로 아래, 아래 cand 와 같은 조건)도 장애물에 넣는다
           q.mini = ph.phase !== 'fold' && ph.sy > 0.6 && vip && px < HOLO.LABEL_PX && view.holoMiniLabels !== false;
           nr++;
@@ -539,7 +556,46 @@ export class HoloLayer {
     if (nt) { this.tGeo.attributes.position.needsUpdate = true; this.tGeo.attributes.color.needsUpdate = true; }
     this.tether.visible = nt > 0;
     this._labelPass(cand);
+    this._tagPass(cand, tf, ntg);
     this.stats.drawn = n;
+  }
+
+  /** 꼬리표: 글 칸·라벨을 받지 못한 패널(멀어서 글이 빠진 것)만, 큰 것부터 TAG_MAX 개 */
+  _tagPass(cand, tf, ntg) {
+    const shown = this._tagShown || (this._tagShown = new Set()); shown.clear();
+    for (let i = 0; i < Math.min(cand.length, HOLO.MAX_LABELS); i++) shown.add(cand[i].e);
+    const list = this._tagL || (this._tagL = []); list.length = 0;
+    for (let i = 0; i < ntg; i++) { const c = this._tagC[i]; if (!shown.has(c.e) && c.e._txf !== tf) list.push(c); }
+    if (list.length > TAG_MAX) list.sort((a, b) => b.px - a.px);
+    for (let i = 0; i < this.tags.length; i++) {
+      const T = this.tags[i], c = list[i];
+      if (!c) { if (T.o.visible) T.o.visible = false; continue; }
+      const e = c.e;
+      if (T.key !== e.id) { T.key = e.id; T.el.textContent = e.label.tool || e.tool || ''; T.el.style.setProperty('--hc', e.cat === 'skill' ? 'var(--skill)' : catColor(e.cat, this.tokens.isLight)); }
+      T.o.position.set(c.x, c.y, c.z);
+      const op = String(Math.round(Math.min(1, c.fade) * 20) / 20);
+      if (T.el.style.opacity !== op) T.el.style.opacity = op;
+      if (!T.o.visible) T.o.visible = true;
+    }
+  }
+
+  /** 화면 좌표(px, 캔버스 기준) → 그 자리 패널 {id: 노드, e: 도구 호출 항목} | null. 여럿이면 카메라에 가까운 것 */
+  panelAt(camera, W, H, x, y) {
+    if (!this.enabled) return null;
+    const f = H / (2 * Math.tan((camera.fov * Math.PI) / 360));
+    const v = this._pv2 || (this._pv2 = new THREE.Vector3());
+    let best = null, bd = Infinity;
+    for (let i = 0; i < (this._nr || 0); i++) {
+      const q = this._rw[i];
+      if (!q.e) continue;
+      v.set(q.x, q.y, q.z);
+      const d = Math.max(0.01, v.distanceTo(camera.position));
+      v.project(camera);
+      if (v.z < -1 || v.z > 1) continue;
+      const cx = (v.x * 0.5 + 0.5) * W, cy = (-v.y * 0.5 + 0.5) * H, hw = Math.max(6, (q.w * f) / d / 2), hh = Math.max(5, (q.h * f) / d / 2);
+      if (Math.abs(x - cx) <= hw && Math.abs(y - cy) <= hh && d < bd) { bd = d; best = { id: q.id, e: q.e }; }
+    }
+    return best;
   }
 
   /** 지금 펼친 패널의 화면 사각형 [x0, y0, x1, y1](px) — 노드 라벨이 피한다. 빌보드라 중심 깊이의 축척으로 충분 */
@@ -600,5 +656,7 @@ export class HoloLayer {
     if (this.text) { this.text.dispose(); this.text = null; }
     for (const L of this.labels) { L.o.removeFromParent(); L.el.remove(); }
     this.labels = [];
+    for (const T of this.tags || []) { T.o.removeFromParent(); T.el.remove(); }
+    this.tags = [];
   }
 }

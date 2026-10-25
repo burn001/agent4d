@@ -4,6 +4,7 @@ const plural = (one, many) => (v) => (Number(v.n) === 1 ? one.replace('{n}', v.n
 export default {
   en: {
     'scene.mode.flow': 'Flow',
+    'scene.holo.tipHint': 'Click for details', // 도구 패널 툴팁
     'scene.mode.voxel': 'Voxel Office',
     // 노드 상태(라벨 아랫줄)
     'scene.status.active': 'Working',
@@ -82,6 +83,7 @@ export default {
     'scene.wx.snow': 'Snow',
   },
   ko: {
+    'scene.holo.tipHint': '눌러서 자세히', // 도구 패널 툴팁
     'scene.mode.flow': '흐름',
     'scene.mode.voxel': '복셀 오피스',
     'scene.status.active': '작업 중',

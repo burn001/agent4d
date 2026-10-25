@@ -46,3 +46,7 @@
 .node-label .cats i { font-style: normal; font-size: 9.5px; font-weight: 700; line-height: 1.3; padding: 0 4px; border-radius: 3px;
   color: var(--hc); border: 1px solid color-mix(in srgb, var(--hc) 55%, transparent); background: color-mix(in srgb, var(--hc) 12%, transparent); }
 .node-label.compact .cats { display: none; }
+
+/* 작은 패널 꼬리표(글이 빠진 먼 패널의 위쪽 가장자리) */
+.holo-tag { font: 600 9px/1.2 var(--mono, ui-monospace, monospace); color: var(--hc, var(--accent)); padding: 0 3px 1px; white-space: nowrap; pointer-events: none;
+  text-shadow: 0 0 3px var(--bg), 0 0 6px var(--bg); letter-spacing: .02em; transform: translateY(-1px); }

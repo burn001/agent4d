@@ -8,6 +8,7 @@
 import { MECH, SUB, planetMode, approach, hatchOpen, subType, hash01, orbitPoint } from '../planet-core.mjs';
 import { projOrbit, burst } from './planet-orbits2d.js';
 import { mixColor } from './flat-core.mjs';
+import { Escapement, TOURB_GEO as TG } from '../tourbillon-core.mjs'; // 뚜르비용(위에서 본 동심 링·톱니·진동 휠)
 
 const TAU = Math.PI * 2;
 
@@ -39,19 +40,10 @@ export function drawMechPlanet(view, ctx, v, x, y, R, alpha, now, col, edge, pul
   const c = pd.cur, C = colorsOf(v, col, L);
   const detail = R >= 6, fine = R >= 14;
   const rot = reduced ? 0 : now * (v.node.status === 'active' ? 0.35 : 0.08) + (v.seed || 0);
-  const tilt = -0.36, rx = R * 1.62, ry = R * 0.42;
   // 후광(3D glow 구 1.5배)
   ctx.globalAlpha = alpha * (L ? 0.1 : 0.16) * (1 + 0.06 * pulse);
   ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y, R * 1.5, 0, TAU); ctx.fill();
-  // 궤도 링 뒤 반쪽(몸체 뒤)
-  const ringLw = Math.min(3, Math.max(1, R * 0.07));
-  const dashA = [Math.min(14, Math.max(2, R * 0.16)), Math.min(9, Math.max(1.5, R * 0.1))];
-  if (detail) {
-    ctx.globalAlpha = alpha * 0.75; ctx.strokeStyle = C.metal; ctx.lineWidth = ringLw;
-    ctx.setLineDash(dashA); ctx.lineDashOffset = -pd.spinA * R * 1.6;
-    ctx.beginPath(); ctx.ellipse(x, y, rx, ry, tilt, Math.PI, TAU); ctx.stroke();
-    ctx.setLineDash([]);
-  }
+  // 예전 기운 점선 링·운반체·안테나는 뚜르비용(drawTourb2D)이 대신한다
   // 몸체
   ctx.globalAlpha = alpha; ctx.fillStyle = col; ctx.strokeStyle = edge; ctx.lineWidth = Math.max(1, R * 0.07);
   ctx.beginPath(); ctx.arc(x, y, R, 0, TAU); ctx.fill(); ctx.stroke();
@@ -105,29 +97,6 @@ export function drawMechPlanet(view, ctx, v, x, y, R, alpha, now, col, edge, pul
         if (sa < 0.05) continue;
         ctx.fillRect(x + Math.cos(a) * R * 1.07 - tw / 2, y + R * 0.05 + sa * R * 0.16 - tw * 0.6, tw, tw * 1.2);
       }
-    }
-    // 안테나: 몸체와 함께 돌며 도구 호출 때 솟고 끝이 깜빡인다
-    if (fine) {
-      const m = rot + 0.6;
-      if (Math.cos(m) > -0.3) {
-        const bx = x + Math.sin(m) * R * 0.5, by = y - R * 0.86, len = R * (0.18 + 0.38 * c.ant);
-        ctx.globalAlpha = alpha; ctx.strokeStyle = C.metal; ctx.lineWidth = Math.max(1, R * 0.04);
-        ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + Math.sin(m) * len * 0.3, by - len); ctx.stroke();
-        const blink = c.ant > 0.5 ? 0.55 + 0.45 * Math.sin(now * (2 + 6 * c.ant)) : 0.6;
-        ctx.globalAlpha = alpha * blink; ctx.fillStyle = C.light;
-        ctx.beginPath(); ctx.arc(bx + Math.sin(m) * len * 0.3, by - len, Math.max(1.2, R * 0.07), 0, TAU); ctx.fill();
-      }
-    }
-    // 궤도 링 앞 반쪽 + 운반체
-    ctx.globalAlpha = alpha * 0.9; ctx.strokeStyle = C.metal; ctx.lineWidth = ringLw;
-    ctx.setLineDash(dashA); ctx.lineDashOffset = -pd.spinA * R * 1.6;
-    ctx.beginPath(); ctx.ellipse(x, y, rx, ry, tilt, 0, Math.PI); ctx.stroke();
-    ctx.setLineDash([]);
-    if (c.glow > 0.08) {
-      const a = pd.spinA % TAU, ct = Math.cos(tilt), st = Math.sin(tilt);
-      const ex = Math.cos(a) * rx, ey = Math.sin(a) * ry;
-      ctx.globalAlpha = alpha * Math.min(1, 0.3 + c.glow) * (Math.sin(a) < 0 ? 0.35 : 1); ctx.fillStyle = C.light;
-      ctx.beginPath(); ctx.arc(x + ex * ct - ey * st, y + ex * st + ey * ct, Math.max(1.4, R * 0.08), 0, TAU); ctx.fill();
     }
   }
   ctx.globalAlpha = alpha;
@@ -405,4 +374,73 @@ function cratersOf(id) {
   const out = [];
   for (let i = 0; i < 5; i++) out.push(hash01(id, 'kx' + i) * 2.2 - 1.1, hash01(id, 'ky' + i) * 1.6 - 0.8, 0.08 + 0.12 * hash01(id, 'ks' + i));
   return out;
+}
+
+// ---------------- 뚜르비용(2D) — 위에서 본 동심 링: 바깥 케이지(살 3·블루 스크루)·안쪽 케이지(점선·루비 피벗)·밸런스 휠(금빛 테·살·타이밍 나사)·
+// 이스케이프 휠(톱니, 째깍)·앵커. 서브는 단일 케이지 링 + 살 3(째깍). 박자는 tourbillon-core.mjs Escapement(3D 와 같음).
+const TB2 = {
+  dark: { steel: '#a9b3c1', gold: '#c9a65c', ruby: '#c0183c', blue: '#3f6cff' },
+  light: { steel: '#5f6a7a', gold: '#8a6a28', ruby: '#9e0f2c', blue: '#2346c4' },
+};
+function escOf(v, now, reduced) {
+  const e = v._esc || (v._esc = new Escapement(hash01(v.id, 'tourb')));
+  const dt = Math.min(0.25, Math.max(0, now - (v._escT ?? now))); v._escT = now;
+  e.step(dt, planetMode(v.node.status, v.icons ? v.icons.size : 0, !!v.scopeRecent), { reduced });
+  return e;
+}
+/** main = 다축(메인), 아니면 단일 케이지(서브). R = 몸체 화면 반지름 */
+export function drawTourb2D(view, ctx, v, x, y, R, alpha, now, main) {
+  if (R < (main ? 6 : 10)) return;
+  const L = !!view.tokens.isLight, P = L ? TB2.light : TB2.dark, e = escOf(v, now, !!view.reduced);
+  const fine = R >= (main ? 14 : 18);
+  const lw = Math.max(0.8, R * (main ? 0.035 : 0.028));
+  const dot = (px, py, r, c, a) => { ctx.globalAlpha = alpha * a; ctx.fillStyle = c; ctx.beginPath(); ctx.arc(px, py, r, 0, TAU); ctx.fill(); };
+  ctx.save();
+  if (!main) {
+    const Rc = R * TG.SUB_R;
+    ctx.globalAlpha = alpha * 0.7; ctx.strokeStyle = P.steel; ctx.lineWidth = lw;
+    ctx.beginPath(); ctx.arc(x, y, Rc, 0, TAU); ctx.stroke();
+    ctx.beginPath();
+    for (let i = 0; i < TG.SUB_ARMS; i++) { const a = e.cage + (i * TAU) / TG.SUB_ARMS; ctx.moveTo(x + Math.cos(a) * R * 1.04, y + Math.sin(a) * R * 1.04); ctx.lineTo(x + Math.cos(a) * Rc, y + Math.sin(a) * Rc); }
+    ctx.stroke();
+    if (fine) { const a = e.cage; dot(x + Math.cos(a) * Rc, y + Math.sin(a) * Rc, Math.max(1.2, R * 0.05), P.ruby, 0.95); for (let i = 1; i < TG.SUB_ARMS; i++) { const b = e.cage + (i * TAU) / TG.SUB_ARMS; dot(x + Math.cos(b) * Rc, y + Math.sin(b) * Rc, Math.max(1, R * 0.035), P.blue, 0.9); } }
+    ctx.restore(); ctx.globalAlpha = alpha; return;
+  }
+  const Ro = R * TG.OUTER_R, Ri = R * TG.INNER_R, Rb = R * TG.BAL_R;
+  // 바깥 케이지: 링 + 살 3(케이지 각으로 째깍) + 살 끝 블루 스크루
+  ctx.globalAlpha = alpha * 0.75; ctx.strokeStyle = P.steel; ctx.lineWidth = lw;
+  ctx.beginPath(); ctx.arc(x, y, Ro, 0, TAU); ctx.stroke();
+  ctx.beginPath();
+  for (let i = 0; i < TG.OUTER_ARMS; i++) { const a = e.cage + (i * TAU) / TG.OUTER_ARMS; ctx.moveTo(x + Math.cos(a) * Rb * 1.05, y + Math.sin(a) * Rb * 1.05); ctx.lineTo(x + Math.cos(a) * Ro, y + Math.sin(a) * Ro); }
+  ctx.stroke();
+  // 안쪽 케이지: 점선 링이 반대로 돌고 피벗 루비 둘
+  if (fine) {
+    ctx.globalAlpha = alpha * 0.6; ctx.setLineDash([Math.max(2, R * 0.14), Math.max(1.5, R * 0.07)]); ctx.lineDashOffset = -e.cage2 * Ri;
+    ctx.beginPath(); ctx.arc(x, y, Ri, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+    for (const k of [0, Math.PI]) dot(x + Math.cos(e.cage2 + k) * Ri, y + Math.sin(e.cage2 + k) * Ri, Math.max(1.2, R * 0.045), P.ruby, 0.95);
+  }
+  // 밸런스 휠: 금빛 테 + 살 3 토막 + 타이밍 나사(진동)
+  ctx.globalAlpha = alpha * 0.9; ctx.strokeStyle = P.gold; ctx.lineWidth = lw * 1.3;
+  ctx.beginPath(); ctx.arc(x, y, Rb, 0, TAU); ctx.stroke();
+  if (fine) {
+    const a0 = e.cage + e.bal;
+    ctx.beginPath();
+    for (let i = 0; i < TG.BAL_SPOKES; i++) { const a = a0 + (i * TAU) / TG.BAL_SPOKES; ctx.moveTo(x + Math.cos(a) * R * 1.0, y + Math.sin(a) * R * 1.0); ctx.lineTo(x + Math.cos(a) * Rb, y + Math.sin(a) * Rb); }
+    ctx.stroke();
+    for (let i = 0; i < TG.BAL_SCREWS; i++) { const a = a0 + ((i + 0.5) * TAU) / TG.BAL_SCREWS; dot(x + Math.cos(a) * (Rb + R * 0.045), y + Math.sin(a) * (Rb + R * 0.045), Math.max(0.9, R * 0.03), P.gold, 0.95); }
+    for (let i = 0; i < TG.OUTER_ARMS; i++) { const a = e.cage + (i * TAU) / TG.OUTER_ARMS; dot(x + Math.cos(a) * Ro, y + Math.sin(a) * Ro, Math.max(1, R * 0.035), P.blue, 0.95); }
+    // 이스케이프 휠(케이지에 붙어 감): 톱니가 박마다 째깍 + 앵커
+    const ea = e.cage + Math.PI / TG.OUTER_ARMS, ex = x + Math.cos(ea) * Ro, ey = y + Math.sin(ea) * Ro, er = R * TG.ESC_R * 1.1;
+    ctx.globalAlpha = alpha * 0.9; ctx.strokeStyle = P.gold; ctx.lineWidth = Math.max(0.8, lw * 0.9);
+    ctx.beginPath(); ctx.arc(ex, ey, er, 0, TAU);
+    for (let i = 0; i < TG.ESC_TEETH; i++) { const a = -e.esc + (i * TAU) / TG.ESC_TEETH; ctx.moveTo(ex + Math.cos(a) * er, ey + Math.sin(a) * er); ctx.lineTo(ex + Math.cos(a + 0.18) * er * 1.28, ey + Math.sin(a + 0.18) * er * 1.28); }
+    ctx.stroke();
+    dot(ex, ey, Math.max(1, R * 0.04), P.ruby, 0.95);
+    const pa = ea + e.pallet * 1.6, px = ex + Math.cos(ea) * er * 1.9, py = ey + Math.sin(ea) * er * 1.9; // 앵커 피벗(바깥쪽), 팔이 바퀴를 감쌈
+    ctx.strokeStyle = P.steel; ctx.beginPath();
+    ctx.moveTo(px + Math.cos(pa + 2.2) * er * 1.2, py + Math.sin(pa + 2.2) * er * 1.2); ctx.lineTo(px, py); ctx.lineTo(px + Math.cos(pa - 2.2) * er * 1.2, py + Math.sin(pa - 2.2) * er * 1.2);
+    ctx.stroke();
+    dot(px, py, Math.max(0.9, R * 0.035), P.ruby, 0.95);
+  }
+  ctx.restore(); ctx.globalAlpha = alpha;
 }

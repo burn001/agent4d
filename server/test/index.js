@@ -26,3 +26,4 @@ import './interactions.test.mjs';
 import './succession.test.mjs';
 import './artifacts.test.mjs';
 import './plans.test.mjs';
+import './version.test.mjs';

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // cc-agent-viz 수집·스트리밍 서버. Node 내장 모듈만 사용. 127.0.0.1 전용.
+import { readVersion } from './version.mjs';
 import http from 'node:http';
 import fs from 'node:fs';
 import { pipeline } from 'node:stream';
@@ -21,7 +22,7 @@ import { ArtifactStore, setServiceScripts, isExternalReq, externalEv, externalSn
 import { ArchiveSource, isArchiveId, archiveKey, resolveArchiveDir } from './archive.mjs';
 import { t } from './cli-i18n.mjs'; // 콘솔 문구(영어 기본, 한국어 로케일이면 한국어)
 
-export const VERSION = '0.1.0';
+export const VERSION = readVersion(); // package.json 이 근거
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WEB_ROOT = path.resolve(HERE, '..', 'web');
 

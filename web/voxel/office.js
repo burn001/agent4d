@@ -3,6 +3,7 @@
 // 매 프레임 다시 채운다 → 전체 draw call 은 한 자릿수(캐릭터 수와 무관).
 import * as THREE from 'three';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { MissileLayer } from '../missile3d.js'; // 사용자 입력 빛줄기
 import { computeOffice, stationFor, CAT_FACILITY, hashStr } from './layout.js';
 import { readTokens, palette } from './palette.js';
 import { BoxBatch, UNIT_BOX, buildRoomStatic, buildCorridor, drawFacilities, drawDeskEmitter, drawMachine, ring, roomFrame, endXf } from './props.js';
@@ -384,9 +385,16 @@ export class VoxelView {
     if (!this.chars.has(id)) return;
     this._pushFx({ type: 'ring', id, dur: 0.75, color: toColor(color || this.kindColor(this.nodes.get(id)?.kind)), r0: 0.4, r1: 1.2 * scale });
   }
+  /** 사용자 입력: 카메라 앞에서 쏜 빛줄기가 그 직원(머리 높이)으로 날아가 흡수 → 바닥 고리 */
   beam(id) {
     if (!this.chars.has(id)) return;
-    this._pushFx({ type: 'beam', id, dur: 1.3, color: toColor(this.tokens.isLight ? this.kindColor('main') : new THREE.Color(1, 1, 1)) });
+    const L = !!this.tokens.isLight;
+    if (!this.missiles) this.missiles = new MissileLayer(this.scene);
+    const col = new THREE.Color(this.kindColor('main'));
+    this.missiles.launch(this.camera, (out) => { const ch = this.chars.get(id); if (!ch || !ch.pos) return false; out.set(ch.pos.x, 1.25, ch.pos.z); return true; }, {
+      color: col, light: L, reduced: !!this.reduced, now: performance.now() / 1000, width: 0.8,
+      onArrive: () => this._pushFx({ type: 'ring', id, dur: 0.9, color: toColor(L ? col : new THREE.Color(1, 1, 1)), r0: 0.4, r1: 1.4 }),
+    });
   }
   // 여러 live 세션
   setSessions({ book } = {}) { this.sess.setBook(book || null); }
@@ -433,6 +441,7 @@ export class VoxelView {
   dispose() {
     if (this._disposed) return;
     this._disposed = true;
+    if (this.missiles) { this.missiles.dispose(); this.missiles = null; }
     this.renderer.setAnimationLoop(null);
     if (this._ro) this._ro.disconnect();
     this.bubbles.dispose();
@@ -1056,6 +1065,7 @@ export class VoxelView {
       this.effects.length = w;
     }
     L.end(); G.end();
+    if (this.missiles) this.missiles.update(performance.now() / 1000, this.camera);
   }
 
   _deskState(ch, now) {

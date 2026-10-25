@@ -251,7 +251,7 @@ export class RateLimiter {
 // 모든 소리: attack ≥ 5ms, release ≥ 30ms, 길이 ≤ 400ms (done ≤ 900ms).
 export const SOUNDS = {
   error: { dur: 0.36, register: 'low', desc: '낮은 삼각파 두 음 하강(반음), lowpass 900Hz' },
-  user: { dur: 0.4, register: 'high', desc: '부드러운 벨 두 음(근음+5도)' },
+  user: { dur: 1.36, register: 'high', desc: '은은한 슝(대역 잡음 상승) → 도착 때 벨 두 음(근음+5도) — §96 빛줄기' },
   spawn: { dur: 0.34, register: 'high', desc: '사인+삼각 2음 상행 아르페지오' },
   'spawn-soft': { dur: 0.34, register: 'high', octave: 1, desc: 'spawn 한 옥타브 위, 게인 0.6' },
   workflow: { dur: 0.38, register: 'mid', desc: '3음 아르페지오' },
@@ -381,11 +381,12 @@ export function synth(ctx, dest, name, t0, { notes = scaleNotes(null), pitchInde
       osc(ctx, 'triangle', semis(n0, -1), t0 + 0.15, 0.2, lp, 0.5 * G);
       return t0 + 0.37;
     }
-    case 'user': {
+    case 'user': { // 빛줄기와 같이: 은은한 '슝'(올라가는 대역 잡음) → 도착 때 '톡'(예전 두 음 벨을 짧게)
+      noise(ctx, t0, 0.95, dest, 0.045 * G, { type: 'bandpass', f: 520, fEnd: 2400, q: 1.3, attack: 0.4 });
       const r = noteFor(notes, 'high', 0);
-      fm(ctx, mtof(r), t0, 0.3, dest, 0.22 * G, { ratio: 2, index: 1.2, idxDecay: 0.15 });
-      fm(ctx, semis(r, 7), t0 + 0.09, 0.3, dest, 0.18 * G, { ratio: 2, index: 1.0, idxDecay: 0.15 });
-      return t0 + 0.4;
+      fm(ctx, mtof(r), t0 + 1.0, 0.26, dest, 0.2 * G, { ratio: 2, index: 1.2, idxDecay: 0.15 });
+      fm(ctx, semis(r, 7), t0 + 1.08, 0.26, dest, 0.15 * G, { ratio: 2, index: 1.0, idxDecay: 0.15 });
+      return t0 + 1.36;
     }
     case 'spawn':
     case 'spawn-soft': {

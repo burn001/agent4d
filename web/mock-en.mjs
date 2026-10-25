@@ -119,13 +119,20 @@ export function en(s) {
 // 이름표·경로가 아닌 식별자 키는 건드리지 않는다
 const SKIP = new Set(['id', 'nodeId', 'parentId', 'toolUseId', 'sessionId', 'projectId', 'rootSessionId', 'type', 'kind', 'cat', 'tool', 'status', 'ts', 'cwd', 'path', 'file', 'p', 'd', 'marks']);
 
+// 영어 화면(README 스크린샷·데모)의 mock 프로젝트 이름은 흔한 영어 일반명으로(표시 문자열만 — id·경로 키는 그대로)
+const NAMES = [['scratchpad\ccviz-probe', 'scratch\probe'], ['scratchpad/ccviz-probe', 'scratch/probe'], ['ccviz-probe', 'probe'], ['survey-dashboard', 'docs-site'],
+  ['team-skills', 'design-system'], ['stats-cli', 'data-cli'], ['md2report', 'report-gen'], ['demo_api', 'api-server'], ['writing-style', 'style-guide']];
+const hasName = (v) => v.includes('probe') || v.includes('survey-') || v.includes('team-skills') || v.includes('stats-cli') || v.includes('md2report') || v.includes('demo_api') || v.includes('writing-style');
+export function enName(v) { if (typeof v !== 'string' || !hasName(v)) return v; let o = v; for (const [a, b] of NAMES) if (o.includes(a)) o = o.split(a).join(b); return o; }
+const tr1 = (v) => enName(HANGUL.test(v) ? en(v) : v);
+
 function walk(x, depth) {
   if (!x || typeof x !== 'object' || depth > 8) return;
-  if (Array.isArray(x)) { for (let i = 0; i < x.length; i++) { if (typeof x[i] === 'string') x[i] = en(x[i]); else walk(x[i], depth + 1); } return; }
+  if (Array.isArray(x)) { for (let i = 0; i < x.length; i++) { if (typeof x[i] === 'string') x[i] = tr1(x[i]); else walk(x[i], depth + 1); } return; }
   for (const k of Object.keys(x)) {
     if (SKIP.has(k)) continue;
     const v = x[k];
-    if (typeof v === 'string') { if (HANGUL.test(v)) x[k] = en(v); } else if (v && typeof v === 'object') walk(v, depth + 1);
+    if (typeof v === 'string') { const w = tr1(v); if (w !== v) x[k] = w; } else if (v && typeof v === 'object') walk(v, depth + 1);
   }
 }
 

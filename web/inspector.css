@@ -124,3 +124,11 @@
   .ins.swap .ins-body, .ins.swap .ins-head, .ins.swap .ins-state { animation: none; }
   .ins-gauge i { transition: none; }
 }
+
+/* 도구 패널 툴팁(3D·2D 공용) · 패널에서 연 도구 호출 줄 강조 */
+.holo-tip { position: fixed; z-index: 40; pointer-events: none; max-width: 340px; padding: 4px 8px; border-radius: 6px; font: 500 12px/1.35 var(--ui-font, system-ui, sans-serif);
+  background: color-mix(in srgb, var(--bg) 92%, transparent); color: var(--text); border: 1px solid color-mix(in srgb, var(--hc, var(--accent)) 55%, transparent);
+  box-shadow: 0 4px 14px rgba(0,0,0,.25); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.holo-tip b { color: var(--hc, var(--accent)); margin-right: 4px; }
+.holo-tip small { display: block; opacity: .6; font-size: 10px; margin-top: 1px; }
+.ins-tl li.hl { background: color-mix(in srgb, var(--accent) 16%, transparent); border-radius: 4px; outline: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); }

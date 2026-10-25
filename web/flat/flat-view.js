@@ -3,6 +3,7 @@
 // 배치(layout.js·overview/layout.mjs)·완료 퇴장·배치 장치 접기·라벨 규칙은 3D 와 같은 순수 모듈을 쓴다.
 // 그리기는 하위 클래스(_drawScene)가 맡는다 — 1단계는 Flow 2D(flow2d.js) 하나, 2단계에서 Planet·복셀 2D 가 같은 바탕을 쓴다.
 // 렌더 루프: 바뀐 것이 있을 때만 그림, 상한 30fps(배경 움직임만 있으면 15fps), 쉬면 4Hz 논리 갱신만, 숨긴 탭은 멈춤, devicePixelRatio ≤ 1.5.
+import { MISSILE_REDUCED } from '../missile-core.mjs';
 import { computeLayout, dockedPos, RADIUS, KIND_LABEL } from '../layout.js';
 import { computeOverview, isRecentRoot } from '../overview/layout.mjs';
 import { packView, packStale } from '../overview/pack-view.js';
@@ -538,7 +539,15 @@ export class FlatView {
   _fx(e) { if (this.effects.length >= MAX_FX) this.effects.shift(); e.t0 = performance.now() / 1000; this.effects.push(e); this.invalidate(); }
   ripple(id, color) { const v = this.vis.get(id); if (v) this._fx({ id, color: color || this.kindColor(v.kind), dur: 0.9, k0: 1.15, k1: 2.45, a: 0.7 }); }
   wave(id, color, scale = 1) { const v = this.vis.get(id); if (v) this._fx({ id, color: color || this.kindColor(v.kind), dur: 0.75, k0: scale, k1: scale * 3.4, a: 0.8 }); }
-  beam(id) { this.ripple(id, this.tokens.isLight ? this.kindColor('main') : '#ffffff'); }
+  /** 사용자 입력: 화면 하단 가운데에서 노드로 휘어 날아가는 2D 빛줄기 → 도착 때 고리 */
+  beam(id) {
+    const v = this.vis.get(id); if (!v) return;
+    const L = !!this.tokens.isLight, red = !!this.reduced;
+    this._side2 = -(this._side2 || 1);
+    const fly = red ? MISSILE_REDUCED.dur : 1.1;
+    this._fx({ id, missile: true, side: this._side2, color: this.kindColor('main'), light: L, dur: fly + 0.25, fly, reduced: red, a: 1 });
+    setTimeout(() => { if (this.vis.get(id)) this.ripple(id, L ? this.kindColor('main') : '#ffffff'); }, fly * 1000);
+  }
   orb() {}
 
   // ---------------- 배치·퇴장(scene.js 와 같은 규칙) ----------------
@@ -766,6 +775,14 @@ export class FlatView {
   }
   setHover(id) { if (this.hoverId === id) return; this.hoverId = id; this.lastLabelPass = 0; this.invalidate(); }
   /** 화면 px → 노드 id(칩 안, 작으면 9px 까지 넓힘). 숨김·희미·퇴장 중은 고르지 않음 */
+  /** 도구 카드 집기 → {id, e} | null(나중에 그린 카드가 위) */
+  pickPanel(clientX, clientY) {
+    const r = this.canvas.getBoundingClientRect(), x = clientX - r.left, y = clientY - r.top;
+    const hs = this._cardHits || [];
+    for (let i = hs.length - 1; i >= 0; i--) { const h = hs[i]; if (x >= h.x0 - 2 && x <= h.x1 + 2 && y >= h.y0 - 2 && y <= h.y1 + 2) { const v = this.vis.get(h.id); if (v && !this._scopeOff(v) && !v.projOut) return { id: h.id, e: h.e }; } }
+    return null;
+  }
+
   pick(clientX, clientY) {
     const r = this.canvas.getBoundingClientRect();
     const px = clientX - r.left, py = clientY - r.top;

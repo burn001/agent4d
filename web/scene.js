@@ -1,6 +1,7 @@
 // three.js 장면: 노드·연결선·도구 아이콘·효과
 import * as THREE from 'three';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { MissileLayer } from './missile3d.js'; // 사용자 입력 빛줄기
 import { computeLayout, dockedPos, RADIUS, KIND_LABEL } from './layout.js';
 import { computeOverview, isRecentRoot } from './overview/layout.mjs';
 import { packView, packStale, camElev } from './overview/pack-view.js';
@@ -275,6 +276,7 @@ export class SceneView {
   dispose() {
     if (this._disposed) return;
     this._disposed = true;
+    if (this.missiles) { this.missiles.dispose(); this.missiles = null; }
     this.renderer.setAnimationLoop(null);
     if (this._ro) this._ro.disconnect();
     if (this._lro) this._lro.disconnect();
@@ -767,20 +769,16 @@ export class SceneView {
     });
   }
 
+  /** 사용자 입력: 시청자(카메라) 앞 화면 하단 가운데에서 쏜 빛줄기가 유도 곡선으로 날아가 노드에 흡수 → 고리·점등 */
   beam(id) {
     const v = this.vis.get(id); if (!v) return;
-    const mat = this._fxMat(this.tokens.isLight ? this.kindColor('main') : 0xffffff, 0.75, { additive: !this.tokens.isLight });
-    const m = new THREE.Mesh(nodeGeo().beam, mat);
-    const H = 34;
-    this._fx(m, 1.3, (k) => {
-      const p = v.group.position;
-      const head = Math.min(1, k / 0.35); // 위에서 내려오는 머리
-      const len = H * head;
-      m.position.set(p.x, p.y + v.r + H - len, p.z);
-      m.scale.set(1 + (1 - k) * 0.6, Math.max(0.01, len), 1 + (1 - k) * 0.6);
-      mat.opacity = 0.75 * (k < 0.35 ? 1 : 1 - (k - 0.35) / 0.65);
+    const L = !!this.tokens.isLight;
+    if (!this.missiles) this.missiles = new MissileLayer(this.scene);
+    const col = new THREE.Color(this.kindColor('main'));
+    this.missiles.launch(this.camera, (out) => { const w = this.vis.get(id); if (!w || w.gone) return false; out.copy(w.group.position); return true; }, {
+      color: col, light: L, reduced: !!this.reduced || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches), now: performance.now() / 1000,
+      onArrive: () => { this.ripple(id, L ? col : new THREE.Color(1, 1, 1)); this.wave(id, col, 0.7); },
     });
-    setTimeout(() => this.ripple(id, this.tokens.isLight ? this.kindColor('main') : new THREE.Color(1, 1, 1)), 420);
   }
 
   /** from(노드 id 또는 Vector3) → to(노드 id 또는 Vector3) 로 빛 구 */
@@ -1062,6 +1060,16 @@ export class SceneView {
     return null;
   }
 
+  /** 홀로그램 도구 패널 집기 → {id, e}(e = 도구 호출 항목: id=toolUseId·label{tool,target}·cat) | null */
+  pickPanel(clientX, clientY) {
+    if (!this.holo || !this.holo.panelAt) return null;
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const hit = this.holo.panelAt(this.camera, r.width, r.height, clientX - r.left, clientY - r.top);
+    if (!hit) return null;
+    const v = this.vis.get(hit.id);
+    return v && !this._scopeOff(v) && !v.projOut ? hit : null;
+  }
+
   _resize() {
     const w = this.container.clientWidth || 1, h = this.container.clientHeight || 1;
     this.renderer.setSize(w, h);
@@ -1340,6 +1348,7 @@ export class SceneView {
       this.effects = keep;
     }
 
+    if (this.missiles) this.missiles.update(performance.now() / 1000, this.camera);
     if (this.onFrame) this.onFrame(dt, now);
     this._nearFade();
     if (this.holo) { this.camera.updateMatrixWorld(); this.holo.update(now, this.camera, this.container.clientHeight || 1); }

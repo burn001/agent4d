@@ -1,16 +1,24 @@
 # cc-agent-viz
 
+[![version](https://img.shields.io/github/v/release/burn001/cc-agent-viz?label=version)](CHANGELOG.md) [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 **English** · [한국어](README.ko.md)
 
 See what your Claude Code agents are doing, live, in 3D. cc-agent-viz is a local, read-only viewer that turns the main agent, its subagents, workflow agents, nested `claude -p` runs, background shells and monitors into one live tree in your browser. The command-line tool is called `ccviz`.
 
 > **Unofficial project.** cc-agent-viz is an independent tool. Anthropic did not make it, does not endorse it and does not support it. "Claude" and "Claude Code" are trademarks of Anthropic, PBC, used here only to say what this tool works with.
 
-![All projects in the Flow view (mock data)](docs/screenshots/overview-flow-dark.png)
+![All projects in the Flow view, dark theme](docs/screenshots/flow-dark.png)
 
-| One session, Flow, light theme | All projects, Planet | One session, Voxel Office |
+| | Dark | Light |
 |---|---|---|
-| ![One session in the Flow view, light theme](docs/screenshots/session-flow-light.png) | ![All projects in the Planet view](docs/screenshots/overview-planet-dark.png) | ![One session in the Voxel Office view, light theme](docs/screenshots/session-voxel-light.png) |
+| **Flow** | ![All projects, Flow, dark](docs/screenshots/flow-dark.png) | ![One session, Flow, light, with the work-target layer](docs/screenshots/flow-light.png) |
+| **Planet** | ![One session, Planet, dark — agents as watch tourbillons](docs/screenshots/planet-dark.png) | ![All projects, Planet, light — round orbital islands](docs/screenshots/planet-light.png) |
+| **Voxel Office** | ![All projects, Voxel Office, dark](docs/screenshots/voxel-dark.png) | ![One session, Voxel Office, light](docs/screenshots/voxel-light.png) |
+
+| Your prompt flies in from your seat | Work targets under the Planet view | 2D mode for slow machines |
+|---|---|---|
+| ![A prompt beam homing in on the main agent](docs/screenshots/prompt-beam-dark.png) | ![Edits, a new file and a push on the work-target floor](docs/screenshots/work-targets-planet-dark.png) | ![Flow view in 2D](docs/screenshots/flow-2d-dark.png) |
 
 ![Flow view, live (sped up)](docs/screenshots/flow-live.gif)
 
@@ -19,6 +27,7 @@ _All screenshots use the built-in mock data (`?mock=1&lang=en`). Project names a
 ## Contents
 
 - [Features](#features)
+- [Supported harnesses](#supported-harnesses)
 - [Requirements](#requirements)
 - [Install](#install)
 - [Run](#run)
@@ -45,6 +54,18 @@ The server tails the transcripts that Claude Code already writes under `~/.claud
 - **Sound** (off until you turn it on). 12 background tracks synthesized from code, plus sound effects synthesized live in the browser.
 - **Languages.** The web UI and the CLI are in English by default and switch to Korean on a Korean locale. Both can be forced (see [FAQ](#faq-and-troubleshooting)).
 - **Remote access** (optional). A Cloudflare quick tunnel plus a small Cloudflare Worker give you a stable, token-protected link that survives restarts.
+
+## Supported harnesses
+
+cc-agent-viz reads **Claude Code** today. Adapters for other agent harnesses are welcome as community pull requests — see [docs/ADAPTERS.md](docs/ADAPTERS.md) for how the reader works and what an adapter has to provide.
+
+| Harness | Status | Session files (to verify) | Tracking issue |
+|---|---|---|---|
+| Claude Code | ✅ Supported | `~/.claude/projects/<project>/<session>.jsonl` | — |
+| Codex CLI | Help wanted — PRs welcome | `~/.codex/sessions/**/*.jsonl` (unverified) | [#1](https://github.com/burn001/cc-agent-viz/issues/1) |
+| Gemini CLI | Help wanted — PRs welcome | `~/.gemini/tmp/<project-hash>/` chats and checkpoints (unverified) | [#2](https://github.com/burn001/cc-agent-viz/issues/2) |
+| OpenClaw | Help wanted — PRs welcome | session JSONL files (unverified) | [#3](https://github.com/burn001/cc-agent-viz/issues/3) |
+| Hermes | Help wanted — PRs welcome | unknown | [#4](https://github.com/burn001/cc-agent-viz/issues/4) |
 
 ## Requirements
 
@@ -199,7 +220,10 @@ Yes. It only reads files that Claude Code writes, never modifies them, and does 
 
 ```bash
 npm test            # node --test for server/ and web/
+ccviz --version     # also shown by `ccviz status` and at the bottom of the ⚙ menu
 ```
+
+Releases follow [Semantic Versioning](https://semver.org/) (0.x until 1.0); see [CHANGELOG.md](CHANGELOG.md). Contributions: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Most code comments are in Korean. Bug reports and pull requests are welcome; please include your OS, Node version and browser, and never paste a link that contains `?t=`.
 

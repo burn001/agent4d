@@ -92,7 +92,12 @@ export function mountSettings() {
   const hint = document.createElement('p');
   hint.className = 'sm-hint';
   hint.textContent = t('core.settings.hint');
-  menu.append(...rows, hint);
+  // 버전: 메뉴 맨 아래 작게(서버 /healthz 의 version — package.json)
+  const ver = document.createElement('p');
+  ver.className = 'sm-ver';
+  ver.hidden = true;
+  fetch('./healthz', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((j) => { if (j && j.version) { ver.textContent = 'v' + j.version; ver.hidden = false; } }).catch(() => {});
+  menu.append(...rows, hint, ver);
   document.body.appendChild(menu);
   const more = top.querySelector('.tb-more');
   if (more && !more.querySelector('button, input, select')) more.hidden = true;
