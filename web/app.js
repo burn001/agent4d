@@ -903,7 +903,7 @@ function connect() {
         const multi = params.get('multi');
         const isl = Number(params.get('islands')) || 0; // ?islands=N: 살아 있는 섬 N 개(화면 비율 배치 확인용)
         const m = (ovMock = createOverviewMock(isl ? { projects: isl, mainsPerProject: [2, 1, 1, 2, 1, 1].slice(0, isl), seed: 2026 } : { projects: 4, mainsPerProject: multi ? [3, 2, 0, 5] : [2, 1, 0, 1], seed: 2026 }));
-        const mc = new MockCtx({ roots: true }), mp = new MockPanels();
+        const mc = new MockCtx({ ...mockCtxOpts(), roots: true }), mp = new MockPanels();
         onSnapshotAll(mockEn(mp.seed(mc.seed(m.snapshot()))));
         setConn('ok', tr('app.mock.fakeAll'));
         m.start((ev) => { if (ovMock !== m) return; onEvent(mockEn(mp.apply(ev))); for (const x of mc.after(ev, getNode)) onEvent(x); }, (d) => { if (ovMock === m) onProjects(mockEn(d)); });

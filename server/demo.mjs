@@ -32,7 +32,7 @@ export const DEMO_SESSION = '00000000-0000-4000-8000-00000000demo'.slice(0, 36);
 const TOOLS = [
   ['Bash', { description: '테스트 실행', command: 'npm test' }], ['Read', { file_path: 'src/app.js' }], ['Write', { file_path: 'notes.md', content: '# 메모\n- 할 일\n' }],
   ['Edit', { file_path: 'server.mjs', old_string: 'a', new_string: 'a\nb\nc' }], ['Grep', { pattern: 'TODO', path: 'src' }], ['Agent', { description: '조사 위임', subagent_type: 'Explore' }],
-  ['Workflow', { name: 'build' }], ['Skill', { skill: 'writing-style' }], ['WebFetch', { url: 'https://example.com/a' }],
+  ['Workflow', { name: 'build' }], ['Skill', { skill: 'style-guide' }], ['WebFetch', { url: 'https://example.com/a' }],
   ['Monitor', { description: '로그 감시' }], ['mcp__demo__lookup', {}], ['Artifact', {}], ['PushNotification', {}],
   ['StructuredOutput', {}],
 ];

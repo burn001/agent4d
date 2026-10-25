@@ -4,7 +4,7 @@
 //   m.start(onEvent, onProjects); m.stop();
 // 기존 MockGenerator 를 루트마다 하나씩 돌리고 id 앞붙이로 겹침을 막는다. projects 이벤트·node-remove 도 합성한다.
 // 프로젝트: 활성 3개(+메인 여러 개) · recent 루트 1개(희미) · 루트 없는 recent 프로젝트 1개 · 독립 claude -p 만 있는 임시 프로젝트 1개.
-// demo_api(demo-beta) 메인은 기동기·배치 예시(서브에이전트 → '기동기 · relaunch.sh'(이어받음) → 회차 반복, 재무장 Monitor)를 돌리고,
+// api-server(demo-beta) 메인은 기동기·배치 예시(서브에이전트 → '기동기 · relaunch.sh'(이어받음) → 회차 반복, 재무장 Monitor)를 돌리고,
 // 같은 프로젝트에 추정 소속(likelyMain)만 있는 독립 claude -p 하나가 그 메인 사무실 대기석에 붙는다.
 // DOM·three 에 의존하지 않는다.
 import { MockGenerator } from '../mock.js';
@@ -12,13 +12,13 @@ import { ConflictTracker, conflictEvent, fileKey, baseOf, sessionMsgEvent } from
 
 const PROJ = [
   { projectId: 'demo-alpha', name: 'acme-web', path: 'D:\\work\\acme-web', titles: ['Claude Code 세션 시각화 3차', '분기 보고서 표 검토', '보고서 초안 정리'] },
-  { projectId: 'demo-beta', name: 'demo_api', path: 'D:\\DEV_REPOS\\demo_api', titles: ['API 평가 모듈 보강', '법령 파서 수정'] },
-  { projectId: 'demo-gamma', name: 'team-skills', path: 'D:\\dev_repos\\team-skills', titles: ['스킬 카탈로그 갱신'] },
-  { projectId: 'demo-delta', name: 'survey-dashboard', path: 'D:\\dev_repos\\survey-dashboard', titles: ['설문 응답 집계'] },
-  { projectId: 'demo-epsilon', name: 'stats-cli', path: 'D:\\dev_repos\\stats-cli', titles: ['통계표 ID 정리'] },
+  { projectId: 'demo-beta', name: 'api-server', path: 'D:\\code\\api-server', titles: ['API 평가 모듈 보강', '검색 파서 수정'] },
+  { projectId: 'demo-gamma', name: 'design-system', path: 'D:\\code\\design-system', titles: ['스킬 카탈로그 갱신'] },
+  { projectId: 'demo-delta', name: 'docs-site', path: 'D:\\code\\docs-site', titles: ['피드백 집계'] },
+  { projectId: 'demo-epsilon', name: 'data-cli', path: 'D:\\code\\data-cli', titles: ['지표 ID 정리'] },
 ];
-const TMP = { projectId: 'demo-tmp', name: '(임시) scratchpad\\ccviz-probe', path: 'C:\\Users\\dev\\AppData\\Local\\Temp\\claude\\…\\scratchpad\\ccviz-probe', temp: true };
-const RECENT_ONLY = { projectId: 'demo-zeta', name: 'md2report', path: 'D:\\dev_repos\\md2report' };
+const TMP = { projectId: 'demo-tmp', name: '(임시) sandbox', path: 'C:\\Users\\dev\\AppData\\Local\\Temp\\sandbox', temp: true };
+const RECENT_ONLY = { projectId: 'demo-zeta', name: 'report-gen', path: 'D:\\code\\report-gen' };
 
 const PRE = 25000;
 
@@ -154,7 +154,7 @@ export function createOverviewMock({ projects = 3, mainsPerProject = [2, 1, 1], 
     orphanRoot = { projectId: TMP.projectId, nodeId: id, sessionId: sid, title: n.meta.title, liveStatus: 'busy', tier: 'live', live: true, orphan: true };
   }
 
-  // ---- 추정 소속만 있는 독립 claude -p(likelyMain): demo_api 메인 사무실 대기석으로 ----
+  // ---- 추정 소속만 있는 독립 claude -p(likelyMain): api-server 메인 사무실 대기석으로 ----
   let guestRoot = null;
   if (orphan && launcher && nP >= 2) {
     const host = roots.find((r) => r.projectId === PROJ[1].projectId);

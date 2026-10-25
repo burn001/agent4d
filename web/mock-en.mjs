@@ -89,8 +89,8 @@ const PHRASES = Object.entries({
   '검증까지 끝내고 알림 보내 줘': 'Finish verification and notify me',
   'Claude Code 세션 시각화 개발': 'Building a Claude Code session viewer', 'Claude Code 세션 시각화 3차': 'Session viewer, round 3',
   '분기 보고서 표 검토': 'Review quarterly report tables', '보고서 초안 정리': 'Tidy report draft', 'API 평가 모듈 보강': 'Harden API scoring module',
-  '법령 파서 수정': 'Fix rules parser', '스킬 카탈로그 갱신': 'Update skill catalog', '설문 응답 집계': 'Aggregate survey responses',
-  '통계표 ID 정리': 'Clean up stats table IDs', 'md 변환 양식 점검': 'Check md conversion template', '지난 세션 예시': 'Earlier session (example)',
+  '검색 파서 수정': 'Fix search parser', '스킬 카탈로그 갱신': 'Update skill catalog', '피드백 집계': 'Aggregate user feedback',
+  '지표 ID 정리': 'Clean up metric IDs', 'md 변환 양식 점검': 'Check md conversion template', '지난 세션 예시': 'Earlier session (example)',
   'SKILL.md 검토': 'Review SKILL.md', '카탈로그 표 갱신': 'Update catalog table', '진행 상황 공유': 'Share progress', '전달됨': 'delivered',
   '흐름 연출': 'flow effects', '동시 분기': 'Parallel fan-out', '백그라운드로 실행': 'running in background', '백그라운드': 'background',
   '기동기': 'Launcher', '팀': 'team', '메인': 'Main', '답함': 'answered', '완료': 'done', '실패': 'failed',
@@ -119,11 +119,8 @@ export function en(s) {
 // 이름표·경로가 아닌 식별자 키는 건드리지 않는다
 const SKIP = new Set(['id', 'nodeId', 'parentId', 'toolUseId', 'sessionId', 'projectId', 'rootSessionId', 'type', 'kind', 'cat', 'tool', 'status', 'ts', 'cwd', 'path', 'file', 'p', 'd', 'marks']);
 
-// 영어 화면(README 스크린샷·데모)의 mock 프로젝트 이름은 흔한 영어 일반명으로(표시 문자열만 — id·경로 키는 그대로)
-const NAMES = [['scratchpad\ccviz-probe', 'scratch\probe'], ['scratchpad/ccviz-probe', 'scratch/probe'], ['ccviz-probe', 'probe'], ['survey-dashboard', 'docs-site'],
-  ['team-skills', 'design-system'], ['stats-cli', 'data-cli'], ['md2report', 'report-gen'], ['demo_api', 'api-server'], ['writing-style', 'style-guide']];
-const hasName = (v) => v.includes('probe') || v.includes('survey-') || v.includes('team-skills') || v.includes('stats-cli') || v.includes('md2report') || v.includes('demo_api') || v.includes('writing-style');
-export function enName(v) { if (typeof v !== 'string' || !hasName(v)) return v; let o = v; for (const [a, b] of NAMES) if (o.includes(a)) o = o.split(a).join(b); return o; }
+// mock 프로젝트 이름은 원본부터 흔한 영어 일반명(api-server·docs-site·design-system·data-cli·report-gen·sandbox) — 바꿀 것 없음
+export function enName(v) { return v; }
 const tr1 = (v) => enName(HANGUL.test(v) ? en(v) : v);
 
 function walk(x, depth) {

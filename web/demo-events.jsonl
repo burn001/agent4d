@@ -29,7 +29,7 @@
 {"type":"node-add","nodeId":"b:demo001","node":{"id":"b:demo001","parentId":"s:demo-main-0001","kind":"bash-bg","label":"node server/index.mjs --demo","model":null,"status":"active","startedAt":"2026-10-23T01:00:04.280Z","endedAt":null,"lastActivityAt":"2026-10-23T01:00:04.280Z","depth":1,"sessionId":"demo-main-0001","meta":{"agentType":null,"toolUseId":null,"phase":null,"cwd":null,"command":"node server/index.mjs --demo","skill":null,"background":true},"counts":{"tools":0,"errors":0,"texts":0},"openTools":[]},"seq":29,"ts":"2026-10-23T01:00:04.280Z"}
 {"type":"tool-end","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00006","tool":"Bash","cat":"shell","ok":false,"durationMs":200,"text":"백그라운드로 실행","brief":"백그라운드로 실행","seq":30,"ts":"2026-10-23T01:00:04.400Z"}
 {"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00007","tool":"Read","cat":"read","skill":null,"text":"scene.js","brief":"web/scene.js","detail":"231줄부터 200줄","seq":31,"ts":"2026-10-23T01:00:04.468Z"}
-{"type":"output","nodeId":"b:demo001","text":"Requesting new quick Tunnel on trycloudflare.com...","seq":32,"ts":"2026-10-23T01:00:04.780Z"}
+{"type":"output","nodeId":"b:demo001","text":"Server listening on 127.0.0.1:7788","seq":32,"ts":"2026-10-23T01:00:04.780Z"}
 {"type":"tool-end","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00007","tool":"Read","cat":"read","ok":true,"durationMs":514,"text":"120줄 읽음","brief":"109줄 읽음","seq":33,"ts":"2026-10-23T01:00:04.982Z"}
 {"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00008","tool":"Monitor","cat":"monitor","skill":null,"text":"서버 로그 감시","brief":"서버 로그 감시","detail":"","seq":34,"ts":"2026-10-23T01:00:05.000Z"}
 {"type":"node-add","nodeId":"m:demo001","node":{"id":"m:demo001","parentId":"s:demo-main-0001","kind":"monitor","label":"서버 로그 감시","model":null,"status":"active","startedAt":"2026-10-23T01:00:05.100Z","endedAt":null,"lastActivityAt":"2026-10-23T01:00:05.100Z","depth":1,"sessionId":"demo-main-0001","meta":{"agentType":null,"toolUseId":null,"phase":null,"cwd":null,"command":null,"skill":null,"background":true,"timeoutMs":1800000},"counts":{"tools":0,"errors":0,"texts":0},"openTools":[]},"seq":35,"ts":"2026-10-23T01:00:05.100Z"}
@@ -63,7 +63,7 @@
 {"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00017","tool":"WebFetch","cat":"web","skill":null,"text":"developers.cloudflare.com","brief":"developers.cloudflare.com/docs","detail":"렌더러 설정 방법 요약","seq":63,"ts":"2026-10-23T01:00:08.617Z"}
 {"type":"output","nodeId":"b:demo001","text":"event: ev  seq=1532","seq":64,"ts":"2026-10-23T01:00:08.705Z"}
 {"type":"tool-end","nodeId":"a:demowf0006","toolUseId":"toolu_demo00015","tool":"Workflow","cat":"workflow","ok":true,"durationMs":418,"text":"완료","brief":"완료","seq":65,"ts":"2026-10-23T01:00:08.868Z"}
-{"type":"node-add","nodeId":"s:demo-child-0001","node":{"id":"s:demo-child-0001","parentId":"a:demowf0004","kind":"claude-p","label":"claude -p · demo-chi","model":"claude-opus-5-5","status":"active","startedAt":"2026-10-23T01:00:09.050Z","endedAt":null,"lastActivityAt":"2026-10-23T01:00:09.050Z","depth":3,"sessionId":"demo-main-0001","meta":{"agentType":null,"toolUseId":null,"phase":null,"cwd":"C:\\…\\scratchpad\\ccviz-probe","command":null,"skill":null,"background":true,"title":"통합 시험을 실행하고 결과를 JSON 으로 보고하라."},"counts":{"tools":0,"errors":0,"texts":0},"openTools":[]},"seq":66,"ts":"2026-10-23T01:00:09.050Z"}
+{"type":"node-add","nodeId":"s:demo-child-0001","node":{"id":"s:demo-child-0001","parentId":"a:demowf0004","kind":"claude-p","label":"claude -p · demo-chi","model":"claude-opus-5-5","status":"active","startedAt":"2026-10-23T01:00:09.050Z","endedAt":null,"lastActivityAt":"2026-10-23T01:00:09.050Z","depth":3,"sessionId":"demo-main-0001","meta":{"agentType":null,"toolUseId":null,"phase":null,"cwd":"C:\\Users\\dev\\AppData\\Local\\Temp\\sandbox","command":null,"skill":null,"background":true,"title":"통합 시험을 실행하고 결과를 JSON 으로 보고하라."},"counts":{"tools":0,"errors":0,"texts":0},"openTools":[]},"seq":66,"ts":"2026-10-23T01:00:09.050Z"}
 {"type":"user","nodeId":"s:demo-child-0001","origin":"human","text":"통합 시험을 실행하고 결과를 JSON 으로 보고하라.","seq":67,"ts":"2026-10-23T01:00:09.050Z"}
 {"type":"text","nodeId":"a:demowf0003","role":"assistant","text":"테스트가 모두 통과했습니다.","seq":68,"ts":"2026-10-23T01:00:09.138Z"}
 {"type":"tool-start","nodeId":"a:demo0007","toolUseId":"toolu_demo00018","tool":"Monitor","cat":"monitor","skill":null,"text":"터널 로그 감시","brief":"터널 로그 감시","detail":"","seq":69,"ts":"2026-10-23T01:00:09.169Z"}
@@ -405,7 +405,7 @@
 {"type":"tool-start","nodeId":"s:demo-child-0001","toolUseId":"toolu_demo00117","tool":"Read","cat":"read","skill":null,"text":"CONTRACT.md","brief":"web/CONTRACT.md","detail":"","seq":405,"ts":"2026-10-23T01:00:34.353Z"}
 {"type":"thinking","nodeId":"a:demo0010","chars":1101,"seq":406,"ts":"2026-10-23T01:00:34.609Z"}
 {"type":"tool-end","nodeId":"s:demo-child-0001","toolUseId":"toolu_demo00117","tool":"Read","cat":"read","ok":false,"durationMs":277,"text":"오류: 명령 실패 (exit 1)","brief":"실패 · 파일을 찾을 수 없음","seq":407,"ts":"2026-10-23T01:00:34.630Z"}
-{"type":"output","nodeId":"b:demo002","text":"Requesting new quick Tunnel on trycloudflare.com...","seq":408,"ts":"2026-10-23T01:00:34.931Z"}
+{"type":"output","nodeId":"b:demo002","text":"Server listening on 127.0.0.1:7788","seq":408,"ts":"2026-10-23T01:00:34.931Z"}
 {"type":"tool-end","nodeId":"a:demowf0006","toolUseId":"toolu_demo00116","tool":"Write","cat":"write","ok":true,"durationMs":883,"text":"완료","brief":"+7 −3","seq":409,"ts":"2026-10-23T01:00:34.939Z"}
 {"type":"tool-start","nodeId":"a:demowf0004","toolUseId":"toolu_demo00118","tool":"Grep","cat":"search","skill":null,"text":"CCVIZ_READY","brief":"\"CCVIZ_READY\" · server","detail":"glob *.mjs · files_with_matches","seq":410,"ts":"2026-10-23T01:00:35.187Z"}
 {"type":"output","nodeId":"b:demo001","text":"ok 12 - layout golden angle\nok 13 - camera framing","seq":411,"ts":"2026-10-23T01:00:35.238Z"}
@@ -467,9 +467,9 @@
 {"type":"tool-end","nodeId":"a:demo0009","toolUseId":"toolu_demo00133","tool":"PushNotification","cat":"notify","ok":true,"durationMs":1640,"text":"완료","brief":"완료","seq":467,"ts":"2026-10-23T01:00:40.707Z"}
 {"type":"tool-end","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00135","tool":"PushNotification","cat":"notify","ok":true,"durationMs":578,"text":"완료","brief":"완료","seq":468,"ts":"2026-10-23T01:00:40.883Z"}
 {"type":"text","nodeId":"a:demo0009","role":"assistant","text":"계약서를 읽고 프런트엔드 구조를 잡겠습니다.","seq":469,"ts":"2026-10-23T01:00:41.013Z"}
-{"type":"tool-start","nodeId":"a:demo0002","toolUseId":"toolu_demo00136","tool":"Skill","cat":"skill","skill":"writing-style","text":"writing-style","brief":"writing-style","detail":"","seq":470,"ts":"2026-10-23T01:00:41.028Z"}
-{"type":"node-update","nodeId":"a:demo0002","patch":{"meta":{"skill":"writing-style"}},"seq":471,"ts":"2026-10-23T01:00:41.028Z"}
-{"type":"output","nodeId":"b:demo002","text":"Requesting new quick Tunnel on trycloudflare.com...","seq":472,"ts":"2026-10-23T01:00:41.111Z"}
+{"type":"tool-start","nodeId":"a:demo0002","toolUseId":"toolu_demo00136","tool":"Skill","cat":"skill","skill":"style-guide","text":"style-guide","brief":"style-guide","detail":"","seq":470,"ts":"2026-10-23T01:00:41.028Z"}
+{"type":"node-update","nodeId":"a:demo0002","patch":{"meta":{"skill":"style-guide"}},"seq":471,"ts":"2026-10-23T01:00:41.028Z"}
+{"type":"output","nodeId":"b:demo002","text":"Server listening on 127.0.0.1:7788","seq":472,"ts":"2026-10-23T01:00:41.111Z"}
 {"type":"text","nodeId":"a:demo0010","role":"assistant","text":"빌드 결과를 검토하고 있습니다.","seq":473,"ts":"2026-10-23T01:00:41.137Z"}
 {"type":"output","nodeId":"b:demo001","text":"ok 12 - layout golden angle\nok 13 - camera framing","seq":474,"ts":"2026-10-23T01:00:41.181Z"}
 {"type":"tool-start","nodeId":"a:demo0011","toolUseId":"toolu_demo00137","tool":"Grep","cat":"search","skill":null,"text":"task-notification","brief":"\"task-notification\" · server","detail":"glob *.mjs · files_with_matches","seq":475,"ts":"2026-10-23T01:00:41.289Z"}
@@ -608,7 +608,7 @@
 {"type":"node-update","nodeId":"a:demo0011","patch":{"meta":{"skill":null}},"seq":608,"ts":"2026-10-23T01:00:57.709Z"}
 {"type":"tool-start","nodeId":"a:demo0011","toolUseId":"toolu_demo00167","tool":"PowerShell","cat":"shell","skill":null,"text":"Get-Process node","brief":"Get-Process node","detail":"","seq":609,"ts":"2026-10-23T01:00:57.787Z"}
 {"type":"thinking","nodeId":"a:demo0007","chars":120,"seq":610,"ts":"2026-10-23T01:00:57.896Z"}
-{"type":"output","nodeId":"b:demo001","text":"Requesting new quick Tunnel on trycloudflare.com...","seq":611,"ts":"2026-10-23T01:00:58.089Z"}
+{"type":"output","nodeId":"b:demo001","text":"Server listening on 127.0.0.1:7788","seq":611,"ts":"2026-10-23T01:00:58.089Z"}
 {"type":"tool-start","nodeId":"a:demo0002","toolUseId":"toolu_demo00168","tool":"PushNotification","cat":"notify","skill":null,"text":"작업 완료 알림","brief":"작업 완료 알림","detail":"","seq":612,"ts":"2026-10-23T01:00:58.173Z"}
 {"type":"text","nodeId":"s:demo-main-0001","role":"assistant","text":"스크린샷으로 다크·라이트 테마를 확인했습니다.","seq":613,"ts":"2026-10-23T01:00:58.249Z"}
 {"type":"tool-end","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00166","tool":"PushNotification","cat":"notify","ok":true,"durationMs":1015,"text":"완료","brief":"완료","seq":614,"ts":"2026-10-23T01:00:58.424Z"}
@@ -644,7 +644,7 @@
 {"type":"output","nodeId":"m:demo001","text":"seq 1588 → 1612","seq":644,"ts":"2026-10-23T01:01:05.149Z"}
 {"type":"node-add","nodeId":"a:demo0012","node":{"id":"a:demo0012","parentId":"s:demo-main-0001","kind":"subagent","label":"서버 파서 구현","model":"claude-opus-5-5","status":"active","startedAt":"2026-10-23T01:01:05.237Z","endedAt":null,"lastActivityAt":"2026-10-23T01:01:05.237Z","depth":1,"sessionId":"demo-main-0001","meta":{"agentType":"general-purpose","toolUseId":"toolu_demo00173","phase":null,"cwd":null,"command":null,"skill":null,"background":true},"counts":{"tools":0,"errors":0,"texts":0},"openTools":[]},"seq":645,"ts":"2026-10-23T01:01:05.237Z"}
 {"type":"tool-end","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00173","tool":"Agent","cat":"agent","ok":true,"durationMs":300,"text":"async_launched","brief":"async_launched","seq":646,"ts":"2026-10-23T01:01:05.417Z"}
-{"type":"output","nodeId":"b:demo001","text":"Requesting new quick Tunnel on trycloudflare.com...","seq":647,"ts":"2026-10-23T01:01:05.909Z"}
+{"type":"output","nodeId":"b:demo001","text":"Server listening on 127.0.0.1:7788","seq":647,"ts":"2026-10-23T01:01:05.909Z"}
 {"type":"text","nodeId":"a:demo0012","role":"assistant","text":"테스트가 모두 통과했습니다.","seq":648,"ts":"2026-10-23T01:01:06.008Z"}
 {"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00174","tool":"Edit","cat":"edit","skill":null,"text":"app.js","brief":"app.js +1 −1","detail":"agent4d/web/app.js","seq":649,"ts":"2026-10-23T01:01:06.179Z"}
 {"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00175","tool":"TaskStop","cat":"monitor","skill":null,"text":"node server/index.mjs --demo","seq":650,"ts":"2026-10-23T01:01:07.489Z"}
@@ -709,8 +709,8 @@
 {"type":"tool-end","nodeId":"a:demo0013","toolUseId":"toolu_demo00190","tool":"mcp__context7__query-docs","cat":"mcp","ok":true,"durationMs":1607,"text":"완료","brief":"완료","seq":709,"ts":"2026-10-23T01:01:29.190Z"}
 {"type":"output","nodeId":"m:demo001","text":"GET /events 200 (SSE)","seq":710,"ts":"2026-10-23T01:01:29.665Z"}
 {"type":"text","nodeId":"a:demo0013","role":"assistant","text":"터널 주소를 KV 에 등록했습니다.","seq":711,"ts":"2026-10-23T01:01:30.317Z"}
-{"type":"tool-start","nodeId":"a:demo0014","toolUseId":"toolu_demo00192","tool":"Skill","cat":"skill","skill":"writing-style","text":"writing-style","brief":"writing-style","detail":"","seq":712,"ts":"2026-10-23T01:01:30.394Z"}
-{"type":"node-update","nodeId":"a:demo0014","patch":{"meta":{"skill":"writing-style"}},"seq":713,"ts":"2026-10-23T01:01:30.394Z"}
+{"type":"tool-start","nodeId":"a:demo0014","toolUseId":"toolu_demo00192","tool":"Skill","cat":"skill","skill":"style-guide","text":"style-guide","brief":"style-guide","detail":"","seq":712,"ts":"2026-10-23T01:01:30.394Z"}
+{"type":"node-update","nodeId":"a:demo0014","patch":{"meta":{"skill":"style-guide"}},"seq":713,"ts":"2026-10-23T01:01:30.394Z"}
 {"type":"tool-start","nodeId":"a:demo0012","toolUseId":"toolu_demo00193","tool":"mcp__context7__query-docs","cat":"mcp","skill":null,"text":"context7.query-docs","brief":"context7.query-docs","detail":"","seq":714,"ts":"2026-10-23T01:01:30.520Z"}
 {"type":"user","nodeId":"s:demo-main-0001","origin":"human","text":"검증까지 끝내고 알림 보내 줘","seq":715,"ts":"2026-10-23T01:01:30.732Z"}
 {"type":"node-update","nodeId":"s:demo-main-0001","patch":{"status":"active"},"seq":716,"ts":"2026-10-23T01:01:30.732Z"}
@@ -808,8 +808,8 @@
 {"type":"thinking","nodeId":"a:demo0013","chars":888,"seq":808,"ts":"2026-10-23T01:01:50.093Z"}
 {"type":"output","nodeId":"m:demo001","text":"tunnel ok","seq":809,"ts":"2026-10-23T01:01:50.096Z"}
 {"type":"tool-start","nodeId":"a:demo0014","toolUseId":"toolu_demo00222","tool":"WebFetch","cat":"web","skill":null,"text":"threejs.org","brief":"threejs.org/docs","detail":"렌더러 설정 방법 요약","seq":810,"ts":"2026-10-23T01:01:50.344Z"}
-{"type":"tool-start","nodeId":"a:demo0015","toolUseId":"toolu_demo00223","tool":"Skill","cat":"skill","skill":"writing-style","text":"writing-style","brief":"writing-style","detail":"","seq":811,"ts":"2026-10-23T01:01:50.661Z"}
-{"type":"node-update","nodeId":"a:demo0015","patch":{"meta":{"skill":"writing-style"}},"seq":812,"ts":"2026-10-23T01:01:50.661Z"}
+{"type":"tool-start","nodeId":"a:demo0015","toolUseId":"toolu_demo00223","tool":"Skill","cat":"skill","skill":"style-guide","text":"style-guide","brief":"style-guide","detail":"","seq":811,"ts":"2026-10-23T01:01:50.661Z"}
+{"type":"node-update","nodeId":"a:demo0015","patch":{"meta":{"skill":"style-guide"}},"seq":812,"ts":"2026-10-23T01:01:50.661Z"}
 {"type":"tool-end","nodeId":"a:demo0013","toolUseId":"toolu_demo00216","tool":"WebFetch","cat":"web","ok":true,"durationMs":3712,"text":"완료","brief":"HTTP 200 · 15KB","seq":813,"ts":"2026-10-23T01:01:50.752Z"}
 {"type":"tool-end","nodeId":"a:demo0012","toolUseId":"toolu_demo00221","tool":"WebFetch","cat":"web","ok":true,"durationMs":934,"text":"완료","brief":"HTTP 200 · 44KB","seq":814,"ts":"2026-10-23T01:01:50.885Z"}
 {"type":"tool-start","nodeId":"a:demo0014","toolUseId":"toolu_demo00224","tool":"PowerShell","cat":"shell","skill":null,"text":"Get-Process node","brief":"Get-Process node","detail":"","seq":815,"ts":"2026-10-23T01:01:50.997Z"}
@@ -858,8 +858,8 @@
 {"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00239","tool":"WebFetch","cat":"web","skill":null,"text":"developers.cloudflare.com","brief":"developers.cloudflare.com/docs","detail":"렌더러 설정 방법 요약","seq":858,"ts":"2026-10-23T01:01:57.141Z"}
 {"type":"tool-end","nodeId":"a:demo0015","toolUseId":"toolu_demo00238","tool":"Skill","cat":"skill","ok":true,"durationMs":487,"text":"완료","brief":"완료","seq":859,"ts":"2026-10-23T01:01:57.290Z"}
 {"type":"tool-end","nodeId":"a:demo0012","toolUseId":"toolu_demo00237","tool":"Glob","cat":"search","ok":true,"durationMs":837,"text":"완료","brief":"8개 파일","seq":860,"ts":"2026-10-23T01:01:57.392Z"}
-{"type":"tool-start","nodeId":"a:demo0013","toolUseId":"toolu_demo00240","tool":"Skill","cat":"skill","skill":"writing-style","text":"writing-style","brief":"writing-style","detail":"","seq":861,"ts":"2026-10-23T01:01:57.464Z"}
-{"type":"node-update","nodeId":"a:demo0013","patch":{"meta":{"skill":"writing-style"}},"seq":862,"ts":"2026-10-23T01:01:57.464Z"}
+{"type":"tool-start","nodeId":"a:demo0013","toolUseId":"toolu_demo00240","tool":"Skill","cat":"skill","skill":"style-guide","text":"style-guide","brief":"style-guide","detail":"","seq":861,"ts":"2026-10-23T01:01:57.464Z"}
+{"type":"node-update","nodeId":"a:demo0013","patch":{"meta":{"skill":"style-guide"}},"seq":862,"ts":"2026-10-23T01:01:57.464Z"}
 {"type":"tool-end","nodeId":"a:demo0014","toolUseId":"toolu_demo00233","tool":"WebFetch","cat":"web","ok":true,"durationMs":2180,"text":"완료","brief":"HTTP 200 · 50KB","seq":863,"ts":"2026-10-23T01:01:57.736Z"}
 {"type":"tool-end","nodeId":"a:demo0013","toolUseId":"toolu_demo00240","tool":"Skill","cat":"skill","ok":true,"durationMs":443,"text":"완료","brief":"완료","seq":864,"ts":"2026-10-23T01:01:57.907Z"}
 {"type":"tool-start","nodeId":"a:demo0014","toolUseId":"toolu_demo00241","tool":"Edit","cat":"edit","skill":null,"text":"worker.js","brief":"worker.js +4 −8","detail":"agent4d/web/worker.js","seq":865,"ts":"2026-10-23T01:01:57.933Z"}

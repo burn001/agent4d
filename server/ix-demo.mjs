@@ -21,7 +21,7 @@ export const IX_DEMO = [
   ['Bash', { command: 'for i in $(seq 1 40); do node build.mjs --page $i; done', description: '페이지 40개 생성' }, { ok: true, stdout: '[40/40] 완료' }, 6000],
   ['Bash', { command: 'gh pr checks 58 --watch', description: 'CI 대기' }, { ok: false, stdout: 'build\tpass\t1m2s\thttps://x\nunit\tpass\t40s\thttps://x\ne2e\tfail\t3m\thttps://x\nlint\tpass\t12s\thttps://x\ndeploy\tpending\t0\thttps://x' }, 4200],
   ['Bash', { command: 'scp -q dist.zip demo-server:/srv/www/', description: '배포 묶음 올리기' }, { ok: true, stdout: '' }, 2400],
-  ['Bash', { command: 'psql -d survey -c "UPDATE resp SET checked = true WHERE id < 100"', description: '응답 표시' }, { ok: true, stdout: 'UPDATE 99\n(99 rows)' }, 1200],
+  ['Bash', { command: 'psql -d shop -c "UPDATE orders SET checked = true WHERE id < 100"', description: '응답 표시' }, { ok: true, stdout: 'UPDATE 99\n(99 rows)' }, 1200],
   ['Bash', { command: 'node --test', run_in_background: true, description: '시험(백그라운드)' }, { ok: true, stdout: '', bg: true }, 600, nodeTests(24, true)],
   ['Bash', { command: 'git pull --ff-only origin main', description: '최신 받기' }, { ok: true, stdout: 'Updating a..b\nFast-forward\n 5 files changed, 40 insertions(+)' }, 1500],
   ['Bash', { command: 'gh pr merge 58 --squash', description: 'PR 병합' }, { ok: true, stdout: '✓ Squashed and merged pull request #58' }, 1500],

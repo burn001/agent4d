@@ -12,10 +12,10 @@ test('mock 영어: 통째·숫자 모양·구절, 한글 없는 글·식별자 �
   assert.equal(en('npm test'), 'npm test');
   try {
     _setLangForTest('en');
-    const ev = mockEn({ type: 'node-add', nodeId: 'a:한', node: { id: 'a:한', label: '통합 검증', meta: { title: '설문 응답 집계' } } });
+    const ev = mockEn({ type: 'node-add', nodeId: 'a:한', node: { id: 'a:한', label: '통합 검증', meta: { title: '피드백 집계' } } });
     assert.equal(ev.nodeId, 'a:한');
     assert.equal(ev.node.label, 'Integration check');
-    assert.equal(ev.node.meta.title, 'Aggregate survey responses');
+    assert.equal(ev.node.meta.title, 'Aggregate user feedback');
     _setLangForTest('ko');
     assert.equal(mockEn({ text: '완료' }).text, '완료');
   } finally { _setLangForTest('ko'); }

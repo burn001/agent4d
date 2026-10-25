@@ -14,7 +14,7 @@ const TOOLS = [
   ['Grep', 'search', ['toolUseId', 'task-notification', 'CCVIZ_READY']],
   ['SendMessage', 'agent', ['검증 담당에게 결과 전달']],
   ['Workflow', 'workflow', ['빌드 단계 실행']],
-  ['Skill', 'skill', ['frontend-design', 'cloudflare:cf-cli', 'writing-style', 'skill-creator']],
+  ['Skill', 'skill', ['frontend-design', 'cloudflare:cf-cli', 'style-guide', 'skill-creator']],
   ['WebFetch', 'web', ['developers.cloudflare.com', 'threejs.org']],
   ['Monitor', 'monitor', ['터널 로그 감시']],
   ['mcp__context7__query-docs', 'mcp', ['context7.query-docs']],
@@ -33,7 +33,7 @@ const TEXTS = [
 ];
 const OUTPUTS = [
   'GET /healthz 200 3ms', 'compiling… done in 412ms', '[watch] 2 files changed', '2026-10-23T01:12:04Z INF Registered tunnel connection',
-  'ok 12 - layout golden angle\nok 13 - camera framing', 'event: ev  seq=1532', 'Requesting new quick Tunnel on trycloudflare.com...',
+  'ok 12 - layout golden angle\nok 13 - camera framing', 'event: ev  seq=1532', 'Server listening on 127.0.0.1:7788',
 ];
 const AGENT_LABELS = ['서버 파서 구현', '3D 프런트엔드', '배경음악 합성', 'Cloudflare 워커', '통합 검증', '문서·스킬 정리',
   '계약 검토', '성능 측정', '보안 점검', '모바일 화면 확인'];
@@ -276,7 +276,7 @@ export class MockGenerator {
       onEnd: (o) => this.at(2000, (o2) => { if (!childDone) { childDone = true; this.emit(o2, { type: 'result', nodeId: id, ok: true, text: '독립 세션 결과: 통합 시험 통과' }); this.setStatus(o2, id, 'done'); } }),
     });
     this.at(700, (o) => {
-      this.addNode(o, { id, parentId, kind: 'claude-p', label: 'claude -p · ' + sid.slice(0, 8), meta: { title: '통합 시험을 실행하고 결과를 JSON 으로 보고하라.', cwd: 'C:\\…\\scratchpad\\ccviz-probe' } });
+      this.addNode(o, { id, parentId, kind: 'claude-p', label: 'claude -p · ' + sid.slice(0, 8), meta: { title: '통합 시험을 실행하고 결과를 JSON 으로 보고하라.', cwd: 'C:\\Users\\dev\\AppData\\Local\\Temp\\sandbox' } });
       this.emit(o, { type: 'user', nodeId: id, origin: 'human', text: '통합 시험을 실행하고 결과를 JSON 으로 보고하라.' });
       this.at(500, (o2) => this.act(o2, id));
       this.at(2500, (o2) => this.spawnAgent(o2, id, 'claude -p 하위 에이전트', { life: 16000 }));
@@ -393,7 +393,7 @@ export class MockGenerator {
     this.at(8400, (o) => {
       if (!agent || !this.alive(agent)) return;
       const tu = this.tuid();
-      const cmd = 'cd /d/DEV_REPOS/demo_api && nohup bash .autopilot/relaunch.sh > .autopilot/relaunch.out 2>&1 < /dev/null & disown';
+      const cmd = 'cd /d/code/api-server && nohup bash .loop/relaunch.sh > .loop/relaunch.out 2>&1 < /dev/null & disown';
       this.emit(o, { type: 'tool-start', nodeId: agent, toolUseId: tu, tool: 'Bash', cat: 'shell', skill: null, text: cmd, brief: 'relaunch.sh 분리 실행', detail: '새 축 둘 세우고 루프 재기동' });
       this.emit(o, { type: 'tool-end', nodeId: agent, toolUseId: tu, tool: 'Bash', cat: 'shell', ok: true, durationMs: 240, text: '', brief: 'exit 0' });
       const t = this.t0 + this.t;
@@ -407,7 +407,7 @@ export class MockGenerator {
       this.lc.n = hist.length;
       this.addNode(o, { id: L, parentId: agent, kind: 'bash-bg', label: '기동기 · relaunch.sh', meta: {
         title: '자율 루프 재기동', detached: true, background: true, toolUseId: tu, command: null,
-        launcher: { script: 'relaunch.sh', via: ['relaunch.sh', 'autopilot-pick-axis.sh', 'autopilot.sh'] },
+        launcher: { script: 'relaunch.sh', via: ['relaunch.sh', 'pick-task.sh', 'loop.sh'] },
         ...(opt.adopted ? { adopted: { fromSession: 'd3e7a1c9-demo', launchedAt: this.iso() } } : {}),
         batch: this._batchMeta() } });
       this.at(1200, (o2) => this._startCycle(o2));
@@ -440,7 +440,7 @@ export class MockGenerator {
     this.lc.items.push(it);
     this.addNode(out, { id, parentId: L, kind: 'claude-p', label: 'claude -p · ' + sid.slice(0, 8), meta: {
       title: '자율 사이클이다. 진행 중인 축 하나를 골라 계약대로 한 단계 진행하고 결과를 JSON 으로 남겨라.',
-      cwd: 'D:\\DEV_REPOS\\demo_api', cycle: k,
+      cwd: 'D:\\code\\api-server', cycle: k,
       link: { by: 'launcher', confidence: k % 3 === 0 ? 'medium' : 'high', evidence: k % 3 === 0 ? ['script-claude-p', 'cwd', 'time', 'earlier-same-launcher-open'] : ['script-claude-p', 'cwd', 'time', 'chain'] } } });
     this.emit(out, { type: 'node-update', nodeId: L, patch: { meta: { batch: this._batchMeta() } } });
     this.emit(out, { type: 'user', nodeId: id, origin: 'human', text: '자율 사이클이다. 진행 중인 축 하나를 골라 계약대로 한 단계 진행하라.' });
@@ -452,7 +452,7 @@ export class MockGenerator {
       for (const t of n.openTools.slice()) this.emit(o, { type: 'tool-end', nodeId: id, toolUseId: t.toolUseId, tool: t.tool, cat: t.cat, ok: true, durationMs: 300, text: '완료' });
       for (const c of this.nodes.values()) if (c.parentId === id && this.alive(c.id)) this.finishAgent(o, c.id);
       const stop = k % 5 === 0;
-      this.emit(o, { type: 'result', nodeId: id, ok: true, text: stop ? '시간 초과로 중단' : `{"cycle":${k},"ok":true,"axis":"law-parser"}` });
+      this.emit(o, { type: 'result', nodeId: id, ok: true, text: stop ? '시간 초과로 중단' : `{"cycle":${k},"ok":true,"task":"search-index"}` });
       this.setStatus(o, id, stop ? 'stopped' : 'done');
       it.status = stop ? 'stopped' : 'done'; it.endMs = this.t0 + this.t;
       this.emit(o, { type: 'node-update', nodeId: L, patch: { meta: { batch: this._batchMeta() } } });
@@ -468,9 +468,9 @@ export class MockGenerator {
     const tu = this.tuid();
     this.emit(out, { type: 'tool-start', nodeId: M, toolUseId: tu, tool: 'Monitor', cat: 'monitor', skill: null, text: '루프 상태 감시' });
     this.emit(out, { type: 'tool-end', nodeId: M, toolUseId: tu, tool: 'Monitor', cat: 'monitor', ok: true, durationMs: 60, text: 'taskId 발급' });
-    this.addNode(out, { id, parentId: M, kind: 'monitor', label: '루프 상태 감시', meta: { timeoutMs: 24000, persistent: false, command: 'tail -f .autopilot/relaunch.log',
+    this.addNode(out, { id, parentId: M, kind: 'monitor', label: '루프 상태 감시', meta: { timeoutMs: 24000, persistent: false, command: 'tail -f .loop/relaunch.log',
       ...(prevId ? { rearmOf: prevId, rearmCount: count } : {}) } });
-    const tick = (o) => { if (!this.alive(id)) return; this.emit(o, { type: 'output', nodeId: id, text: ['cycle ok', 'axis: law-parser', 'heartbeat'][Math.floor(this.t / 1000) % 3] }); this.at(4000, tick); };
+    const tick = (o) => { if (!this.alive(id)) return; this.emit(o, { type: 'output', nodeId: id, text: ['cycle ok', 'task: search-index', 'heartbeat'][Math.floor(this.t / 1000) % 3] }); this.at(4000, tick); };
     this.at(1500, tick);
     this.at(24000, (o) => {
       if (!this.alive(id)) return;

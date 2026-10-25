@@ -15,7 +15,7 @@ export const ART_DEMO = [
   ['Write', { file_path: 'out/최종보고서.pdf', content: '%PDF' }, { ok: true, tur: { type: 'create' } }, 800],
   ['Bash', { command: 'rm -rf build/cache', description: '빌드 캐시 지우기' }, { ok: true, stdout: '' }, 500],
   ['Write', { file_path: 'docs/notes.md', content: '# 메모\n' }, { ok: true, tur: { type: 'update' } }, 600],
-  ['Bash', { command: 'psql -d survey -c "UPDATE resp SET checked = true WHERE id < 100"', description: '응답 표시' }, { ok: true, stdout: 'UPDATE 99\n(99 rows)' }, 1100],
+  ['Bash', { command: 'psql -d shop -c "UPDATE orders SET checked = true WHERE id < 100"', description: '응답 표시' }, { ok: true, stdout: 'UPDATE 99\n(99 rows)' }, 1100],
   ['Bash', { command: 'npx wrangler deploy', description: 'Worker 배포' }, { ok: true, stdout: 'Deployed demo-worker' }, 1500],
   ['Edit', { file_path: '.env', old_string: 'A=1', new_string: 'A=2' }, { ok: true, tur: { structuredPatch: [{ lines: ['-A=1', '+A=2'] }] } }, 500],
   ['Bash', { command: 'scp -q dist.zip demo-server:/srv/www/', description: '배포 묶음 올리기' }, { ok: true, stdout: '' }, 2000],

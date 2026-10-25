@@ -14,7 +14,7 @@ export const ART_MOCK = [
   ['Write', 'out/final-report.pdf', [F('out/final-report.pdf', 'write', { sz: 1, imp: 'final' })], [F('out/final-report.pdf', 'create', { sz: 1, imp: 'final' })], 800],
   ['Bash', 'rm -rf build/cache', [F('build/cache', 'delete', { est: 1, x: 'rm' })], [F('build/cache', 'delete', { est: 1, x: 'rm' })], 500],
   ['Write', 'docs/notes.md', [F('docs/notes.md', 'write', { sz: 1 })], [F('docs/notes.md', 'modify', { sz: 1, x: 'overwrite' })], 600],
-  ['Bash', 'psql … UPDATE resp', [{ k: 'db', id: 'db:postgres/survey', n: 'survey', v: 'write', coll: ['resp'], imp: 'db' }], [{ k: 'db', id: 'db:postgres/survey', n: 'survey', v: 'write', coll: ['resp'], imp: 'db', rows: 99 }], 1100],
+  ['Bash', 'psql … UPDATE orders', [{ k: 'db', id: 'db:postgres/shop', n: 'shop', v: 'write', coll: ['orders'], imp: 'db' }], [{ k: 'db', id: 'db:postgres/shop', n: 'shop', v: 'write', coll: ['orders'], imp: 'db', rows: 99 }], 1100],
   ['Bash', 'npx wrangler deploy', [{ k: 'service', id: 'svc:cloudflare', n: 'Cloudflare', v: 'write' }], [{ k: 'service', id: 'svc:cloudflare', n: 'Cloudflare', v: 'write' }], 1500],
   ['Edit', '.env', [F('.env', 'modify', { sz: 1, imp: 'secret' })], [F('.env', 'modify', { sz: 2, imp: 'secret' })], 500],
   ['Bash', 'scp dist.zip demo-server:/srv/www/', [{ k: 'remote', id: 'remote:demo-server', n: 'demo-server', v: 'write', imp: 'prod' }], [{ k: 'remote', id: 'remote:demo-server', n: 'demo-server', v: 'write', imp: 'prod' }], 2000],

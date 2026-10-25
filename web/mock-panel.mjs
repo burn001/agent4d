@@ -18,7 +18,7 @@ const SHELL_ERR = [['o', '> node --test web/test'], ['e', 'not ok 12 - layout go
 const READ_BODY = {
   'CONTRACT.md': ['# Agent4D 계약', '', '## 3. 이벤트 형식', '모든 이벤트는 `seq` 순서로 온다.', '| type | 필드 |', '|---|---|', '| tool-start | nodeId · toolUseId · tool · cat |', '| tool-end | ok · durationMs · brief |', '| output | nodeId · text |', '', '## 50. 홀로그램 패널 내용'],
   'scene.js': ['import * as THREE from \'three\';', 'import { HoloLayer } from \'./holo.js\';', '', 'export class SceneView {', '  constructor(container, opts = {}) {', '    this.vis = new Map();', '    this.focusId = null;', '    this.holo = new HoloLayer(this.scene, this);', '  }', '', '  toolStart(nodeId, ev, quiet = false) {'],
-  'journal.jsonl': ['{"t":"2026-10-24T01:02:03Z","kind":"start","axis":"panel"}', '{"t":"2026-10-24T01:04:11Z","kind":"step","ok":true}', '{"t":"2026-10-24T01:09:40Z","kind":"step","ok":true}', '{"t":"2026-10-24T01:12:02Z","kind":"done"}'],
+  'journal.jsonl': ['{"t":"2026-10-24T01:02:03Z","kind":"start","task":"panel"}', '{"t":"2026-10-24T01:04:11Z","kind":"step","ok":true}', '{"t":"2026-10-24T01:09:40Z","kind":"step","ok":true}', '{"t":"2026-10-24T01:12:02Z","kind":"done"}'],
   'package.json': ['{', '  "name": "agent4d",', '  "version": "0.1.0",', '  "private": true,', '  "type": "module",', '  "scripts": {', '    "start": "node bin/ccviz.mjs start",', '    "test": "node --test server/test"', '  }', '}'],
 };
 const CODE = {
