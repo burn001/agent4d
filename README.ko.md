@@ -251,4 +251,4 @@ npm test            # server/·web/ 의 node --test
 
 ## 라이선스
 
-[MIT](LICENSE) © 2026 Agent4D contributors.
+[MIT](LICENSE) © 2026 burn001 (Dr. Cho, Sangkyu). Uses [three.js](https://threejs.org) (MIT).

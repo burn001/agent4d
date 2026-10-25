@@ -4,6 +4,7 @@
   "description": "Agent4D — your coding agents in 3D space + time. Unofficial, local, read-only viewer for Claude Code sessions: main agent, subagents, workflows, claude -p runs and background jobs as one live tree in the browser",
   "private": true,
   "license": "MIT",
+  "author": "burn001 (Dr. Cho, Sangkyu)",
   "type": "module",
   "repository": {
     "type": "git",

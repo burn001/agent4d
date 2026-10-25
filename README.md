@@ -260,4 +260,4 @@ Most code comments are in Korean. Bug reports and pull requests are welcome; ple
 
 ## License
 
-[MIT](LICENSE) © 2026 Agent4D contributors.
+[MIT](LICENSE) © 2026 burn001 (Dr. Cho, Sangkyu). Uses [three.js](https://threejs.org) (MIT).
