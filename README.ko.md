@@ -10,7 +10,9 @@
 
 Claude Code 에이전트가 지금 무엇을 하는지 브라우저 3D 화면으로 실시간 보여 주고, 나중에 다시 재생합니다. Agent4D 는 메인 에이전트와 서브에이전트, 워크플로 에이전트, 안에서 띄운 `claude -p` 실행, 백그라운드 셸·모니터를 하나의 살아 있는 트리로 그리는 로컬·읽기 전용 뷰어입니다. 공간 3차원에 실시간 스트리밍·재생이라는 시간 축을 더했습니다. 명령줄 도구 이름은 `agent4d` 이고, 예전 이름 `ccviz` 도 그대로 동작합니다.
 
-![Planet 표현: 프롬프트가 화면 테두리에 모였다가 메인 에이전트의 뚜르비용으로 날아감](docs/media/planet.gif)
+[![Planet 표현: 프롬프트가 화면 테두리에 모였다가 메인 에이전트의 뚜르비용으로 날아감](docs/media/planet.gif)](https://github.com/burn001/agent4d/releases/download/v0.1.0/agent4d-intro-v0.1.0.mp4)
+
+▶ **[24초 소개 영상 보기(MP4)](https://github.com/burn001/agent4d/releases/download/v0.1.0/agent4d-intro-v0.1.0.mp4)**
 
 <!-- 소개 영상(20～30초, H.264): agent4d-intro.mp4 를 GitHub 댓글·릴리스 편집 창에 끌어다 놓은 뒤, 나온 user-attachments 주소를 이 자리에 한 줄로 붙이면 플레이어로 보입니다. -->
 

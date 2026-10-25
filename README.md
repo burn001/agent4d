@@ -8,9 +8,9 @@
 
 See what your Claude Code agents are doing, live, in 3D — and play it back later. Agent4D is a local, read-only viewer that turns the main agent, its subagents, workflow agents, nested `claude -p` runs, background shells and monitors into one live tree in your browser: three dimensions of space, plus time through live streaming and replay. The command-line tool is `agent4d` (`ccviz` still works).
 
-![Planet view: your prompt gathers at the screen edge and flies into the main agent's tourbillon](docs/media/planet.gif)
+[![Planet view: your prompt gathers at the screen edge and flies into the main agent's tourbillon](docs/media/planet.gif)](https://github.com/burn001/agent4d/releases/download/v0.1.0/agent4d-intro-v0.1.0.mp4)
 
-<!-- Intro video (20–30 s, H.264): drag agent4d-intro.mp4 into a GitHub comment or release editor, then paste the user-attachments URL on its own line here so GitHub renders a player. -->
+▶ **[Watch the 24-second intro video (MP4)](https://github.com/burn001/agent4d/releases/download/v0.1.0/agent4d-intro-v0.1.0.mp4)**
 
 > **Unofficial project.** Agent4D is an independent tool. Anthropic did not make it, does not endorse it and does not support it. "Claude" and "Claude Code" are trademarks of Anthropic, PBC, used here only to say what this tool works with.
 
