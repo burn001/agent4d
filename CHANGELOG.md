@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/) (0.x until a stable 1.0).
 
+## [0.1.3] - 2026-10-25
+
+### Fixed
+- Flow 3D: the leftmost cell of a launcher's recent-run band flickered with noisy streaks. The shader read the per-instance band code and cell count through interpolated varyings and used them with exact comparisons, so tiny interpolation errors (a count of 4.9999, a code of 936.9998) changed the cell's colour pixel by pixel and frame by frame. Integer values are now rounded before decoding and the "no run in progress" check has a margin. The same rounding is applied to the voxel hologram panel line pattern.
+
 ## [0.1.2] - 2026-10-25
 
 ### Changed

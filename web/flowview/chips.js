@@ -158,17 +158,20 @@ void main() {
     col = mix(col, C, scan);
     if (dev) {
       // 장치 앞면: 위 = 회차 진행 막대(경과/평균), 오른쪽 위 = 진행 표시등, 아래 = 최근 회차 상태 띠(오래된 → 최근)
-      float code = vC.y, nb = vC.z, prog = vC.w;
+      // 인스턴스 속성도 varying 으로 오면 보간 오차(±1e-4 안팎, 기기·각도·크기마다 다름)가 붙는다. 정수 값은 반올림해 쓰고 경계 비교는 여유를 둔다
+      // (예전엔 칸 수 nb 가 4.9999 가 되면 맨 왼쪽 칸 slot 이 -0.0001 → 빈 칸, code 가 936.9998 이면 끝자리가 바뀌어 화소마다 색이 튀었다 = '지지직')
+      float code = floor(vC.y + 0.5), nb = floor(vC.z + 0.5), prog = vC.w;
+      bool run = prog > -0.5;
       vec2 sp = p - vec2(-0.2, 0.3);
       if (abs(sp.y) < 0.09 && abs(sp.x) < 0.9) {
         float fillx = (sp.x + 0.9) / 1.8;
-        bool on = prog >= 0.0 && fillx <= prog;
+        bool on = run && fillx <= prog;
         col = mix(col, on ? uWarn : C, on ? 0.85 : 0.22);
       }
-      float ledOn = prog >= 0.0 || code > 0.0 ? 1.0 : 0.0;
+      float ledOn = run || code > 0.5 ? 1.0 : 0.0;
       float led = smoothstep(0.13, 0.07, length(p - vec2(1.0, 0.3)));
-      float blink = prog >= 0.0 ? (0.45 + 0.55 * step(0.0, sin(T * 6.0))) : 0.35;
-      col = mix(col, prog >= 0.0 ? uWarn : uOk, led * blink * ledOn);
+      float blink = run ? (0.45 + 0.55 * step(0.0, sin(T * 6.0))) : 0.35;
+      col = mix(col, run ? uWarn : uOk, led * blink * ledOn);
       for (int i = 0; i < 5; i++) {
         float fi = float(i);
         float cx = -1.0 + fi * 0.5;
@@ -176,7 +179,7 @@ void main() {
         float cell = step(abs(bp.x), 0.19) * step(abs(bp.y), 0.13);
         float slot = fi - (5.0 - nb);           // 오른쪽 정렬: 최근이 오른쪽 끝
         float b = 0.0;
-        if (slot >= 0.0) b = mod(floor(code / pow(5.0, slot) + 0.001), 5.0);
+        if (slot > -0.5) { float q = floor((code + 0.5) / floor(pow(5.0, slot) + 0.5)); b = q - 5.0 * floor((q + 0.5) / 5.0); }
         vec3 bc = b > 0.5 ? bandC(b) : C;
         float pul = b > 0.5 && b < 1.5 ? 0.7 + 0.3 * sin(T * 4.0) : 1.0;
         col = mix(col, bc, cell * (b > 0.5 ? 0.9 * pul : 0.18));

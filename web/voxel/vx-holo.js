@@ -48,7 +48,7 @@ void main() {
     float rows = kind > 0.5 && kind < 1.5 ? 4.0 : 7.0;
     float yy = (vUv.y / 0.78) * rows + (kind < 0.5 ? uTime * 0.9 : 0.0);
     float rr = floor(yy), fy = fract(yy);
-    float len = 0.25 + 0.6 * h1(rr + floor(vA.x * 3.0));
+    float len = 0.25 + 0.6 * h1(rr + floor(vA.x * 3.0 + 0.5)); // 투명도 1.0 이 보간 오차로 0.99999 가 되면 줄 길이가 화소마다 튀지 않게 반올림
     lines = step(0.06, vUv.x) * step(vUv.x, 0.06 + len * 0.88) * step(0.3, fy) * step(fy, 0.7) * step(vUv.y, 0.76);
   }
   vec3 col; float a;
