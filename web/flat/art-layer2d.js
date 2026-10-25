@@ -2,7 +2,7 @@
 // 위에서 본 평면으로 투영하고 높이(y)는 화면 위쪽(−z)으로 기울인다(Planet 0.55 = 흐름과 같음, 복셀 0.3 = 평면도에 가깝게).
 // 같은 실루엣의 평면 기호: 상자 = 윗면 + 앞면, 선·점·라벨 그대로. three.js 를 불러오지 않는다. 끄면 이 객체가 없다.
 import { ART, ART_KEYS, artKeyColor, artFitPoints, ArtState, artNameLines, artNamePlate, artNameReadable } from '../artifact-core.mjs';
-import { planetArtGeometry, pickHits } from '../art-meta.mjs';
+import { planetArtGeometry, pickHits, PLANET_ART } from '../art-meta.mjs';
 import { VxArtPlan, voxelArtGeometry, vxFitPoints, vxRoomsFor } from '../voxel/vx-art-core.mjs';
 import { projectNameOf, nameFont, dimIslandLabel, undimAll } from '../art-name.js';
 import { arcNamePlate } from '../art-arc.mjs'; // 원형 섬 가장자리 원호 글씨
@@ -207,7 +207,8 @@ export class PlanetArt2D extends ArtLayerBase2D {
   constructor(view, opts) {
     super(view, opts, { tilt: 0.55 });
     this._env.anchor = (pid) => this.st.anchor(pid);
-    this._env.yOf = () => ART.FLOOR_Y;
+    this.floorY = PLANET_ART.FLOOR_2D; // 에이전트 평면 아래 별도 바닥(기울임으로 화면 아래쪽에 깔림)
+    this._env.yOf = () => this.floorY;
     this._avoid = [];
   }
   _pids() {
@@ -222,20 +223,32 @@ export class PlanetArt2D extends ArtLayerBase2D {
     for (const n of v.vis.values()) { if (n.gone || n.hidden) continue; const p = n.target; x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); }
     return Number.isFinite(x0) ? { x: (x0 + x1) / 2, z: (z0 + z1) / 2, hw: Math.max(18, (x1 - x0) / 2 + 6), hd: Math.max(18, (z1 - z0) / 2 + 6) } : { x: 0, z: 0, hw: 18, hd: 18 };
   }
-  _step(now, dt) { return this.st.frame(this._pids(), (p) => this._target(p), now, dt); }
+  /** 대상 배치 목표: 바닥이 기울임만큼 화면 아래로 내려가므로 절반은 위로 되돌리고(섬 밖으로 덜 나가게), 전체 보기는 SHRINK 배 */
+  _layTarget(pid) {
+    const t = this._target(pid);
+    if (!t) return t;
+    const k = this.view.scope && this.view.scope.mode === 'all' ? PLANET_ART.SHRINK : 1;
+    return { ...t, z: t.z + this.floorY * this.tilt * 0.5, hw: t.hw * k, hd: t.hd * k };
+  }
+  _step(now, dt) { return this.st.frame(this._pids(), (p) => this._layTarget(p), now, dt); }
   _env2d(env, s) {
     const st = this.st;
     env.cellPx = (pid) => { const a = st.anchor(pid); return ART.CELL * (a ? a.k || 1 : 1) * s; };
     const av = this._avoid; av.length = 0;
-    for (const n of this.view.vis.values()) { if (n.gone || n.hidden || (n.scopeK ?? 1) < 0.5) continue; av.push({ x: n.pos.x, z: n.pos.z + ART.FLOOR_Y * this.tilt, r: (n.r || 1) * 1.5 }); }
+    for (const n of this.view.vis.values()) { if (n.gone || n.hidden || (n.scopeK ?? 1) < 0.5) continue; av.push({ x: n.pos.x, z: n.pos.z + this.floorY * this.tilt, r: (n.r || 1) * PLANET_ART.AVOID_K_2D }); }
     env.avoid = av;
+    // 다림줄(2D): 노드 자리(y 0)에서 기울임만큼 아래 바닥 그림자 고리까지
+    const pl = this._plumbs || (this._plumbs = []); pl.length = 0;
+    const pa = this.view.projAlpha ? (pid) => this.view.projAlpha(pid) : null;
+    for (const n of this.view.vis.values()) { if (n.gone || n.hidden || n.exiting != null || (n.scopeK ?? 1) < 0.5 || pl.length >= 160) continue; pl.push({ x: n.pos.x, y: 0, z: n.pos.z, r: n.r || 1, a: pa && n.projectId ? pa(n.projectId) : 1 }); }
+    env.plumbs = pl;
   }
   _namePids() { return this._pids(); }
   _nameTarget(pid) { const t = this._target(pid); return t ? { ...t, y: ART.FLOOR_Y + ART.NAME_Y } : null; }
   _geometry(now, env) { return planetArtGeometry(this.st.book, this.st.lay, this.st.fx, now, env, this.st.geo); }
   fitPoints(pts, scope = {}) {
     const fp = scope && scope.mode === 'all' ? scope.focusProject || null : null;
-    for (const q of artFitPoints(this.st.lay, (pid) => this.st.anchor(pid), [], { pid: fp })) pts.push({ p: { x: q.p.x, y: 0, z: q.p.z - ART.FLOOR_Y * this.tilt }, r: q.r });
+    for (const q of artFitPoints(this.st.lay, (pid) => this.st.anchor(pid), [], { pid: fp })) pts.push({ p: { x: q.p.x, y: 0, z: q.p.z - this.floorY * this.tilt }, r: q.r });
     return pts;
   }
 }

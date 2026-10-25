@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { ART, ARTGEO, ART_KEYS, artKeyColor, artFitPoints, ArtState, ensureArtCss } from './artifact-core.mjs';
-import { planetArtGeometry, pickHits } from './art-meta.mjs';
+import { planetArtGeometry, pickHits, planetFloorY, PLANET_ART } from './art-meta.mjs';
 import { VxArtPlan, voxelArtGeometry, vxFitPoints, vxRoomsFor } from './voxel/vx-art-core.mjs';
 
 const EDGE_OFF = 0.09;
@@ -195,16 +195,24 @@ class ArtLayerBase3D {
 }
 
 // ───────────── Planet 3D(SceneView) ─────────────
-/** Planet 바닥 높이: 전체 보기 = 섬 원반 위(ART.FLOOR_Y), 단일 세션 = −6(노드가 위아래로 ±4 흩어져 있어 그 아래 '행성 표면') */
-export const PLANET_SESSION_Y = -6;
+/** Planet 바닥 높이: 전체 보기·단일 세션 모두 에이전트 궤도면 아래 별도 평면 — planetFloorY(가장 낮은 노드 − 틈), 기본 −9.
+ *  (예전: 전체 보기 섬 원판 위 −2.2·단일 세션 −6 → 아래쪽 행성·백그라운드 명령(−4)과 같은 평면에 섞였다) */
 export class PlanetArt3D extends ArtLayerBase3D {
   constructor(scene, view, opts) {
     super(scene, view, opts);
     this._env.anchor = (pid) => this.st.anchor(pid);
     this._env.yOf = () => this._y();
     this._avoid = [];
+    this._floor = planetFloorY(-4 - PLANET_ART.BODY_K * 0.4);
   }
-  _y() { const v = this.view; return v.scope && v.scope.mode === 'all' ? ART.FLOOR_Y : PLANET_SESSION_Y; }
+  _y() { return this._floor; }
+  /** 보이는 노드 중 가장 낮은 아랫면(y − BODY_K·r) → 바닥 높이(STEP 단위, 내려갈 땐 바로·올라갈 땐 2 STEP 넘게 차이 날 때만) */
+  _floorStep() {
+    let m = Infinity;
+    for (const n of this.view.vis.values()) { if (n.gone || n.hidden || (n.scopeK ?? 1) < 0.5) continue; m = Math.min(m, n.group.position.y - PLANET_ART.BODY_K * (n.r || 1)); }
+    const f = planetFloorY(m);
+    if (f < this._floor || f - this._floor > 2 * PLANET_ART.STEP) this._floor = f;
+  }
   _nodePos(id) {
     const v = this.view.vis.get(id);
     if (!v || v.gone || v.hidden || v.exiting != null || !v.group.visible || (v.scopeD ?? 1) < 0.5) return null; // 페이드 중엔 그대로(장면·빔은 프로젝트 투명도 ka 로)
@@ -222,14 +230,28 @@ export class PlanetArt3D extends ArtLayerBase3D {
     for (const n of v.vis.values()) { if (n.gone || n.hidden) continue; const p = n.target; x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); }
     return Number.isFinite(x0) ? { x: (x0 + x1) / 2, z: (z0 + z1) / 2, hw: Math.max(18, (x1 - x0) / 2 + 6), hd: Math.max(18, (z1 - z0) / 2 + 6) } : { x: 0, z: 0, hw: 18, hd: 18 };
   }
+  /** 대상 배치 목표: 전체 보기는 섬 발자국의 SHRINK 배(깊은 바닥이 이웃 섬 쪽으로 투영되지 않게), 바닥 글씨는 원래 섬 크기 */
+  _layTarget(pid) {
+    const t = this._target(pid);
+    if (!t || !(this.view.scope && this.view.scope.mode === 'all')) return t;
+    return { ...t, hw: t.hw * PLANET_ART.SHRINK, hd: t.hd * PLANET_ART.SHRINK };
+  }
   _prepare(now, dt, env) {
     const st = this.st, pids = this._pids();
-    st.frame(pids, (p) => this._target(p), now, dt);
+    st.frame(pids, (p) => this._layTarget(p), now, dt);
+    this._floorStep();
     const y = this._y();
     env.cellPx = (pid) => { const a = st.anchor(pid); return a ? ART.CELL * (a.k || 1) * this._pxAt(a.x, y, a.z) : 20; };
     const av = this._avoid; av.length = 0;
-    for (const n of this.view.vis.values()) { if (n.gone || n.hidden || (n.scopeK ?? 1) < 0.5) continue; av.push({ x: n.group.position.x, z: n.group.position.z, r: (n.r || 1) * 1.5 }); }
-    env.avoid = av;
+    const pl = this._plumbs || (this._plumbs = []); pl.length = 0; // 다림줄(노드 → 대상 바닥)
+    const pa = this.view.projAlpha ? (pid) => this.view.projAlpha(pid) : null;
+    for (const n of this.view.vis.values()) {
+      if (n.gone || n.hidden || (n.scopeK ?? 1) < 0.5) continue;
+      const gp = n.group.position;
+      av.push({ x: gp.x, z: gp.z, r: (n.r || 1) * PLANET_ART.AVOID_K });
+      if (n.exiting == null && n.group.visible && pl.length < 160) pl.push({ x: gp.x, y: gp.y, z: gp.z, r: n.r || 1, a: pa && n.projectId ? pa(n.projectId) : 1 });
+    }
+    env.avoid = av; env.plumbs = pl;
     if (this.names) this.names.update(pids, (p) => this._target(p), this._f(), now, dt, { y: y + ART.NAME_Y, reduced: env.reduced });
   }
   _geometry(now, env) { return planetArtGeometry(this.st.book, this.st.lay, this.st.fx, now, env, this.st.geo); }

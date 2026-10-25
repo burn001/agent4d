@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ArtBook, ArtFx, ArtState, ArtGeo, ARTGEO, ART } from '../artifact-core.mjs';
 import { artMockPayload } from '../art-mock.mjs';
-import { planetArtGeometry, pickHits, PLANET_H, cityHeight, KI } from '../art-meta.mjs';
+import { planetArtGeometry, pickHits, PLANET_H, cityHeight, KI, planetFloorY, PLANET_ART } from '../art-meta.mjs';
 import { VxArtPlan, voxelArtGeometry, vxFrame, bayXs, fixtureSpots, vxFitPoints, VXA } from '../voxel/vx-art-core.mjs';
 import { rotateRoom } from '../voxel/xf.mjs';
 
@@ -100,4 +100,14 @@ test('복셀: 도형 상한·서류 패킷(상자)·500대상 계산 시간', ()
   assert.ok(ms < 8, `한 번 ${ms.toFixed(2)}ms`);
   assert.ok(g.nb <= ARTGEO.BOXES && g.nl <= ARTGEO.LINES);
   assert.ok(env.hits.length > 0 && env.hits.length <= (VXA.BAYS_MAX * VXA.DRAWERS * VXA.PER_DRAWER) + 40);
+});
+
+// Planet 층 분리: 바닥 = 가장 낮은 노드 아랫면 − 틈(기본 −9 안팎, STEP 내림), 떠 있는 대상은 낮은 궤도까지만
+test('Planet 층 분리(§93): planetFloorY·낮은 궤도 높이·2D 바닥', () => {
+  assert.equal(planetFloorY(Infinity), PLANET_ART.FLOOR, '노드 없으면 기본 바닥');
+  assert.equal(planetFloorY(-4 - 2.5 * 0.4), -9, '백그라운드 명령(−4, r 0.4) 아래 −9');
+  assert.equal(planetFloorY(5), PLANET_ART.FLOOR, '노드가 높아도 기본 바닥보다 위로 안 감');
+  assert.ok(planetFloorY(-12.3) <= -12.3 - PLANET_ART.GAP && Number.isInteger(planetFloorY(-12.3)), '더 낮은 노드면 그만큼 아래(정수 단위)');
+  for (const k of ['service', 'remote', 'repo']) assert.ok(PLANET_H[k] + 0.5 < PLANET_ART.GAP + 1, `${k} 떠 있는 높이 < 틈(에이전트 평면까지 안 올라감)`);
+  assert.ok(PLANET_ART.FLOOR_2D <= -5 && PLANET_ART.SHRINK < 1 && PLANET_ART.AVOID_K > 1.5);
 });

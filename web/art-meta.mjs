@@ -112,13 +112,24 @@ const hit = (env, pid, id, x, y, z, r) => { if (env.hits) env.hits.push({ pid, i
 
 // ───────────── Planet ─────────────
 /** Planet 높이(바닥 Y0 기준): 서비스 위성·원격 정거장·저장소 게이트(궤도) */
-export const PLANET_H = { service: 2.4, remote: 3.4, repo: 4.4 };
+// Planet 층 분리: 떠 있는 대상(위성·정거장·게이트)은 '낮은 궤도'까지만 — 예전 2.4·3.4·4.4 는 에이전트 행성 높이까지 올라와 섞였다
+export const PLANET_H = { service: 1.4, remote: 2.0, repo: 2.6 };
+/**
+ * Planet 작업 대상 층 = 에이전트 궤도면 아래 별도 바닥. 바닥 높이 = min(FLOOR, 보이는 노드 중 가장 낮은 아랫면(y − BODY_K·r) − GAP) 을
+ * STEP 단위로 내림(노드가 오르내릴 때마다 출렁이지 않게). 전체 보기는 대상 층 발자국을 섬의 SHRINK 배로(깊어진 바닥이 비스듬한
+ * 카메라에서 이웃 섬 쪽으로 투영되지 않게), 노드 아래 비움 반경 = 노드 반지름 × AVOID_K. 2D 는 높이를 기울임으로만 보이므로 FLOOR_2D.
+ */
+export const PLANET_ART = { FLOOR: -8, GAP: 3.5, BODY_K: 2.5, STEP: 1, SHRINK: 0.82, AVOID_K: 2.4, AVOID_K_2D: 3.2, FLOOR_2D: -5.5 };
+export function planetFloorY(minBottom, o = PLANET_ART) {
+  const m = Number.isFinite(minBottom) ? minBottom - o.GAP : o.FLOOR;
+  return Math.floor(Math.min(o.FLOOR, m) / o.STEP) * o.STEP;
+}
 /** 도시 블록 높이: 흐름 판 높이(0.08～0.9, 크기·접촉 수) → 0.35～2.1(낮은 도시) */
 export const cityHeight = (it) => 0.25 + ((blockHeight(it) - 0.08) / 0.82) * 1.25;
 
 /**
  * Planet 바닥층 도형. lay = ArtState.lay(섬 로컬 격자 — 흐름과 같은 배치·축척·섬 안 보장).
- * env = 흐름 artGeometry 의 env + yOf(pid)(바닥 높이: 전체 보기 섬 원판 위 ART.FLOOR_Y, 단일 세션 −6) · hits(집기 기준점 배열, 선택)
+ * env = 흐름 artGeometry 의 env + yOf(pid)(바닥 높이: 에이전트 궤도면 아래 planetFloorY — 3D 기본 −9, 2D −5.5) · hits(집기 기준점 배열, 선택)
  */
 export function planetArtGeometry(book, lay, fx, nowSec, env, geo) {
   geo.begin();
@@ -288,8 +299,27 @@ export function planetArtGeometry(book, lay, fx, nowSec, env, geo) {
     }
   }
   geo.ka = 1;
+  if (env.plumbs && env.plumbs.length) planetPlumbs(geo, env.plumbs, env.yOf ? env.yOf(null) : ART.FLOOR_Y, A.LINE_A);
   if (AC) drawActs(geo, AC, nowSec, { theme: 'planet', unitPx: env.cellPx ? (p) => { const a = env.anchor(p); return env.cellPx(p) / (ART.CELL * ((a && a.k) || 1)); } : null, KI, pos: AP, zoneOf: zoneKeyOf, book, nodePos: env.nodePos, reduced: env.reduced, isLight: env.isLight, pidAlpha: env.pidAlpha || null }); // 장면도 프로젝트 페이드
   return geo;
+}
+/**
+ * 다림줄: 에이전트 행성마다 아랫면에서 대상 바닥까지 옅은 점선 + 바닥의 작은 그림자 고리 — 두 평면이 위아래로 떨어져 있음을 읽히게
+ * (흐름 3D 점선 기둥줄 과 같은 언어). nodes = [{x, y, z, r, a?}](a = 프로젝트 페이드 투명도), 상한 PLUMB_MAX.
+ */
+export const PLUMB_MAX = 160;
+export function planetPlumbs(geo, nodes, floorY, LINE_A) {
+  const A = Math.min(0.26, 0.08 + LINE_A * 0.4);
+  const n = Math.min(nodes.length, PLUMB_MAX);
+  for (let i = 0; i < n; i++) {
+    const p = nodes[i], ka = p.a ?? 1;
+    if (!(ka > 0)) continue;
+    geo.ka = ka;
+    const top = p.y - (p.r || 1) * 1.1;
+    if (top - floorY > 0.6) dashed(geo, p.x, top, p.z, p.x, floorY + 0.06, p.z, KI.zone, A, Math.max(3, Math.min(9, Math.round((top - floorY) / 0.9))));
+    geo.ring(p.x, floorY + 0.04, p.z, (p.r || 1) * 1.15, KI.zone, A * 0.6, 14);
+  }
+  geo.ka = 1;
 }
 /** push 흡입: 최근 파일 블록에서 게이트로 점이 날아감(n = 커밋 수) */
 function absorbTo(geo, book, pid, L, e, nowSec, ax, az, sk, Y0, x, y, z) {
