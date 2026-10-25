@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
 import { pickIslandAt, islandStyle, PULSE_AMP, islandOutline, zoneRayLen } from './pick-core.mjs';
+import { makeOrbitDisc, syncOrbitDisc, styleOrbitDisc } from './orbit-island.js'; // Planet 원형 궤도계
 export { pickIslandAt, pickRectAt, pickLabelAt, islandPickTol, islandStyle } from './pick-core.mjs';
 
 /** 슈퍼타원 섬 도형(경계 상자에 내접): 채움·가장자리 고리(얇게, 두께 w)·안쪽 고리(0.62) — 상자 크기가 바뀔 때만 다시 만든다 */
@@ -78,6 +79,13 @@ export class Islands {
       // 다시 배치되면 섬 바닥도 노드 스프링과 비슷하게 미끄러져 옮겨 감(새 섬은 바로 그 자리)
       it.tx = c.center.x; it.tz = c.center.z;
       if (born || !it.placed) { it.g.position.set(c.center.x, ISLAND_Y, c.center.z); it.placed = true; }
+      // Planet: 원형 궤도계 원판 하나(예전 바닥판·고리·안쪽 고리·쌍성 장식은 숨김)
+      if (c.round > 0) {
+        if (!it.orb) { it.orb = makeOrbitDisc(); it.g.add(it.orb); }
+        const ok = c.round.toFixed(1) + JSON.stringify(c.stars || []) + (c.orbit ? c.orbit.r.toFixed(1) : '') + !!c.inactive;
+        if (it.orbKey !== ok) { it.orbKey = ok; syncOrbitDisc(it.orb, c); }
+      } else if (it.orb) { it.g.remove(it.orb); it.orb.material.dispose(); it.orb = null; it.orbKey = null; }
+      for (const k of ['disc', 'ring']) it[k].visible = !it.orb;
       if (c.box) {
         // 둥근 사각형: 상자 크기가 바뀔 때만 도형을 다시 만든다(배율 1)
         const key = c.box.hw.toFixed(1) + ',' + c.box.hd.toFixed(1);
@@ -91,8 +99,8 @@ export class Islands {
         for (const m of [it.disc, it.ring]) m.scale.setScalar(c.r);
         it.inner.scale.setScalar(c.r);
       }
-      it.inner.visible = !c.inactive && Math.max(c.box ? c.box.hw : c.r, c.box ? c.box.hd : c.r) > 14 && !c.orbit && !c.zones;
-      it.label.position.set(0, 0.2, (c.box ? c.box.hd : c.r) + 1.2);
+      it.inner.visible = !it.orb && !c.inactive && Math.max(c.box ? c.box.hw : c.r, c.box ? c.box.hd : c.r) > 14 && !c.orbit && !c.zones;
+      it.label.position.set(0, 0.2, (c.round > 0 ? c.round : c.box ? c.box.hd : c.r) + 1.2);
       this._syncDeco(it, c);
       const html = islandLabelHtml(c);
       if (html !== it.html) { it.el.innerHTML = html; it.html = html; }
@@ -105,7 +113,7 @@ export class Islands {
   /** 같은 섬 live 메인 여럿: 마주 보기 = 옅은 공전 고리, 파이 = 구역 경계 옅은 선 */
   _syncDeco(it, c) {
     const key = c.orbit ? 'o' + c.orbit.r.toFixed(1) + ':' + (c.orbit.cx || 0).toFixed(1) + ',' + (c.orbit.cz || 0).toFixed(1) : c.zones ? 'z' + c.zones.n + ':' + c.zones.r0.toFixed(1) + ':' + c.box.hw.toFixed(1) + ',' + c.box.hd.toFixed(1) + ':' + c.zones.dirs.map((d) => d.toFixed(2)).join(',') : '';
-    if (it.decoKey === key) return;
+    if (it.decoKey === key && !!it.deco === !!key) { if (it.deco) it.deco.visible = !it.orb; return; }
     it.decoKey = key;
     if (it.deco) { it.g.remove(it.deco); it.deco.geometry.dispose(); it.deco.material.dispose(); it.deco = null; }
     if (!key) return;
@@ -126,6 +134,7 @@ export class Islands {
       it.deco = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ transparent: true, depthWrite: false, color: t.link, opacity: t.isLight ? 0.4 : 0.32 }));
     }
     it.deco.renderOrder = -1;
+    it.deco.visible = !it.orb; // 원형 궤도계는 공전 고리를 원판이 그림
     it.g.add(it.deco);
   }
 
@@ -151,6 +160,14 @@ export class Islands {
     it.inner.material.color.copy(t.link);
     it.inner.material.opacity = st.inner;
     if (it.deco) { it.deco.material.color.copy(t.link); it.deco.material.opacity = (t.isLight ? 0.14 : 0.11) * fa; }
+    if (it.orb) {
+      // 고리 = 링크색을 글자색 쪽으로 조금(다크는 차가운 빛, 라이트는 먹선), 원판 = 그리드색, 항성 빛 = 링크·글자 사이
+      const C = this._oc || (this._oc = { line: new THREE.Color(), fill: new THREE.Color(), glow: new THREE.Color() });
+      C.line.copy(t.link).lerp(t.text, t.isLight ? 0.18 : 0.32);
+      C.fill.copy(t.grid).lerp(t.link, t.isLight ? 0.1 : 0.35);
+      C.glow.copy(t.link).lerp(t.text, 0.5);
+      styleOrbitDisc(it.orb, { ...C, a: fa, fillA: c.inactive ? st.disc * 0.8 : st.disc * (t.isLight ? 1.0 : 2.2), lineA: c.inactive ? st.ring * 1.6 : (t.isLight ? 0.42 : 0.5) * (st.hot ? 1.15 : 1), hot: st.hot ? 1 : 0, rim: t.isLight ? 0.55 : 0.85 });
+    }
     const op = fa < 1 ? (Math.round(fa * 20) / 20).toFixed(2) : '';
     if (it.el.style.opacity !== op) it.el.style.opacity = op;
     it.el.classList.toggle('dim', false);
@@ -165,6 +182,7 @@ export class Islands {
     this._lastNow = now;
     const k = 1 - Math.exp(-dt * 7); // 약 0.6초에 거의 도착
     for (const it of this.items.values()) {
+      if (it.orb) it.orb.material.uniforms.uTime.value = now % 10000;
       const p = it.g.position;
       if (it.tx != null && (Math.abs(it.tx - p.x) > 1e-3 || Math.abs(it.tz - p.z) > 1e-3)) { p.x += (it.tx - p.x) * k; p.z += (it.tz - p.z) * k; }
     }
@@ -212,6 +230,7 @@ export class Islands {
     it.el.remove();
     for (const m of [it.disc, it.ring, it.inner]) { m.material.dispose(); if (it.own) m.geometry.dispose(); }
     if (it.deco) { it.deco.geometry.dispose(); it.deco.material.dispose(); }
+    if (it.orb) it.orb.material.dispose();
     this.items.delete(pid);
   }
 

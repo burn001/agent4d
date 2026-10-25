@@ -16,6 +16,7 @@ const DG_DASH = [0, 0, 0, 0]; // 끊긴 선 무늬(재사용)
 
 import { toScreen, camScale, planetShape, planetColor, mixColor, retractPt } from './flat-core.mjs';
 import { drawCards, drawRings, drawDeviceFace, drawIslands } from './flat-draw.js';
+import { drawPlanetIslands } from './planet-islands2d.js'; // 섬 = 원형 궤도계
 import { drawMechPlanet, drawSubPlanet } from './planet-deco2d.js'; // 행성 연출
 import { stepOrbits, drawOrbits, drawBursts, emitTool, nearestSat, orbitExtent } from './planet-orbits2d.js'; // 궤도계
 import { bodyK } from '../planet-core.mjs';
@@ -134,7 +135,7 @@ export class Planet2DView extends FlatView {
     ctx.fillStyle = t.bg;
     ctx.fillRect(0, 0, W, H);
     const s = this._s = camScale(this.cam, H);
-    if (this.scope.mode === 'all') drawIslands(this, ctx, now, s);
+    if (this.scope.mode === 'all') drawPlanetIslands(this, ctx, now, s); // 원형 궤도계
     if (this.pArt) this.pArt.draw(ctx, now); // 바닥층(노드·연결 아래)
     for (const v of this.vis.values()) {
       if (v.gone || v.hidden) { v._on = false; continue; }

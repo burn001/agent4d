@@ -199,7 +199,7 @@ export class PlanetArt3D extends ArtLayerBase3D {
   }
   _target(pid) {
     const v = this.view;
-    if (v.scope && v.scope.mode === 'all') { const c = v.clusterTarget(pid); return c ? { x: c.center.x, z: c.center.z, hw: c.box ? c.box.hw : c.r, hd: c.box ? c.box.hd : c.r } : null; }
+    if (v.scope && v.scope.mode === 'all') { const c = v.clusterTarget(pid); return c ? { x: c.center.x, z: c.center.z, hw: c.box ? c.box.hw : c.r, hd: c.box ? c.box.hd : c.r, round: c.round || 0 } : null; } // round: 바닥 글씨 = 가장자리 원호
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
     for (const n of v.vis.values()) { if (n.gone || n.hidden) continue; const p = n.target; x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); }
     return Number.isFinite(x0) ? { x: (x0 + x1) / 2, z: (z0 + z1) / 2, hw: Math.max(18, (x1 - x0) / 2 + 6), hd: Math.max(18, (z1 - z0) / 2 + 6) } : { x: 0, z: 0, hw: 18, hd: 18 };

@@ -880,7 +880,7 @@ export class SceneView {
     let pos, parentOf, root;
     const all = this.scope.mode === 'all';
     if (all) {
-      const ov = this._ov = computeOverview(nodes, this.scope.roots, this.scope.projects, this._ov, { showInactive: this.scope.showInactive, nowMs: Date.now(), spread: this.overviewSpread || 1, facing: !!this.overviewFacing, aspect: this._packAspect(), view: this._packView() }); // 섬 배치는 가용 영역 비율·고도
+      const ov = this._ov = computeOverview(nodes, this.scope.roots, this.scope.projects, this._ov, { showInactive: this.scope.showInactive, nowMs: Date.now(), spread: this.overviewSpread || 1, facing: !!this.overviewFacing, round: this.constructor.modeId === 'planet', aspect: this._packAspect(), view: this._packView() }); // 섬 배치는 가용 영역 비율·고도
       pos = ov.pos; parentOf = ov.parentOf;
       const c0 = ov.clusters.find((c) => c.active && c.mains.length) || ov.clusters.find((c) => c.mains.length);
       root = c0 ? c0.currentMain || c0.mains[0].nodeId : (ov.roots[0] ? ov.roots[0].nodeId : null);
@@ -953,7 +953,7 @@ export class SceneView {
       if (!e) { e = { projectId: c.projectId, center: new THREE.Vector3() }; this._clusterV.set(c.projectId, e); }
       e.center.set(c.center.x, 0, c.center.z);
       e.r = c.r; e.name = c.name; e.active = !!c.active; e.live = !!c.live; e.busy = !!c.busy; e.inactive = !!c.inactive; e.temp = !!c.temp;
-      e.box = c.box || null;
+      e.box = c.box || null; e.round = c.round || 0; e.stars = c.stars || null; // Planet 원형 궤도계
     }
     for (const k of [...this._clusterV.keys()]) if (!keep.has(k)) this._clusterV.delete(k);
   }
@@ -1005,7 +1005,7 @@ export class SceneView {
 
   /** 카메라 순환·전체 조망용: [{projectId, name, center:Vector3, r, active, live, busy, inactive}] */
   clusters() { return this.scope.mode === 'all' ? [...this._clusterV.values()] : []; }
-  clusterTarget(projectId) { const e = this._clusterV.get(projectId); return e ? { center: e.center, r: e.r, box: e.box || null } : null; } // box: 상자 맞춤
+  clusterTarget(projectId) { const e = this._clusterV.get(projectId); return e ? { center: e.center, r: e.r, box: e.box || null, round: e.round || 0 } : null; } // box: 상자 맞춤, round: 원형 궤도계 반지름
   nodeCluster(id) { const v = this.vis.get(id); return v ? v.projectId || null : null; }
   /** 화면 좌표 → 섬 projectId(노드가 아닌 빈 섬을 눌렀을 때). 전체 보기 아니면 null.
    *  opts.pid = 그 섬만 + 둘레 여유(프로젝트 영역 판정) */

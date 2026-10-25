@@ -602,7 +602,7 @@ export class FlatView {
     let pos, parentOf, root;
     const all = this.scope.mode === 'all';
     if (all) {
-      const ov = this._ov = computeOverview(nodes, this.scope.roots, this.scope.projects, this._ov, { showInactive: this.scope.showInactive, nowMs: Date.now(), spread: this.overviewSpread || 1, facing: !!this.overviewFacing, aspect: (this.W || 16) / (this.H || 10), view: packView(this.container, { labelBelow: !!this.labelBelow, labelReserve: this.labelReserve ? this.labelReserve() : null, flat: true }) }); // 섬 배치는 가용 영역 비율
+      const ov = this._ov = computeOverview(nodes, this.scope.roots, this.scope.projects, this._ov, { showInactive: this.scope.showInactive, nowMs: Date.now(), spread: this.overviewSpread || 1, facing: !!this.overviewFacing, round: this.constructor.modeId === 'planet', aspect: (this.W || 16) / (this.H || 10), view: packView(this.container, { labelBelow: !!this.labelBelow, labelReserve: this.labelReserve ? this.labelReserve() : null, flat: true }) }); // 섬 배치는 가용 영역 비율
       pos = ov.pos; parentOf = ov.parentOf;
       const c0 = ov.clusters.find((c) => c.active && c.mains.length) || ov.clusters.find((c) => c.mains.length);
       root = c0 ? c0.currentMain || c0.mains[0].nodeId : (ov.roots[0] ? ov.roots[0].nodeId : null);
@@ -677,7 +677,7 @@ export class FlatView {
       e.center.x = c.center.x; e.center.y = 0; e.center.z = c.center.z;
       e.r = c.r; e.name = c.name; e.active = !!c.active; e.live = !!c.live; e.busy = !!c.busy; e.inactive = !!c.inactive; e.temp = !!c.temp;
       e.labelZ = c.labelZ ?? (c.box ? c.center.z + c.box.hd + 1.2 : null); // 이름표 자리(z) — 섬 상자 아래, 없으면 원 아래(복셀 동은 바닥판 앞 가장자리)
-      e.box = c.box || null; e.orbit = c.orbit || null; e.zones = c.zones || null;
+      e.box = c.box || null; e.orbit = c.orbit || null; e.zones = c.zones || null; e.round = c.round || 0; e.stars = c.stars || null;
       e.c = c;
     }
     for (const k of [...this._clusterV.keys()]) if (!keep.has(k)) this._clusterV.delete(k);
@@ -737,7 +737,7 @@ export class FlatView {
   projAlpha(pid) { return this.scope.mode === 'all' ? this.pf.alpha(pid) : 1; }
   projGone(pid) { return this.scope.mode === 'all' ? this.pf.gone(pid) : false; }
   clusters() { return this.scope.mode === 'all' ? [...this._clusterV.values()] : []; }
-  clusterTarget(projectId) { const e = this._clusterV.get(projectId); return e ? { center: e.center, r: e.r, box: e.box || null } : null; } // box: 상자 맞춤
+  clusterTarget(projectId) { const e = this._clusterV.get(projectId); return e ? { center: e.center, r: e.r, box: e.box || null, round: e.round || 0 } : null; } // box: 상자 맞춤, round: 원형 궤도계 반지름
   nodeCluster(id) { const v = this.vis.get(id); return v ? v.projectId || null : null; }
   /** opts.pid = 그 섬만 + 둘레 여유(프로젝트 영역). 나가는(숨는) 섬은 집지 않음 */
   pickCluster(clientX, clientY, opts = {}) {

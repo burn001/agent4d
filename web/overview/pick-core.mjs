@@ -14,7 +14,12 @@ export function pickIslandAt(clusters, x, z, pad = 0) {
   for (const c of clusters) {
     if (!c || !c.center || !(c.r > 0)) continue;
     let k;
-    if (c.box) {
+    if (c.round > 0) {
+      // Planet 원형 궤도계: 반지름 기준(원 + 허용 오차 + 둘레 여유)
+      const d = Math.hypot(x - c.center.x, z - c.center.z);
+      if (d > c.round + islandPickTol(c.round) + pad) continue;
+      k = d / c.round;
+    } else if (c.box) {
       // 섬 = 경계 상자에 내접한 슈퍼타원(n=4): 그 안 + 허용 오차면 그 섬, 여럿이면 상자 대비 가까운 쪽
       const tol = islandPickTol(Math.max(c.box.hw, c.box.hd)) + pad;
       const dx = Math.abs(x - c.center.x), dz = Math.abs(z - c.center.z);

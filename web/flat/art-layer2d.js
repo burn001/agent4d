@@ -5,6 +5,7 @@ import { ART, ART_KEYS, artKeyColor, artFitPoints, ArtState, artNameLines, artNa
 import { planetArtGeometry, pickHits } from '../art-meta.mjs';
 import { VxArtPlan, voxelArtGeometry, vxFitPoints, vxRoomsFor } from '../voxel/vx-art-core.mjs';
 import { projectNameOf, nameFont, dimIslandLabel, undimAll } from '../art-name.js';
+import { arcNamePlate } from '../art-arc.mjs'; // 원형 섬 가장자리 원호 글씨
 import { toScreen, camScale } from './flat-core.mjs';
 
 const AB = 10;
@@ -140,6 +141,7 @@ class ArtLayerBase2D {
       const lines = t ? artNameLines(projectNameOf(v, pid)) : [];
       if (!lines.length) continue;
       keep.add(pid);
+      if (t.round > 0) { this._arcName(ctx, t, lines, s, isLight, pid, root, dimNow); continue; }
       ctx.save();
       ctx.font = nameFont(100);
       const wpx = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 40;
@@ -160,6 +162,36 @@ class ArtLayerBase2D {
     }
     for (const pid of this._named || []) if (!keep.has(pid)) dimIslandLabel(root, pid, false);
     this._named = keep;
+  }
+  /** 원형 궤도계 섬: 먼 쪽(화면 위) 가장자리 안쪽 원호를 따라 글자마다 돌려 그림(여러 줄은 바깥 → 안쪽) */
+  _arcName(ctx, t, lines, s, isLight, pid, root, dimNow) {
+    const a = this._a;
+    ctx.save();
+    ctx.font = nameFont(100);
+    const wpx = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 40;
+    const pl = arcNamePlate(t.round, (110 * lines.length + 30) / wpx, lines.length);
+    if (!pl) { ctx.restore(); return; }
+    this._xy(t.x, t.y || 0, t.z, a);
+    const lh = (pl.H / lines.length) * s, fpx = lh / 1.1;
+    if (fpx < 3) { ctx.restore(); return; }
+    ctx.font = nameFont(fpx);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+    const col = isLight ? '71,85,105' : '124,136,156';
+    lines.forEach((l, i) => {
+      const r = (pl.rc + pl.H / 2) * s - lh * (i + 0.5);
+      const ws = [...l].map((ch) => ctx.measureText(ch).width), tot = ws.reduce((x, y) => x + y, 0);
+      let psi = -Math.PI / 2 - tot / r / 2;
+      [...l].forEach((ch, k) => {
+        const half = ws[k] / r / 2; psi += half;
+        ctx.save(); ctx.translate(a.x + Math.cos(psi) * r, a.y + Math.sin(psi) * r); ctx.rotate(psi + Math.PI / 2);
+        ctx.fillStyle = `rgba(${col},${isLight ? 0.07 : 0.08})`; ctx.fillText(ch, 0, 0);
+        ctx.strokeStyle = `rgba(${col},${isLight ? 0.26 : 0.3})`; ctx.lineWidth = Math.max(1, fpx * 0.03); ctx.strokeText(ch, 0, 0);
+        ctx.restore();
+        psi += half;
+      });
+    });
+    ctx.restore();
+    if (dimNow && this.view.scope && this.view.scope.mode === 'all') dimIslandLabel(root, pid, artNameReadable(fpx * 1.1));
   }
   /** 화면 px(캔버스 기준) → {pid, id}: 지난 그리기의 집기 기준점 중 가장 가까운 것 */
   pick(px, py) {
@@ -185,7 +217,7 @@ export class PlanetArt2D extends ArtLayerBase2D {
   }
   _target(pid) {
     const v = this.view;
-    if (v.scope && v.scope.mode === 'all') { const c = v.clusterTarget(pid); return c ? { x: c.center.x, z: c.center.z, hw: c.box ? c.box.hw : c.r, hd: c.box ? c.box.hd : c.r } : null; }
+    if (v.scope && v.scope.mode === 'all') { const c = v.clusterTarget(pid); return c ? { x: c.center.x, z: c.center.z, hw: c.box ? c.box.hw : c.r, hd: c.box ? c.box.hd : c.r, round: c.round || 0 } : null; } // round: 바닥 글씨 = 가장자리 원호
     let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
     for (const n of v.vis.values()) { if (n.gone || n.hidden) continue; const p = n.target; x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); }
     return Number.isFinite(x0) ? { x: (x0 + x1) / 2, z: (z0 + z1) / 2, hw: Math.max(18, (x1 - x0) / 2 + 6), hd: Math.max(18, (z1 - z0) / 2 + 6) } : { x: 0, z: 0, hw: 18, hd: 18 };
