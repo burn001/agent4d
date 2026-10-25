@@ -12,7 +12,7 @@ import * as THREE from 'three';
 import { MECH, SUB, ORBIT, planetMode, approach, pxRadius, planetLod, orbitLod, orbitSpec, hash01, subType, SETTLE_S, settleK } from './planet-core.mjs';
 import { OrbitSystem, OrbitSparks } from './planet-orbits.js';
 import { injectSubType, mkSubU, buildSubType, stepSubType, setSubTypeColors, disposeSubType } from './planet-sub.js';
-import { Escapement, tourbLod, TOURB_LOD } from './tourbillon-core.mjs'; // 뚜르비용
+import { Escapement, tourbLod, TOURB_LOD, TOURB_GEO } from './tourbillon-core.mjs'; // 뚜르비용
 import { TourbMain, SubCages } from './planet-tourb.js';
 
 const TAU = Math.PI * 2;
@@ -133,13 +133,15 @@ const SUB_F = /* glsl */`#include <emissivemap_fragment>
 function inject(mat, kind, U) {
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, U);
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', COMMON_V).replace('#include <begin_vertex>', BEGIN_V);
+    // 메인: 몸체를 uShrink 만큼 줄여 그림(무브먼트가 앞에 서게) — CPU 지오메트리는 그대로라 클릭 판정은 원래 크기
+    const mech = kind === 'mech';
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', COMMON_V + (mech ? '\nuniform float uShrink;' : '')).replace('#include <begin_vertex>', BEGIN_V + (mech ? '\ntransformed *= uShrink;' : ''));
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', COMMON_F).replace('#include <emissivemap_fragment>', kind === 'mech' ? MECH_F : SUB_F);
   };
   mat.customProgramCacheKey = () => 'planet-' + kind;
   mat.needsUpdate = true;
 }
-const mkU = () => ({ uT: { value: 0 }, uGlow: { value: 0 }, uLights: { value: 0 }, uHatch: { value: 0 }, uDetail: { value: 1 }, uLight: { value: 0 }, uPulse: { value: 1 }, uSpin: { value: 1 } });
+const mkU = () => ({ uT: { value: 0 }, uGlow: { value: 0 }, uLights: { value: 0 }, uHatch: { value: 0 }, uDetail: { value: 1 }, uLight: { value: 0 }, uPulse: { value: 1 }, uSpin: { value: 1 }, uShrink: { value: 1 } });
 
 // 대기 테두리 빛(프레넬)
 const ATMO_V = /* glsl */`varying vec3 vN; varying vec3 vV;
@@ -158,7 +160,7 @@ export class PlanetDeco {
     this.map = new Map(); // id → deco
     this.stats = { main: 0, sub: 0, lod: [0, 0, 0], olod: [0, 0, 0, 0], ms: 0 };
     this.sparks = new OrbitSparks(view.scene);
-    this.cages = new SubCages(view.scene); // 서브 단일 케이지(장면 전체 인스턴싱)
+    this.cages = new SubCages(view.scene, 256, view.renderer); // 서브 단일 케이지(장면 전체 인스턴싱)
   }
 
   /** 노드 v 에 연출을 붙인다(메인·서브·워크플로 에이전트·claude -p, 배치 장치·백그라운드·모니터·워크플로 제외) */
@@ -195,12 +197,10 @@ export class PlanetDeco {
     const metal = new THREE.MeshStandardMaterial({ roughness: 0.38, metalness: 0.55, transparent: true });
     const light = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false });
     const root = new THREE.Group();          // 몸체 크기를 따르는 묶음
-    // 예전 기운 점선 링·운반체·안테나 → 다축 뚜르비용. 적도 기어 띠는 고정된 네 번째 휠(케이지가 그 위를 돈다)
-    const gear = new THREE.Group(); root.add(gear);
-    gear.add(new THREE.Mesh(G.gearBand, metal));
-    const teeth = new THREE.Mesh(G.teeth, metal); gear.add(teeth);
-    for (const o of [teeth, ...gear.children]) o.raycast = () => {};
-    const tb = new TourbMain(root);
+    // 예전 기운 점선 링·운반체·안테나·적도 기어 띠 → 자이로 뚜르비용(고정 4번 휠·케이지·기어 트레인·밸런스는 planet-tourb.js)
+    const gear = new THREE.Group(); gear.visible = false;
+    const teeth = gear;
+    const tb = new TourbMain(root, this.view.renderer);
     v.group.add(root);
     return { type: 'mech', U, metal, light, root, gear, teeth, tb };
   }
@@ -299,10 +299,15 @@ export class PlanetDeco {
         st.main++;
         const c = approach(d.cur, MECH[mode], dt, 2.5);
         d.tb.theme(L, v.mat.color);
-        d.tb.step(d.esc, tourbLod(px), op);
+        const tlod = tourbLod(px);
+        d.tb.step(d.esc, tlod, op);
         d.U.uT.value = T; d.U.uGlow.value = c.glow + sk * 0.6; d.U.uLights.value = c.lights; d.U.uHatch.value = c.hatch;
         d.U.uPulse.value = reduced ? 0.2 : c.pulse; d.U.uDetail.value = lod === 0 ? 0 : Math.min(1, (px - 4) / 8);
-        if (lod !== d.lod) { d.lod = lod; d.gear.visible = lod >= 1; d.teeth.visible = lod >= 2; }
+        if (lod !== d.lod) d.lod = lod;
+        // 무브먼트가 보이면 몸체를 코어로 줄인다(멀면 원래 크기 원판 — 점으로 사라지지 않게). 후광도 코어에 맞춤
+        const shr = tlod >= 1 ? TOURB_GEO.CORE_K : 1;
+        d.U.uShrink.value += (shr - d.U.uShrink.value) * Math.min(1, dt * 6);
+        if (v.extras.glow) v.extras.glow.scale.setScalar(s * (0.5 + 1.0 * d.U.uShrink.value));
         if (lod >= 1) {
           if (d._colKey !== v.mat.color.getHexString() + L) {
             d._colKey = v.mat.color.getHexString() + L;

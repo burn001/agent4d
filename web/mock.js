@@ -47,8 +47,8 @@ export function mockBrief(tool, cat, text, id) {
   switch (tool) {
     case 'Bash': return { brief: text, detail: BASH_DESC[text] || '' };
     case 'Read': return { brief: 'web/' + text, detail: k % 3 ? '' : `${k * 7}줄부터 200줄` };
-    case 'Edit': return { brief: `${text} +${1 + (k % 23)} −${k % 9}`, detail: 'cc-agent-viz/web/' + text };
-    case 'Write': return { brief: `${text} ${20 + k * 3}줄`, detail: 'cc-agent-viz/web/' + text };
+    case 'Edit': return { brief: `${text} +${1 + (k % 23)} −${k % 9}`, detail: 'agent4d/web/' + text };
+    case 'Write': return { brief: `${text} ${20 + k * 3}줄`, detail: 'agent4d/web/' + text };
     case 'Grep': return { brief: `"${text}" · server`, detail: 'glob *.mjs · files_with_matches' };
     case 'Glob': return { brief: text, detail: '' };
     case 'WebFetch': return { brief: text + '/docs', detail: '렌더러 설정 방법 요약' };
@@ -241,9 +241,9 @@ export class MockGenerator {
     if (!this.alive(parentId)) return;
     const runId = 'wf_demo' + String(++this.cnt.w).padStart(3, '0');
     const id = 'w:' + runId;
-    this.tool(out, parentId, ['Workflow', 'workflow', ['cc-agent-viz 팀']], { durMs: 400, endText: 'async_launched' });
+    this.tool(out, parentId, ['Workflow', 'workflow', ['agent4d 팀']], { durMs: 400, endText: 'async_launched' });
     this.at(150, (o) => {
-      this.addNode(o, { id, parentId, kind: 'workflow', label: 'cc-agent-viz 팀 ' + this.cnt.w, meta: { background: true } });
+      this.addNode(o, { id, parentId, kind: 'workflow', label: 'agent4d 팀 ' + this.cnt.w, meta: { background: true } });
       const agents = [];
       PHASES.slice(0, this.stress ? 4 : 3 + (this.cnt.w % 2)).forEach(([phase, label], i) => {
         this.at(600 + i * 1400, (o2) => {

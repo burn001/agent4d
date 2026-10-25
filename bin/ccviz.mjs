@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// cc-agent-viz 런처
+// Agent4D 런처 — 명령 이름 agent4d(bin/agent4d.mjs), ccviz 는 별칭
 //   start [--tunnel|--no-tunnel] [--limits|--no-limits] [--port N] [--project X] [--session ID] [--wait S] [--watch]
 //                                                  서버(기본 127.0.0.1 전용). --tunnel 또는 config remote(또는 workerUrl)일 때만
 //                                                  cloudflared quick tunnel + Worker 등록, 고정 링크 출력
@@ -668,7 +668,7 @@ async function cmdStatus() {
   const relayUp = st.relayPid ? ownedAlive(st.relayPid, "node") : false;
   const local = await httpStatus(`http://127.0.0.1:${port}/healthz`, { timeout: 2000 });
   const sv = local === 200 ? (await httpJson(`http://127.0.0.1:${port}/healthz`, { timeout: 2000 })).json : null; // 버전
-  log(`ccviz v${readVersion()}${sv && sv.version && sv.version !== readVersion() ? ` (server v${sv.version})` : ""}`);
+  log(`agent4d v${readVersion()}${sv && sv.version && sv.version !== readVersion() ? ` (server v${sv.version})` : ""}`);
   const tun = st.tunnelUrl ? await httpStatus(`${st.tunnelUrl}/healthz`, { timeout: 6000 }) : null;
   const h = cfg.workerUrl ? await httpJson(`${cfg.workerUrl}/_health`, { timeout: 10000 }) : { text: t("st.notDeployed") };
   const off = t("st.off");
@@ -882,7 +882,7 @@ async function main() {
   const argv = stripLangFlag(raw);
   const opts = parseArgs(argv);
   const cmd = opts._[0];
-  if (cmd === "version" || opts.version || opts.v || argv.includes("-v") || argv.includes("--version")) { log(`ccviz v${readVersion()}`); return; }
+  if (cmd === "version" || opts.version || opts.v || argv.includes("-v") || argv.includes("--version")) { log(`agent4d v${readVersion()}`); return; }
   switch (cmd) {
     case "start":
       return cmdStart(opts);

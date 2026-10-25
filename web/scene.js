@@ -1,7 +1,7 @@
 // three.js 장면: 노드·연결선·도구 아이콘·효과
 import * as THREE from 'three';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { MissileLayer } from './missile3d.js'; // 사용자 입력 빛줄기
+import { PromptFx } from './prompt-fx.js'; // 사용자 입력 빛줄기(화면 공간 오버레이)
 import { computeLayout, dockedPos, RADIUS, KIND_LABEL } from './layout.js';
 import { computeOverview, isRecentRoot } from './overview/layout.mjs';
 import { packView, packStale, camElev } from './overview/pack-view.js';
@@ -276,7 +276,7 @@ export class SceneView {
   dispose() {
     if (this._disposed) return;
     this._disposed = true;
-    if (this.missiles) { this.missiles.dispose(); this.missiles = null; }
+    if (this.promptFx) { this.promptFx.dispose(); this.promptFx = null; }
     this.renderer.setAnimationLoop(null);
     if (this._ro) this._ro.disconnect();
     if (this._lro) this._lro.disconnect();
@@ -769,15 +769,24 @@ export class SceneView {
     });
   }
 
-  /** 사용자 입력: 시청자(카메라) 앞 화면 하단 가운데에서 쏜 빛줄기가 유도 곡선으로 날아가 노드에 흡수 → 고리·점등 */
-  beam(id) {
-    const v = this.vis.get(id); if (!v) return;
+  /** 사용자 입력: 화면 테두리에 모인 에너지가 메인으로 휘어 날아가 흡수 → 고리·점등. o.delay = 카메라가 옮겨 가는 동안 기다림.
+   *  반환 {start, launch, arrive}(초, 효과음 박자) | null */
+  beam(id, o = {}) {
+    const v = this.vis.get(id); if (!v) return null;
     const L = !!this.tokens.isLight;
-    if (!this.missiles) this.missiles = new MissileLayer(this.scene);
+    if (!this.promptFx) this.promptFx = new PromptFx(this.container);
     const col = new THREE.Color(this.kindColor('main'));
-    this.missiles.launch(this.camera, (out) => { const w = this.vis.get(id); if (!w || w.gone) return false; out.copy(w.group.position); return true; }, {
-      color: col, light: L, reduced: !!this.reduced || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches), now: performance.now() / 1000,
-      onArrive: () => { this.ripple(id, L ? col : new THREE.Color(1, 1, 1)); this.wave(id, col, 0.7); },
+    const pv = new THREE.Vector3();
+    return this.promptFx.launch({
+      targetFn: () => {
+        const w = this.vis.get(id); if (!w || w.gone) return null;
+        pv.copy(w.group.position).project(this.camera);
+        const W = this.container.clientWidth || 1, H = this.container.clientHeight || 1;
+        return { x: (pv.x * 0.5 + 0.5) * W, y: (-pv.y * 0.5 + 0.5) * H, behind: pv.z > 1 };
+      },
+      color: '#' + col.getHexString(), light: L, delay: o.delay || 0,
+      reduced: !!this.reduced || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches),
+      onArrive: () => { if (!this.vis.get(id)) return; this.ripple(id, L ? col : new THREE.Color(1, 1, 1)); this.wave(id, col, 0.7); },
     });
   }
 
@@ -1348,7 +1357,6 @@ export class SceneView {
       this.effects = keep;
     }
 
-    if (this.missiles) this.missiles.update(performance.now() / 1000, this.camera);
     if (this.onFrame) this.onFrame(dt, now);
     this._nearFade();
     if (this.holo) { this.camera.updateMatrixWorld(); this.holo.update(now, this.camera, this.container.clientHeight || 1); }

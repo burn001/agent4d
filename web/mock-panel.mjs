@@ -7,7 +7,7 @@ function hnum(s, n) { let h = 2166136261; s = String(s || ''); for (let i = 0; i
 const P = (mode, part, title, rows, extra = {}) => ({ v: 1, mode, part, title, lines: rows.map((r) => r[1]), marks: rows.map((r) => r[0]).join(''), ...extra });
 
 const SHELL_OUT = {
-  'npm test': [['o', '> cc-agent-viz@0.1.0 test'], ['o', '> node --test server/test && node --test "web/test/*.test.mjs"'], ['o', 'ok 68 - panel: 셸 꼬리·exit'], ['o', 'ok 69 - panel: 마스킹(가짜 값 13가지)'],
+  'npm test': [['o', '> agent4d@0.1.0 test'], ['o', '> node --test server/test && node --test "web/test/*.test.mjs"'], ['o', 'ok 68 - panel: 셸 꼬리·exit'], ['o', 'ok 69 - panel: 마스킹(가짜 값 13가지)'],
     ['o', 'ok 70 - holo: 줄 표시·말줄임'], ['o', 'ok 71 - holo: 말·꼬리 패널'], ['o', '# tests 71'], ['o', '# pass 71'], ['o', '# fail 0']],
   'git status --short': [['o', ' M web/holo.js'], ['o', ' M web/holo-core.mjs'], ['o', '?? web/holo-text.js'], ['o', '?? web/mock-panel.mjs']],
   'curl -s localhost:7788/healthz': [['o', '{"ok":true,"uptime":812,"sessions":3,"clients":1}']],
@@ -16,15 +16,15 @@ const SHELL_OUT = {
 };
 const SHELL_ERR = [['o', '> node --test web/test'], ['e', 'not ok 12 - layout golden angle'], ['e', '  AssertionError: 0.62 !== 0.618'], ['e', '# fail 1']];
 const READ_BODY = {
-  'CONTRACT.md': ['# cc-agent-viz 계약', '', '## 3. 이벤트 형식', '모든 이벤트는 `seq` 순서로 온다.', '| type | 필드 |', '|---|---|', '| tool-start | nodeId · toolUseId · tool · cat |', '| tool-end | ok · durationMs · brief |', '| output | nodeId · text |', '', '## 50. 홀로그램 패널 내용'],
+  'CONTRACT.md': ['# Agent4D 계약', '', '## 3. 이벤트 형식', '모든 이벤트는 `seq` 순서로 온다.', '| type | 필드 |', '|---|---|', '| tool-start | nodeId · toolUseId · tool · cat |', '| tool-end | ok · durationMs · brief |', '| output | nodeId · text |', '', '## 50. 홀로그램 패널 내용'],
   'scene.js': ['import * as THREE from \'three\';', 'import { HoloLayer } from \'./holo.js\';', '', 'export class SceneView {', '  constructor(container, opts = {}) {', '    this.vis = new Map();', '    this.focusId = null;', '    this.holo = new HoloLayer(this.scene, this);', '  }', '', '  toolStart(nodeId, ev, quiet = false) {'],
   'journal.jsonl': ['{"t":"2026-10-24T01:02:03Z","kind":"start","axis":"panel"}', '{"t":"2026-10-24T01:04:11Z","kind":"step","ok":true}', '{"t":"2026-10-24T01:09:40Z","kind":"step","ok":true}', '{"t":"2026-10-24T01:12:02Z","kind":"done"}'],
-  'package.json': ['{', '  "name": "cc-agent-viz",', '  "version": "0.1.0",', '  "private": true,', '  "type": "module",', '  "scripts": {', '    "start": "node bin/ccviz.mjs start",', '    "test": "node --test server/test"', '  }', '}'],
+  'package.json': ['{', '  "name": "agent4d",', '  "version": "0.1.0",', '  "private": true,', '  "type": "module",', '  "scripts": {', '    "start": "node bin/ccviz.mjs start",', '    "test": "node --test server/test"', '  }', '}'],
 };
 const CODE = {
   js: ['export function holoRows(p, rows) {', '  if (!p || rows <= 0) return [];', '  const keep = Math.max(1, rows - 1);', '  return p.lines.slice(0, keep);', '}'],
   css: ['.holo-label {', '  font: 600 10.5px/1.25 ui-monospace, monospace;', '  color: var(--text);', '}'],
-  md: ['# cc-agent-viz', '', '세션 동작을 3D 로 보여 준다.', '', '## 실행', '`ccviz start --watch`'],
+  md: ['# Agent4D', '', '세션 동작을 3D 로 보여 준다.', '', '## 실행', '`ccviz start --watch`'],
   json: ['{', '  "tempo": 92,', '  "key": "D minor",', '  "sections": ["intro", "build", "peak", "outro"]', '}'],
 };
 const ext = (f) => { const m = /\.(\w+)$/.exec(f || ''); const e = m ? m[1] : 'js'; return CODE[e] ? e : e === 'mjs' ? 'js' : 'js'; };
@@ -41,9 +41,9 @@ function inputPanel(ev) {
     case 'Monitor': return P('monitor', 'input', '$ tail -f logs/server.log', [['d', x]]);
     case 'Read':
       if (hnum(id, 5) === 0) return P('read', 'input', '~/.config/demo/credentials.json', [['d', '[비밀 경로 — 내용 생략]']], { hidden: 'secret' });
-      return P('read', 'input', 'cc-agent-viz/web/' + x, [['d', ev.detail || '처음부터 200줄']]);
-    case 'Write': return P('diff', 'input', 'cc-agent-viz/web/' + x, CODE[ext(x)].map((l) => ['+', l]));
-    case 'Edit': return P('diff', 'input', 'cc-agent-viz/web/' + x, [['-', '  const H = 0.85 + 0.22 * v.r;'], ['+', '  let H = (1.25 + 0.3 * v.r) * (isShot ? 1.5 : 1);'], ['+', '  const W = H * HOLO.ASPECT;']]);
+      return P('read', 'input', 'agent4d/web/' + x, [['d', ev.detail || '처음부터 200줄']]);
+    case 'Write': return P('diff', 'input', 'agent4d/web/' + x, CODE[ext(x)].map((l) => ['+', l]));
+    case 'Edit': return P('diff', 'input', 'agent4d/web/' + x, [['-', '  const H = 0.85 + 0.22 * v.r;'], ['+', '  let H = (1.25 + 0.3 * v.r) * (isShot ? 1.5 : 1);'], ['+', '  const W = H * HOLO.ASPECT;']]);
     case 'Grep': return P('search', 'input', `"${x}" · server`, [['d', 'glob *.mjs · files_with_matches']]);
     case 'Glob': return P('search', 'input', x, []);
     case 'WebFetch': return P('web', 'input', x + '/docs', [['d', '렌더러 설정 방법 요약']]);

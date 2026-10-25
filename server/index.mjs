@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// cc-agent-viz 수집·스트리밍 서버. Node 내장 모듈만 사용. 127.0.0.1 전용.
+// Agent4D 수집·스트리밍 서버. Node 내장 모듈만 사용. 127.0.0.1 전용.
 import { readVersion } from './version.mjs';
 import http from 'node:http';
 import fs from 'node:fs';

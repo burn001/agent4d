@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// cc-agent-viz statusLine 래퍼. Node 내장 모듈만.
+// Agent4D statusLine 래퍼. Node 내장 모듈만.
 //  - 실행본: 설치 때 <CCVIZ_HOME>/statusline.mjs 로 복사되고 settings.json 의 statusLine.command 가 이 파일을 가리킨다.
 //  - stdin JSON 의 rate_limits.five_hour / seven_day 만 <CCVIZ_HOME>/ratelimits.json 에 원자적으로 쓴다.
 //  - 설치 전 statusLine 명령(prev)이 있으면 같은 stdin 으로 실행해 그 출력을 그대로 내보낸다.

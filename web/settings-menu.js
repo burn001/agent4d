@@ -82,7 +82,7 @@ export function mountSettings() {
   soundNote.textContent = t('core.settings.soundNote');
   const rows = [
     row(t('core.settings.row.view'), [viewNode]),
-    row(t('core.settings.row.camera'), [$('btn-camera'), $('btn-cam-mode')]),
+    row(t('core.settings.row.camera'), [$('btn-camera'), $('btn-cam-mode'), $('btn-follow-prompt')]),
     row(t('core.settings.row.display'), [$('btn-done'), $('btn-env'), $('btn-legend')]),
     row(t('core.settings.row.theme'), [$('btn-theme')]),
     row(t('core.settings.row.sound'), [soundNote]),

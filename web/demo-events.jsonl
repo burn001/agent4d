@@ -16,9 +16,9 @@
 {"type":"tool-end","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00004","tool":"Agent","cat":"agent","ok":true,"durationMs":300,"text":"async_launched","brief":"async_launched","seq":16,"ts":"2026-10-23T01:00:02.900Z"}
 {"type":"text","nodeId":"a:demo0001","role":"assistant","text":"서버 SSE 형식을 확인했습니다. snapshot 다음 ev 가 이어집니다.","seq":17,"ts":"2026-10-23T01:00:02.992Z"}
 {"type":"tool-end","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00003","tool":"Bash","cat":"shell","ok":true,"durationMs":1026,"text":"exit 0","brief":"exit 0 · nothing to commit","seq":18,"ts":"2026-10-23T01:00:03.045Z"}
-{"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00005","tool":"Workflow","cat":"workflow","skill":null,"text":"cc-agent-viz 팀","brief":"cc-agent-viz 팀","detail":"","seq":19,"ts":"2026-10-23T01:00:03.200Z"}
+{"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00005","tool":"Workflow","cat":"workflow","skill":null,"text":"agent4d 팀","brief":"agent4d 팀","detail":"","seq":19,"ts":"2026-10-23T01:00:03.200Z"}
 {"type":"text","nodeId":"s:demo-main-0001","role":"assistant","text":"이 부분은 계약과 다르므로 반환값에 적겠습니다.","seq":20,"ts":"2026-10-23T01:00:03.336Z"}
-{"type":"node-add","nodeId":"w:wf_demo001","node":{"id":"w:wf_demo001","parentId":"s:demo-main-0001","kind":"workflow","label":"cc-agent-viz 팀 1","model":"claude-opus-5-5","status":"active","startedAt":"2026-10-23T01:00:03.350Z","endedAt":null,"lastActivityAt":"2026-10-23T01:00:03.350Z","depth":1,"sessionId":"demo-main-0001","meta":{"agentType":null,"toolUseId":null,"phase":null,"cwd":null,"command":null,"skill":null,"background":true},"counts":{"tools":0,"errors":0,"texts":0},"openTools":[]},"seq":21,"ts":"2026-10-23T01:00:03.350Z"}
+{"type":"node-add","nodeId":"w:wf_demo001","node":{"id":"w:wf_demo001","parentId":"s:demo-main-0001","kind":"workflow","label":"agent4d 팀 1","model":"claude-opus-5-5","status":"active","startedAt":"2026-10-23T01:00:03.350Z","endedAt":null,"lastActivityAt":"2026-10-23T01:00:03.350Z","depth":1,"sessionId":"demo-main-0001","meta":{"agentType":null,"toolUseId":null,"phase":null,"cwd":null,"command":null,"skill":null,"background":true},"counts":{"tools":0,"errors":0,"texts":0},"openTools":[]},"seq":21,"ts":"2026-10-23T01:00:03.350Z"}
 {"type":"thinking","nodeId":"a:demo0002","chars":330,"seq":22,"ts":"2026-10-23T01:00:03.486Z"}
 {"type":"tool-end","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00005","tool":"Workflow","cat":"workflow","ok":true,"durationMs":400,"text":"async_launched","brief":"async_launched","seq":23,"ts":"2026-10-23T01:00:03.600Z"}
 {"type":"node-add","nodeId":"a:demowf0003","node":{"id":"a:demowf0003","parentId":"w:wf_demo001","kind":"workflow-agent","label":"설계:계약","model":"claude-opus-5-5","status":"active","startedAt":"2026-10-23T01:00:03.950Z","endedAt":null,"lastActivityAt":"2026-10-23T01:00:03.950Z","depth":2,"sessionId":"demo-main-0001","meta":{"agentType":"workflow-subagent","toolUseId":null,"phase":"Design","cwd":null,"command":null,"skill":null,"background":true},"counts":{"tools":0,"errors":0,"texts":0},"openTools":[]},"seq":24,"ts":"2026-10-23T01:00:03.950Z"}
@@ -37,11 +37,11 @@
 {"type":"node-add","nodeId":"a:demowf0004","node":{"id":"a:demowf0004","parentId":"w:wf_demo001","kind":"workflow-agent","label":"빌드:서버","model":"claude-opus-5-5","status":"active","startedAt":"2026-10-23T01:00:05.350Z","endedAt":null,"lastActivityAt":"2026-10-23T01:00:05.350Z","depth":2,"sessionId":"demo-main-0001","meta":{"agentType":"workflow-subagent","toolUseId":null,"phase":"Build","cwd":null,"command":null,"skill":null,"background":true},"counts":{"tools":0,"errors":0,"texts":0},"openTools":[]},"seq":37,"ts":"2026-10-23T01:00:05.350Z"}
 {"type":"text","nodeId":"a:demo0001","role":"assistant","text":"빌드 결과를 검토하고 있습니다.","seq":38,"ts":"2026-10-23T01:00:05.397Z"}
 {"type":"text","nodeId":"a:demowf0004","role":"assistant","text":"스크린샷으로 다크·라이트 테마를 확인했습니다.","seq":39,"ts":"2026-10-23T01:00:05.650Z"}
-{"type":"tool-start","nodeId":"a:demo0002","toolUseId":"toolu_demo00009","tool":"Write","cat":"write","skill":null,"text":"layout.js","brief":"layout.js 203줄","detail":"cc-agent-viz/web/layout.js","seq":40,"ts":"2026-10-23T01:00:05.893Z"}
+{"type":"tool-start","nodeId":"a:demo0002","toolUseId":"toolu_demo00009","tool":"Write","cat":"write","skill":null,"text":"layout.js","brief":"layout.js 203줄","detail":"agent4d/web/layout.js","seq":40,"ts":"2026-10-23T01:00:05.893Z"}
 {"type":"output","nodeId":"m:demo001","text":"GET /events 200 (SSE)","seq":41,"ts":"2026-10-23T01:00:05.900Z"}
 {"type":"node-update","nodeId":"s:demo-main-0001","patch":{"meta":{"skill":null}},"seq":42,"ts":"2026-10-23T01:00:06.131Z"}
 {"type":"tool-end","nodeId":"a:demo0002","toolUseId":"toolu_demo00009","tool":"Write","cat":"write","ok":true,"durationMs":314,"text":"완료","brief":"+11 −7","seq":43,"ts":"2026-10-23T01:00:06.207Z"}
-{"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00010","tool":"Edit","cat":"edit","skill":null,"text":"theme.css","brief":"theme.css +5 −1","detail":"cc-agent-viz/web/theme.css","seq":44,"ts":"2026-10-23T01:00:06.229Z"}
+{"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00010","tool":"Edit","cat":"edit","skill":null,"text":"theme.css","brief":"theme.css +5 −1","detail":"agent4d/web/theme.css","seq":44,"ts":"2026-10-23T01:00:06.229Z"}
 {"type":"node-add","nodeId":"a:demowf0005","node":{"id":"a:demowf0005","parentId":"w:wf_demo001","kind":"workflow-agent","label":"빌드:프런트","model":"claude-opus-5-5","status":"active","startedAt":"2026-10-23T01:00:06.750Z","endedAt":null,"lastActivityAt":"2026-10-23T01:00:06.750Z","depth":2,"sessionId":"demo-main-0001","meta":{"agentType":"workflow-subagent","toolUseId":null,"phase":"Build","cwd":null,"command":null,"skill":null,"background":true},"counts":{"tools":0,"errors":0,"texts":0},"openTools":[]},"seq":45,"ts":"2026-10-23T01:00:06.750Z"}
 {"type":"thinking","nodeId":"a:demowf0003","chars":2012,"seq":46,"ts":"2026-10-23T01:00:06.779Z"}
 {"type":"tool-start","nodeId":"a:demowf0004","toolUseId":"toolu_demo00011","tool":"Grep","cat":"search","skill":null,"text":"task-notification","brief":"\"task-notification\" · server","detail":"glob *.mjs · files_with_matches","seq":47,"ts":"2026-10-23T01:00:06.934Z"}
@@ -122,7 +122,7 @@
 {"type":"text","nodeId":"a:demo0001","role":"assistant","text":"노드 배치 규칙을 황금각 기준으로 구현했습니다.","seq":122,"ts":"2026-10-23T01:00:13.512Z"}
 {"type":"tool-end","nodeId":"a:demowf0003","toolUseId":"toolu_demo00033","tool":"Artifact","cat":"artifact","ok":true,"durationMs":866,"text":"완료","brief":"완료","seq":123,"ts":"2026-10-23T01:00:13.549Z"}
 {"type":"tool-end","nodeId":"a:demowf0005","toolUseId":"toolu_demo00032","tool":"WebSearch","cat":"web","ok":true,"durationMs":1344,"text":"완료","brief":"HTTP 200 · 92KB","seq":124,"ts":"2026-10-23T01:00:13.719Z"}
-{"type":"tool-start","nodeId":"a:demo0002","toolUseId":"toolu_demo00037","tool":"Write","cat":"write","skill":null,"text":"README.md","brief":"README.md 47줄","detail":"cc-agent-viz/web/README.md","seq":125,"ts":"2026-10-23T01:00:13.806Z"}
+{"type":"tool-start","nodeId":"a:demo0002","toolUseId":"toolu_demo00037","tool":"Write","cat":"write","skill":null,"text":"README.md","brief":"README.md 47줄","detail":"agent4d/web/README.md","seq":125,"ts":"2026-10-23T01:00:13.806Z"}
 {"type":"tool-start","nodeId":"a:demo0007","toolUseId":"toolu_demo00038","tool":"Agent","cat":"agent","skill":null,"text":"Cloudflare 워커 보조","brief":"Cloudflare 워커 보조","detail":"","seq":126,"ts":"2026-10-23T01:00:13.882Z"}
 {"type":"tool-end","nodeId":"a:demowf0006","toolUseId":"toolu_demo00031","tool":"mcp__context7__query-docs","cat":"mcp","ok":true,"durationMs":2097,"text":"완료","brief":"완료","seq":127,"ts":"2026-10-23T01:00:13.995Z"}
 {"type":"node-add","nodeId":"a:demo0009","node":{"id":"a:demo0009","parentId":"a:demo0007","kind":"subagent","label":"Cloudflare 워커 보조","model":"claude-opus-5-5","status":"active","startedAt":"2026-10-23T01:00:14.002Z","endedAt":null,"lastActivityAt":"2026-10-23T01:00:14.002Z","depth":3,"sessionId":"demo-main-0001","meta":{"agentType":"general-purpose","toolUseId":"toolu_demo00038","phase":null,"cwd":null,"command":null,"skill":null,"background":true},"counts":{"tools":0,"errors":0,"texts":0},"openTools":[]},"seq":128,"ts":"2026-10-23T01:00:14.002Z"}
@@ -164,7 +164,7 @@
 {"type":"tool-end","nodeId":"a:demo0007","toolUseId":"toolu_demo00048","tool":"SendMessage","cat":"agent","ok":true,"durationMs":454,"text":"완료","brief":"완료","seq":164,"ts":"2026-10-23T01:00:16.402Z"}
 {"type":"tool-end","nodeId":"a:demo0009","toolUseId":"toolu_demo00041","tool":"Grep","cat":"search","ok":true,"durationMs":2119,"text":"완료","brief":"1개 파일","seq":165,"ts":"2026-10-23T01:00:16.514Z"}
 {"type":"tool-start","nodeId":"a:demo0009","toolUseId":"toolu_demo00050","tool":"Grep","cat":"search","skill":null,"text":"CCVIZ_READY","brief":"\"CCVIZ_READY\" · server","detail":"glob *.mjs · files_with_matches","seq":166,"ts":"2026-10-23T01:00:16.534Z"}
-{"type":"tool-start","nodeId":"a:demowf0004","toolUseId":"toolu_demo00051","tool":"Edit","cat":"edit","skill":null,"text":"app.js","brief":"app.js +9 −4","detail":"cc-agent-viz/web/app.js","seq":167,"ts":"2026-10-23T01:00:16.660Z"}
+{"type":"tool-start","nodeId":"a:demowf0004","toolUseId":"toolu_demo00051","tool":"Edit","cat":"edit","skill":null,"text":"app.js","brief":"app.js +9 −4","detail":"agent4d/web/app.js","seq":167,"ts":"2026-10-23T01:00:16.660Z"}
 {"type":"thinking","nodeId":"a:demowf0003","chars":3017,"seq":168,"ts":"2026-10-23T01:00:16.683Z"}
 {"type":"tool-end","nodeId":"a:demowf0005","toolUseId":"toolu_demo00043","tool":"TodoWrite","cat":"other","ok":true,"durationMs":1963,"text":"완료","brief":"완료","seq":169,"ts":"2026-10-23T01:00:16.797Z"}
 {"type":"tool-start","nodeId":"a:demowf0006","toolUseId":"toolu_demo00052","tool":"Bash","cat":"shell","skill":null,"text":"npm test","brief":"npm test","detail":"단위시험 실행","seq":170,"ts":"2026-10-23T01:00:16.810Z"}
@@ -194,7 +194,7 @@
 {"type":"output","nodeId":"b:demo002","text":"[watch] 2 files changed","seq":194,"ts":"2026-10-23T01:00:18.690Z"}
 {"type":"tool-start","nodeId":"a:demo0009","toolUseId":"toolu_demo00058","tool":"Grep","cat":"search","skill":null,"text":"CCVIZ_READY","brief":"\"CCVIZ_READY\" · server","detail":"glob *.mjs · files_with_matches","seq":195,"ts":"2026-10-23T01:00:18.719Z"}
 {"type":"tool-start","nodeId":"a:demo0001","toolUseId":"toolu_demo00059","tool":"mcp__context7__query-docs","cat":"mcp","skill":null,"text":"context7.query-docs","brief":"context7.query-docs","detail":"","seq":196,"ts":"2026-10-23T01:00:18.730Z"}
-{"type":"tool-start","nodeId":"a:demowf0006","toolUseId":"toolu_demo00060","tool":"Write","cat":"write","skill":null,"text":"README.md","brief":"README.md 65줄","detail":"cc-agent-viz/web/README.md","seq":197,"ts":"2026-10-23T01:00:18.871Z"}
+{"type":"tool-start","nodeId":"a:demowf0006","toolUseId":"toolu_demo00060","tool":"Write","cat":"write","skill":null,"text":"README.md","brief":"README.md 65줄","detail":"agent4d/web/README.md","seq":197,"ts":"2026-10-23T01:00:18.871Z"}
 {"type":"tool-start","nodeId":"a:demo0008","toolUseId":"toolu_demo00061","tool":"Skill","cat":"skill","skill":"frontend-design","text":"frontend-design","brief":"frontend-design","detail":"","seq":198,"ts":"2026-10-23T01:00:18.918Z"}
 {"type":"node-update","nodeId":"a:demo0008","patch":{"meta":{"skill":"frontend-design"}},"seq":199,"ts":"2026-10-23T01:00:18.918Z"}
 {"type":"thinking","nodeId":"a:demowf0005","chars":2384,"seq":200,"ts":"2026-10-23T01:00:18.940Z"}
@@ -290,15 +290,15 @@
 {"type":"tool-end","nodeId":"a:demo0007","toolUseId":"toolu_demo00083","tool":"Glob","cat":"search","ok":true,"durationMs":1740,"text":"완료","brief":"8개 파일","seq":290,"ts":"2026-10-23T01:00:25.134Z"}
 {"type":"node-update","nodeId":"a:demo0001","patch":{"meta":{"skill":null}},"seq":291,"ts":"2026-10-23T01:00:25.144Z"}
 {"type":"text","nodeId":"a:demo0001","role":"assistant","text":"이 부분은 계약과 다르므로 반환값에 적겠습니다.","seq":292,"ts":"2026-10-23T01:00:25.171Z"}
-{"type":"tool-start","nodeId":"a:demo0010","toolUseId":"toolu_demo00089","tool":"Edit","cat":"edit","skill":null,"text":"app.js","brief":"app.js +17 −4","detail":"cc-agent-viz/web/app.js","seq":293,"ts":"2026-10-23T01:00:25.372Z"}
+{"type":"tool-start","nodeId":"a:demo0010","toolUseId":"toolu_demo00089","tool":"Edit","cat":"edit","skill":null,"text":"app.js","brief":"app.js +17 −4","detail":"agent4d/web/app.js","seq":293,"ts":"2026-10-23T01:00:25.372Z"}
 {"type":"tool-end","nodeId":"a:demowf0005","toolUseId":"toolu_demo00085","tool":"Monitor","cat":"monitor","ok":true,"durationMs":1477,"text":"완료","brief":"완료","seq":294,"ts":"2026-10-23T01:00:25.505Z"}
 {"type":"tool-start","nodeId":"a:demo0007","toolUseId":"toolu_demo00090","tool":"Monitor","cat":"monitor","skill":null,"text":"터널 로그 감시","brief":"터널 로그 감시","detail":"","seq":295,"ts":"2026-10-23T01:00:25.506Z"}
 {"type":"node-update","nodeId":"s:demo-main-0001","patch":{"meta":{"skill":null}},"seq":296,"ts":"2026-10-23T01:00:25.519Z"}
 {"type":"output","nodeId":"b:demo002","text":"ok 12 - layout golden angle\nok 13 - camera framing","seq":297,"ts":"2026-10-23T01:00:25.558Z"}
-{"type":"tool-start","nodeId":"a:demo0008","toolUseId":"toolu_demo00091","tool":"Write","cat":"write","skill":null,"text":"bgm.json","brief":"bgm.json 35줄","detail":"cc-agent-viz/web/bgm.json","seq":298,"ts":"2026-10-23T01:00:25.581Z"}
+{"type":"tool-start","nodeId":"a:demo0008","toolUseId":"toolu_demo00091","tool":"Write","cat":"write","skill":null,"text":"bgm.json","brief":"bgm.json 35줄","detail":"agent4d/web/bgm.json","seq":298,"ts":"2026-10-23T01:00:25.581Z"}
 {"type":"text","nodeId":"a:demowf0006","role":"assistant","text":"터널 주소를 KV 에 등록했습니다.","seq":299,"ts":"2026-10-23T01:00:25.668Z"}
 {"type":"text","nodeId":"s:demo-main-0001","role":"assistant","text":"카메라 자동 투어 점수를 계산합니다.","seq":300,"ts":"2026-10-23T01:00:25.709Z"}
-{"type":"tool-start","nodeId":"a:demo0001","toolUseId":"toolu_demo00092","tool":"Edit","cat":"edit","skill":null,"text":"worker.js","brief":"worker.js +20 −7","detail":"cc-agent-viz/web/worker.js","seq":301,"ts":"2026-10-23T01:00:25.796Z"}
+{"type":"tool-start","nodeId":"a:demo0001","toolUseId":"toolu_demo00092","tool":"Edit","cat":"edit","skill":null,"text":"worker.js","brief":"worker.js +20 −7","detail":"agent4d/web/worker.js","seq":301,"ts":"2026-10-23T01:00:25.796Z"}
 {"type":"thinking","nodeId":"a:demo0009","chars":2966,"seq":302,"ts":"2026-10-23T01:00:25.825Z"}
 {"type":"tool-start","nodeId":"a:demo0007","toolUseId":"toolu_demo00093","tool":"Grep","cat":"search","skill":null,"text":"toolUseId","brief":"\"toolUseId\" · server","detail":"glob *.mjs · files_with_matches","seq":303,"ts":"2026-10-23T01:00:26.062Z"}
 {"type":"tool-start","nodeId":"a:demo0002","toolUseId":"toolu_demo00094","tool":"Workflow","cat":"workflow","skill":null,"text":"빌드 단계 실행","brief":"빌드 단계 실행","detail":"","seq":304,"ts":"2026-10-23T01:00:26.238Z"}
@@ -307,7 +307,7 @@
 {"type":"tool-end","nodeId":"a:demowf0005","toolUseId":"toolu_demo00088","tool":"PushNotification","cat":"notify","ok":true,"durationMs":1457,"text":"완료","brief":"완료","seq":307,"ts":"2026-10-23T01:00:26.425Z"}
 {"type":"tool-end","nodeId":"a:demo0007","toolUseId":"toolu_demo00084","tool":"Bash","cat":"shell","ok":true,"durationMs":2503,"text":"exit 0","brief":"exit 0 · pass 96","seq":308,"ts":"2026-10-23T01:00:26.427Z"}
 {"type":"tool-end","nodeId":"s:demo-child-0001","toolUseId":"toolu_demo00087","tool":"Workflow","cat":"workflow","ok":true,"durationMs":1817,"text":"완료","brief":"완료","seq":309,"ts":"2026-10-23T01:00:26.497Z"}
-{"type":"tool-start","nodeId":"a:demowf0005","toolUseId":"toolu_demo00096","tool":"Edit","cat":"edit","skill":null,"text":"theme.css","brief":"theme.css +2 −2","detail":"cc-agent-viz/web/theme.css","seq":310,"ts":"2026-10-23T01:00:26.596Z"}
+{"type":"tool-start","nodeId":"a:demowf0005","toolUseId":"toolu_demo00096","tool":"Edit","cat":"edit","skill":null,"text":"theme.css","brief":"theme.css +2 −2","detail":"agent4d/web/theme.css","seq":310,"ts":"2026-10-23T01:00:26.596Z"}
 {"type":"node-update","nodeId":"a:demo0002","patch":{"meta":{"skill":null}},"seq":311,"ts":"2026-10-23T01:00:26.636Z"}
 {"type":"tool-end","nodeId":"a:demo0007","toolUseId":"toolu_demo00090","tool":"Monitor","cat":"monitor","ok":true,"durationMs":1251,"text":"완료","brief":"완료","seq":312,"ts":"2026-10-23T01:00:26.757Z"}
 {"type":"tool-start","nodeId":"a:demo0001","toolUseId":"toolu_demo00097","tool":"Artifact","cat":"artifact","skill":null,"text":"결과 보고 페이지 게시","brief":"결과 보고 페이지 게시","detail":"","seq":313,"ts":"2026-10-23T01:00:26.773Z"}
@@ -397,7 +397,7 @@
 {"type":"output","nodeId":"b:demo001","text":"2026-10-23T01:12:04Z INF Registered tunnel connection","seq":397,"ts":"2026-10-23T01:00:33.534Z"}
 {"type":"text","nodeId":"s:demo-child-0001","role":"assistant","text":"스크린샷으로 다크·라이트 테마를 확인했습니다.","seq":398,"ts":"2026-10-23T01:00:33.740Z"}
 {"type":"text","nodeId":"a:demowf0004","role":"assistant","text":"스크린샷으로 다크·라이트 테마를 확인했습니다.","seq":399,"ts":"2026-10-23T01:00:34.047Z"}
-{"type":"tool-start","nodeId":"a:demowf0006","toolUseId":"toolu_demo00116","tool":"Write","cat":"write","skill":null,"text":"bgm.json","brief":"bgm.json 152줄","detail":"cc-agent-viz/web/bgm.json","seq":400,"ts":"2026-10-23T01:00:34.056Z"}
+{"type":"tool-start","nodeId":"a:demowf0006","toolUseId":"toolu_demo00116","tool":"Write","cat":"write","skill":null,"text":"bgm.json","brief":"bgm.json 152줄","detail":"agent4d/web/bgm.json","seq":400,"ts":"2026-10-23T01:00:34.056Z"}
 {"type":"text","nodeId":"a:demo0011","role":"assistant","text":"서버 SSE 형식을 확인했습니다. snapshot 다음 ev 가 이어집니다.","seq":401,"ts":"2026-10-23T01:00:34.068Z"}
 {"type":"text","nodeId":"a:demo0009","role":"assistant","text":"노드 배치 규칙을 황금각 기준으로 구현했습니다.","seq":402,"ts":"2026-10-23T01:00:34.219Z"}
 {"type":"thinking","nodeId":"a:demo0002","chars":2576,"seq":403,"ts":"2026-10-23T01:00:34.333Z"}
@@ -410,16 +410,16 @@
 {"type":"tool-start","nodeId":"a:demowf0004","toolUseId":"toolu_demo00118","tool":"Grep","cat":"search","skill":null,"text":"CCVIZ_READY","brief":"\"CCVIZ_READY\" · server","detail":"glob *.mjs · files_with_matches","seq":410,"ts":"2026-10-23T01:00:35.187Z"}
 {"type":"output","nodeId":"b:demo001","text":"ok 12 - layout golden angle\nok 13 - camera framing","seq":411,"ts":"2026-10-23T01:00:35.238Z"}
 {"type":"tool-end","nodeId":"a:demowf0004","toolUseId":"toolu_demo00111","tool":"PowerShell","cat":"shell","ok":true,"durationMs":3046,"text":"exit 0","brief":"exit 0 · {\"ok\":true}","seq":412,"ts":"2026-10-23T01:00:35.267Z"}
-{"type":"tool-start","nodeId":"a:demo0007","toolUseId":"toolu_demo00119","tool":"Edit","cat":"edit","skill":null,"text":"app.js","brief":"app.js +3 −7","detail":"cc-agent-viz/web/app.js","seq":413,"ts":"2026-10-23T01:00:35.504Z"}
+{"type":"tool-start","nodeId":"a:demo0007","toolUseId":"toolu_demo00119","tool":"Edit","cat":"edit","skill":null,"text":"app.js","brief":"app.js +3 −7","detail":"agent4d/web/app.js","seq":413,"ts":"2026-10-23T01:00:35.504Z"}
 {"type":"tool-end","nodeId":"s:demo-child-0001","toolUseId":"toolu_demo00114","tool":"WebSearch","cat":"web","ok":true,"durationMs":3175,"text":"완료","brief":"HTTP 200 · 20KB","seq":414,"ts":"2026-10-23T01:00:35.678Z"}
 {"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00120","tool":"Bash","cat":"shell","skill":null,"text":"npm test","brief":"npm test","detail":"단위시험 실행","seq":415,"ts":"2026-10-23T01:00:35.696Z"}
 {"type":"tool-start","nodeId":"a:demo0011","toolUseId":"toolu_demo00121","tool":"Glob","cat":"search","skill":null,"text":"web/**/*.js","brief":"web/**/*.js","detail":"","seq":416,"ts":"2026-10-23T01:00:35.745Z"}
 {"type":"tool-end","nodeId":"a:demowf0004","toolUseId":"toolu_demo00118","tool":"Grep","cat":"search","ok":true,"durationMs":567,"text":"완료","brief":"1개 파일","seq":417,"ts":"2026-10-23T01:00:35.753Z"}
-{"type":"tool-start","nodeId":"a:demo0009","toolUseId":"toolu_demo00122","tool":"Write","cat":"write","skill":null,"text":"README.md","brief":"README.md 230줄","detail":"cc-agent-viz/web/README.md","seq":418,"ts":"2026-10-23T01:00:35.845Z"}
+{"type":"tool-start","nodeId":"a:demo0009","toolUseId":"toolu_demo00122","tool":"Write","cat":"write","skill":null,"text":"README.md","brief":"README.md 230줄","detail":"agent4d/web/README.md","seq":418,"ts":"2026-10-23T01:00:35.845Z"}
 {"type":"output","nodeId":"b:demo002","text":"GET /healthz 200 3ms","seq":419,"ts":"2026-10-23T01:00:35.873Z"}
 {"type":"node-update","nodeId":"a:demowf0003","patch":{"meta":{"skill":null}},"seq":420,"ts":"2026-10-23T01:00:35.997Z"}
 {"type":"output","nodeId":"b:demo001","text":"compiling… done in 412ms","seq":421,"ts":"2026-10-23T01:00:36.026Z"}
-{"type":"tool-start","nodeId":"a:demo0002","toolUseId":"toolu_demo00123","tool":"Write","cat":"write","skill":null,"text":"layout.js","brief":"layout.js 188줄","detail":"cc-agent-viz/web/layout.js","seq":422,"ts":"2026-10-23T01:00:36.139Z"}
+{"type":"tool-start","nodeId":"a:demo0002","toolUseId":"toolu_demo00123","tool":"Write","cat":"write","skill":null,"text":"layout.js","brief":"layout.js 188줄","detail":"agent4d/web/layout.js","seq":422,"ts":"2026-10-23T01:00:36.139Z"}
 {"type":"tool-start","nodeId":"a:demowf0006","toolUseId":"toolu_demo00124","tool":"Glob","cat":"search","skill":null,"text":"web/**/*.js","brief":"web/**/*.js","detail":"","seq":423,"ts":"2026-10-23T01:00:36.176Z"}
 {"type":"tool-end","nodeId":"a:demo0007","toolUseId":"toolu_demo00119","tool":"Edit","cat":"edit","ok":true,"durationMs":745,"text":"완료","brief":"+22 −0","seq":424,"ts":"2026-10-23T01:00:36.249Z"}
 {"type":"tool-start","nodeId":"s:demo-child-0001","toolUseId":"toolu_demo00125","tool":"PowerShell","cat":"shell","skill":null,"text":"Get-Process node","brief":"Get-Process node","detail":"","seq":425,"ts":"2026-10-23T01:00:36.257Z"}
@@ -448,7 +448,7 @@
 {"type":"tool-start","nodeId":"a:demowf0006","toolUseId":"toolu_demo00129","tool":"SendMessage","cat":"agent","skill":null,"text":"검증 담당에게 결과 전달","brief":"→ 검증 담당","detail":"검증 담당에게 결과 전달","seq":448,"ts":"2026-10-23T01:00:38.290Z"}
 {"type":"tool-end","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00115","tool":"Bash","cat":"shell","ok":true,"durationMs":5036,"text":"exit 0","brief":"exit 0 · nothing to commit","seq":449,"ts":"2026-10-23T01:00:38.351Z"}
 {"type":"tool-start","nodeId":"a:demo0002","toolUseId":"toolu_demo00130","tool":"Bash","cat":"shell","skill":null,"text":"node --test server/test","brief":"node --test server/test","detail":"서버 시험","seq":450,"ts":"2026-10-23T01:00:38.480Z"}
-{"type":"tool-start","nodeId":"a:demo0010","toolUseId":"toolu_demo00131","tool":"Edit","cat":"edit","skill":null,"text":"worker.js","brief":"worker.js +14 −1","detail":"cc-agent-viz/web/worker.js","seq":451,"ts":"2026-10-23T01:00:38.627Z"}
+{"type":"tool-start","nodeId":"a:demo0010","toolUseId":"toolu_demo00131","tool":"Edit","cat":"edit","skill":null,"text":"worker.js","brief":"worker.js +14 −1","detail":"agent4d/web/worker.js","seq":451,"ts":"2026-10-23T01:00:38.627Z"}
 {"type":"tool-start","nodeId":"a:demo0007","toolUseId":"toolu_demo00132","tool":"Artifact","cat":"artifact","skill":null,"text":"결과 보고 페이지 게시","brief":"결과 보고 페이지 게시","detail":"","seq":452,"ts":"2026-10-23T01:00:38.757Z"}
 {"type":"thinking","nodeId":"s:demo-main-0001","chars":563,"seq":453,"ts":"2026-10-23T01:00:38.883Z"}
 {"type":"text","nodeId":"a:demo0011","role":"assistant","text":"터널 주소를 KV 에 등록했습니다.","seq":454,"ts":"2026-10-23T01:00:38.930Z"}
@@ -499,7 +499,7 @@
 {"type":"node-update","nodeId":"s:demo-main-0001","patch":{"status":"idle"},"seq":499,"ts":"2026-10-23T01:00:45.000Z"}
 {"type":"tool-start","nodeId":"a:demo0010","toolUseId":"toolu_demo00141","tool":"mcp__context7__query-docs","cat":"mcp","skill":null,"text":"context7.query-docs","brief":"context7.query-docs","detail":"","seq":500,"ts":"2026-10-23T01:00:45.022Z"}
 {"type":"tool-start","nodeId":"a:demo0002","toolUseId":"toolu_demo00142","tool":"Read","cat":"read","skill":null,"text":"scene.js","brief":"web/scene.js","detail":"","seq":501,"ts":"2026-10-23T01:00:45.046Z"}
-{"type":"tool-start","nodeId":"a:demo0009","toolUseId":"toolu_demo00143","tool":"Edit","cat":"edit","skill":null,"text":"theme.css","brief":"theme.css +15 −6","detail":"cc-agent-viz/web/theme.css","seq":502,"ts":"2026-10-23T01:00:45.201Z"}
+{"type":"tool-start","nodeId":"a:demo0009","toolUseId":"toolu_demo00143","tool":"Edit","cat":"edit","skill":null,"text":"theme.css","brief":"theme.css +15 −6","detail":"agent4d/web/theme.css","seq":502,"ts":"2026-10-23T01:00:45.201Z"}
 {"type":"tool-start","nodeId":"a:demowf0006","toolUseId":"toolu_demo00144","tool":"Workflow","cat":"workflow","skill":null,"text":"빌드 단계 실행","brief":"빌드 단계 실행","detail":"","seq":503,"ts":"2026-10-23T01:00:45.229Z"}
 {"type":"tool-start","nodeId":"a:demo0007","toolUseId":"toolu_demo00145","tool":"Skill","cat":"skill","skill":"frontend-design","text":"frontend-design","brief":"frontend-design","detail":"","seq":504,"ts":"2026-10-23T01:00:45.454Z"}
 {"type":"node-update","nodeId":"a:demo0007","patch":{"meta":{"skill":"frontend-design"}},"seq":505,"ts":"2026-10-23T01:00:45.454Z"}
@@ -566,7 +566,7 @@
 {"type":"text","nodeId":"a:demo0007","role":"assistant","text":"빌드 결과를 검토하고 있습니다.","seq":566,"ts":"2026-10-23T01:00:52.095Z"}
 {"type":"tool-start","nodeId":"a:demo0009","toolUseId":"toolu_demo00158","tool":"Grep","cat":"search","skill":null,"text":"CCVIZ_READY","brief":"\"CCVIZ_READY\" · server","detail":"glob *.mjs · files_with_matches","seq":567,"ts":"2026-10-23T01:00:52.164Z"}
 {"type":"output","nodeId":"b:demo001","text":"GET /healthz 200 3ms","seq":568,"ts":"2026-10-23T01:00:52.275Z"}
-{"type":"tool-start","nodeId":"a:demo0010","toolUseId":"toolu_demo00159","tool":"Write","cat":"write","skill":null,"text":"layout.js","brief":"layout.js 122줄","detail":"cc-agent-viz/web/layout.js","seq":569,"ts":"2026-10-23T01:00:52.453Z"}
+{"type":"tool-start","nodeId":"a:demo0010","toolUseId":"toolu_demo00159","tool":"Write","cat":"write","skill":null,"text":"layout.js","brief":"layout.js 122줄","detail":"agent4d/web/layout.js","seq":569,"ts":"2026-10-23T01:00:52.453Z"}
 {"type":"output","nodeId":"m:demo001","text":"tunnel ok","seq":570,"ts":"2026-10-23T01:00:52.506Z"}
 {"type":"tool-end","nodeId":"a:demo0010","toolUseId":"toolu_demo00159","tool":"Write","cat":"write","ok":true,"durationMs":419,"text":"완료","brief":"+6 −5","seq":571,"ts":"2026-10-23T01:00:52.873Z"}
 {"type":"tool-end","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00157","tool":"Workflow","cat":"workflow","ok":true,"durationMs":974,"text":"완료","brief":"완료","seq":572,"ts":"2026-10-23T01:00:52.977Z"}
@@ -621,7 +621,7 @@
 {"type":"text","nodeId":"s:demo-main-0001","role":"assistant","text":"테스트가 모두 통과했습니다.","seq":621,"ts":"2026-10-23T01:00:59.356Z"}
 {"type":"output","nodeId":"m:demo001","text":"GET /events 200 (SSE)","seq":622,"ts":"2026-10-23T01:00:59.681Z"}
 {"type":"tool-end","nodeId":"a:demo0002","toolUseId":"toolu_demo00168","tool":"PushNotification","cat":"notify","ok":true,"durationMs":1540,"text":"완료","brief":"완료","seq":623,"ts":"2026-10-23T01:00:59.713Z"}
-{"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00170","tool":"Edit","cat":"edit","skill":null,"text":"app.js","brief":"app.js +6 −5","detail":"cc-agent-viz/web/app.js","seq":624,"ts":"2026-10-23T01:01:00.133Z"}
+{"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00170","tool":"Edit","cat":"edit","skill":null,"text":"app.js","brief":"app.js +6 −5","detail":"agent4d/web/app.js","seq":624,"ts":"2026-10-23T01:01:00.133Z"}
 {"type":"tool-end","nodeId":"a:demo0007","toolUseId":"toolu_demo00169","tool":"Read","cat":"read","ok":true,"durationMs":833,"text":"120줄 읽음","brief":"67줄 읽음","seq":625,"ts":"2026-10-23T01:01:00.147Z"}
 {"type":"tool-start","nodeId":"a:demo0002","toolUseId":"toolu_demo00171","tool":"Bash","cat":"shell","skill":null,"text":"git status --short","brief":"git status --short","detail":"변경 파일 확인","seq":626,"ts":"2026-10-23T01:01:00.197Z"}
 {"type":"tool-end","nodeId":"a:demo0002","toolUseId":"toolu_demo00171","tool":"Bash","cat":"shell","ok":true,"durationMs":500,"text":"완료","seq":627,"ts":"2026-10-23T01:01:00.762Z"}
@@ -635,7 +635,7 @@
 {"type":"result","nodeId":"a:demo0007","ok":true,"text":"모바일 화면 확인 보조 완료 — 변경 파일 4개, 테스트 통과","seq":635,"ts":"2026-10-23T01:01:01.644Z"}
 {"type":"node-update","nodeId":"a:demo0007","patch":{"status":"done","endedAt":"2026-10-23T01:01:01.644Z"},"seq":636,"ts":"2026-10-23T01:01:01.644Z"}
 {"type":"user","nodeId":"a:demo0001","origin":"task-notification","text":"에이전트 \"모바일 화면 확인 보조\" 완료","seq":637,"ts":"2026-10-23T01:01:01.644Z"}
-{"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00172","tool":"Edit","cat":"edit","skill":null,"text":"app.js","brief":"app.js +11 −6","detail":"cc-agent-viz/web/app.js","seq":638,"ts":"2026-10-23T01:01:02.643Z"}
+{"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00172","tool":"Edit","cat":"edit","skill":null,"text":"app.js","brief":"app.js +11 −6","detail":"agent4d/web/app.js","seq":638,"ts":"2026-10-23T01:01:02.643Z"}
 {"type":"output","nodeId":"m:demo001","text":"seq 1588 → 1612","seq":639,"ts":"2026-10-23T01:01:03.198Z"}
 {"type":"output","nodeId":"b:demo001","text":"ok 12 - layout golden angle\nok 13 - camera framing","seq":640,"ts":"2026-10-23T01:01:03.318Z"}
 {"type":"tool-end","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00172","tool":"Edit","cat":"edit","ok":true,"durationMs":1079,"text":"완료","brief":"+21 −7","seq":641,"ts":"2026-10-23T01:01:03.721Z"}
@@ -646,7 +646,7 @@
 {"type":"tool-end","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00173","tool":"Agent","cat":"agent","ok":true,"durationMs":300,"text":"async_launched","brief":"async_launched","seq":646,"ts":"2026-10-23T01:01:05.417Z"}
 {"type":"output","nodeId":"b:demo001","text":"Requesting new quick Tunnel on trycloudflare.com...","seq":647,"ts":"2026-10-23T01:01:05.909Z"}
 {"type":"text","nodeId":"a:demo0012","role":"assistant","text":"테스트가 모두 통과했습니다.","seq":648,"ts":"2026-10-23T01:01:06.008Z"}
-{"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00174","tool":"Edit","cat":"edit","skill":null,"text":"app.js","brief":"app.js +1 −1","detail":"cc-agent-viz/web/app.js","seq":649,"ts":"2026-10-23T01:01:06.179Z"}
+{"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00174","tool":"Edit","cat":"edit","skill":null,"text":"app.js","brief":"app.js +1 −1","detail":"agent4d/web/app.js","seq":649,"ts":"2026-10-23T01:01:06.179Z"}
 {"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00175","tool":"TaskStop","cat":"monitor","skill":null,"text":"node server/index.mjs --demo","seq":650,"ts":"2026-10-23T01:01:07.489Z"}
 {"type":"tool-end","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00175","tool":"TaskStop","cat":"monitor","ok":true,"durationMs":40,"text":"Successfully stopped task","seq":651,"ts":"2026-10-23T01:01:07.489Z"}
 {"type":"node-update","nodeId":"b:demo001","patch":{"status":"stopped","endedAt":"2026-10-23T01:01:07.489Z","meta":{"killed":true,"stopReason":"taskstop"}},"seq":652,"ts":"2026-10-23T01:01:07.489Z"}
@@ -671,12 +671,12 @@
 {"type":"tool-end","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00178","tool":"PushNotification","cat":"notify","ok":false,"durationMs":2023,"text":"오류: 명령 실패 (exit 1)","brief":"실패 · 파일을 찾을 수 없음","seq":671,"ts":"2026-10-23T01:01:18.014Z"}
 {"type":"tool-start","nodeId":"a:demo0012","toolUseId":"toolu_demo00179","tool":"mcp__context7__query-docs","cat":"mcp","skill":null,"text":"context7.query-docs","brief":"context7.query-docs","detail":"","seq":672,"ts":"2026-10-23T01:01:18.304Z"}
 {"type":"tool-end","nodeId":"a:demo0012","toolUseId":"toolu_demo00179","tool":"mcp__context7__query-docs","cat":"mcp","ok":false,"durationMs":544,"text":"오류: 명령 실패 (exit 1)","brief":"실패 · 파일을 찾을 수 없음","seq":673,"ts":"2026-10-23T01:01:18.848Z"}
-{"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00180","tool":"Edit","cat":"edit","skill":null,"text":"theme.css","brief":"theme.css +10 −1","detail":"cc-agent-viz/web/theme.css","seq":674,"ts":"2026-10-23T01:01:18.909Z"}
+{"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00180","tool":"Edit","cat":"edit","skill":null,"text":"theme.css","brief":"theme.css +10 −1","detail":"agent4d/web/theme.css","seq":674,"ts":"2026-10-23T01:01:18.909Z"}
 {"type":"tool-start","nodeId":"a:demo0012","toolUseId":"toolu_demo00181","tool":"Skill","cat":"skill","skill":"skill-creator","text":"skill-creator","brief":"skill-creator","detail":"","seq":675,"ts":"2026-10-23T01:01:20.324Z"}
 {"type":"node-update","nodeId":"a:demo0012","patch":{"meta":{"skill":"skill-creator"}},"seq":676,"ts":"2026-10-23T01:01:20.324Z"}
 {"type":"tool-end","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00180","tool":"Edit","cat":"edit","ok":true,"durationMs":1442,"text":"완료","brief":"+15 −1","seq":677,"ts":"2026-10-23T01:01:20.351Z"}
 {"type":"tool-end","nodeId":"a:demo0012","toolUseId":"toolu_demo00181","tool":"Skill","cat":"skill","ok":true,"durationMs":662,"text":"완료","brief":"완료","seq":678,"ts":"2026-10-23T01:01:20.986Z"}
-{"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00182","tool":"Write","cat":"write","skill":null,"text":"README.md","brief":"README.md 269줄","detail":"cc-agent-viz/web/README.md","seq":679,"ts":"2026-10-23T01:01:21.308Z"}
+{"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00182","tool":"Write","cat":"write","skill":null,"text":"README.md","brief":"README.md 269줄","detail":"agent4d/web/README.md","seq":679,"ts":"2026-10-23T01:01:21.308Z"}
 {"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00183","tool":"Agent","cat":"agent","skill":null,"text":"보안 점검","brief":"보안 점검","detail":"","seq":680,"ts":"2026-10-23T01:01:21.515Z"}
 {"type":"node-add","nodeId":"a:demo0013","node":{"id":"a:demo0013","parentId":"s:demo-main-0001","kind":"subagent","label":"보안 점검","model":"claude-opus-5-5","status":"active","startedAt":"2026-10-23T01:01:21.635Z","endedAt":null,"lastActivityAt":"2026-10-23T01:01:21.635Z","depth":1,"sessionId":"demo-main-0001","meta":{"agentType":"general-purpose","toolUseId":"toolu_demo00183","phase":null,"cwd":null,"command":null,"skill":null,"background":true},"counts":{"tools":0,"errors":0,"texts":0},"openTools":[]},"seq":681,"ts":"2026-10-23T01:01:21.635Z"}
 {"type":"tool-end","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00183","tool":"Agent","cat":"agent","ok":false,"durationMs":300,"text":"async_launched","brief":"async_launched","seq":682,"ts":"2026-10-23T01:01:21.815Z"}
@@ -689,7 +689,7 @@
 {"type":"tool-start","nodeId":"a:demo0013","toolUseId":"toolu_demo00185","tool":"Artifact","cat":"artifact","skill":null,"text":"결과 보고 페이지 게시","brief":"결과 보고 페이지 게시","detail":"","seq":689,"ts":"2026-10-23T01:01:24.461Z"}
 {"type":"tool-start","nodeId":"a:demo0012","toolUseId":"toolu_demo00186","tool":"Glob","cat":"search","skill":null,"text":"web/**/*.js","brief":"web/**/*.js","detail":"","seq":690,"ts":"2026-10-23T01:01:24.548Z"}
 {"type":"tool-start","nodeId":"a:demo0013","toolUseId":"toolu_demo00187","tool":"Artifact","cat":"artifact","skill":null,"text":"결과 보고 페이지 게시","brief":"결과 보고 페이지 게시","detail":"","seq":691,"ts":"2026-10-23T01:01:25.077Z"}
-{"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00188","tool":"Write","cat":"write","skill":null,"text":"layout.js","brief":"layout.js 230줄","detail":"cc-agent-viz/web/layout.js","seq":692,"ts":"2026-10-23T01:01:25.405Z"}
+{"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00188","tool":"Write","cat":"write","skill":null,"text":"layout.js","brief":"layout.js 230줄","detail":"agent4d/web/layout.js","seq":692,"ts":"2026-10-23T01:01:25.405Z"}
 {"type":"node-update","nodeId":"s:demo-main-0001","patch":{"status":"idle"},"seq":693,"ts":"2026-10-23T01:01:25.732Z"}
 {"type":"thinking","nodeId":"a:demo0012","chars":479,"seq":694,"ts":"2026-10-23T01:01:25.820Z"}
 {"type":"tool-end","nodeId":"a:demo0013","toolUseId":"toolu_demo00185","tool":"Artifact","cat":"artifact","ok":true,"durationMs":1390,"text":"완료","brief":"완료","seq":695,"ts":"2026-10-23T01:01:25.851Z"}
@@ -753,7 +753,7 @@
 {"type":"tool-start","nodeId":"a:demo0012","toolUseId":"toolu_demo00204","tool":"mcp__context7__query-docs","cat":"mcp","skill":null,"text":"context7.query-docs","brief":"context7.query-docs","detail":"","seq":753,"ts":"2026-10-23T01:01:39.227Z"}
 {"type":"tool-end","nodeId":"a:demo0012","toolUseId":"toolu_demo00203","tool":"PowerShell","cat":"shell","ok":true,"durationMs":1559,"text":"exit 0","brief":"exit 0 · pass 96","seq":754,"ts":"2026-10-23T01:01:39.462Z"}
 {"type":"thinking","nodeId":"s:demo-main-0001","chars":1128,"seq":755,"ts":"2026-10-23T01:01:39.863Z"}
-{"type":"tool-start","nodeId":"a:demo0014","toolUseId":"toolu_demo00205","tool":"Write","cat":"write","skill":null,"text":"bgm.json","brief":"bgm.json 35줄","detail":"cc-agent-viz/web/bgm.json","seq":756,"ts":"2026-10-23T01:01:39.877Z"}
+{"type":"tool-start","nodeId":"a:demo0014","toolUseId":"toolu_demo00205","tool":"Write","cat":"write","skill":null,"text":"bgm.json","brief":"bgm.json 35줄","detail":"agent4d/web/bgm.json","seq":756,"ts":"2026-10-23T01:01:39.877Z"}
 {"type":"tool-end","nodeId":"a:demo0012","toolUseId":"toolu_demo00204","tool":"mcp__context7__query-docs","cat":"mcp","ok":true,"durationMs":1032,"text":"완료","brief":"완료","seq":757,"ts":"2026-10-23T01:01:40.258Z"}
 {"type":"text","nodeId":"a:demo0013","role":"assistant","text":"이 부분은 계약과 다르므로 반환값에 적겠습니다.","seq":758,"ts":"2026-10-23T01:01:40.644Z"}
 {"type":"tool-start","nodeId":"a:demo0012","toolUseId":"toolu_demo00206","tool":"TodoWrite","cat":"other","skill":null,"text":"{\"todos\":[{\"content\":\"검증\"…","brief":"{\"todos\":[{\"content\":\"검증\"…","detail":"","seq":759,"ts":"2026-10-23T01:01:41.165Z"}
@@ -774,7 +774,7 @@
 {"type":"tool-end","nodeId":"a:demo0014","toolUseId":"toolu_demo00207","tool":"WebFetch","cat":"web","ok":true,"durationMs":2218,"text":"완료","brief":"HTTP 200 · 22KB","seq":774,"ts":"2026-10-23T01:01:43.889Z"}
 {"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00211","tool":"Bash","cat":"shell","skill":null,"text":"git status --short","brief":"git status --short","detail":"변경 파일 확인","seq":775,"ts":"2026-10-23T01:01:43.941Z"}
 {"type":"text","nodeId":"a:demo0013","role":"assistant","text":"빌드 결과를 검토하고 있습니다.","seq":776,"ts":"2026-10-23T01:01:43.970Z"}
-{"type":"tool-start","nodeId":"a:demo0013","toolUseId":"toolu_demo00212","tool":"Write","cat":"write","skill":null,"text":"layout.js","brief":"layout.js 290줄","detail":"cc-agent-viz/web/layout.js","seq":777,"ts":"2026-10-23T01:01:44.776Z"}
+{"type":"tool-start","nodeId":"a:demo0013","toolUseId":"toolu_demo00212","tool":"Write","cat":"write","skill":null,"text":"layout.js","brief":"layout.js 290줄","detail":"agent4d/web/layout.js","seq":777,"ts":"2026-10-23T01:01:44.776Z"}
 {"type":"tool-start","nodeId":"a:demo0012","toolUseId":"toolu_demo00213","tool":"WebSearch","cat":"web","skill":null,"text":"three.js CSS2DRenderer","brief":"three.js CSS2DRenderer","detail":"","seq":778,"ts":"2026-10-23T01:01:44.821Z"}
 {"type":"tool-start","nodeId":"a:demo0014","toolUseId":"toolu_demo00214","tool":"Workflow","cat":"workflow","skill":null,"text":"빌드 단계 실행","brief":"빌드 단계 실행","detail":"","seq":779,"ts":"2026-10-23T01:01:44.830Z"}
 {"type":"tool-end","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00210","tool":"WebFetch","cat":"web","ok":false,"durationMs":2212,"text":"오류: 명령 실패 (exit 1)","brief":"실패 · 파일을 찾을 수 없음","seq":780,"ts":"2026-10-23T01:01:45.052Z"}
@@ -831,8 +831,8 @@
 {"type":"tool-start","nodeId":"a:demo0014","toolUseId":"toolu_demo00228","tool":"WebSearch","cat":"web","skill":null,"text":"three.js CSS2DRenderer","brief":"three.js CSS2DRenderer","detail":"","seq":831,"ts":"2026-10-23T01:01:52.998Z"}
 {"type":"thinking","nodeId":"a:demo0016","chars":2855,"seq":832,"ts":"2026-10-23T01:01:53.352Z"}
 {"type":"tool-end","nodeId":"a:demo0014","toolUseId":"toolu_demo00222","tool":"WebFetch","cat":"web","ok":true,"durationMs":3017,"text":"완료","brief":"HTTP 200 · 67KB","seq":833,"ts":"2026-10-23T01:01:53.360Z"}
-{"type":"tool-start","nodeId":"a:demo0012","toolUseId":"toolu_demo00229","tool":"Edit","cat":"edit","skill":null,"text":"worker.js","brief":"worker.js +14 −1","detail":"cc-agent-viz/web/worker.js","seq":834,"ts":"2026-10-23T01:01:53.533Z"}
-{"type":"tool-start","nodeId":"a:demo0013","toolUseId":"toolu_demo00230","tool":"Edit","cat":"edit","skill":null,"text":"theme.css","brief":"theme.css +17 −7","detail":"cc-agent-viz/web/theme.css","seq":835,"ts":"2026-10-23T01:01:53.629Z"}
+{"type":"tool-start","nodeId":"a:demo0012","toolUseId":"toolu_demo00229","tool":"Edit","cat":"edit","skill":null,"text":"worker.js","brief":"worker.js +14 −1","detail":"agent4d/web/worker.js","seq":834,"ts":"2026-10-23T01:01:53.533Z"}
+{"type":"tool-start","nodeId":"a:demo0013","toolUseId":"toolu_demo00230","tool":"Edit","cat":"edit","skill":null,"text":"theme.css","brief":"theme.css +17 −7","detail":"agent4d/web/theme.css","seq":835,"ts":"2026-10-23T01:01:53.629Z"}
 {"type":"tool-start","nodeId":"a:demo0015","toolUseId":"toolu_demo00231","tool":"Monitor","cat":"monitor","skill":null,"text":"터널 로그 감시","brief":"터널 로그 감시","detail":"","seq":836,"ts":"2026-10-23T01:01:53.631Z"}
 {"type":"text","nodeId":"s:demo-main-0001","role":"assistant","text":"서버 SSE 형식을 확인했습니다. snapshot 다음 ev 가 이어집니다.","seq":837,"ts":"2026-10-23T01:01:54.035Z"}
 {"type":"tool-start","nodeId":"a:demo0016","toolUseId":"toolu_demo00232","tool":"WebFetch","cat":"web","skill":null,"text":"threejs.org","brief":"threejs.org/docs","detail":"렌더러 설정 방법 요약","seq":838,"ts":"2026-10-23T01:01:54.393Z"}
@@ -862,7 +862,7 @@
 {"type":"node-update","nodeId":"a:demo0013","patch":{"meta":{"skill":"writing-style"}},"seq":862,"ts":"2026-10-23T01:01:57.464Z"}
 {"type":"tool-end","nodeId":"a:demo0014","toolUseId":"toolu_demo00233","tool":"WebFetch","cat":"web","ok":true,"durationMs":2180,"text":"완료","brief":"HTTP 200 · 50KB","seq":863,"ts":"2026-10-23T01:01:57.736Z"}
 {"type":"tool-end","nodeId":"a:demo0013","toolUseId":"toolu_demo00240","tool":"Skill","cat":"skill","ok":true,"durationMs":443,"text":"완료","brief":"완료","seq":864,"ts":"2026-10-23T01:01:57.907Z"}
-{"type":"tool-start","nodeId":"a:demo0014","toolUseId":"toolu_demo00241","tool":"Edit","cat":"edit","skill":null,"text":"worker.js","brief":"worker.js +4 −8","detail":"cc-agent-viz/web/worker.js","seq":865,"ts":"2026-10-23T01:01:57.933Z"}
+{"type":"tool-start","nodeId":"a:demo0014","toolUseId":"toolu_demo00241","tool":"Edit","cat":"edit","skill":null,"text":"worker.js","brief":"worker.js +4 −8","detail":"agent4d/web/worker.js","seq":865,"ts":"2026-10-23T01:01:57.933Z"}
 {"type":"tool-start","nodeId":"a:demo0013","toolUseId":"toolu_demo00242","tool":"WebSearch","cat":"web","skill":null,"text":"three.js CSS2DRenderer","brief":"three.js CSS2DRenderer","detail":"","seq":866,"ts":"2026-10-23T01:01:58.110Z"}
 {"type":"output","nodeId":"m:demo001","text":"tunnel ok","seq":867,"ts":"2026-10-23T01:01:58.214Z"}
 {"type":"tool-start","nodeId":"a:demo0016","toolUseId":"toolu_demo00243","tool":"WebFetch","cat":"web","skill":null,"text":"threejs.org","brief":"threejs.org/docs","detail":"렌더러 설정 방법 요약","seq":868,"ts":"2026-10-23T01:01:58.294Z"}
@@ -897,12 +897,12 @@
 {"type":"tool-start","nodeId":"a:demo0016","toolUseId":"toolu_demo00250","tool":"Artifact","cat":"artifact","skill":null,"text":"결과 보고 페이지 게시","brief":"결과 보고 페이지 게시","detail":"","seq":897,"ts":"2026-10-23T01:02:02.583Z"}
 {"type":"output","nodeId":"m:demo001","text":"heartbeat","seq":898,"ts":"2026-10-23T01:02:03.077Z"}
 {"type":"tool-start","nodeId":"a:demo0012","toolUseId":"toolu_demo00251","tool":"PushNotification","cat":"notify","skill":null,"text":"작업 완료 알림","brief":"작업 완료 알림","detail":"","seq":899,"ts":"2026-10-23T01:02:03.339Z"}
-{"type":"tool-start","nodeId":"a:demo0015","toolUseId":"toolu_demo00252","tool":"Write","cat":"write","skill":null,"text":"layout.js","brief":"layout.js 263줄","detail":"cc-agent-viz/web/layout.js","seq":900,"ts":"2026-10-23T01:02:03.578Z"}
+{"type":"tool-start","nodeId":"a:demo0015","toolUseId":"toolu_demo00252","tool":"Write","cat":"write","skill":null,"text":"layout.js","brief":"layout.js 263줄","detail":"agent4d/web/layout.js","seq":900,"ts":"2026-10-23T01:02:03.578Z"}
 {"type":"text","nodeId":"a:demo0013","role":"assistant","text":"서버 SSE 형식을 확인했습니다. snapshot 다음 ev 가 이어집니다.","seq":901,"ts":"2026-10-23T01:02:03.646Z"}
 {"type":"text","nodeId":"a:demo0016","role":"assistant","text":"테스트가 모두 통과했습니다.","seq":902,"ts":"2026-10-23T01:02:03.670Z"}
 {"type":"node-update","nodeId":"a:demo0015","patch":{"meta":{"skill":null}},"seq":903,"ts":"2026-10-23T01:02:03.826Z"}
 {"type":"tool-end","nodeId":"a:demo0016","toolUseId":"toolu_demo00250","tool":"Artifact","cat":"artifact","ok":true,"durationMs":1323,"text":"완료","brief":"완료","seq":904,"ts":"2026-10-23T01:02:03.906Z"}
-{"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00253","tool":"Write","cat":"write","skill":null,"text":"layout.js","brief":"layout.js 221줄","detail":"cc-agent-viz/web/layout.js","seq":905,"ts":"2026-10-23T01:02:03.961Z"}
+{"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00253","tool":"Write","cat":"write","skill":null,"text":"layout.js","brief":"layout.js 221줄","detail":"agent4d/web/layout.js","seq":905,"ts":"2026-10-23T01:02:03.961Z"}
 {"type":"tool-end","nodeId":"a:demo0014","toolUseId":"toolu_demo00248","tool":"TodoWrite","cat":"other","ok":true,"durationMs":1982,"text":"완료","brief":"완료","seq":906,"ts":"2026-10-23T01:02:04.153Z"}
 {"type":"tool-end","nodeId":"a:demo0012","toolUseId":"toolu_demo00249","tool":"Bash","cat":"shell","ok":true,"durationMs":500,"text":"완료","seq":907,"ts":"2026-10-23T01:02:04.444Z"}
 {"type":"tool-end","nodeId":"a:demo0012","toolUseId":"toolu_demo00251","tool":"PushNotification","cat":"notify","ok":true,"durationMs":500,"text":"완료","seq":908,"ts":"2026-10-23T01:02:04.444Z"}
@@ -932,8 +932,8 @@
 {"type":"thinking","nodeId":"a:demo0015","chars":1559,"seq":932,"ts":"2026-10-23T01:02:08.077Z"}
 {"type":"tool-start","nodeId":"a:demo0016","toolUseId":"toolu_demo00256","tool":"SendMessage","cat":"agent","skill":null,"text":"검증 담당에게 결과 전달","brief":"→ 검증 담당","detail":"검증 담당에게 결과 전달","seq":933,"ts":"2026-10-23T01:02:08.232Z"}
 {"type":"tool-end","nodeId":"a:demo0016","toolUseId":"toolu_demo00256","tool":"SendMessage","cat":"agent","ok":true,"durationMs":409,"text":"완료","brief":"완료","seq":934,"ts":"2026-10-23T01:02:08.642Z"}
-{"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00257","tool":"Write","cat":"write","skill":null,"text":"bgm.json","brief":"bgm.json 98줄","detail":"cc-agent-viz/web/bgm.json","seq":935,"ts":"2026-10-23T01:02:08.648Z"}
-{"type":"tool-start","nodeId":"a:demo0016","toolUseId":"toolu_demo00258","tool":"Write","cat":"write","skill":null,"text":"bgm.json","brief":"bgm.json 134줄","detail":"cc-agent-viz/web/bgm.json","seq":936,"ts":"2026-10-23T01:02:08.842Z"}
+{"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00257","tool":"Write","cat":"write","skill":null,"text":"bgm.json","brief":"bgm.json 98줄","detail":"agent4d/web/bgm.json","seq":935,"ts":"2026-10-23T01:02:08.648Z"}
+{"type":"tool-start","nodeId":"a:demo0016","toolUseId":"toolu_demo00258","tool":"Write","cat":"write","skill":null,"text":"bgm.json","brief":"bgm.json 134줄","detail":"agent4d/web/bgm.json","seq":936,"ts":"2026-10-23T01:02:08.842Z"}
 {"type":"tool-end","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00257","tool":"Write","cat":"write","ok":true,"durationMs":441,"text":"완료","brief":"+7 −7","seq":937,"ts":"2026-10-23T01:02:09.090Z"}
 {"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00259","tool":"Read","cat":"read","skill":null,"text":"CONTRACT.md","brief":"web/CONTRACT.md","detail":"168줄부터 200줄","seq":938,"ts":"2026-10-23T01:02:09.156Z"}
 {"type":"tool-start","nodeId":"a:demo0016","toolUseId":"toolu_demo00260","tool":"TodoWrite","cat":"other","skill":null,"text":"{\"todos\":[{\"content\":\"검증\"…","brief":"{\"todos\":[{\"content\":\"검증\"…","detail":"","seq":939,"ts":"2026-10-23T01:02:09.434Z"}
@@ -974,7 +974,7 @@
 {"type":"tool-start","nodeId":"a:demo0016","toolUseId":"toolu_demo00270","tool":"PowerShell","cat":"shell","skill":null,"text":"Get-Process node","brief":"Get-Process node","detail":"","seq":974,"ts":"2026-10-23T01:02:19.352Z"}
 {"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00271","tool":"Artifact","cat":"artifact","skill":null,"text":"결과 보고 페이지 게시","brief":"결과 보고 페이지 게시","detail":"","seq":975,"ts":"2026-10-23T01:02:20.010Z"}
 {"type":"node-update","nodeId":"s:demo-main-0001","patch":{"status":"idle"},"seq":976,"ts":"2026-10-23T01:02:20.076Z"}
-{"type":"tool-start","nodeId":"a:demo0016","toolUseId":"toolu_demo00272","tool":"Write","cat":"write","skill":null,"text":"layout.js","brief":"layout.js 173줄","detail":"cc-agent-viz/web/layout.js","seq":977,"ts":"2026-10-23T01:02:20.200Z"}
+{"type":"tool-start","nodeId":"a:demo0016","toolUseId":"toolu_demo00272","tool":"Write","cat":"write","skill":null,"text":"layout.js","brief":"layout.js 173줄","detail":"agent4d/web/layout.js","seq":977,"ts":"2026-10-23T01:02:20.200Z"}
 {"type":"tool-end","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00271","tool":"Artifact","cat":"artifact","ok":true,"durationMs":893,"text":"완료","brief":"완료","seq":978,"ts":"2026-10-23T01:02:20.903Z"}
 {"type":"tool-end","nodeId":"a:demo0016","toolUseId":"toolu_demo00272","tool":"Write","cat":"write","ok":true,"durationMs":988,"text":"완료","brief":"+4 −4","seq":979,"ts":"2026-10-23T01:02:21.187Z"}
 {"type":"text","nodeId":"a:demo0016","role":"assistant","text":"서버 SSE 형식을 확인했습니다. snapshot 다음 ev 가 이어집니다.","seq":980,"ts":"2026-10-23T01:02:21.738Z"}
@@ -990,18 +990,18 @@
 {"type":"text","nodeId":"s:demo-main-0001","role":"assistant","text":"노드 배치 규칙을 황금각 기준으로 구현했습니다.","seq":990,"ts":"2026-10-23T01:02:25.709Z"}
 {"type":"output","nodeId":"m:demo001","text":"GET /events 200 (SSE)","seq":991,"ts":"2026-10-23T01:02:26.278Z"}
 {"type":"text","nodeId":"a:demo0016","role":"assistant","text":"터널 주소를 KV 에 등록했습니다.","seq":992,"ts":"2026-10-23T01:02:26.644Z"}
-{"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00273","tool":"Workflow","cat":"workflow","skill":null,"text":"cc-agent-viz 팀","brief":"cc-agent-viz 팀","detail":"","seq":993,"ts":"2026-10-23T01:02:27.099Z"}
-{"type":"node-add","nodeId":"w:wf_demo002","node":{"id":"w:wf_demo002","parentId":"s:demo-main-0001","kind":"workflow","label":"cc-agent-viz 팀 2","model":"claude-opus-5-5","status":"active","startedAt":"2026-10-23T01:02:27.249Z","endedAt":null,"lastActivityAt":"2026-10-23T01:02:27.249Z","depth":1,"sessionId":"demo-main-0001","meta":{"agentType":null,"toolUseId":null,"phase":null,"cwd":null,"command":null,"skill":null,"background":true},"counts":{"tools":0,"errors":0,"texts":0},"openTools":[]},"seq":994,"ts":"2026-10-23T01:02:27.249Z"}
+{"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00273","tool":"Workflow","cat":"workflow","skill":null,"text":"agent4d 팀","brief":"agent4d 팀","detail":"","seq":993,"ts":"2026-10-23T01:02:27.099Z"}
+{"type":"node-add","nodeId":"w:wf_demo002","node":{"id":"w:wf_demo002","parentId":"s:demo-main-0001","kind":"workflow","label":"agent4d 팀 2","model":"claude-opus-5-5","status":"active","startedAt":"2026-10-23T01:02:27.249Z","endedAt":null,"lastActivityAt":"2026-10-23T01:02:27.249Z","depth":1,"sessionId":"demo-main-0001","meta":{"agentType":null,"toolUseId":null,"phase":null,"cwd":null,"command":null,"skill":null,"background":true},"counts":{"tools":0,"errors":0,"texts":0},"openTools":[]},"seq":994,"ts":"2026-10-23T01:02:27.249Z"}
 {"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00274","tool":"mcp__context7__query-docs","cat":"mcp","skill":null,"text":"context7.query-docs","brief":"context7.query-docs","detail":"","seq":995,"ts":"2026-10-23T01:02:27.409Z"}
 {"type":"tool-end","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00273","tool":"Workflow","cat":"workflow","ok":true,"durationMs":400,"text":"async_launched","brief":"async_launched","seq":996,"ts":"2026-10-23T01:02:27.499Z"}
 {"type":"thinking","nodeId":"a:demo0016","chars":2345,"seq":997,"ts":"2026-10-23T01:02:27.542Z"}
 {"type":"node-add","nodeId":"a:demowf0017","node":{"id":"a:demowf0017","parentId":"w:wf_demo002","kind":"workflow-agent","label":"설계:계약","model":"claude-opus-5-5","status":"active","startedAt":"2026-10-23T01:02:27.849Z","endedAt":null,"lastActivityAt":"2026-10-23T01:02:27.849Z","depth":2,"sessionId":"demo-main-0001","meta":{"agentType":"workflow-subagent","toolUseId":null,"phase":"Design","cwd":null,"command":null,"skill":null,"background":true},"counts":{"tools":0,"errors":0,"texts":0},"openTools":[]},"seq":998,"ts":"2026-10-23T01:02:27.849Z"}
 {"type":"tool-end","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00274","tool":"mcp__context7__query-docs","cat":"mcp","ok":true,"durationMs":670,"text":"완료","brief":"완료","seq":999,"ts":"2026-10-23T01:02:28.079Z"}
-{"type":"tool-start","nodeId":"a:demowf0017","toolUseId":"toolu_demo00275","tool":"Write","cat":"write","skill":null,"text":"bgm.json","brief":"bgm.json 92줄","detail":"cc-agent-viz/web/bgm.json","seq":1000,"ts":"2026-10-23T01:02:28.149Z"}
+{"type":"tool-start","nodeId":"a:demowf0017","toolUseId":"toolu_demo00275","tool":"Write","cat":"write","skill":null,"text":"bgm.json","brief":"bgm.json 92줄","detail":"agent4d/web/bgm.json","seq":1000,"ts":"2026-10-23T01:02:28.149Z"}
 {"type":"output","nodeId":"m:demo001","text":"seq 1588 → 1612","seq":1001,"ts":"2026-10-23T01:02:28.430Z"}
 {"type":"tool-start","nodeId":"a:demowf0017","toolUseId":"toolu_demo00276","tool":"Grep","cat":"search","skill":null,"text":"task-notification","brief":"\"task-notification\" · server","detail":"glob *.mjs · files_with_matches","seq":1002,"ts":"2026-10-23T01:02:29.171Z"}
 {"type":"node-add","nodeId":"a:demowf0018","node":{"id":"a:demowf0018","parentId":"w:wf_demo002","kind":"workflow-agent","label":"빌드:서버","model":"claude-opus-5-5","status":"active","startedAt":"2026-10-23T01:02:29.249Z","endedAt":null,"lastActivityAt":"2026-10-23T01:02:29.249Z","depth":2,"sessionId":"demo-main-0001","meta":{"agentType":"workflow-subagent","toolUseId":null,"phase":"Build","cwd":null,"command":null,"skill":null,"background":true},"counts":{"tools":0,"errors":0,"texts":0},"openTools":[]},"seq":1003,"ts":"2026-10-23T01:02:29.249Z"}
-{"type":"tool-start","nodeId":"a:demo0016","toolUseId":"toolu_demo00277","tool":"Write","cat":"write","skill":null,"text":"README.md","brief":"README.md 299줄","detail":"cc-agent-viz/web/README.md","seq":1004,"ts":"2026-10-23T01:02:29.519Z"}
+{"type":"tool-start","nodeId":"a:demo0016","toolUseId":"toolu_demo00277","tool":"Write","cat":"write","skill":null,"text":"README.md","brief":"README.md 299줄","detail":"agent4d/web/README.md","seq":1004,"ts":"2026-10-23T01:02:29.519Z"}
 {"type":"text","nodeId":"a:demowf0018","role":"assistant","text":"서버 SSE 형식을 확인했습니다. snapshot 다음 ev 가 이어집니다.","seq":1005,"ts":"2026-10-23T01:02:29.549Z"}
 {"type":"tool-start","nodeId":"s:demo-main-0001","toolUseId":"toolu_demo00278","tool":"mcp__context7__query-docs","cat":"mcp","skill":null,"text":"context7.query-docs","brief":"context7.query-docs","detail":"","seq":1006,"ts":"2026-10-23T01:02:29.617Z"}
 {"type":"tool-end","nodeId":"a:demowf0017","toolUseId":"toolu_demo00275","tool":"Write","cat":"write","ok":true,"durationMs":1478,"text":"완료","brief":"+13 −0","seq":1007,"ts":"2026-10-23T01:02:29.627Z"}

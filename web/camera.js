@@ -7,6 +7,8 @@ import { bestPose, perspPose, needRepack } from './overview/fill-pack.mjs';
 import { legacyPack } from './overview/pack-view.js';
 
 import { t } from './i18n.mjs';
+import { promptCamPlan } from './missile-core.mjs'; // 입력 때 메인으로
+const HAS = (view, id) => { const v = view && view.vis && view.vis.get(id); return !!(v && !v.gone && !v.hidden); };
 const SWITCH_EVERY = 8;      // 초
 const RESUME_AFTER = 10;     // 초
 const IDLE_OVERVIEW = 30;    // 초
@@ -374,6 +376,30 @@ export class CameraDirector {
     return root && this._shownId(root) ? { type: 'node', id: root, wide: true } : { type: 'overview' };
   }
 
+  /** 'Follow my prompts': 사람 입력이 들어오면 그 메인으로 짧게(0.75초) 날아가 흡수 뒤까지(2.5초) 비추고 원래 흐름으로.
+   *  최근 수동 조작·상세 팝업·자동 카메라 끔·큰 재생 배속이면 옮기지 않음(0). 반환 = 빛줄기가 기다릴 카메라 이동 남은 시간(초) */
+  promptFocus(id, { speed = 1 } = {}) {
+    const now = performance.now() / 1000;
+    const p = promptCamPlan({ enabled: this.enabled, manual: this.mode === 'manual', hold: !!this.hold, dragging: !!this.dragging, has: !!(this.view && HAS(this.view, id)), speed });
+    if (!p.move) return 0;
+    const same = this.prompt && this.prompt.id === id && now < this.prompt.until;
+    this.prompt = { id, until: now + p.dur + p.hold };
+    if (same) return this.trans ? Math.max(0, this.trans.t0 + this.trans.dur - now) : 0; // 연달아: 이동을 겹쳐(새로 날지 않음)
+    this.shot = { type: 'node', id, prompt: true, maxDist: this.camera ? this.camera.position.distanceTo(this.controls.target) : 0 };
+    this.prevTarget = id;
+    this._startTransition(p.dur);
+    return p.dur;
+  }
+  _promptStep(now) {
+    const pr = this.prompt;
+    if (!pr) return false;
+    if (this.mode !== 'auto' || now >= pr.until || !HAS(this.view, pr.id)) {
+      this.prompt = null;
+      if (this.mode === 'auto') { this.lastSwitch = -1e9; this._flyNext = true; }
+      return false;
+    }
+    return true;
+  }
   /** 노드 클릭 → 그 노드로 포커스 (10초 규칙 적용) */
   focusNode(id) {
     this._manual();
@@ -422,10 +448,11 @@ export class CameraDirector {
     const seen = new Set([id]);
     let kids = view.children(id).filter((k) => this._shownId(k));
     if (!shot.wide) kids = nearestKids(kids, (k) => view.nodeTarget(k), pts[0].p || { x: 0, y: 0, z: 0 }, ZOOM.NODE_KIDS); // 가까운 자식 몇 개만
+    if (shot.prompt) kids = []; // 입력 받은 메인: 메인 자체를 가운데 크게(자식·하위 활동 노드 훑기 없음)
     const lim = kids.length;
     for (let i = 0; i < lim; i++) { seen.add(kids[i]); pts.push({ p: view.nodeTarget(kids[i]), r: view.nodeRadius(kids[i]) + 1.2, must: this._liveId(kids[i], now) }); }
     // 하위의 하위에서 일하는 노드(서브에이전트의 서브에이전트·claude -p 자식 등)도 들어오게
-    const stack = view.children(id).slice();
+    const stack = shot.prompt ? [] : view.children(id).slice();
     for (let n = 0; stack.length && n < 400; n++) {
       const k = stack.pop();
       if (!seen.has(k) && this._liveId(k, now)) { seen.add(k); pts.push({ p: view.nodeTarget(k), r: view.nodeRadius(k) + 1.2, must: true }); }
@@ -542,6 +569,7 @@ export class CameraDirector {
     const band = this._band();
     dist /= Math.max(0.6, band.k);
     dist = autoFloor(Math.max(pr.distMin, Math.min(dmax, dist)), this.controls && this.controls.minDistance);
+    if (shot.prompt && shot.maxDist) dist = Math.min(dist, shot.maxDist); // 입력 때는 멀어지지 않는다(지금보다 가깝거나 같게)
     if (band.yc) {
       const dir = this._dirFrom(center);
       const rl = Math.hypot(dir.z, dir.x) || 1;
@@ -705,7 +733,9 @@ export class CameraDirector {
       this._flyNext = true; // 같은 대상을 다시 골라도 손으로 옮긴 자리에서 날아 돌아온다
     }
 
-    if (this.mode === 'auto' && this.camMode === 'fit') {
+    if (this._promptStep(now)) {
+      // 입력 받은 메인을 비추는 중 — 대상 고르기를 쉰다(비행·머묾은 아래 공용 경로)
+    } else if (this.mode === 'auto' && this.camMode === 'fit') {
       // 전체 맞춤: 대상을 바꾸지 않는다. 처음·복귀·표현 전환 뒤에만 날아가고, 그 뒤는 경계가 크게 바뀔 때만 부드럽게
       if (this.shot.type !== 'fit') { this.shot = { type: 'fit' }; this._startTransition(); this._pose(); }
       else if (this._flyNext) { this._startTransition(); this._pose(); }

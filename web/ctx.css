@@ -90,7 +90,7 @@
   #ctx-banner { top: calc(var(--topbar-h, 75px) + 8px); font-size: 12px; }
 }
 /* 게이지·실시간 정지 버튼 자리를 만들려고 1920px 미만에선 로고 옆 글자를 숨긴다(로고·제목 풍선은 그대로) */
-@media (min-width: 720px) and (max-width: 1919px) { #topbar .brand .txt { display: none; } }
+@media (min-width: 720px) and (max-width: 1099px) { #topbar .brand .txt { display: none; } }
 /* 1280～1599: 게이지·정지 버튼 자리 — 볼륨 슬라이더는 1280 미만처럼 숨김(켜기/끄기는 그대로, 기억된 볼륨 사용) */
 @media (min-width: 1280px) and (max-width: 1599px) { #vol, #sfx-vol { display: none; } }
 .conn.paused b { max-width: none !important; }

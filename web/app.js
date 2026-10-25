@@ -38,6 +38,7 @@ import { mountInspector } from './inspector.js'; // 객체 클릭 상세 팝업
 import { mountArtifacts } from './art-ui.js'; // 작업 대상 층(⚙ 켬/끔)
 import { mountPlans } from './plan-ui.js'; // 계획 보드(⚙ 켬/끔)
 import { t as tr, applyDom, fmtNum } from './i18n.mjs'; // 다국어
+import { launchDelay } from './missile-core.mjs'; // 입력 빛줄기 — 카메라 이동 뒤 발사
 import { localizeEvent, localizeSnapshot, localizeProjects } from './i18n-server.mjs'; // 서버가 조합한 문구 → 지금 언어(ko 면 그대로)
 
 // index.html 정적 문구(data-i18n*)·문서 제목을 지금 언어로 — 가능한 한 일찍
@@ -230,6 +231,21 @@ function setCamMode(m) {
 }
 setCamMode(params.get('cam') || lsGet('ccviz.camMode') || 'fit');
 camModeBtn.addEventListener('click', () => { camModeBtn.blur(); setCamMode(director.camMode === 'fit' ? 'follow' : 'fit'); });
+// 'Follow my prompts'(입력 시 카메라 이동, 기본 켬): localStorage ccviz.followPrompt, ?followPrompt=0|1 은 이번 접속만
+const fpQ = params.get('followPrompt');
+let followPrompt = fpQ != null ? fpQ !== '0' : lsGet('ccviz.followPrompt') !== 'off';
+const followBtn = document.createElement('button');
+followBtn.id = 'btn-follow-prompt'; followBtn.className = 'tb'; followBtn.type = 'button';
+camModeBtn.insertAdjacentElement('afterend', followBtn);
+function setFollowPrompt(on, save = true) {
+  followPrompt = !!on;
+  followBtn.textContent = on ? tr('app.btn.followPrompt') : tr('app.btn.followPromptOff');
+  followBtn.title = tr('app.btn.followPromptTitle');
+  followBtn.setAttribute('aria-pressed', String(!!on));
+  if (save) lsSet('ccviz.followPrompt', on ? 'on' : 'off');
+}
+setFollowPrompt(followPrompt, false);
+followBtn.addEventListener('click', () => { followBtn.blur(); setFollowPrompt(!followPrompt); });
 director.onStatus = (s) => { const c = $('cam-chip'); c.textContent = s.text; c.classList.toggle('manual', s.mode === 'manual'); };
 
 // '완료 표시': 기본 꺼짐 → 끝난(완료·중지됨) 노드는 흐려지며 퇴장. 켜면 다시 보인다. localStorage 는 lsGet/lsSet(try/catch)
@@ -557,6 +573,7 @@ function fillSessionHint() {
   if (next.projectId !== sel.projectId || next.projectName !== sel.projectName || next.title !== sel.title) { sel = next; pl.setSelection(sel); refreshScopeUi(); }
 }
 
+let promptTiming = null; // 이번 입력 빛줄기의 박자 {start, launch, arrive} — 효과음 '스으 → 슈욱 → 톡'이 맞춘다
 function onEvent(ev, opts = {}) {
   if (!ev || !ev.type) return;
   localizeEvent(ev);
@@ -622,7 +639,12 @@ function onEvent(ev, opts = {}) {
     case 'thinking': break;
     case 'user':
       if (!fx) break;
-      if (ev.origin === 'human') { view.beam(ev.nodeId); if (sayOk && ev.text) view.say(ev.nodeId, ev.text, { type: 'user' }); }
+      if (ev.origin === 'human') {
+        // 'Follow my prompts': 받는 메인으로 카메라가 먼저 옮겨 가고(옮길 수 있을 때만), 이동이 끝나 갈 때 테두리 에너지 → 발사 → 흡수
+        const camDur = followPrompt && !opts.resume && director.promptFocus ? director.promptFocus(ev.nodeId, { speed }) : 0;
+        promptTiming = view.beam(ev.nodeId, { delay: launchDelay(camDur) }) || null;
+        if (sayOk && ev.text) view.say(ev.nodeId, ev.text, { type: 'user' });
+      }
       else view.wave(ev.nodeId, view.tokens.skill, 1.2);
       break;
     case 'result':
@@ -649,7 +671,8 @@ function onEvent(ev, opts = {}) {
   }
   director.noteEvent(ev);
   panel.add(ev);
-  sfx.onEvent(ev, { node: store.nodes.get(ev.nodeId) || ev.node || null, speed, quiet, replay: !!opts.replay });
+  sfx.onEvent(ev, { node: store.nodes.get(ev.nodeId) || ev.node || null, speed, quiet, replay: !!opts.replay, timing: ev.type === 'user' ? promptTiming : null });
+  promptTiming = null;
   if (env) env.noteEvent(ev, { quiet });
   statsDirty = true;
 }

@@ -10,7 +10,6 @@ import { BubbleBook, BUBBLE } from '../flowview/flow-style.mjs';
 import { islandStyle, PULSE_AMP, islandOutline, zoneRayLen } from '../overview/pick-core.mjs';
 import { toScreen, cardOffset, cardPx } from './flat-core.mjs';
 import { dodgeBox } from '../label-place.mjs';
-import { flightEase, bez, trailAt, TRAIL, ABSORB_FROM, MISSILE_REDUCED, missile2D } from '../missile-core.mjs';
 import { DEG, degOf, glitchAt, seedOf } from '../degrade-core.mjs';
 import { t } from '../i18n.mjs';
 
@@ -219,54 +218,12 @@ export function drawRings(view, ctx, now, s, anchorOf = null) {
     if (!v || v.hidden || v.gone) continue;
     const k = Math.min(1, (now - e.t0) / e.dur);
     if (anchorOf) { const A = anchorOf(v, true); p.x = A.x; p.y = A.y; } else toScreen(view.cam, view.W, view.H, v.pos.x, v.pos.z, p);
-    if (e.missile) { drawMissile2D(view, ctx, e, p, now); continue; }
     ctx.globalAlpha = e.a * (1 - k) * (1 - k * 0.3);
     ctx.strokeStyle = typeof e.color === 'string' ? e.color : view.tokens.text;
     ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(2, v.r * s * (e.k0 + (e.k1 - e.k0) * k)), 0, Math.PI * 2); ctx.stroke();
   }
   ctx.globalAlpha = 1;
-}
-
-// ---------- 사용자 입력 빛줄기(2D): 화면 하단 가운데 → 노드로 휘어 들어가는 머리 + 가늘어지며 사라지는 꼬리 ----------
-const _bp = {}, _bq = {};
-function drawMissile2D(view, ctx, e, p, now) {
-  const k = (now - e.t0) / e.fly;
-  const t = flightEase(Math.min(1, k));
-  let C;
-  if (e.reduced) { const a = { x: p.x, y: p.y + 64 }; C = { p0: a, c1: a, c2: p, p1: p }; }
-  else C = missile2D(view.W, view.H, p.x, p.y, e.side);
-  const fade = k > 1 ? Math.max(0, 1 - (k - 1) / 0.25) : 1;
-  const L = !!e.light, col = L ? e.color : mixHex(e.color, '#ffffff', 0.45);
-  ctx.save();
-  ctx.globalCompositeOperation = L ? 'source-over' : 'lighter';
-  ctx.lineCap = 'round'; ctx.strokeStyle = col;
-  const N = TRAIL.N;
-  bez(_bp, C.p0, C.c1, C.c2, C.p1, trailAt(t, 0).t);
-  for (let i = 1; i < N; i++) {
-    const s = trailAt(t, i);
-    bez(_bq, C.p0, C.c1, C.c2, C.p1, s.t);
-    ctx.globalAlpha = (L ? 0.8 : 0.85) * s.a * fade;
-    ctx.lineWidth = Math.max(0.6, 4.2 * s.w);
-    ctx.beginPath(); ctx.moveTo(_bp.x, _bp.y); ctx.lineTo(_bq.x, _bq.y); ctx.stroke();
-    _bp.x = _bq.x; _bp.y = _bq.y;
-  }
-  if (k <= 1) {
-    bez(_bp, C.p0, C.c1, C.c2, C.p1, t);
-    const ab = k < ABSORB_FROM ? 1 : Math.max(0, 1 - (k - ABSORB_FROM) / (1 - ABSORB_FROM));
-    const r = 9 * (0.35 + 0.65 * ab);
-    const g = ctx.createRadialGradient(_bp.x, _bp.y, 0, _bp.x, _bp.y, r);
-    g.addColorStop(0, L ? col : '#ffffff'); g.addColorStop(0.35, col); g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.globalAlpha = L ? 0.85 : 0.95; ctx.fillStyle = g;
-    ctx.beginPath(); ctx.arc(_bp.x, _bp.y, r, 0, Math.PI * 2); ctx.fill();
-  }
-  ctx.restore();
-}
-function mixHex(a, b, k) {
-  const pa = /^#([0-9a-f]{6})$/i.exec(String(a)), pb = /^#([0-9a-f]{6})$/i.exec(String(b));
-  if (!pa || !pb) return a;
-  const x = parseInt(pa[1], 16), y = parseInt(pb[1], 16), c = (s) => Math.round(((x >> s) & 255) * (1 - k) + ((y >> s) & 255) * k);
-  return '#' + ((c(16) << 16) | (c(8) << 8) | c(0)).toString(16).padStart(6, '0');
 }
 
 // ---------- 배치 장치 칩: 진행 막대·표시등·상태 띠 5칸 ----------

@@ -18,6 +18,7 @@ import { toScreen, camScale, planetShape, planetColor, mixColor, retractPt } fro
 import { drawCards, drawRings, drawDeviceFace, drawIslands } from './flat-draw.js';
 import { drawPlanetIslands } from './planet-islands2d.js'; // 섬 = 원형 궤도계
 import { drawMechPlanet, drawSubPlanet, drawTourb2D } from './planet-deco2d.js'; // 행성 연출 · 뚜르비용
+import { TOURB_GEO } from '../tourbillon-core.mjs'; // 코어 축소 몫
 import { stepOrbits, drawOrbits, drawBursts, emitTool, nearestSat, orbitExtent } from './planet-orbits2d.js'; // 궤도계
 import { bodyK } from '../planet-core.mjs';
 import { FLAT } from './flat-core.mjs';
@@ -273,7 +274,8 @@ export class Planet2DView extends FlatView {
     ctx.fillStyle = col; ctx.strokeStyle = edge; ctx.lineWidth = Math.max(1, R * (foc ? 0.12 : 0.07));
     if (shape === 'ico') {
       // 메인 = 기계 행성: 이음선·코어 광·해치·기어 띠·궤도 링·안테나
-      drawMechPlanet(this, ctx, v, x, y, R, alpha, now, col, edge, pulse);
+      // 무브먼트가 보이는 크기면 몸체를 코어로 줄여(3D uShrink 와 같은 몫) 기어·프레임이 앞에 서게
+      drawMechPlanet(this, ctx, v, x, y, R >= 4 ? R * TOURB_GEO.CORE_K * 1.12 : R, alpha, now, col, edge, pulse);
       drawTourb2D(this, ctx, v, x, y, R, alpha, now, true);
     } else if (shape === 'sphere') {
       // 서브에이전트 = 구름 띠·대기·위성

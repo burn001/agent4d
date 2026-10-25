@@ -196,7 +196,7 @@ export class UsagePoller {
     try {
       const res = await this.fetchImpl(USAGE_URL, {
         method: 'GET', signal: ac.signal,
-        headers: { Authorization: `Bearer ${token}`, 'anthropic-beta': USAGE_BETA, 'User-Agent': `cc-agent-viz/${this.version}`, Accept: 'application/json' },
+        headers: { Authorization: `Bearer ${token}`, 'anthropic-beta': USAGE_BETA, 'User-Agent': `agent4d/${this.version}`, Accept: 'application/json' },
       });
       let text = '';
       try { text = await res.text(); } catch (e) { text = ''; }

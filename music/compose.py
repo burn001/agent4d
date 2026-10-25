@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""cc-agent-viz 배경음악 결정적 합성기.
+"""Agent4D 배경음악 결정적 합성기.
 
 외부 샘플 없이 numpy 만으로 5분(300초) 코딩 앰비언트 곡을 합성해
 web/assets/bgm.mp3 (44.1kHz 스테레오 128kbps CBR) 와 bgm.json 을 만든다.
@@ -831,7 +831,7 @@ def main(argv=None):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
-    ap = argparse.ArgumentParser(description="cc-agent-viz 배경음악 합성")
+    ap = argparse.ArgumentParser(description="Agent4D 배경음악 합성")
     ap.add_argument("--out", default=DEFAULT_OUT, help="MP3 출력 경로 (bgm.json 은 같은 폴더)")
     ap.add_argument("--wav", default=None, help="미리듣기용 16bit WAV 도 저장(선택, 레포에는 커밋하지 않음)")
     args = ap.parse_args(argv)

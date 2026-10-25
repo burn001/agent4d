@@ -4,7 +4,9 @@
 import { isShown, isLive, scoreOf, pickBest, shotLost, FitHold, safeBand, ZOOM, autoFloor, nearestKids } from '../camera-core.mjs';
 import { stageInsets } from '../screen-insets.js';
 import { t } from '../i18n.mjs';
+import { promptCamPlan } from '../missile-core.mjs'; // 입력 때 메인으로
 import { FLAT, toWorld, zoomAt, panBy, boxCenterXZ, fitNeed, fitMinD, flyPose, dampTo, clampD } from './flat-core.mjs';
+const HAS = (view, id) => { const v = view && view.vis && view.vis.get(id); return !!(v && !v.gone && !v.hidden); };
 
 const SWITCH_EVERY = 8, RESUME_AFTER = 10, IDLE_OVERVIEW = 30, TRANSITION = 1.6;
 const easeInOutCubic = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
@@ -202,6 +204,30 @@ export class Director2D {
     if (this.scope.mode !== 'all' || this.scope.focusNode !== id || !this.view || !this.view.has(id)) return;
     this.fit.reset(); this._startTransition(TRANSITION); this.focusFly = true;
   }
+  /** 'Follow my prompts': 사람 입력이 들어오면 그 메인으로 짧게(0.75초) 날아가 흡수 뒤까지(2.5초) 비추고 원래 흐름으로.
+   *  최근 수동 조작·상세 팝업·자동 카메라 끔·큰 재생 배속이면 옮기지 않음(0). 반환 = 빛줄기가 기다릴 카메라 이동 남은 시간(초) */
+  promptFocus(id, { speed = 1 } = {}) {
+    const now = performance.now() / 1000;
+    const p = promptCamPlan({ enabled: this.enabled, manual: this.mode === 'manual', hold: !!this.hold, dragging: !!this.dragging, has: !!(this.view && HAS(this.view, id)), speed });
+    if (!p.move) return 0;
+    const same = this.prompt && this.prompt.id === id && now < this.prompt.until;
+    this.prompt = { id, until: now + p.dur + p.hold };
+    if (same) return this.trans ? Math.max(0, this.trans.t0 + this.trans.dur - now) : 0; // 연달아: 이동을 겹쳐(새로 날지 않음)
+    this.shot = { type: 'node', id, prompt: true, maxD: this.cam ? this.cam.D : 0 };
+    this.prevTarget = id;
+    this._startTransition(p.dur);
+    return p.dur;
+  }
+  _promptStep(now) {
+    const pr = this.prompt;
+    if (!pr) return false;
+    if (this.mode !== 'auto' || now >= pr.until || !HAS(this.view, pr.id)) {
+      this.prompt = null;
+      if (this.mode === 'auto') { this.lastSwitch = -1e9; this._flyNext = true; }
+      return false;
+    }
+    return true;
+  }
   focusNode(id) {
     this._manual();
     this.shot = { type: 'node', id };
@@ -293,7 +319,13 @@ export class Director2D {
     return pts;
   }
   _frame(shot, now = performance.now() / 1000) {
-    if (shot.type === 'node' && this.view.has(shot.id)) return this._nodeFrame(shot.id, shot.wide) || this._fitFrame(now);
+    if (shot.type === 'node' && this.view.has(shot.id)) {
+      if (shot.prompt) { // 입력 받은 메인을 가운데로, 멀어지지 않게
+        const f = this._nodeFrame(shot.id, false), v = this.view.vis.get(shot.id);
+        if (f && v) { const D = Math.min(f.D, shot.maxD || f.D); return { x: v.target.x, z: v.target.z + D * this._band(this._size().H).yc, D }; }
+      }
+      return this._nodeFrame(shot.id, shot.wide) || this._fitFrame(now);
+    }
     if (shot.type === 'cluster' && this.view.clusterTarget) {
       const c = this.view.clusterTarget(shot.pid);
       if (c) {
@@ -340,7 +372,9 @@ export class Director2D {
     if (this.mode === 'manual' && this.enabled && !this.hold && !this.dragging && now - this.lastInput >= RESUME_AFTER) {
       this.mode = 'auto'; this.lastSwitch = -1e9; this._flyNext = true;
     }
-    if (this.mode === 'auto' && this.camMode === 'fit') {
+    if (this._promptStep(now)) {
+      // 입력 받은 메인을 비추는 중
+    } else if (this.mode === 'auto' && this.camMode === 'fit') {
       if (this.shot.type !== 'fit') { this.shot = { type: 'fit' }; this._startTransition(); }
       else if (this._flyNext) this._startTransition();
       else {

@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in cc-agent-viz.
+Thanks for your interest in Agent4D (formerly cc-agent-viz).
 
 - **Bugs:** open an issue with your OS, Node version, browser and the view (Flow, Planet or Voxel Office, 3D or 2D). Never paste a link that contains `?t=` (it carries your viewer token), and never attach raw transcripts.
 - **Adapters for other harnesses** (Codex CLI, Gemini CLI, OpenClaw, Hermes, …) are very welcome. Start with [docs/ADAPTERS.md](docs/ADAPTERS.md) and the "Adapter: …" issues.

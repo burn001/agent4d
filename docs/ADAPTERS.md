@@ -1,6 +1,6 @@
 # Writing an adapter for another agent harness
 
-cc-agent-viz currently reads **Claude Code** sessions only. The browser never touches transcripts. It renders a small, harness-neutral stream of **nodes** and **events** that the server builds. A new harness (Codex CLI, Gemini CLI, OpenClaw, Hermes, …) therefore needs a server-side adapter that turns that harness's session files into the same nodes and events. The web views (Flow, Planet, Voxel Office, 3D and 2D) should not need to change.
+Agent4D currently reads **Claude Code** sessions only. The browser never touches transcripts. It renders a small, harness-neutral stream of **nodes** and **events** that the server builds. A new harness (Codex CLI, Gemini CLI, OpenClaw, Hermes, …) therefore needs a server-side adapter that turns that harness's session files into the same nodes and events. The web views (Flow, Planet, Voxel Office, 3D and 2D) should not need to change.
 
 This document describes how the Claude Code path works today and what an adapter has to provide. It is written from the code in `server/`. When this document and the code disagree, the code wins. Please open an issue in that case.
 

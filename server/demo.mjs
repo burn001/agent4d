@@ -80,7 +80,7 @@ class DemoRuntime {
     add(M, null, 'main', this.title, { cwd: this.cwd, ...(this.git ? { git: this.git } : {}) });
     add(N('a:demo-sub-1'), M, 'subagent', '자료 조사', { agentType: 'general-purpose', background: true });
     add(N('a:demo-sub-2'), M, 'subagent', '코드 리뷰', { agentType: 'general-purpose' });
-    add(N('w:wf_demo-001'), M, 'workflow', 'cc-agent-viz 빌드', { runId: 'wf_demo-001', taskId: 'wdemo1' });
+    add(N('w:wf_demo-001'), M, 'workflow', 'agent4d 빌드', { runId: 'wf_demo-001', taskId: 'wdemo1' });
     add(N('a:demo-wf-1'), N('w:wf_demo-001'), 'workflow-agent', 'design:contract', { phase: 'Design' });
     add(N('a:demo-wf-2'), N('w:wf_demo-001'), 'workflow-agent', 'build:server', { phase: 'Build' });
     add(N('a:demo-wf-3'), N('w:wf_demo-001'), 'workflow-agent', 'build:web', { phase: 'Build' });

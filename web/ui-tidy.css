@@ -2,7 +2,7 @@
 
 /* ── 상단 바 ── */
 body.ui-tidy #topbar { flex-wrap: nowrap; }
-body.ui-tidy #topbar .brand .txt { display: none; }
+@media (max-width: 1099px) { body.ui-tidy #topbar .brand .txt { display: none; } } /* Agent4D: 넓은 화면에선 제품 이름을 로고 옆에 */
 /* 연결 상태: 점만(글자는 title·스크린리더용으로 남김) */
 body.ui-tidy #conn { padding: 0 4px; }
 body.ui-tidy #conn b { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

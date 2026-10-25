@@ -8,7 +8,7 @@
 import { MECH, SUB, planetMode, approach, hatchOpen, subType, hash01, orbitPoint } from '../planet-core.mjs';
 import { projOrbit, burst } from './planet-orbits2d.js';
 import { mixColor } from './flat-core.mjs';
-import { Escapement, TOURB_GEO as TG } from '../tourbillon-core.mjs'; // 뚜르비용(위에서 본 동심 링·톱니·진동 휠)
+import { Escapement, TOURB_GEO as TG, GEAR_M, PINION_R, ESC_ARBOR, pinionAngle } from '../tourbillon-core.mjs'; // 뚜르비용(위에서 본 동심 링·톱니·진동 휠)
 
 const TAU = Math.PI * 2;
 
@@ -379,8 +379,8 @@ function cratersOf(id) {
 // ---------------- 뚜르비용(2D) — 위에서 본 동심 링: 바깥 케이지(살 3·블루 스크루)·안쪽 케이지(점선·루비 피벗)·밸런스 휠(금빛 테·살·타이밍 나사)·
 // 이스케이프 휠(톱니, 째깍)·앵커. 서브는 단일 케이지 링 + 살 3(째깍). 박자는 tourbillon-core.mjs Escapement(3D 와 같음).
 const TB2 = {
-  dark: { steel: '#a9b3c1', gold: '#c9a65c', ruby: '#c0183c', blue: '#3f6cff' },
-  light: { steel: '#5f6a7a', gold: '#8a6a28', ruby: '#9e0f2c', blue: '#2346c4' },
+  dark: { steel: '#c3ccd8', steelHi: '#eef3fa', steelLo: '#5d6878', gold: '#d9b064', goldLo: '#7a5c22', ruby: '#d0183f', blue: '#3a64f0', ink: null },
+  light: { steel: '#8a94a4', steelHi: '#f4f6fa', steelLo: '#2b3341', gold: '#a77d2c', goldLo: '#5a4012', ruby: '#a3102e', blue: '#1f3fb8', ink: '#1b2230' },
 };
 function escOf(v, now, reduced) {
   const e = v._esc || (v._esc = new Escapement(hash01(v.id, 'tourb')));
@@ -388,59 +388,100 @@ function escOf(v, now, reduced) {
   e.step(dt, planetMode(v.node.status, v.icons ? v.icons.size : 0, !!v.scopeRecent), { reduced });
   return e;
 }
-/** main = 다축(메인), 아니면 단일 케이지(서브). R = 몸체 화면 반지름 */
+/** 톱니 테(위에서 본 기어): 반지름 r 에 톱니 Z 를 선 대시로(한 번의 stroke) — 이 높이 h px, 회전 a */
+function teethRing(ctx, x, y, r, Z, h, a, color, alpha) {
+  const p = (TAU * r) / Z;
+  ctx.globalAlpha = alpha; ctx.strokeStyle = color; ctx.lineWidth = h; ctx.lineCap = 'butt';
+  ctx.setLineDash([p * 0.46, p * 0.54]); ctx.lineDashOffset = -a * r;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+}
+/** 면취 띠(위에서 본 스틸 테): 어두운 바깥 → 몸 → 가는 하이라이트(앵글라주). 라이트는 진한 잉크 윤곽 */
+function bevelRing(ctx, x, y, r, w, P, alpha) {
+  ctx.lineCap = 'round';
+  ctx.globalAlpha = alpha; ctx.strokeStyle = P.ink || P.steelLo; ctx.lineWidth = w + (P.ink ? 1.6 : 1.2);
+  ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.stroke();
+  ctx.strokeStyle = P.steel; ctx.lineWidth = w; ctx.stroke();
+  ctx.globalAlpha = alpha * 0.85; ctx.strokeStyle = P.steelHi; ctx.lineWidth = Math.max(0.6, w * 0.22);
+  ctx.beginPath(); ctx.arc(x, y, r - w * 0.22, Math.PI * 0.95, Math.PI * 1.75); ctx.stroke();
+}
+function bevelLine(ctx, pts, w, P, alpha) {
+  const path = () => { ctx.beginPath(); ctx.moveTo(pts[0], pts[1]); ctx.quadraticCurveTo(pts[2], pts[3], pts[4], pts[5]); };
+  ctx.lineCap = 'round';
+  ctx.globalAlpha = alpha; ctx.strokeStyle = P.ink || P.steelLo; ctx.lineWidth = w + (P.ink ? 1.6 : 1.2); path(); ctx.stroke();
+  ctx.strokeStyle = P.steel; ctx.lineWidth = w; path(); ctx.stroke();
+  ctx.globalAlpha = alpha * 0.8; ctx.strokeStyle = P.steelHi; ctx.lineWidth = Math.max(0.5, w * 0.2); path(); ctx.stroke();
+}
+/** main = 자이로 뚜르비용(메인), 아니면 단일 케이지(서브). R = 몸체(원래 크기) 화면 반지름. 위에서 본 무브먼트:
+ *  고정 4번 휠(금 톱니 테·살 5) → 케이지 테·브리지 팔 3(스틸 면취, 째깍 회전) → 피니언·이스케이프 휠(케이지에 붙어 4번 휠 위를 구름)·앵커
+ *  → 안쪽 케이지(기운 고리, 반대로) → 밸런스(금 테·살·나사, 진동). 작으면 실루엣(테·톱니)만 */
 export function drawTourb2D(view, ctx, v, x, y, R, alpha, now, main) {
-  if (R < (main ? 6 : 10)) return;
+  if (R < (main ? 4 : 7)) return;
   const L = !!view.tokens.isLight, P = L ? TB2.light : TB2.dark, e = escOf(v, now, !!view.reduced);
-  const fine = R >= (main ? 14 : 18);
-  const lw = Math.max(0.8, R * (main ? 0.035 : 0.028));
   const dot = (px, py, r, c, a) => { ctx.globalAlpha = alpha * a; ctx.fillStyle = c; ctx.beginPath(); ctx.arc(px, py, r, 0, TAU); ctx.fill(); };
+  const pt = (a, r) => [x + Math.cos(a) * r, y - Math.sin(a) * r]; // 3D 와 같은 방위 감각(위에서 반시계)
   ctx.save();
   if (!main) {
-    const Rc = R * TG.SUB_R;
-    ctx.globalAlpha = alpha * 0.7; ctx.strokeStyle = P.steel; ctx.lineWidth = lw;
-    ctx.beginPath(); ctx.arc(x, y, Rc, 0, TAU); ctx.stroke();
-    ctx.beginPath();
-    for (let i = 0; i < TG.SUB_ARMS; i++) { const a = e.cage + (i * TAU) / TG.SUB_ARMS; ctx.moveTo(x + Math.cos(a) * R * 1.04, y + Math.sin(a) * R * 1.04); ctx.lineTo(x + Math.cos(a) * Rc, y + Math.sin(a) * Rc); }
-    ctx.stroke();
-    if (fine) { const a = e.cage; dot(x + Math.cos(a) * Rc, y + Math.sin(a) * Rc, Math.max(1.2, R * 0.05), P.ruby, 0.95); for (let i = 1; i < TG.SUB_ARMS; i++) { const b = e.cage + (i * TAU) / TG.SUB_ARMS; dot(x + Math.cos(b) * Rc, y + Math.sin(b) * Rc, Math.max(1, R * 0.035), P.blue, 0.9); } }
+    const Rc = R * TG.SUB_R, fine = R >= 12;
+    teethRing(ctx, x, y, R * (TG.SUB_R + 0.11), 40, Math.max(1, R * 0.09), e.cage, P.gold, alpha * 0.85);
+    bevelRing(ctx, x, y, Rc, Math.max(1, R * 0.1), P, alpha * 0.85);
+    if (fine) {
+      for (let i = 0; i < TG.SUB_ARMS; i++) { const a = e.cage + (i * TAU) / TG.SUB_ARMS, [ax, ay] = pt(a, Rc), [cx, cy] = pt(a + 0.25, Rc * 0.6), [bx, by] = pt(a, R * 0.1); bevelLine(ctx, [ax, ay, cx, cy, bx, by], Math.max(0.8, R * 0.06), P, alpha * 0.8); }
+      dot(x, y, Math.max(1.2, R * 0.06), P.ruby, 0.95);
+    }
     ctx.restore(); ctx.globalAlpha = alpha; return;
   }
-  const Ro = R * TG.OUTER_R, Ri = R * TG.INNER_R, Rb = R * TG.BAL_R;
-  // 바깥 케이지: 링 + 살 3(케이지 각으로 째깍) + 살 끝 블루 스크루
-  ctx.globalAlpha = alpha * 0.75; ctx.strokeStyle = P.steel; ctx.lineWidth = lw;
-  ctx.beginPath(); ctx.arc(x, y, Ro, 0, TAU); ctx.stroke();
-  ctx.beginPath();
-  for (let i = 0; i < TG.OUTER_ARMS; i++) { const a = e.cage + (i * TAU) / TG.OUTER_ARMS; ctx.moveTo(x + Math.cos(a) * Rb * 1.05, y + Math.sin(a) * Rb * 1.05); ctx.lineTo(x + Math.cos(a) * Ro, y + Math.sin(a) * Ro); }
-  ctx.stroke();
-  // 안쪽 케이지: 점선 링이 반대로 돌고 피벗 루비 둘
+  const S = 1.12 * R; // 3D 와 같은 메인 배율
+  const fine = R >= 9, detail = R >= 16;
+  // ② 고정 4번 휠(돌지 않음): 금 톱니 테 + 살 5
+  const m = GEAR_M * S;
+  teethRing(ctx, x, y, TG.FOURTH_R * S, TG.FOURTH_Z, Math.max(1.2, m * 2.2), 0, P.gold, alpha);
+  ctx.globalAlpha = alpha * 0.9; ctx.strokeStyle = P.gold; ctx.lineWidth = Math.max(1, S * 0.09);
+  ctx.beginPath(); ctx.arc(x, y, (TG.FOURTH_R - 0.1) * S, 0, TAU); ctx.stroke();
   if (fine) {
-    ctx.globalAlpha = alpha * 0.6; ctx.setLineDash([Math.max(2, R * 0.14), Math.max(1.5, R * 0.07)]); ctx.lineDashOffset = -e.cage2 * Ri;
-    ctx.beginPath(); ctx.arc(x, y, Ri, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
-    for (const k of [0, Math.PI]) dot(x + Math.cos(e.cage2 + k) * Ri, y + Math.sin(e.cage2 + k) * Ri, Math.max(1.2, R * 0.045), P.ruby, 0.95);
+    ctx.lineWidth = Math.max(0.8, S * 0.06); ctx.beginPath();
+    for (let i = 0; i < TG.FOURTH_SPOKES; i++) { const a = 0.3 + (i * TAU) / TG.FOURTH_SPOKES + TAU / TG.FOURTH_SPOKES / 2, [ax, ay] = pt(a, 0.6 * S), [bx, by] = pt(a, (TG.FOURTH_R - 0.12) * S); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); }
+    ctx.stroke();
+    ctx.lineWidth = Math.max(0.8, S * 0.07); ctx.beginPath(); ctx.arc(x, y, 0.6 * S, 0, TAU); ctx.stroke();
   }
-  // 밸런스 휠: 금빛 테 + 살 3 토막 + 타이밍 나사(진동)
-  ctx.globalAlpha = alpha * 0.9; ctx.strokeStyle = P.gold; ctx.lineWidth = lw * 1.3;
-  ctx.beginPath(); ctx.arc(x, y, Rb, 0, TAU); ctx.stroke();
+  // 피니언·이스케이프 휠(케이지에 붙어 감)
+  const aE = e.cage + Math.PI / TG.CAGE_ARMS, [ex, ey] = pt(aE, ESC_ARBOR * S), pa = pinionAngle(e.cage, Math.PI / TG.CAGE_ARMS) + e.cage + e.kick;
   if (fine) {
-    const a0 = e.cage + e.bal;
-    ctx.beginPath();
-    for (let i = 0; i < TG.BAL_SPOKES; i++) { const a = a0 + (i * TAU) / TG.BAL_SPOKES; ctx.moveTo(x + Math.cos(a) * R * 1.0, y + Math.sin(a) * R * 1.0); ctx.lineTo(x + Math.cos(a) * Rb, y + Math.sin(a) * Rb); }
-    ctx.stroke();
-    for (let i = 0; i < TG.BAL_SCREWS; i++) { const a = a0 + ((i + 0.5) * TAU) / TG.BAL_SCREWS; dot(x + Math.cos(a) * (Rb + R * 0.045), y + Math.sin(a) * (Rb + R * 0.045), Math.max(0.9, R * 0.03), P.gold, 0.95); }
-    for (let i = 0; i < TG.OUTER_ARMS; i++) { const a = e.cage + (i * TAU) / TG.OUTER_ARMS; dot(x + Math.cos(a) * Ro, y + Math.sin(a) * Ro, Math.max(1, R * 0.035), P.blue, 0.95); }
-    // 이스케이프 휠(케이지에 붙어 감): 톱니가 박마다 째깍 + 앵커
-    const ea = e.cage + Math.PI / TG.OUTER_ARMS, ex = x + Math.cos(ea) * Ro, ey = y + Math.sin(ea) * Ro, er = R * TG.ESC_R * 1.1;
-    ctx.globalAlpha = alpha * 0.9; ctx.strokeStyle = P.gold; ctx.lineWidth = Math.max(0.8, lw * 0.9);
-    ctx.beginPath(); ctx.arc(ex, ey, er, 0, TAU);
-    for (let i = 0; i < TG.ESC_TEETH; i++) { const a = -e.esc + (i * TAU) / TG.ESC_TEETH; ctx.moveTo(ex + Math.cos(a) * er, ey + Math.sin(a) * er); ctx.lineTo(ex + Math.cos(a + 0.18) * er * 1.28, ey + Math.sin(a + 0.18) * er * 1.28); }
-    ctx.stroke();
-    dot(ex, ey, Math.max(1, R * 0.04), P.ruby, 0.95);
-    const pa = ea + e.pallet * 1.6, px = ex + Math.cos(ea) * er * 1.9, py = ey + Math.sin(ea) * er * 1.9; // 앵커 피벗(바깥쪽), 팔이 바퀴를 감쌈
-    ctx.strokeStyle = P.steel; ctx.beginPath();
-    ctx.moveTo(px + Math.cos(pa + 2.2) * er * 1.2, py + Math.sin(pa + 2.2) * er * 1.2); ctx.lineTo(px, py); ctx.lineTo(px + Math.cos(pa - 2.2) * er * 1.2, py + Math.sin(pa - 2.2) * er * 1.2);
-    ctx.stroke();
-    dot(px, py, Math.max(0.9, R * 0.035), P.ruby, 0.95);
+    teethRing(ctx, ex, ey, PINION_R * S, TG.PINION_Z, Math.max(1, m * 2), -pa, P.steel, alpha * 0.9);
+    const er = TG.ESC_R * S;
+    ctx.globalAlpha = alpha * 0.95; ctx.strokeStyle = P.steel; ctx.lineWidth = Math.max(0.8, S * 0.03); ctx.beginPath();
+    for (let i = 0; i < TG.ESC_TEETH; i++) { const a = pa + (i * TAU) / TG.ESC_TEETH; ctx.moveTo(ex + Math.cos(a) * er * 0.74, ey - Math.sin(a) * er * 0.74); ctx.lineTo(ex + Math.cos(a + 0.17) * er, ey - Math.sin(a + 0.17) * er); }
+    ctx.stroke(); ctx.beginPath(); ctx.arc(ex, ey, er * 0.74, 0, TAU); ctx.stroke();
+    if (detail) { // 앵커 + 팔레트 루비
+      const aP = e.cage + Math.PI / TG.CAGE_ARMS - 0.21, [px, py] = pt(aP, (ESC_ARBOR - 0.22) * S);
+      const dir = Math.atan2(-(ey - py), ex - px) + e.pallet + e.kick * 0.6, k = er * 0.95;
+      ctx.strokeStyle = P.steel; ctx.lineWidth = Math.max(0.8, S * 0.035); ctx.beginPath();
+      const arm = (s2) => [px + Math.cos(dir + s2 * 0.75) * k, py - Math.sin(dir + s2 * 0.75) * k];
+      const [l1x, l1y] = arm(1), [l2x, l2y] = arm(-1);
+      ctx.moveTo(l1x, l1y); ctx.lineTo(px, py); ctx.lineTo(l2x, l2y); ctx.moveTo(px, py); ctx.lineTo(px - Math.cos(dir) * k * 1.1, py + Math.sin(dir) * k * 1.1); ctx.stroke();
+      dot(l1x, l1y, Math.max(0.9, S * 0.025), P.ruby, 0.95); dot(l2x, l2y, Math.max(0.9, S * 0.025), P.ruby, 0.95);
+      dot(ex, ey, Math.max(1, S * 0.035), P.ruby, 0.95);
+    }
+    // 이스케이프 브리지(테 → 굴대)
+    const [rx, ry] = pt(aE, TG.CAGE_R * S); bevelLine(ctx, [rx, ry, (rx + ex) / 2, (ry + ey) / 2, ex, ey], Math.max(0.8, S * 0.06), P, alpha);
+  }
+  // ① 케이지 테 + 브리지 팔 3(째깍 회전)
+  bevelRing(ctx, x, y, TG.CAGE_R * S, Math.max(1.2, S * 0.12), P, alpha);
+  if (fine) for (let i = 0; i < TG.CAGE_ARMS; i++) {
+    const a = e.cage + (i * TAU) / TG.CAGE_ARMS, [ax, ay] = pt(a, TG.CAGE_R * S), [cx, cy] = pt(a + 0.22, 0.7 * S), [bx, by] = pt(a, 0.12 * S);
+    bevelLine(ctx, [ax, ay, cx, cy, bx, by], Math.max(0.9, S * 0.075), P, alpha);
+  }
+  // ③ 안쪽 케이지(기운 고리, 반대로) + 밸런스
+  if (fine) {
+    ctx.globalAlpha = alpha * 0.8; ctx.strokeStyle = P.ink || P.steelLo; ctx.lineWidth = Math.max(0.8, S * 0.05);
+    ctx.beginPath(); ctx.ellipse(x, y, TG.INNER_R * S, TG.INNER_R * S * Math.cos(TG.INNER_TILT), -e.cage2, 0, TAU); ctx.stroke();
+    ctx.strokeStyle = P.steel; ctx.lineWidth = Math.max(0.6, S * 0.035); ctx.stroke();
+    const a0 = e.cage + e.cage2 + e.bal, Rb = TG.BAL_R * S;
+    ctx.globalAlpha = alpha; ctx.strokeStyle = P.goldLo; ctx.lineWidth = Math.max(1, S * 0.08); ctx.beginPath(); ctx.arc(x, y, Rb, 0, TAU); ctx.stroke();
+    ctx.strokeStyle = P.gold; ctx.lineWidth = Math.max(0.8, S * 0.055); ctx.stroke();
+    if (detail) {
+      for (let i = 0; i < TG.BAL_SCREWS; i++) { const a = a0 + ((i + 0.5) * TAU) / TG.BAL_SCREWS, [sx, sy] = pt(a, Rb + S * 0.045); dot(sx, sy, Math.max(0.8, S * 0.024), P.gold, 0.95); }
+      for (let i = 0; i < TG.CAGE_ARMS; i++) { const [sx, sy] = pt(e.cage + (i * TAU) / TG.CAGE_ARMS, TG.CAGE_R * S); dot(sx, sy, Math.max(0.9, S * 0.03), P.blue, 0.95); }
+    }
   }
   ctx.restore(); ctx.globalAlpha = alpha;
 }

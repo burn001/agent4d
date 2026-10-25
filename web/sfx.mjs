@@ -251,7 +251,7 @@ export class RateLimiter {
 // 모든 소리: attack ≥ 5ms, release ≥ 30ms, 길이 ≤ 400ms (done ≤ 900ms).
 export const SOUNDS = {
   error: { dur: 0.36, register: 'low', desc: '낮은 삼각파 두 음 하강(반음), lowpass 900Hz' },
-  user: { dur: 1.36, register: 'high', desc: '은은한 슝(대역 잡음 상승) → 도착 때 벨 두 음(근음+5도) — §96 빛줄기' },
+  user: { dur: 1.36, register: 'high', desc: '모임 스으(고음 잡음) → 슈욱(대역 잡음 상승) → 도착 때 벨 두 음(근음+5도) — §96 빛줄기(카메라 이동이 있으면 그만큼 늦게 시작)' },
   spawn: { dur: 0.34, register: 'high', desc: '사인+삼각 2음 상행 아르페지오' },
   'spawn-soft': { dur: 0.34, register: 'high', octave: 1, desc: 'spawn 한 옥타브 위, 게인 0.6' },
   workflow: { dur: 0.38, register: 'mid', desc: '3음 아르페지오' },
@@ -368,7 +368,9 @@ const semis = (m, s) => mtof(m + s);
  * 소리 하나를 ctx 위에 만든다(실시간·OfflineAudioContext 공용).
  * opts: { notes(scaleNotes 결과), pitchIndex, gain }  반환: 끝나는 시각(초)
  */
-export function synth(ctx, dest, name, t0, { notes = scaleNotes(null), pitchIndex = 0, gain = 1 } = {}) {
+/** 빛줄기 기본 박자(카메라 이동 없음, 화면 거리 중간): 모임 시작·발사·도착(초) */
+export const USER_TIMING = { start: 0, launch: 0.32, arrive: 1.0 };
+export function synth(ctx, dest, name, t0, { notes = scaleNotes(null), pitchIndex = 0, gain = 1, timing = null } = {}) {
   const spec = SOUNDS[name];
   if (!spec) return t0;
   const reg = spec.register;
@@ -381,12 +383,15 @@ export function synth(ctx, dest, name, t0, { notes = scaleNotes(null), pitchInde
       osc(ctx, 'triangle', semis(n0, -1), t0 + 0.15, 0.2, lp, 0.5 * G);
       return t0 + 0.37;
     }
-    case 'user': { // 빛줄기와 같이: 은은한 '슝'(올라가는 대역 잡음) → 도착 때 '톡'(예전 두 음 벨을 짧게)
-      noise(ctx, t0, 0.95, dest, 0.045 * G, { type: 'bandpass', f: 520, fEnd: 2400, q: 1.3, attack: 0.4 });
+    case 'user': { // 빛줄기와 같은 박자: 모임 '스으'(작은 고음 잡음) → 발사 '슈욱'(올라가는 대역 잡음) → 도착 '톡'(벨 두 음을 짧게)
+      const T = timing || USER_TIMING;
+      const a = t0 + T.start, b = t0 + T.launch, c = t0 + T.arrive;
+      noise(ctx, a, Math.max(0.12, b - a + 0.05), dest, 0.018 * G, { type: 'highpass', f: 5200, fEnd: 7600, q: 0.7, attack: Math.max(0.08, b - a) * 0.9 });
+      noise(ctx, b, Math.max(0.3, c - b), dest, 0.045 * G, { type: 'bandpass', f: 420, fEnd: 2600, q: 1.3, attack: Math.max(0.2, c - b) * 0.75 });
       const r = noteFor(notes, 'high', 0);
-      fm(ctx, mtof(r), t0 + 1.0, 0.26, dest, 0.2 * G, { ratio: 2, index: 1.2, idxDecay: 0.15 });
-      fm(ctx, semis(r, 7), t0 + 1.08, 0.26, dest, 0.15 * G, { ratio: 2, index: 1.0, idxDecay: 0.15 });
-      return t0 + 1.36;
+      fm(ctx, mtof(r), c, 0.26, dest, 0.2 * G, { ratio: 2, index: 1.2, idxDecay: 0.15 });
+      fm(ctx, semis(r, 7), c + 0.08, 0.26, dest, 0.15 * G, { ratio: 2, index: 1.0, idxDecay: 0.15 });
+      return c + 0.36;
     }
     case 'spawn':
     case 'spawn-soft': {
@@ -654,7 +659,7 @@ export class Sfx {
   }
   _save() { try { this._storage && this._storage.setItem(KEY, JSON.stringify({ on: this._on, volume: this._vol })); } catch (e) {} }
 
-  onEvent(ev, { node = null, speed = 1, quiet = false, replay = false } = {}) {
+  onEvent(ev, { node = null, speed = 1, quiet = false, replay = false, timing = null } = {}) {
     if (!this._on || quiet || this.held) return false;
     if (typeof document !== 'undefined' && document.hidden) return false;
     // 컨텍스트가 멈춘 동안(자동재생 대기·interrupted)은 쌓지 않는다 — 풀리면 한꺼번에 나므로(복원은 sound.mjs)
@@ -663,10 +668,10 @@ export class Sfx {
     if (!s) return false;
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     if (!this.limiter.allow(s, now, replay ? speed : 1)) { this.stats.dropped++; return false; }
-    return this.play(s.name, s);
+    return this.play(s.name, timing ? { ...s, timing } : s);
   }
 
-  play(name, { priority = 2, pitchIndex = 0, pan = 0, gain = 1 } = {}) {
+  play(name, { priority = 2, pitchIndex = 0, pan = 0, gain = 1, timing = null } = {}) {
     if (!SOUNDS[name] || this.held || !this._ensure()) return false;
     const ctx = this.ctx;
     if (ctx.state === 'suspended') ctx.resume().catch(() => {});
@@ -690,7 +695,7 @@ export class Sfx {
     let musicT = null;
     try { musicT = this.getMusicTime(); } catch (e) {}
     const t0 = now + 0.01;
-    const end = synth(ctx, out, name, t0, { notes: scaleNotes(musicT), pitchIndex, gain });
+    const end = synth(ctx, out, name, t0, { notes: scaleNotes(musicT), pitchIndex, gain, timing });
     const v = { g: vg, priority, start: t0, end: end + 0.05 };
     this.voices.push(v);
     setTimeout(() => { try { vg.disconnect(); } catch (e) {} }, (end - now + 0.3) * 1000);
