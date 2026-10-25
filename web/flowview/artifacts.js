@@ -5,7 +5,8 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { ART, ARTGEO, ART_KEYS, artKeyColor, artGeometry, artFitPoints, artPickXZ, ArtState, ensureArtCss } from '../artifact-core.mjs';
-import { NamePlates3D } from '../art-name3d.js'; // 바닥 글씨(표현 공용)
+import { NamePlates3D } from '../art-name3d.js';
+import { artBlend, artInk } from '../art-layer3d.js'; // 테마별 혼합 // 바닥 글씨(표현 공용)
 
 const EDGE_OFF = 0.09; // 굵은 간선(누적 많음)은 평행선을 더 그린다
 
@@ -77,18 +78,12 @@ export class ArtLayer3D {
     if (!t) return;
     this.isLight = !!t.isLight;
     this.colors = ART_KEYS.map((k) => new THREE.Color(artKeyColor(k, this.isLight)));
-    // 저휘도: 다크는 가산(옅은 선·아주 옅은 채움), 라이트는 일반 혼합(밝은 바탕에 진한 가는 선, 채움 없음)
-    const bl = this.isLight ? THREE.NormalBlending : THREE.AdditiveBlending;
-    for (const m of [this.lMat, this.dMat, this.bMat, this.yMat]) { m.blending = bl; m.needsUpdate = true; }
+    // 저휘도: 다크는 가산(옅은 선·아주 옅은 채움), 라이트는 곱하기 잉크(밝은 바탕에 진한 가는 선 + 아주 옅은 채움)
+    artBlend([this.lMat, this.dMat, this.bMat, this.yMat], this.isLight);
     for (const L of this.labels) L.key = '';
     if (this.names) this.names.applyTheme(this.isLight);
   }
-  _mix(out, ci, a, solid = false) {
-    const c = this.colors[ci] || this.colors[0];
-    if (this.isLight || solid) out.copy((this.view.tokens && this.view.tokens.bg) || new THREE.Color(this.isLight ? 0xffffff : 0)).lerp(c, Math.min(1, a));
-    else out.copy(c).multiplyScalar(Math.min(1, a));
-    return out;
-  }
+  _mix(out, ci, a) { return artInk(out, this.colors[ci] || this.colors[0], a, this.isLight); }
 
   /** 지금 보이는 프로젝트: 전체 보기 = 활성 섬들, 단일 세션 = 장부 기본 프로젝트 */
   _pids() {

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   ART, ArtBook, ArtLayout, ArtFx, ArtGeo, ArtState, ARTGEO, artGeometry, artFitPoints, artPickXZ, freshness, edgeWeight, isShown,
   districtKey, topFolder, fileSub, inIsland, fitScale, ART_KEYS, artInitial, artStoreKey, ART_VIEWS_READY, artInspectModel, artHistorySample, foldRef, sanitizeArt, artHash, spiralAt,
-  districtLabel, artAlarmText, ART_KIND_LABEL,
+  districtLabel, artAlarmText, ART_KIND_LABEL, artAlphaBase, artKeyColor,
 } from '../artifact-core.mjs';
 import { _setLangForTest } from '../i18n.mjs';
 import { ART_MOCK, ArtMockDriver, artMockPayload } from '../art-mock.mjs';
@@ -101,7 +101,7 @@ test('연출 큐: 시작=패킷(읽기는 있는 대상만 선), 끝=솟음·맥
   assert.ok(fx.list.length <= 160);
 });
 
-test('도형(§79.13·§79.14): 저휘도 선 위주·점등·종류별 실루엣·빔은 점등/초점만·라이트 채움 없음·LOD·상한', () => {
+test('도형(§79.13·§79.14): 저휘도 선 위주·점등·종류별 실루엣·빔은 점등/초점만·라이트 옅은 채움·LOD·상한', () => {
   const book = new ArtBook();
   const now = T + 60_000;
   book.apply(end('a', [file('src/a.js', 'create')]), 'p');
@@ -132,7 +132,9 @@ test('도형(§79.13·§79.14): 저휘도 선 위주·점등·종류별 실루�
   fx.step(5);
   const g2 = artGeometry(book, st.lay, fx, 5, env, new ArtGeo());
   assert.ok(maxA(g2) <= 0.36, '4초 감쇠 뒤 다시 가라앉음');
-  assert.equal(artGeometry(book, st.lay, fx, 5, { ...env, isLight: true }, new ArtGeo()).nb, 0, '라이트는 채움 없음');
+  { const gl = artGeometry(book, st.lay, fx, 5, { ...env, isLight: true }, new ArtGeo()); // 라이트: 곱하기 잉크 위 아주 옅은 채움(≤ 0.1)
+    assert.ok(gl.nb > 0 && Math.max(0, ...gl.BA.slice(0, gl.nb)) <= 0.1, '라이트 옅은 채움 ≤ 0.1'); }
+  assert.equal(artGeometry(book, st.lay, fx, 5, { ...env, isLight: true, style: { bright: 0.35, fill: 'line' } }, new ArtGeo()).nb, 0, '라이트 선만 = 채움 없음');
   assert.equal(artGeometry(book, st.lay, fx, 5, { ...env, style: { bright: 0.35, fill: 'line' } }, new ArtGeo()).nb, 0, '선만');
   st.setFoot('p', 'a:2');
   assert.ok(has(artGeometry(book, st.lay, new ArtFx(), 0, { ...env, foot: st.foot }, new ArtGeo()), 'write'), '초점 노드 빔');
@@ -266,4 +268,31 @@ test('바닥 글씨 방향(§79.15): 카메라 방위의 가장 가까운 90° �
   assert.ok(b > 3.0, '최단 방향(±π 넘어)');
   const t = { hw: 30, hd: 10 };
   assert.ok(artNamePlateYaw(t, 0.25, Q).w < artNamePlateYaw(t, 0.25, 0).w, '90° 면 좁은 축에 맞춤');
+});
+
+// 라이트 대비: 평상시 은은하지만 확실히, 점등 시 뚜렷 · 다크 값은 그대로 · 잉크 색은 밝은 바탕과 명암비 확보
+test('라이트 대비(§92): 테마별 기본 알파·점등 상한·잉크 색 명암비, 다크 불변', () => {
+  const d = artAlphaBase({ bright: 0.35, fill: 'soft' }, false), l = artAlphaBase({ bright: 0.35, fill: 'soft' }, true);
+  assert.ok(Math.abs(d.LINE_A - 0.225) < 1e-9 && Math.abs(d.FILL_A - 0.0295) < 1e-9 && d.LIT_TOP === 0.85 && d.LIT_FILL === 0.3 && d.FRESH0 === 0.45, '다크 = §79.13 값 그대로');
+  assert.ok(l.LINE_A >= 0.5 && l.LINE_A <= 0.7, `라이트 평상시 선 0.5～0.7 (${l.LINE_A})`);
+  assert.ok(l.LINE_A * l.FRESH0 >= 0.4, '오래된 대상도 선 ≥ 0.4(사라지지 않음)');
+  assert.ok(l.FILL_A > 0 && l.FILL_A <= 0.1 && artAlphaBase({ bright: 0.35, fill: 'line' }, true).FILL_A === 0, '라이트 옅은 채움 · 선만이면 0');
+  assert.ok(l.LIT_TOP >= 0.85 && l.LIT_TOP - l.LINE_A >= 0.25, '점등은 평상시보다 확실히 진함');
+  assert.ok(artAlphaBase({ bright: 0, fill: 'soft' }, true).LINE_A >= 0.3, '밝기 0 이어도 라이트 선은 보임');
+  // 잉크 색: 라이트 바탕(#f5f6fa)과 명암비 — 종류 색 ≥ 7, 빔·강조 ≥ 3.5, 지운 것·구역 ≥ 2.5
+  const lum = (hex) => { const v = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))); return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; };
+  const cr = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+  for (const k of ['file', 'output', 'repo', 'db', 'remote', 'service']) assert.ok(cr(artKeyColor(k, true), '#f5f6fa') >= 7, k);
+  for (const k of ['write', 'read', 'alarm', 'imp', 'new', 'warn']) assert.ok(cr(artKeyColor(k, true), '#f5f6fa') >= 3.5, k);
+  for (const k of ['del', 'zone']) assert.ok(cr(artKeyColor(k, true), '#f5f6fa') >= 2.5, k);
+  // 기하: 라이트 평상시 선이 다크보다 진하고, 점등 대상은 ≥ 0.85
+  const book = new ArtBook(); for (const [tu, f] of [['a', 'src/a.js'], ['b', 'src/b.js'], ['c', 'docs/r.md']]) book.apply(end(tu, [file(f, 'create')]), 'p');
+  const fx = new ArtFx(), st = new ArtState({ book, fx }); st.frame(['p'], () => ({ x: 0, z: 0, hw: 100, hd: 100 }), 0, 0);
+  const env = { anchor: (pid) => st.anchor(pid), nodePos: () => ({ x: 5, y: 0, z: 5 }), nowMs: T + 3600_000 * 24, cellPx: () => 20 };
+  const med = (gg) => { const a = [...gg.LA.slice(0, gg.nl)].sort((x, y) => x - y); return a[a.length >> 1]; };
+  const gd = artGeometry(book, st.lay, fx, 0, env, new ArtGeo()), gl = artGeometry(book, st.lay, fx, 0, { ...env, isLight: true }, new ArtGeo());
+  assert.ok(med(gl) >= 0.3 && med(gl) > med(gd) * 1.5, `라이트 평상시 선 중앙값 (${med(gl).toFixed(2)} vs 다크 ${med(gd).toFixed(2)})`);
+  fx.note(book.apply(end('z', [file('src/a.js', 'modify', { sz: 3 })], 2000, 'a:1'), 'p'), 'a:1', 0);
+  const glit = artGeometry(book, st.lay, fx, 0.3, { ...env, isLight: true }, new ArtGeo());
+  assert.ok(Math.max(...glit.LA.slice(0, glit.nl)) >= 0.85, '라이트 점등 선 ≥ 0.85');
 });

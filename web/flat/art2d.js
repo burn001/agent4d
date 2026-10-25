@@ -74,7 +74,7 @@ export class FlatArt {
     const a = this._a, b = this._b;
     this.hits.length = 0;
     ctx.save();
-    if (!isLight) ctx.globalCompositeOperation = 'lighter';
+    ctx.globalCompositeOperation = isLight ? 'multiply' : 'lighter'; // 라이트 = 곱하기 잉크(바탕이 무엇이든 그만큼 어둡게), 다크 = 가산
     // 상자: 윗면 + 앞면(높이만큼 아래로) — 큰 판(구역)부터 그려지도록 도형 순서 그대로
     for (let i = 0; i < g.nb; i++) {
       const o = i * 6;

@@ -451,7 +451,7 @@ export function artKeyColor(key, isLight = false) {
     case 'alarm': return L ? '#dc2626' : '#f87171';   // 빨강 = 파괴적 경보 전용
     case 'imp': return L ? '#92400e' : '#e8c977';
     case 'zone': return L ? '#64748b' : '#8b97aa';
-    case 'del': return L ? '#94a3b8' : '#5b6474';
+    case 'del': return L ? '#7b8698' : '#5b6474';
     case 'new': return L ? '#166534' : '#86efac';
     case 'warn': return L ? '#b45309' : '#fbbf24';
     default: return L ? '#334155' : '#cbd5e1';
@@ -505,6 +505,24 @@ export const inIsland = (x, z, hw, hd, m = 0.86) => Math.pow(Math.abs(x) / (hw *
 export const ART_STYLE_DEFAULT = { bright: 0.35, fill: 'soft' };
 
 /**
+ * 테마별 기본 알파. 다크(그대로): 가산 혼합 위의 옅은 선·아주 옅은 채움, 점등 선 0.85·채움 +0.3.
+ * 라이트: 렌더러가 '잉크'(3D 곱하기 혼합·2D multiply)로 그리므로 알파 = 바탕을 잉크 색 쪽으로 덮는 비율.
+ *   평상시 선 0.32 + 0.8×밝기(기본 0.6) · 신선도 하한 0.7(오래된 대상도 사라지지 않게) · 옅은 채움 0.03 + 0.06×밝기(기본 0.05, '선만'이면 0)
+ *   · 점등 선 0.95 · 점등 채움 +0.14 — 평상시엔 은은하지만 확실히 보이고, 손대면 뚜렷.
+ */
+export const ART_LIGHT = { LINE0: 0.32, LINEK: 0.8, FRESH0: 0.7, FILL0: 0.03, FILLK: 0.06, LIT_TOP: 0.9, LIT_FILL: 0.1 };
+export function artAlphaBase(style, isLight) {
+  const st = style || ART_STYLE_DEFAULT;
+  const B0 = Math.max(0, Math.min(1, st.bright ?? 0.35));
+  const line = st.fill === 'line';
+  if (isLight) {
+    const L = ART_LIGHT;
+    return { B0, line, LINE_A: Math.min(0.9, L.LINE0 + L.LINEK * B0), FILL_A: line ? 0 : L.FILL0 + L.FILLK * B0, FRESH0: L.FRESH0, LIT_TOP: L.LIT_TOP, LIT_FILL: L.LIT_FILL };
+  }
+  return { B0, line, LINE_A: 0.05 + 0.5 * B0, FILL_A: line ? 0 : 0.005 + 0.07 * B0, FRESH0: 0.45, LIT_TOP: 0.85, LIT_FILL: 0.3 };
+}
+
+/**
  * 장부 + 배치 + 연출 → 세계 좌표 도형.
  * env = { anchor(pid) → {x,z,k}|null, nodePos(id) → {x,y,z}|null, nowMs(데이터 시계), reduced, foot: {pid,node,set}|null(발자국·호버 초점),
  *         hover: {pid,id}|null(선택), y(바닥), style {bright, fill}, isLight, cellPx(pid) → 한 칸 화면 px(멀면 LOD), avoid: [{x,z,r}](노드 아래 비움) }
@@ -514,10 +532,8 @@ export function artGeometry(book, lay, fx, nowSec, env, geo = new ArtGeo()) {
   geo.begin();
   const Y0 = env.y ?? ART.FLOOR_Y;
   const nowMs = env.nowMs || Date.now();
-  const st = env.style || ART_STYLE_DEFAULT;
-  const B0 = Math.max(0, Math.min(1, st.bright ?? 0.35));
-  const LINE_A = (0.05 + 0.5 * B0) * (env.isLight ? 1.7 : 1);                                   // 기본 0.225(측정: 켬/끔 평균 밝기 상승 ≤5%)
-  const FILL_A = st.fill === 'line' || env.isLight ? 0 : 0.005 + 0.07 * B0; // 기본 0.03, 라이트는 채움 없음
+  const AB0 = artAlphaBase(env.style, env.isLight); // 테마별(다크 기본 선 0.225·채움 0.03 — 측정: 켬/끔 평균 밝기 상승 ≤5%)
+  const LINE_A = AB0.LINE_A, FILL_A = AB0.FILL_A, FRESH0 = AB0.FRESH0, LIT_TOP = AB0.LIT_TOP, LIT_FILL = AB0.LIT_FILL;
   // 점등(최근 활동): 대상마다 lit 0～1, 동시 상한 ART.LIT_MAX
   const fxBy = new Map(), litBy = new Map();
   for (const e of fx ? fx.list : []) {
@@ -558,8 +574,8 @@ export function artGeometry(book, lay, fx, nowSec, env, geo = new ArtGeo()) {
       const sel = env.hover && env.hover.pid === pid && env.hover.id === id;
       let dim = foot ? (foot.has(id) ? 1.6 : 0.3) : 1;
       if (near(x, z)) dim *= 0.35; // 에이전트 노드 아래는 비움(층 분리)
-      const la = Math.min(1, (LINE_A * (0.45 + 0.55 * fr) * dim) + (0.85 - LINE_A) * Math.max(lit, sel ? 0.7 : 0));
-      const fa = (FILL_A * fr * dim) + 0.3 * lit * (env.isLight ? 0 : 1);
+      const la = Math.min(1, (LINE_A * (FRESH0 + (1 - FRESH0) * fr) * dim) + Math.max(0, LIT_TOP - LINE_A) * Math.max(lit, sel ? 0.7 : 0));
+      const fa = (FILL_A * fr * dim) + LIT_FILL * lit;
       const ref = zoneItem ? null : { pid, id };
       const fxs = fxBy.get(key) || null;
       const R = want && want.has(key) ? AP.put(key, x, Y0 + 0.4, z, Y0 + 0.3, Y0, C) : null; // 연출 기준점

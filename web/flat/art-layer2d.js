@@ -70,13 +70,13 @@ class ArtLayerBase2D {
         ctx.globalAlpha = 1; ctx.fillStyle = base; ctx.fillRect(a.x, a.y, w, h + fh);
         ctx.globalAlpha = Math.min(0.6, g.BA[i] * 0.5); ctx.fillStyle = cols[g.BC[i]]; ctx.fillRect(a.x, a.y, w, h);
       } else {
-        ctx.globalCompositeOperation = isLight ? 'source-over' : 'lighter';
+        ctx.globalCompositeOperation = isLight ? 'multiply' : 'lighter';
         ctx.globalAlpha = g.BA[i] * (isLight ? 0.85 : 0.75); ctx.fillStyle = cols[g.BC[i]];
         ctx.fillRect(a.x, a.y, w, h);
         if (fh > 0.8) { ctx.globalAlpha = g.BA[i] * 0.45; ctx.fillRect(a.x, b.y, w, fh); }
       }
     }
-    ctx.globalCompositeOperation = isLight ? 'source-over' : 'lighter';
+    ctx.globalCompositeOperation = isLight ? 'multiply' : 'lighter';
     for (let i = 0; i < g.ny; i++) {
       const o = i * 5;
       const x = g.Y[o], y = g.Y[o + 1], z = g.Y[o + 2], r = g.Y[o + 3], hh = g.Y[o + 4];
@@ -155,7 +155,7 @@ class ArtLayerBase2D {
       lines.forEach((l, i) => {
         const y = a.y + (i - (lines.length - 1) / 2) * fpx * 1.1;
         ctx.fillStyle = `rgba(${col},${isLight ? 0.07 : 0.08})`; ctx.fillText(l, a.x, y);
-        ctx.strokeStyle = `rgba(${col},${isLight ? 0.26 : 0.3})`; ctx.lineWidth = Math.max(1, fpx * 0.03); ctx.strokeText(l, a.x, y);
+        ctx.strokeStyle = `rgba(${col},${isLight ? 0.32 : 0.3})`; ctx.lineWidth = Math.max(1, fpx * 0.03); ctx.strokeText(l, a.x, y);
       });
       ctx.restore();
       if (dimNow && v.scope && v.scope.mode === 'all') dimIslandLabel(root, pid, artNameReadable(fpx * 1.1));
@@ -185,7 +185,7 @@ class ArtLayerBase2D {
         const half = ws[k] / r / 2; psi += half;
         ctx.save(); ctx.translate(a.x + Math.cos(psi) * r, a.y + Math.sin(psi) * r); ctx.rotate(psi + Math.PI / 2);
         ctx.fillStyle = `rgba(${col},${isLight ? 0.07 : 0.08})`; ctx.fillText(ch, 0, 0);
-        ctx.strokeStyle = `rgba(${col},${isLight ? 0.26 : 0.3})`; ctx.lineWidth = Math.max(1, fpx * 0.03); ctx.strokeText(ch, 0, 0);
+        ctx.strokeStyle = `rgba(${col},${isLight ? 0.32 : 0.3})`; ctx.lineWidth = Math.max(1, fpx * 0.03); ctx.strokeText(ch, 0, 0);
         ctx.restore();
         psi += half;
       });

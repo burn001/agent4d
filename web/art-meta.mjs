@@ -6,7 +6,7 @@
 //  · 복셀 오피스: voxel/vx-art-core.mjs(서가·금고실·우편함·택배 창구·안테나·결재함 — 사무실 벽 바깥 띠).
 // 원칙(흐름 와 같음): 저휘도·선 위주, 손댈 때만 4초 점등(동시 8), 종류는 색이 아니라 실루엣·선 양식·움직임으로,
 // 파괴적 작업 붉은 파문, 중요 표식 작은 방패, 에이전트 → 대상 빔은 점등·초점일 때만.
-import { ART, ARTGEO, ART_KEYS, artXLabel, ART_STYLE_DEFAULT, freshness, edgeWeight, blockHeight, dbLevel, fileSub, zoneKeyOf } from './artifact-core.mjs';
+import { ART, ARTGEO, ART_KEYS, artXLabel, ART_STYLE_DEFAULT, artAlphaBase, freshness, edgeWeight, blockHeight, dbLevel, fileSub, zoneKeyOf } from './artifact-core.mjs';
 import { ActPos, drawActs } from './art-act-core.mjs'; // 상호작용 연출
 
 export const KI = Object.fromEntries(ART_KEYS.map((k, i) => [k, i]));
@@ -15,16 +15,7 @@ export const extOf = (n) => { const m = /\.([a-z0-9]{1,6})$/i.exec(String(n || '
 
 // ───────────── 공용 보조(Planet·복셀) ─────────────
 /** 표시 양식(⚙) → 선·채움 기본 알파(흐름과 같은 식) */
-export function styleAlpha(env) {
-  const st = env.style || ART_STYLE_DEFAULT;
-  const B0 = Math.max(0, Math.min(1, st.bright ?? 0.35));
-  return {
-    B0,
-    LINE_A: (0.05 + 0.5 * B0) * (env.isLight ? 1.7 : 1),
-    FILL_A: st.fill === 'line' || env.isLight ? 0 : 0.005 + 0.07 * B0,
-    line: st.fill === 'line',
-  };
-}
+export function styleAlpha(env) { return artAlphaBase(env.style, env.isLight); } // 테마별 기본 알파(artifact-core)
 /** 연출 큐 → 대상별 연출 목록·점등(동시 상한 ART.LIT_MAX, 밝은 순) */
 export function litMap(fx, nowSec, out = { fxBy: new Map(), litBy: new Map() }) {
   out.fxBy.clear(); out.litBy.clear();
@@ -54,8 +45,8 @@ export function fxState(fxs, nowSec, reduced, s = {}) {
 /** 선·채움 알파(흐름 artGeometry 와 같은 식) */
 export function itemAlpha(A, fr, dim, lit, sel, isLight) {
   return {
-    la: Math.min(1, A.LINE_A * (0.45 + 0.55 * fr) * dim + (0.85 - A.LINE_A) * Math.max(lit, sel ? 0.7 : 0)),
-    fa: A.FILL_A * fr * dim + 0.3 * lit * (isLight ? 0 : 1),
+    la: Math.min(1, A.LINE_A * ((A.FRESH0 ?? 0.45) + (1 - (A.FRESH0 ?? 0.45)) * fr) * dim + Math.max(0, (A.LIT_TOP ?? 0.85) - A.LINE_A) * Math.max(lit, sel ? 0.7 : 0)),
+    fa: A.FILL_A * fr * dim + (A.LIT_FILL ?? (isLight ? 0 : 0.3)) * lit,
   };
 }
 /** 중요 표식: 작은 방패(선) */

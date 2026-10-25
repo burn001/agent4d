@@ -10,6 +10,31 @@ import { VxArtPlan, voxelArtGeometry, vxFitPoints, vxRoomsFor } from './voxel/vx
 
 const EDGE_OFF = 0.09;
 
+/**
+ * 테마별 혼합. 다크 = 가산(그대로 — 어두운 바탕에서 빛나는 옅은 선). 라이트 = **곱하기 혼합 잉크**: 색을 흰색 → 잉크 색으로
+ * 알파만큼 섞어 바탕에 곱한다(흰 바탕 위 반투명 잉크와 같음). 섬 원판·격자·가구 등 바탕이 무엇이든 그만큼 어두워져 사라지지 않는다.
+ * 곱하기는 미리 곱한 알파가 필요하고(three), 그때 불투명도가 1 이 아니면 덮는 자리 전체가 어두워지므로 라이트에선 1, 안개는 끔
+ * (안개 색 쪽으로 바랜 잉크가 바탕을 회색으로 덮지 않게 — 먼 대상은 LOD 가 줄임).
+ */
+export function artBlend(mats, isLight) {
+  for (const m of mats) {
+    if (!m) continue;
+    if (m.userData.op0 == null) m.userData.op0 = m.opacity;
+    m.blending = isLight ? THREE.MultiplyBlending : THREE.AdditiveBlending;
+    m.premultipliedAlpha = !!isLight;
+    m.opacity = isLight ? 1 : m.userData.op0;
+    m.fog = !isLight;
+    m.needsUpdate = true;
+  }
+}
+const WHITE = new THREE.Color(1, 1, 1);
+/** 정점·인스턴스 색: 다크 = 종류 색 × 알파(가산), 라이트 = 흰색 → 잉크 색 알파만큼(곱하기) */
+export function artInk(out, c, a, isLight) {
+  if (isLight) out.copy(WHITE).lerp(c, Math.min(1, a));
+  else out.copy(c).multiplyScalar(Math.min(1, a));
+  return out;
+}
+
 class ArtLayerBase3D {
   /** solid: 상자를 배경과 섞은 불투명 색으로(복셀 가구 — 깊이 쓰기), 아니면 흐름과 같은 저휘도 혼합 */
   constructor(scene, view, { book, fx, style = null }, { solid = false } = {}) {
@@ -56,19 +81,12 @@ class ArtLayerBase3D {
     if (!t) return;
     this.isLight = !!t.isLight;
     this.colors = ART_KEYS.map((k) => new THREE.Color(artKeyColor(k, this.isLight)));
-    const bl = this.isLight ? THREE.NormalBlending : THREE.AdditiveBlending;
-    for (const m of [this.lMat, this.dMat, this.yMat]) { m.blending = bl; m.needsUpdate = true; }
-    if (!this.solid) { this.bMat.blending = bl; this.bMat.needsUpdate = true; }
+    artBlend([this.lMat, this.dMat, this.yMat, this.solid ? null : this.bMat], this.isLight); // 다크 가산 · 라이트 곱하기 잉크
     for (const L of this.labels) L.key = '';
     if (this.names) this.names.applyTheme(this.isLight);
   }
   _bg() { return (this.view.tokens && this.view.tokens.bg) || new THREE.Color(this.isLight ? 0xffffff : 0); }
-  _mix(out, ci, a, solid = false) {
-    const c = this.colors[ci] || this.colors[0];
-    if (this.isLight || solid) out.copy(this._bg()).lerp(c, Math.min(1, a));
-    else out.copy(c).multiplyScalar(Math.min(1, a));
-    return out;
-  }
+  _mix(out, ci, a) { return artInk(out, this.colors[ci] || this.colors[0], a, this.isLight); }
   /** 불투명 가구 색: 바탕 금속색에서 종류 색으로 a×0.5 만큼(몸통 ≈ 9%, 점등한 탭은 더) */
   _solid(out, ci, a) { const base = this._solidBase ? this._solidBase() : null; out.copy(base || this._bg()); if (!this.isLight) out.multiplyScalar(0.8); out.lerp(this.colors[ci] || this.colors[0], Math.min(1, a * 0.5)); return out; }
   _focus() {

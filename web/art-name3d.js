@@ -17,10 +17,12 @@ export class NamePlates3D {
   applyTheme(isLight) { this.isLight = !!isLight; for (const e of this.M.values()) this._style(e); }
   _style(e) {
     // 저휘도: 흰 글자(옅은 채움 + 윤곽) × 재질색. 다크 가산·라이트 일반 혼합, 글로우 없음
-    e.mat.color.set(this.isLight ? '#475569' : '#8a96aa');
-    e.baseOp = this.isLight ? 0.3 : 0.42;
+    // 라이트: 더 진한 잉크(#334155)·0.42, 안개 끔(밝은 안개 쪽으로 바래 바닥에 묻히지 않게) — 다크는 그대로
+    e.mat.color.set(this.isLight ? '#334155' : '#8a96aa');
+    e.baseOp = 0.42;
     e.mat.opacity = e.baseOp * (e.fa ?? 1);
     e.mat.blending = this.isLight ? THREE.NormalBlending : THREE.AdditiveBlending;
+    e.mat.fog = !this.isLight;
     e.mat.needsUpdate = true;
   }
   _drop(e) { this.group.remove(e.mesh); e.geo.dispose(); if (e.arcGeo) e.arcGeo.dispose(); e.mat.dispose(); e.tex.dispose(); }

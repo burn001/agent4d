@@ -245,7 +245,7 @@ export function voxelArtGeometry(book, plans, fx, nowSec, env, geo) {
         if (sub === 'doc') { tw = 0.11; th = 0.22; } else if (sub === 'data') { tw = 0.1; th = 0.26; } else if (sub === 'image') { tw = 0.1; th = 0.2; } else if (sub === 'plan') { tw = 0.12; th = 0.09; } else if (sub === 'del') { tw = 0.08; th = 0.08; }
         th *= shrink; const y0 = s.ly - 0.18 + drop, y1 = y0 + th, z = lz + out;
         const c = st.gone ? KI.del : col;
-        BX(lx, (y0 + y1) / 2, z - 0.03, tw, Math.max(0.02, th), 0.05, c, BODY * 1.4 + (env.isLight ? 0 : 0.35 * lit), ref);
+        BX(lx, (y0 + y1) / 2, z - 0.03, tw, Math.max(0.02, th), 0.05, c, BODY * 1.4 + (env.isLight ? 0.6 : 0.35) * lit, ref); // 라이트도 점등한 탭은 잉크 색 쪽으로
         if (detail || lit > 0.05 || sel) {
           FRONT(lx - tw / 2, y0, lx + tw / 2, y1, z, c, la);
           if (detail) {
