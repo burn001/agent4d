@@ -3,7 +3,6 @@
 // 매 프레임 다시 채운다 → 전체 draw call 은 한 자릿수(캐릭터 수와 무관).
 import * as THREE from 'three';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { PromptFx } from '../prompt-fx.js'; // 사용자 입력 빛줄기(화면 공간 오버레이)
 import { computeOffice, stationFor, CAT_FACILITY, hashStr } from './layout.js';
 import { readTokens, palette } from './palette.js';
 import { BoxBatch, UNIT_BOX, buildRoomStatic, buildCorridor, drawFacilities, drawDeskEmitter, drawMachine, ring, roomFrame, endXf, DESK_TOP } from './props.js';
@@ -390,25 +389,6 @@ export class VoxelView {
     if (!this.chars.has(id)) return;
     this._pushFx({ type: 'ring', id, dur: 0.75, color: toColor(color || this.kindColor(this.nodes.get(id)?.kind)), r0: 0.4, r1: 1.2 * scale });
   }
-  /** 사용자 입력: 카메라 앞에서 쏜 빛줄기가 그 직원(머리 높이)으로 날아가 흡수 → 바닥 고리 */
-  beam(id, o = {}) {
-    if (!this.chars.has(id)) return null;
-    const L = !!this.tokens.isLight;
-    if (!this.promptFx) this.promptFx = new PromptFx(this.container);
-    const col = new THREE.Color(this.kindColor('main'));
-    const pv = new THREE.Vector3();
-    return this.promptFx.launch({
-      targetFn: () => {
-        const ch = this.chars.get(id); if (!ch || !ch.pos) return null;
-        pv.set(ch.pos.x, 1.25, ch.pos.z).project(this.camera);
-        const W = this.container.clientWidth || 1, H = this.container.clientHeight || 1;
-        return { x: (pv.x * 0.5 + 0.5) * W, y: (-pv.y * 0.5 + 0.5) * H, behind: pv.z > 1 };
-      },
-      color: '#' + col.getHexString(), light: L, delay: o.delay || 0,
-      reduced: !!this.reduced || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches),
-      onArrive: () => { if (this.chars.has(id)) this._pushFx({ type: 'ring', id, dur: 0.9, color: toColor(L ? col : new THREE.Color(1, 1, 1)), r0: 0.4, r1: 1.4 }); },
-    });
-  }
   // 여러 live 세션
   setSessions({ book } = {}) { this.sess.setBook(book || null); }
   sessionMsg(ev) { return this.sess.message(ev, this._now); }
@@ -471,12 +451,11 @@ export class VoxelView {
   dispose() {
     if (this._disposed) return;
     this._disposed = true;
-    if (this.promptFx) { this.promptFx.dispose(); this.promptFx = null; }
     this.renderer.setAnimationLoop(null);
     if (this._ro) this._ro.disconnect();
     this.bubbles.dispose();
     if (this.sess) this.sess.dispose();
-    this.holo.dispose(); this.ix.dispose();
+    this.holo.dispose(); this.ix.dispose(); this.client.dispose();
     if (this.vArt) { this.vArt.dispose(); this.vArt = null; }
     for (const sg of this._signs) { sg.o.removeFromParent(); sg.el.remove(); }
     this._signs = [];
@@ -645,6 +624,13 @@ export class VoxelView {
   }
   get artOn() { return !!this.vArt; }
   pickArtifact(clientX, clientY) { return this.vArt ? this.vArt.pickAt(clientX, clientY) : null; }
+  /** 의뢰인 스크린(사용자 콘솔) 집기 → 주인 메인 id | null · 스크린 가운데(세계) */
+  pickConsole(clientX, clientY) {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const id = this.client.consoleAt(clientX - r.left, clientY - r.top, r);
+    return id && this.nodes.has(id) && !this._isDim(id) ? id : null;
+  }
+  consolePos(id) { return this.client.consolePos(id); }
   artPos(pid, id) { return this.vArt ? this.vArt.posOf(pid, id) : null; }
   setArtFoot(pid, nodeId) { if (this.vArt) this.vArt.st.setFoot(pid, nodeId); }
   setArtSelected(t) { if (this.vArt) this.vArt.st.sel = t || null; }
@@ -1087,6 +1073,7 @@ export class VoxelView {
     this.sess.drawDynamic(B, now); // 캐비닛 경고등·창·서류 더미·종이비행기
     this.ix.draw(B, now);          // 특별 상호작용 은유(발송대·문서고·부스·컨베이어·신호등)
     this.client.draw(B, now);      // 의뢰인 창구
+    this.client._overlay();        // 스크린 이름표·집기 사각형
     // 효과
     if (this.effects.length) {
       let w = 0;
@@ -1179,7 +1166,7 @@ export class VoxelView {
       G.box(p.x, top - len / 2, p.z, w, Math.max(0.01, len), w, e.color);
       if (k > 0.3) ring(G, p.x, 0.05, p.z, 0.4 + (k - 0.3) * 1.6, 12, e.color, 0.12);
     } else if (e.type === 'orb') {
-      const a = this._fxA || (this._fxA = new THREE.Vector3()), b = this._fxB || (this._fxB = new THREE.Vector3());
+      const a = this._orbA || (this._orbA = new THREE.Vector3()), b = this._orbB || (this._orbB = new THREE.Vector3()); // _fxA 는 페이드 메서드(이름 겹침 수리)
       if (!this._fxPos(e.from, a) || !this._fxPos(e.to, b)) return;
       const u = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
       const s = 0.26 * (1 - k * 0.4);

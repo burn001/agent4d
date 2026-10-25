@@ -408,7 +408,7 @@ export function autoCloseReason(s) {
 }
 
 /** 대상 키(같은 대상인지 비교) */
-export const targetKey = (t) => (!t ? '' : t.type === 'cluster' ? 'c:' + t.pid : t.type === 'artifact' ? 'a:' + t.pid + '|' + t.id : t.type === 'plan' ? 'p:' + t.id : 'n:' + t.id); // 대상 · 계획 보드(메인 id)
+export const targetKey = (t) => (!t ? '' : t.type === 'cluster' ? 'c:' + t.pid : t.type === 'artifact' ? 'a:' + t.pid + '|' + t.id : t.type === 'plan' ? 'p:' + t.id : t.type === 'console' ? 'u:' + t.id : 'n:' + t.id); // 대상 · 계획 보드(메인 id) · 사용자 콘솔(메인 id)
 
 /** 위치 보간(지수 감쇠) — 프레임 dt 초 */
 export function easeToward(cur, want, dt, rate = 14) {

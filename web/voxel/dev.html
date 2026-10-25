@@ -176,7 +176,7 @@
           break;
         case 'text': view.ripple(ev.nodeId); if (sayOk && ev.role === 'assistant') view.say(ev.nodeId, ev.text, { type: 'text' }); break;
         case 'user':
-          if (ev.origin === 'human') { view.beam(ev.nodeId); if (sayOk) view.say(ev.nodeId, ev.text, { type: 'user' }); }
+          if (ev.origin === 'human') { if (sayOk) view.say(ev.nodeId, ev.text, { type: 'user' }); }
           else view.wave(ev.nodeId, view.tokens.skill, 1.2);
           break;
         case 'result':

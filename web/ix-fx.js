@@ -5,8 +5,11 @@
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { IxModel, IxGeo, ixGeometry, IXGEO, IX_KEYS, ixKeyColor, ensureIxCss } from './ix-core.mjs';
+import { userBook, consoleLines, wantsConsole, hitRect } from './user-core.mjs'; // 사용자 콘솔
 
 export class IxLayer {
+  static CON_MIN_PX = 26; // 콘솔 화면이 이만큼(px) 넘을 때만 이름표
+  static CON_SHOW = 8;
   constructor(scene, view) {
     ensureIxCss();
     this.scene = scene;
@@ -36,6 +39,7 @@ export class IxLayer {
     this.quads.frustumCulled = false;
     this.quads.renderOrder = 3;
     scene.add(this.quads);
+    this._cp = new THREE.Vector3();
     this._m = new THREE.Matrix4(); this._c = new THREE.Color(); this._q = new THREE.Quaternion(); this._s = new THREE.Vector3(); this._p = new THREE.Vector3();
     // 라벨 풀
     this.labels = [];
@@ -48,9 +52,25 @@ export class IxLayer {
       scene.add(o);
       this.labels.push({ o, el, text: '', cls: '', key: '' });
     }
+    // 사용자 콘솔 이름표 풀(마지막 입력 첫 몇 단어 · 상태 · 시간) — 화면에서 콘솔이 작으면 안 붙임, 동시에 CON_SHOW 개
+    this.conLabels = [];
+    for (let i = 0; i < IXGEO.CLABELS; i++) {
+      const el = document.createElement('div');
+      el.className = 'ix-con';
+      const b = document.createElement('b'), sp = document.createElement('span');
+      el.append(b, sp);
+      const o = new CSS2DObject(el);
+      o.center.set(0.5, 1);
+      o.visible = false;
+      scene.add(o);
+      this.conLabels.push({ o, el, b, sp, text: '', status: '', cls: '', key: '' });
+    }
+    this.conHits = []; // 이번 프레임 콘솔 화면 사각형(px, 캔버스 기준) {root, x0,y0,x1,y1, cx,cy}
+    this._conInfo = new Map(); this._conAt = -1;
     this.colors = [];
     this.applyTheme(view.tokens);
     this._env = {
+      light: !!this.isLight,
       theme: this.theme, reduced: false,
       pos: (id) => {
         const v = this.view.vis.get(id);
@@ -60,6 +80,8 @@ export class IxLayer {
       rad: (id) => { const v = this.view.vis.get(id); return v ? v.r * (v.size || 1) * (this.theme === 'flow' ? 0.75 : 1) : 0.8; },
       root: (id) => this.rootOf(id),
       fade: (id) => { const v = this.view.vis.get(id); return v && v.projA != null ? v.projA : 1; }, // 프로젝트 페이드
+      consoleRoots: () => this.consoleRoots(),
+      consoleInfo: (root) => this.consoleInfo(root),
     };
     this._rootOf = (id) => this.rootOf(id);
     this.stats = { lines: 0, quads: 0, labels: 0, fx: 0 };
@@ -75,10 +97,43 @@ export class IxLayer {
     return cur;
   }
 
+  /** 콘솔을 둘 뿌리: 끝나지 않은 메인마다(사용자 이벤트를 기다리지 않음) */
+  consoleRoots() {
+    const out = new Set();
+    for (const v of this.view.vis.values()) if (wantsConsole(v.node)) out.add(this.rootOf(v.id));
+    return out;
+  }
+  /** 뿌리 → 콘솔 화면 문구(consoleLines). 프레임마다 한 번만 계산 */
+  consoleInfo(root) {
+    const t = this._frameT;
+    if (this._conAt !== t) { this._conInfo.clear(); this._conAt = t; }
+    let r = this._conInfo.get(root);
+    if (r === undefined) { r = consoleLines(userBook.get(root), this.view.clock ? this.view.clock() : Date.now()); this._conInfo.set(root, r); }
+    return r;
+  }
+  /** 화면 px(캔버스 기준) → 콘솔 뿌리 id | null(화면 사각형 + 이름표) */
+  consoleAt(x, y, rect) {
+    const h = hitRect(this.conHits, x, y, 6);
+    if (h) return h.root;
+    for (const L of this.conLabels) {
+      if (!L.o.visible || !L.root) continue;
+      const r = L.el.getBoundingClientRect();
+      if (r.width && x + rect.left >= r.left && x + rect.left <= r.right && y + rect.top >= r.top && y + rect.top <= r.bottom) return L.root;
+    }
+    return null;
+  }
+  /** 콘솔 화면 가운데(세계 좌표, 상세 카드 자리) */
+  consolePos(root) {
+    for (const c of this.geo.cons) if (c.root === root) return this._cp.set(c.x, c.y, c.z);
+    return null;
+  }
+
   applyTheme(t) {
     if (!t) return;
     this.isLight = !!t.isLight;
+    if (this._env) this._env.light = this.isLight; // 콘솔 진하기
     this.bg = (t.bg && t.bg.clone) ? t.bg.clone() : new THREE.Color(this.isLight ? 0xffffff : 0);
+    for (const L of this.conLabels || []) L.key = '';
     this.colors = IX_KEYS.map((k) => new THREE.Color(ixKeyColor(k, this.isLight)));
     const bl = this.isLight ? THREE.NormalBlending : THREE.AdditiveBlending;
     this.lMat.blending = bl; this.qMat.blending = bl;
@@ -103,13 +158,16 @@ export class IxLayer {
     this.lGeo.setDrawRange(0, 0);
     this.quads.count = 0;
     for (const L of this.labels) if (L.o.visible) L.o.visible = false;
+    for (const L of this.conLabels) if (L.o.visible) L.o.visible = false;
+    this.conHits.length = 0; this.geo.cons.length = 0;
     this._shown = false;
   }
 
   update(now) {
     const m = this.model;
     m.step(now);
-    if (!this.enabled || (!m.fx.size && !m.portal.size && !m.console.size)) { if (this._shown) this._hide(); this.stats.fx = 0; return; }
+    this._frameT = now;
+    if (!this.enabled || (!m.fx.size && !m.portal.size && !m.console.size && !this._anyMain())) { if (this._shown) this._hide(); this.stats.fx = 0; return; }
     const g = ixGeometry(m, now, this._env, this.geo);
     // 선
     const P = this.lPos, C = this.lCol, c = this._c;
@@ -148,15 +206,60 @@ export class IxLayer {
       if (L.el.style.opacity !== op) L.el.style.opacity = op;
       if (!L.o.visible) L.o.visible = true;
     }
+    this._consoles(g);
     this._shown = true;
     this.stats.lines = g.nl; this.stats.quads = g.nq; this.stats.labels = g.labels.length; this.stats.fx = m.fx.size;
+  }
+
+  _anyMain() { for (const v of this.view.vis.values()) if (wantsConsole(v.node)) return true; return false; }
+  /** 콘솔 화면 사각형(집기) + 이름표(화면에서 충분히 클 때만, 큰 것부터 CON_SHOW 개) */
+  _consoles(g) {
+    const cam = this.view.camera, dom = this.view.renderer && this.view.renderer.domElement;
+    const W = (dom && dom.clientWidth) || this.view.container.clientWidth || 1, H = (dom && dom.clientHeight) || this.view.container.clientHeight || 1;
+    const p = this._p;
+    this.conHits.length = 0;
+    const sized = [];
+    for (const c of g.cons) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, behind = false;
+      for (const [dx, dy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+        p.set(c.x + dx * c.w, c.y + dy * c.h, c.z).project(cam);
+        if (p.z > 1) { behind = true; break; }
+        const sx = (p.x * 0.5 + 0.5) * W, sy = (-p.y * 0.5 + 0.5) * H;
+        x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy);
+      }
+      if (behind) continue;
+      // 화면에서 작으면 최소 18×12px 로 집기
+      const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, hw = Math.max(9, (x1 - x0) / 2), hh = Math.max(6, (y1 - y0) / 2);
+      const hit = { root: c.root, x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh, cx, cy };
+      this.conHits.push(hit);
+      sized.push({ root: c.root, px: x1 - x0 });
+    }
+    sized.sort((a, b) => b.px - a.px);
+    const show = new Set(sized.filter((x) => x.px >= IxLayer.CON_MIN_PX).slice(0, IxLayer.CON_SHOW).map((x) => x.root));
+    let k = 0;
+    for (const d of g.clabels) {
+      if (!show.has(d.root) || k >= this.conLabels.length) continue;
+      const L = this.conLabels[k++];
+      L.o.position.set(d.x, d.y, d.z);
+      L.root = d.root;
+      if (L.text !== d.text) { L.b.textContent = d.text; L.b.hidden = !d.text; L.text = d.text; }
+      if (L.status !== d.status) { L.sp.textContent = d.status; L.status = d.status; }
+      const cls = 'ix-con st-' + d.state;
+      if (L.cls !== cls) { L.el.className = cls; L.cls = cls; }
+      if (L.key !== d.key) { L.el.style.setProperty('--ix-c', ixKeyColor(d.key, this.isLight)); L.key = d.key; }
+      const op = (Math.round(d.alpha * 20) / 20).toFixed(2);
+      if (L.el.style.opacity !== op) L.el.style.opacity = op;
+      if (!L.o.visible) L.o.visible = true;
+    }
+    for (; k < this.conLabels.length; k++) { const L = this.conLabels[k]; L.root = null; if (L.o.visible) L.o.visible = false; }
   }
 
   dispose() {
     this.scene.remove(this.lines, this.quads);
     this.lGeo.dispose(); this.lMat.dispose(); this.quads.geometry.dispose(); this.qMat.dispose();
     for (const L of this.labels) { this.scene.remove(L.o); L.el.remove(); }
-    this.labels = [];
+    for (const L of this.conLabels) { this.scene.remove(L.o); L.el.remove(); }
+    this.labels = []; this.conLabels = []; this.conHits = [];
     this.model.clear();
   }
 }

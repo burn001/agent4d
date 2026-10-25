@@ -10,7 +10,7 @@
 
 Claude Code 에이전트가 지금 무엇을 하는지 브라우저 3D 화면으로 실시간 보여 주고, 나중에 다시 재생합니다. Agent4D 는 메인 에이전트와 서브에이전트, 워크플로 에이전트, 안에서 띄운 `claude -p` 실행, 백그라운드 셸·모니터를 하나의 살아 있는 트리로 그리는 로컬·읽기 전용 뷰어입니다. 공간 3차원에 실시간 스트리밍·재생이라는 시간 축을 더했습니다. 명령줄 도구 이름은 `agent4d` 이고, 예전 이름 `ccviz` 도 그대로 동작합니다.
 
-[![Planet 표현: 프롬프트가 화면 테두리에 모였다가 메인 에이전트의 뚜르비용으로 날아감](docs/media/planet.gif)](https://github.com/burn001/agent4d/releases/download/v0.1.0/agent4d-intro-v0.1.0.mp4)
+[![Planet 표현: 일하는 메인 에이전트의 뚜르비용](docs/media/planet.gif)](https://github.com/burn001/agent4d/releases/download/v0.1.0/agent4d-intro-v0.1.0.mp4)
 
 ▶ **[24초 소개 영상 보기(MP4)](https://github.com/burn001/agent4d/releases/download/v0.1.0/agent4d-intro-v0.1.0.mp4)**
 
@@ -26,7 +26,7 @@ Claude Code 에이전트가 지금 무엇을 하는지 브라우저 3D 화면으
 
 | 움직이는 화면 | 다크 | 라이트 |
 |---|---|---|
-| ![흐름 루프: 프롬프트가 날아든 뒤 작업 대상 층에서 편집·push](docs/media/flow.gif) | ![전체 프로젝트, 흐름, 다크](docs/screenshots/flow-dark.png) | ![세션 하나, 흐름, 라이트, 작업 대상 층](docs/screenshots/flow-light.png) |
+| ![흐름 루프: 작업 대상 층에서 편집·push](docs/media/flow.gif) | ![전체 프로젝트, 흐름, 다크](docs/screenshots/flow-dark.png) | ![세션 하나, 흐름, 라이트, 작업 대상 층](docs/screenshots/flow-light.png) |
 
 ### Planet
 
@@ -34,7 +34,7 @@ Claude Code 에이전트가 지금 무엇을 하는지 브라우저 3D 화면으
 
 | 움직이는 화면 | 다크 | 라이트 |
 |---|---|---|
-| ![Planet 루프: 카메라가 메인으로 옮겨 가고 빛줄기가 흡수된 뒤 작업 장면](docs/media/planet.gif) | ![세션 하나, Planet, 다크 — 뚜르비용 메인](docs/screenshots/planet-dark.png) | ![전체 프로젝트, Planet, 라이트 — 원형 궤도계 섬](docs/screenshots/planet-light.png) |
+| ![Planet 루프: 카메라가 메인으로 옮겨 간 뒤 작업 장면](docs/media/planet.gif) | ![세션 하나, Planet, 다크 — 뚜르비용 메인](docs/screenshots/planet-dark.png) | ![전체 프로젝트, Planet, 라이트 — 원형 궤도계 섬](docs/screenshots/planet-light.png) |
 
 ### 복셀 오피스
 
@@ -42,11 +42,11 @@ Claude Code 에이전트가 지금 무엇을 하는지 브라우저 3D 화면으
 
 | 움직이는 화면 | 다크 | 라이트 |
 |---|---|---|
-| ![복셀 루프: 프롬프트가 팀장 책상으로 날아감](docs/media/voxel.gif) | ![전체 프로젝트, 복셀 오피스, 다크](docs/screenshots/voxel-dark.png) | ![세션 하나, 복셀 오피스, 라이트](docs/screenshots/voxel-light.png) |
+| ![복셀 루프: 일하는 팀장과 직원들](docs/media/voxel.gif) | ![전체 프로젝트, 복셀 오피스, 다크](docs/screenshots/voxel-dark.png) | ![세션 하나, 복셀 오피스, 라이트](docs/screenshots/voxel-light.png) |
 
-| 화면 테두리에 모였다 날아가는 내 프롬프트 | Planet 아래 작업 대상 층 | 저사양용 2D |
+| 메인 옆 콘솔로 그린 나 | Planet 아래 작업 대상 층 | 저사양용 2D |
 |---|---|---|
-| ![메인으로 휘어 들어가는 프롬프트 빛줄기](docs/screenshots/prompt-beam-dark.png) | ![편집·새 파일·push 장면](docs/screenshots/work-targets-planet-dark.png) | ![흐름 2D](docs/screenshots/flow-2d-dark.png) |
+| ![사용자 콘솔과 상세 카드: 나에게 온 질문·최근 메시지·마지막 최종 답변](docs/screenshots/user-console-dark.png) | ![편집·새 파일·push 장면](docs/screenshots/work-targets-planet-dark.png) | ![흐름 2D](docs/screenshots/flow-2d-dark.png) |
 
 _스크린샷과 움직이는 화면은 모두 내장 가짜 데이터(`?mock=1&lang=en`)로 찍었습니다. 프로젝트 이름과 라벨은 지어낸 것입니다. 한국어 화면은 `lang=ko` 또는 한국어 브라우저에서 볼 수 있습니다._
 
@@ -74,6 +74,7 @@ _스크린샷과 움직이는 화면은 모두 내장 가짜 데이터(`?mock=1&
 
 - **표현 세 가지.** **흐름(Flow)**(기본: 육각 노드·곡선 빔·빔을 따라 흐르는 패킷), **Planet**(메인은 기계 행성, 서브에이전트는 가스 거인·용암·얼음·고리·쌍성·혜성 등 여덟 가지 행성, 노드마다 자기 궤도와 위성이 돌고 일할 때 빨라짐, 도구 홀로그램은 궤도 링에서 투사, 프로젝트는 둥근 궤도계), **복셀 오피스**(에이전트가 책상·서가·단말로 오가는 사무실 직원). 표현마다 **3D** 와 저사양용 **2D** 가 있고, WebGL 이 없으면 2D 로 자동 전환합니다.
 - **전체 또는 한 프로젝트.** 첫 화면은 이 PC 의 모든 활성 Claude Code 세션을 프로젝트마다 섬(또는 건물)으로 보여 주고, 카메라가 활동 중인 곳을 자동으로 돕니다. 사이드 패널에서 프로젝트나 세션 하나로 좁힐 수 있습니다.
+- **장면 속의 나.** 메인 에이전트마다 작은 **사용자 콘솔**이 있습니다(흐름: 섬 위 단말, Planet: 지상 관제소, 복셀 오피스: 사무실 벽 의뢰인 스크린). 평소에도 마지막으로 보낸 말의 첫 몇 단어와 지금 상태("메인 작업 중 · 2분", "5분 전 답함", "나에게 질문 · 선택지 3")를 보여 주고, 메시지는 금빛 빔으로 메인에 닿고 답은 콘솔로 돌아옵니다. 마우스를 올리면 요약, 누르면 최근 메시지·나에게 온 질문·마지막 최종 답변 카드. 프롬프트를 보내면 받는 메인으로 카메라가 옮겨 갑니다(⚙ **내 입력 따라가기**, 기본 켬, 카메라를 직접 조작 중이면 건너뜀).
 - **도구 실황.** 노드 옆 패널에 지금 쓰는 도구(셸·읽기·편집·검색·웹·에이전트·스킬 등)와 한 줄 요약이 뜨고, 접는 사이드 패널에 실황 텍스트가 흐릅니다.
 - **재생.** 지난 세션이나 진행 중인 세션을 처음부터 0.5～32배속으로 다시 봅니다. 쉬는 구간 압축, 타임라인 스크럽, 볼거리 표시, 연속 재생을 지원합니다. 선택 사항인 읽기 전용 **보관함** 폴더에 transcript 를 남겨 두면 원본이 지워진 뒤에도 재생할 수 있습니다(`agent4d archive add`).
 - **계획 보드**(기본 끔). TodoWrite·작업 목록, 계획 모드 글, Markdown 체크리스트를 작은 판 하나로 보여 줍니다. 러너가 있으면 러너 옆, 없으면 메인 옆 월드에 고정되고, 크기는 도구 홀로그램 폭에 높이 1.5배, 기준 노드와는 선 하나로 잇습니다.

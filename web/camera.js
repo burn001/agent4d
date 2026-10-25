@@ -7,7 +7,7 @@ import { bestPose, perspPose, needRepack } from './overview/fill-pack.mjs';
 import { legacyPack } from './overview/pack-view.js';
 
 import { t } from './i18n.mjs';
-import { promptCamPlan } from './missile-core.mjs'; // 입력 때 메인으로
+import { promptCamPlan } from './camera-core.mjs'; // 입력 때 메인으로(Follow my prompts)
 const HAS = (view, id) => { const v = view && view.vis && view.vis.get(id); return !!(v && !v.gone && !v.hidden); };
 const SWITCH_EVERY = 8;      // 초
 const RESUME_AFTER = 10;     // 초

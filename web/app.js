@@ -35,10 +35,10 @@ import { escClears, scopeClears } from './filter-ui.mjs';
 import { pickLabelAt } from './overview/pick-core.mjs';
 import { blankClickAction, areaAtDown } from './proj-fade.mjs';
 import { mountInspector } from './inspector.js'; // 객체 클릭 상세 팝업
+import { userBook, consoleLines } from './user-core.mjs'; // 사용자 콘솔(나 · 사용자) 장부 — 세 표현 × 3D·2D 가 읽음
 import { mountArtifacts } from './art-ui.js'; // 작업 대상 층(⚙ 켬/끔)
 import { mountPlans } from './plan-ui.js'; // 계획 보드(⚙ 켬/끔)
 import { t as tr, applyDom, fmtNum } from './i18n.mjs'; // 다국어
-import { launchDelay } from './missile-core.mjs'; // 입력 빛줄기 — 카메라 이동 뒤 발사
 import { localizeEvent, localizeSnapshot, localizeProjects } from './i18n-server.mjs'; // 서버가 조합한 문구 → 지금 언어(ko 면 그대로)
 
 // index.html 정적 문구(data-i18n*)·문서 제목을 지금 언어로 — 가능한 한 일찍
@@ -231,7 +231,7 @@ function setCamMode(m) {
 }
 setCamMode(params.get('cam') || lsGet('ccviz.camMode') || 'fit');
 camModeBtn.addEventListener('click', () => { camModeBtn.blur(); setCamMode(director.camMode === 'fit' ? 'follow' : 'fit'); });
-// 'Follow my prompts'(입력 시 카메라 이동, 기본 켬): localStorage ccviz.followPrompt, ?followPrompt=0|1 은 이번 접속만
+// 'Follow my prompts'(입력 시 받는 메인으로 카메라 이동, 기본 켬 — 예전, 빛줄기는 0.3.0 에서 없앰): localStorage ccviz.followPrompt, ?followPrompt=0|1 은 이번 접속만
 const fpQ = params.get('followPrompt');
 let followPrompt = fpQ != null ? fpQ !== '0' : lsGet('ccviz.followPrompt') !== 'off';
 const followBtn = document.createElement('button');
@@ -274,6 +274,7 @@ const inspector = mountInspector({
   getProject: (pid) => store.projects.find((p) => p.projectId === pid) || null,
   getLimits: () => lg.value, sessIdx: (n) => nodeSessIdx(n, sessColors),
   getArt: () => (art && art.on ? art : null), // 대상 팝업
+  userBook, // 나 · 사용자 카드
   planHtml: (n, nowMs) => (plans ? plans.inspectHtml(n, nowMs) : ''), // 노드 팝업 계획 항목
   planSheet: (id, nowMs) => (plans ? plans.sheetHtml(id, nowMs) : null), // 계획 보드 크게 보기
   planAnchor: () => (plans && plans.openAnchor ? plans.openAnchor() : null), // 카드는 보드 자리 곁(카메라 이동 없음)
@@ -363,6 +364,24 @@ function holoTip(hp, ev) {
   const x = Math.min(window.innerWidth - 20, ev.clientX + 14), y = Math.min(window.innerHeight - 40, ev.clientY + 16);
   holoTipEl.style.left = x + 'px'; holoTipEl.style.top = y + 'px';
 }
+/** 사용자 콘솔 툴팁: "나 · 사용자" + 화면 문구 한 줄 + 눌러서 자세히(holo-tip 같은 모양) */
+function userTip(id, ev) {
+  if (!holoTipEl) { holoTipEl = document.createElement('div'); holoTipEl.className = 'holo-tip'; holoTipEl.setAttribute('role', 'tooltip'); document.body.appendChild(holoTipEl); }
+  const info = consoleLines(userBook.get(id), clockFn());
+  const key = 'u|' + id + '|' + info.line;
+  if (key !== holoTipKey) {
+    holoTipKey = key;
+    holoTipEl.textContent = '';
+    const b = document.createElement('b'); b.textContent = tr('cards.user.title');
+    const s = document.createElement('span'); s.textContent = info.line;
+    const m = document.createElement('small'); m.textContent = tr('scene.holo.tipHint');
+    holoTipEl.append(b, s, m);
+    holoTipEl.style.setProperty('--hc', resolveTheme() === 'light' ? '#a16207' : '#fcd34d');
+  }
+  holoTipEl.hidden = false;
+  const x = Math.min(window.innerWidth - 20, ev.clientX + 14), y = Math.min(window.innerHeight - 40, ev.clientY + 16);
+  holoTipEl.style.left = x + 'px'; holoTipEl.style.top = y + 'px';
+}
 function bindCanvas(v) {
   const canvas = v.renderer.domElement;
   canvas.addEventListener('pointermove', (e) => {
@@ -372,10 +391,11 @@ function bindCanvas(v) {
       if (view !== v) return;
       const id = v.pick(hoverEv.clientX, hoverEv.clientY);
       const hp = !id && v.pickPanel ? v.pickPanel(hoverEv.clientX, hoverEv.clientY) : null; // 도구 패널
-      v.setHover(id || (hp ? hp.id : null));
+      const uc = !id && !hp && v.pickConsole ? v.pickConsole(hoverEv.clientX, hoverEv.clientY) : null; // 사용자 콘솔
+      v.setHover(id || (hp ? hp.id : null) || uc);
       if (ctxUi) ctxUi.hover(id, hoverEv);
-      holoTip(hp, hoverEv);
-      canvas.style.cursor = id || hp || clusterAt(v, hoverEv.clientX, hoverEv.clientY) ? 'pointer' : '';
+      if (uc) userTip(uc, hoverEv); else holoTip(hp, hoverEv);
+      canvas.style.cursor = id || hp || uc || clusterAt(v, hoverEv.clientX, hoverEv.clientY) ? 'pointer' : '';
     });
   });
   canvas.addEventListener('pointerleave', () => { if (view === v) v.setHover(null); if (ctxUi) ctxUi.hover(null); holoTip(null); });
@@ -394,6 +414,9 @@ function bindCanvas(v) {
     // 홀로그램 도구 패널 = 그 노드 상세 카드를 그 도구 호출 자리로
     const hp = v.pickPanel ? v.pickPanel(e.clientX, e.clientY) : null;
     if (hp) { holoTip(null); inspector.open({ type: 'node', id: hp.id, tool: hp.e.id || null }); return; }
+    // 사용자 콘솔(흐름 단말·Planet 관제소·복셀 의뢰인 스크린) = 나 · 사용자 카드
+    const uc = v.pickConsole ? v.pickConsole(e.clientX, e.clientY) : null;
+    if (uc) { holoTip(null); inspector.open({ type: 'console', id: uc }); return; }
     const fp = focusPid(); // 단일 프로젝트 모드
     // 바닥층 대상(파일·DB·저장소…) = 대상 팝업(누가 언제 무엇을). 숨은(다른) 프로젝트 대상은 집지 않음
     const ap = v.pickArtifact ? v.pickArtifact(e.clientX, e.clientY) : null;
@@ -555,6 +578,7 @@ function onSnapshot(snap, o = {}) {
   view.layoutNow();
   if (focusId && view.has(focusId)) view.setFocus(focusId);
   for (const ev of snap.recent || []) panel.add(ev);
+  userBook.reset(snap.recent);
   inspector.reset(snap.recent);
   timeline.clear();
   if (art) art.snapshot(); // 그 시점 기본 장부(재생이면 재생 시각까지)
@@ -573,7 +597,6 @@ function fillSessionHint() {
   if (next.projectId !== sel.projectId || next.projectName !== sel.projectName || next.title !== sel.title) { sel = next; pl.setSelection(sel); refreshScopeUi(); }
 }
 
-let promptTiming = null; // 이번 입력 빛줄기의 박자 {start, launch, arrive} — 효과음 '스으 → 슈욱 → 톡'이 맞춘다
 function onEvent(ev, opts = {}) {
   if (!ev || !ev.type) return;
   localizeEvent(ev);
@@ -640,9 +663,10 @@ function onEvent(ev, opts = {}) {
     case 'user':
       if (!fx) break;
       if (ev.origin === 'human') {
-        // 'Follow my prompts': 받는 메인으로 카메라가 먼저 옮겨 가고(옮길 수 있을 때만), 이동이 끝나 갈 때 테두리 에너지 → 발사 → 흡수
-        const camDur = followPrompt && !opts.resume && director.promptFocus ? director.promptFocus(ev.nodeId, { speed }) : 0;
-        promptTiming = view.beam(ev.nodeId, { delay: launchDelay(camDur) }) || null;
+        // 'Follow my prompts': 받는 메인으로 카메라가 옮겨 감(옮길 수 있을 때만). 메시지 연출은 사용자 콘솔의 금빛 빔 하나
+        // 화면 테두리 빛줄기는 0.3.0 에서 없앰. 서버 user 범주(ix)가 없는 연결이면 메인에 작은 파동만
+        if (followPrompt && !opts.resume && director.promptFocus) director.promptFocus(ev.nodeId, { speed });
+        if (!ev.ix) view.wave(ev.nodeId, null, 0.8);
         if (sayOk && ev.text) view.say(ev.nodeId, ev.text, { type: 'user' });
       }
       else view.wave(ev.nodeId, view.tokens.skill, 1.2);
@@ -659,6 +683,7 @@ function onEvent(ev, opts = {}) {
     case 'conflict': conflicts.apply(ev); break; // 같은 파일(화면은 장부를 매 프레임 읽음)
     case 'session-msg': if (fx && view.sessionMsg) view.sessionMsg(ev); break; // 세션 간 메시지 패킷
   }
+  userBook.event(ev, clockFn()); // 사용자 콘솔 장부(라이브·재생·보관함 같은 길)
   inspector.event(ev); // 상세 팝업 장부(재생이면 재생 시점 기준)
   if (art) art.event(ev, { quiet, speed }); // 작업 대상 장부·연출(끄면 아무것도 안 함) · art 없는 검색·실패·중지 연출도
   if (view.holo) view.holo.event(ev, { quiet }); // 홀로그램 패널 안 실제 글(panel·parentPanel →)
@@ -671,8 +696,7 @@ function onEvent(ev, opts = {}) {
   }
   director.noteEvent(ev);
   panel.add(ev);
-  sfx.onEvent(ev, { node: store.nodes.get(ev.nodeId) || ev.node || null, speed, quiet, replay: !!opts.replay, timing: ev.type === 'user' ? promptTiming : null });
-  promptTiming = null;
+  sfx.onEvent(ev, { node: store.nodes.get(ev.nodeId) || ev.node || null, speed, quiet, replay: !!opts.replay });
   if (env) env.noteEvent(ev, { quiet });
   statsDirty = true;
 }
@@ -858,6 +882,7 @@ function onSnapshotAll(snap, o = {}) {
   if (sel.scope === 'session' && !wantAll(sel)) { connect(); return; }
   if (sel.scope === 'session' && !sel.projectId) { sel = { ...sel, projectId: projectOfSession(sel.sessionId) }; if (pl) pl.setSelection(sel); }
   for (const ev of snap.recent || []) panel.add(ev);
+  userBook.reset(snap.recent);
   inspector.reset(snap.recent);
   if (art) art.snapshot();
   if (plans) plans.reset();

@@ -210,7 +210,7 @@
           break;
         case 'tool-end': if (n) { n.openTools = (n.openTools || []).filter((t) => t.toolUseId !== ev.toolUseId); view.toolEnd(n.id, ev); } break;
         case 'text': view.ripple(ev.nodeId); if (ev.role === 'assistant') view.say(ev.nodeId, ev.text, { type: 'text' }); break;
-        case 'user': if (ev.origin === 'human') { view.beam(ev.nodeId); view.say(ev.nodeId, ev.text, { type: 'user' }); } else view.wave(ev.nodeId, view.tokens.skill, 1.2); break;
+        case 'user': if (ev.origin === 'human') { view.say(ev.nodeId, ev.text, { type: 'user' }); } else view.wave(ev.nodeId, view.tokens.skill, 1.2); break;
         case 'result':
           if (n && n.parentId && store.nodes.has(n.parentId)) view.orb(ev.nodeId, n.parentId, ev.ok === false ? view.tokens.error : view.tokens.ok, 1.0);
           else view.ripple(ev.nodeId, ev.ok === false ? view.tokens.error : view.tokens.ok);

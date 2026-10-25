@@ -8,7 +8,7 @@
 
 See what your Claude Code agents are doing, live, in 3D — and play it back later. Agent4D is a local, read-only viewer that turns the main agent, its subagents, workflow agents, nested `claude -p` runs, background shells and monitors into one live tree in your browser: three dimensions of space, plus time through live streaming and replay. The command-line tool is `agent4d` (`ccviz` still works).
 
-[![Planet view: your prompt gathers at the screen edge and flies into the main agent's tourbillon](docs/media/planet.gif)](https://github.com/burn001/agent4d/releases/download/v0.1.0/agent4d-intro-v0.1.0.mp4)
+[![Planet view: the main agent's tourbillon at work](docs/media/planet.gif)](https://github.com/burn001/agent4d/releases/download/v0.1.0/agent4d-intro-v0.1.0.mp4)
 
 ▶ **[Watch the 24-second intro video (MP4)](https://github.com/burn001/agent4d/releases/download/v0.1.0/agent4d-intro-v0.1.0.mp4)**
 
@@ -22,7 +22,7 @@ The default view: hexagon nodes, tapered curved beams and packets moving along t
 
 | Live | Dark | Light |
 |---|---|---|
-| ![Flow view, live loop: a prompt flies in, then edits and a push on the work-target layer](docs/media/flow.gif) | ![All projects, Flow, dark](docs/screenshots/flow-dark.png) | ![One session, Flow, light, with the work-target layer](docs/screenshots/flow-light.png) |
+| ![Flow view, live loop: edits and a push on the work-target layer](docs/media/flow.gif) | ![All projects, Flow, dark](docs/screenshots/flow-dark.png) | ![One session, Flow, light, with the work-target layer](docs/screenshots/flow-light.png) |
 
 ### Planet
 
@@ -30,7 +30,7 @@ The main agent is a gyro tourbillon — a steel cage with chamfered bridges turn
 
 | Live | Dark | Light |
 |---|---|---|
-| ![Planet view, live loop: the camera moves to the main agent, the prompt beam is absorbed, work scenes follow](docs/media/planet.gif) | ![One session, Planet, dark — the main agent as a tourbillon](docs/screenshots/planet-dark.png) | ![All projects, Planet, light — round orbital islands](docs/screenshots/planet-light.png) |
+| ![Planet view, live loop: the camera moves to the main agent, work scenes follow](docs/media/planet.gif) | ![One session, Planet, dark — the main agent as a tourbillon](docs/screenshots/planet-dark.png) | ![All projects, Planet, light — round orbital islands](docs/screenshots/planet-light.png) |
 
 ### Voxel Office
 
@@ -38,11 +38,11 @@ Agents as office workers at desks, shelves and terminals.
 
 | Live | Dark | Light |
 |---|---|---|
-| ![Voxel Office, live loop: a prompt flies to the team lead's desk](docs/media/voxel.gif) | ![All projects, Voxel Office, dark](docs/screenshots/voxel-dark.png) | ![One session, Voxel Office, light](docs/screenshots/voxel-light.png) |
+| ![Voxel Office, live loop: the team lead and staff at work](docs/media/voxel.gif) | ![All projects, Voxel Office, dark](docs/screenshots/voxel-dark.png) | ![One session, Voxel Office, light](docs/screenshots/voxel-light.png) |
 
-| Your prompt, gathered from the screen edge | Work targets under the Planet view | 2D mode for slow machines |
+| You, as a console next to the main agent | Work targets under the Planet view | 2D mode for slow machines |
 |---|---|---|
-| ![A prompt beam curving into the main agent](docs/screenshots/prompt-beam-dark.png) | ![Edits, a new file and a push on the work-target floor](docs/screenshots/work-targets-planet-dark.png) | ![Flow view in 2D](docs/screenshots/flow-2d-dark.png) |
+| ![The user console and its detail card: a question waiting for you, recent messages, the last final answer](docs/screenshots/user-console-dark.png) | ![Edits, a new file and a push on the work-target floor](docs/screenshots/work-targets-planet-dark.png) | ![Flow view in 2D](docs/screenshots/flow-2d-dark.png) |
 
 _All screenshots and loops use the built-in mock data (`?mock=1&lang=en`). Project names and labels are made up._
 
@@ -71,7 +71,7 @@ The server tails the transcripts that Claude Code already writes under `~/.claud
 
 - **Three views.** **Flow** (default: hexagon nodes, curved beams, packets moving along them), **Planet** (the main agent as a mechanical planet, subagents as eight kinds of worlds such as gas giants, lava, ice, ringed, binary and comet planets, every node circled by its own orbits and moons that speed up while it works, tool holograms projected from the orbit ring, and each project drawn as a round orbital system), and **Voxel Office** (agents as office workers at desks, shelves and terminals). Each view has a **3D** mode and a lighter **2D** mode for slow machines. 2D is picked automatically when WebGL is missing.
 - **All projects, or just one.** The start screen shows every active Claude Code session on this machine, one island (or building) per project, with an automatic camera tour. Narrow it to one project or one session from the side panel.
-- **Your prompts, followed.** When you send a prompt, the camera moves to the main agent that receives it, energy gathers at a random point on the screen edge and flies in as a soft homing beam, then lands with a ripple (⚙ **Follow my prompts**, on by default; skipped while you steer the camera).
+- **You, in the scene.** Each main agent has a small **user console** (Flow: a terminal above the island; Planet: a ground station; Voxel Office: the client screen on the office wall). It always shows the first words of your last message and where things stand ("Main working · 2m", "Answered 5m ago", "Question for you · 3 options"). A gold beam carries each message to the main agent and the answer flies back. Hover it for a summary, click it for a card with your recent messages, a pending question and the last final answer. When you send a prompt, the camera moves to the main agent that receives it (⚙ **Follow my prompts**, on by default; skipped while you steer the camera).
 - **Live tool activity.** Panels next to each node show the current tool (shell, read, edit, search, web, agent, skill…) and a one-line summary. A collapsible side panel shows a live text feed.
 - **Replay.** Play past or running sessions from the start at 0.5×–32×, with idle gaps compressed, a scrubbable timeline, highlight markers and continuous playback. An optional read-only **archive** folder keeps transcripts around for replay after the originals are gone (`agent4d archive add`).
 - **Plan board** (off by default). TodoWrite and task lists, plan-mode text and Markdown checklists appear as one small board pinned in the world next to the runner when there is one, otherwise next to the main agent. The board is as wide as a tool hologram and 1.5 times as tall, with a single line back to its anchor.

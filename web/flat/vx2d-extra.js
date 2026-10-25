@@ -5,6 +5,7 @@
 import { FLOW, PacketPool, planFlow, easeInOut, catColor } from '../flow-core.mjs';
 import { OFFICE_FX, ixSpot, floorRoute, routeCum, routeAt, dashStarts, lineStyle, clientScreen, clientSpot, breakSpot, BREAK_N, MON } from '../voxel/office-core.mjs';
 import { ClientDesk, clientOp, CLIENT } from '../voxel/client-core.mjs';
+import { userBook, consoleLines, hitRect } from '../user-core.mjs'; // 사용자 콘솔
 import * as IX from '../ix-core.mjs';
 import { DEG, degOf, degOfLink, packetGone, lineFlicker, brokenDash, seedOf } from '../degrade-core.mjs';
 const DG_DASH = [0, 0, 0, 0]; // 끊긴 선 무늬(재사용)
@@ -281,6 +282,9 @@ export class Vx2DExtra {
   drawClient(ctx, now, s) {
     const v = this.view, t = v.tokens, pal = v.pal, X = v._X, Y = v._Y;
     const user = t['flow-call'] || t['k-main'];
+    const hits = this.conHits || (this.conHits = []); hits.length = 0; // 집기 사각형(px)
+    const scr = this.conScr || (this.conScr = []); scr.length = 0;
+    const tags = [];
     for (const r of v.rooms) {
       if (r.type !== 'office' || !r.leadDesk || r.external) continue;
       const ov = v.vis.get(r.ownerId);
@@ -295,6 +299,17 @@ export class Vx2DExtra {
       ctx.globalAlpha = fa;
       ctx.fillStyle = mode === 'alert' ? (Math.floor(now * 4) % 2 ? t.error : pal.screenOff) : mode === 'saver' ? pal.screenOff : mode === 'idle' ? mixHex(pal.screenDim, user, 0.15) : mixHex(pal.screenDim, user, 0.6);
       ctx.fillRect(X(sc.x) - w / 2, Y(sc.z) - h / 2, w, h);
+      { // 집기(최소 18×12px) · 대기 중에도 글줄 · 이름표 후보
+        const hw = Math.max(9, w / 2 + 3), hh = Math.max(6, h / 2 + 3);
+        hits.push({ root: r.ownerId, x0: X(sc.x) - hw, y0: Y(sc.z) - hh, x1: X(sc.x) + hw, y1: Y(sc.z) + hh });
+        scr.push({ root: r.ownerId, x: sc.x, z: sc.z });
+        if (mode === 'idle' && s > 3) {
+          ctx.fillStyle = mixHex(pal.screenDim, user, 0.55);
+          if (odd) { ctx.fillRect(X(sc.x) - 0.5, Y(sc.z) - h * 0.3, 1.2, h * 0.3); ctx.fillRect(X(sc.x) - 0.5, Y(sc.z) + h * 0.05, 1.2, h * 0.18); }
+          else { ctx.fillRect(X(sc.x) - w * 0.3, Y(sc.z) - 0.5, w * 0.3, 1.2); ctx.fillRect(X(sc.x) + w * 0.05, Y(sc.z) - 0.5, w * 0.18, 1.2); }
+        }
+        if (s > 6) tags.push({ root: r.ownerId, x: X(sc.x), y: Y(sc.z) - h / 2 - 4, a: fa, hit: hits[hits.length - 1] });
+      }
       if (d && d.ask && s > 3) {
         const n = d.ask.n, sp = clientSpot(r);
         for (let i = 0; i < n; i++) {
@@ -314,8 +329,30 @@ export class Vx2DExtra {
         if (d.memo && s > 3) { ctx.fillStyle = mixHex(pal.paper, t.skill, 0.45); for (let i = 0; i < d.memo; i++) ctx.fillRect(X(r.leadDesk.x - 0.75) + i * 1.5, Y(r.leadDesk.z + 0.18) - i * 1.5, 0.24 * s, 0.24 * s); }
       }
     }
+    // 스크린 이름표: 마지막 입력 첫 몇 단어 · 상태 · 시간(흐름 2D 와 같은 모양, 최대 8)
+    const L = !!t.isLight, nowMs = v.clock ? v.clock() : Date.now();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    for (const g of tags.slice(0, 8)) {
+      const info = consoleLines(userBook.get(g.root), nowMs);
+      ctx.font = '600 10.5px system-ui, "Segoe UI", sans-serif';
+      const w1 = info.text ? ctx.measureText(info.text).width : 0;
+      ctx.font = '500 9.5px system-ui, "Segoe UI", sans-serif';
+      const w2 = ctx.measureText(info.status).width;
+      const bw = Math.min(220, Math.max(w1, w2) + 14), lh = info.text ? 27 : 15;
+      ctx.globalAlpha = g.a * 0.92;
+      ctx.fillStyle = L ? 'rgba(255,255,255,.9)' : 'rgba(5,5,16,.72)';
+      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(g.x - bw / 2, g.y - lh, bw, lh, 7) : ctx.rect(g.x - bw / 2, g.y - lh, bw, lh); ctx.fill();
+      ctx.strokeStyle = user; ctx.lineWidth = 1; ctx.globalAlpha = g.a * 0.5; ctx.stroke();
+      ctx.globalAlpha = g.a;
+      if (info.text) { ctx.font = '600 10.5px system-ui, "Segoe UI", sans-serif'; ctx.fillStyle = user; ctx.fillText(info.text, g.x, g.y - 15, 210); }
+      ctx.font = '500 9.5px system-ui, "Segoe UI", sans-serif'; ctx.fillStyle = t.muted || t.text; ctx.fillText(info.status, g.x, g.y - 4, 210);
+      g.hit.y0 = Math.min(g.hit.y0, g.y - lh); g.hit.x0 = Math.min(g.hit.x0, g.x - bw / 2); g.hit.x1 = Math.max(g.hit.x1, g.x + bw / 2);
+    }
     ctx.globalAlpha = 1;
   }
+  /** 화면 px → 의뢰인 스크린 주인 id | null · 스크린 가운데 {x, z} */
+  consoleAt(x, y) { const h = hitRect(this.conHits || [], x, y, 5); return h ? h.root : null; }
+  consolePos(root) { const c = (this.conScr || []).find((q) => q.root === root); return c ? { x: c.x, z: c.z } : null; }
 }
 
 const IXC = new Map();

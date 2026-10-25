@@ -57,7 +57,7 @@ This document describes how the Claude Code path works today and what an adapter
 | `tool-end` | `toolUseId`, `tool`, `cat`, `ok`, `durationMs`, `text` | |
 | `text` | `role` (`assistant` / `system`), `text` (≤400) | |
 | `thinking` | `chars` | content is never sent |
-| `user` | `origin` (`human` / `task-notification` / `system`), `text` | `human` triggers the "prompt beam" effect |
+| `user` | `origin` (`human` / `task-notification` / `system`), `text` | `human` is a message from you; with an `ix` field of category `user` it also drives the user console (last words, state, detail card) |
 | `result` | `ok`, `text` | final answer of a subagent / nested run |
 | `output` | `text` (≤600) | background shell or monitor output |
 

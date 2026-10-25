@@ -198,7 +198,7 @@ const sink = {
       case 'tool-start': if (n) { n.openTools = n.openTools || []; if (!n.openTools.some((t) => t.toolUseId === ev.toolUseId)) n.openTools.push({ toolUseId: ev.toolUseId, tool: ev.tool, cat: ev.cat, skill: ev.skill, startedAt: ev.ts, text: ev.text }); view && view.toolStart(n.id, ev, o.quiet); } break;
       case 'tool-end': if (n) { n.openTools = (n.openTools || []).filter((t) => t.toolUseId !== ev.toolUseId); view && view.toolEnd(n.id, ev); } break;
       case 'text': if (view && !o.quiet) view.ripple(ev.nodeId); break;
-      case 'user': if (view && !o.quiet) { if (ev.origin === 'human') view.beam(ev.nodeId); else view.wave(ev.nodeId, view.tokens.skill, 1.2); } break;
+      case 'user': if (view && !o.quiet) { if (ev.origin !== 'human') view.wave(ev.nodeId, view.tokens.skill, 1.2); } break;
       case 'result': if (view && !o.quiet) { if (n && n.parentId && store.nodes.has(n.parentId)) view.orb(ev.nodeId, n.parentId, ev.ok === false ? view.tokens.error : view.tokens.ok, 1.0); else view.ripple(ev.nodeId); } break;
       case 'output': if (view && !o.quiet) view.wave(ev.nodeId, null, 0.9); break;
     }

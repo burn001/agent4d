@@ -170,3 +170,16 @@
   .jd-stale .ins-jdot, .ins-jstate.jd-stale i { animation: none; opacity: .55; }
   .ins-jbar i { transition: none; }
 }
+
+/* 나 · 사용자 카드 */
+#inspector { --ix-user: #fcd34d; }
+:root[data-theme="light"] #inspector { --ix-user: #a16207; }
+.ins-pill.st-ask { color: var(--ix-user); border-color: color-mix(in srgb, var(--ix-user) 55%, transparent); background: color-mix(in srgb, var(--ix-user) 12%, transparent); }
+.ins-user-ask { border-left: 2px solid var(--ix-user); padding-left: 8px; }
+.ins-user-no { color: var(--error); }
+.ins-user-msgs { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; }
+.ins-user-msgs li { display: grid; grid-template-columns: 1.1em 1fr auto; gap: 6px; align-items: baseline; font-size: 12px; }
+.ins-user-msgs li > i { font-style: normal; font-weight: 700; color: var(--ix-user); text-align: center; }
+.ins-user-msgs li.op-interrupt > i, .ins-user-msgs li.op-deny > i { color: var(--error); }
+.ins-user-msgs .ins-um-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ins-user-msgs small { color: var(--muted); font-variant-numeric: tabular-nums; }

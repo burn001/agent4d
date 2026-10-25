@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/) (0.x until a stable 1.0).
 
+## [0.3.0] - 2026-10-26
+
+### Added
+- User console ("Me · user"), the object that stands for you next to each main agent, no longer looks like an empty monitor. It is there from the start for every running main agent (no need to wait for a message) in Flow (a terminal above the island), Planet (the ground station, now with a small screen outside the planet's rings and drawn more visibly) and Voxel Office (the client screen on the office wall). The screen shows text lines, and a small label shows the first words of your last message and where things stand: "Main working · 2m", "Answered 5m ago", "Question for you · 3 options", "No messages yet". With `privacy: minimal` only the state and time are shown.
+- Hover the console for a tooltip; click it for a detail card: whose turn it is, a question waiting for you (text, number of options) or the last question and your answer, your 5 most recent messages (redacted text, time), the last final answer (time, turn length) and a link to the main agent. The camera moves to the main agent and stays while the card is open. Works in Flow, Planet and Voxel Office, 3D and 2D, live, replay and archive.
+
+### Changed
+- The user console dims less after an answer (it stays findable) and is drawn stronger in the light theme.
+- The plain `user` sound effect (used only when the server sends no user interaction data) is now a short two-note bell.
+
+### Removed
+- The prompt beam: the light that gathered at the screen edge and flew into the main agent when you sent a prompt. The console's gold beam and ribbon now carry each message alone. The camera move to the receiving main agent ("Follow my prompts") stays.
+
+### Fixed
+- Voxel Office: a fallback "orb" effect reused the name of the fade helper and would have failed if triggered.
+
 ## [0.2.0] - 2026-10-25
 
 ### Added

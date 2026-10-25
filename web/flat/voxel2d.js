@@ -477,6 +477,14 @@ export class Voxel2DView extends FlatView {
   get artOn() { return !!this.vArt; }
   pickArtifact(clientX, clientY) { if (!this.vArt) return null; const r = this.canvas.getBoundingClientRect(); return this.vArt.pick(clientX - r.left, clientY - r.top); }
   artPos(pid, id) { return this.vArt ? this.vArt.posOf(pid, id) : null; }
+  /** 의뢰인 스크린(사용자 콘솔) 집기 · 자리 — 바탕 FlatIx 는 복셀에서 꺼져 있어 vx2d-extra 가 맡음 */
+  pickConsole(clientX, clientY) {
+    const r = this.canvas.getBoundingClientRect();
+    const id = this.vx.consoleAt(clientX - r.left, clientY - r.top);
+    const v = id ? this.vis.get(id) : null;
+    return v && !v.hidden && !this._scopeOff(v) && !v.projOut ? id : null;
+  }
+  consolePos(id) { return this.vx.consolePos(id); }
   setArtFoot(pid, nodeId) { if (this.vArt) { this.vArt.st.setFoot(pid, nodeId); this.invalidate(); } }
   setArtSelected(t) { if (this.vArt) { this.vArt.st.sel = t || null; this.invalidate(); } }
 

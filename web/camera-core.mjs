@@ -375,3 +375,15 @@ export function overlayInsets(st, rects) {
   }
   return { top, bottom };
 }
+
+/**
+ * 입력 때 카메라를 메인으로 옮길지('Follow my prompts', 예전 — 빛줄기는 0.3.0 에서 없앰, 카메라 이동만 남음):
+ * 켬 + 자동 카메라 켬 + 최근 수동 조작 없음 + 상세 팝업 없음 + 노드 있음. 재생 배속이 크면 짧게(>2× → 0.45초), 8× 이상이면 옮기지 않는다.
+ * 반환 {move, dur, hold}
+ */
+export const PROMPT_CAM = { dur: 0.75, short: 0.45, hold: 2.5 };
+export function promptCamPlan({ follow = true, enabled = true, manual = false, hold = false, dragging = false, has = true, speed = 1, paused = false } = {}) {
+  const no = { move: false, dur: 0, hold: 0 };
+  if (!follow || !enabled || manual || hold || dragging || !has || paused || speed >= 8) return no;
+  return { move: true, dur: speed > 2 ? PROMPT_CAM.short : PROMPT_CAM.dur, hold: PROMPT_CAM.hold };
+}

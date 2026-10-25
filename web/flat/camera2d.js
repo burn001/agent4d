@@ -4,7 +4,7 @@
 import { isShown, isLive, scoreOf, pickBest, shotLost, FitHold, safeBand, ZOOM, autoFloor, nearestKids, FIT, isFitActive, pickFitIds, PanelMemo, pxToE } from '../camera-core.mjs';
 import { stageInsets } from '../screen-insets.js';
 import { t } from '../i18n.mjs';
-import { promptCamPlan } from '../missile-core.mjs'; // 입력 때 메인으로
+import { promptCamPlan } from '../camera-core.mjs'; // 입력 때 메인으로(Follow my prompts)
 import { FLAT, toWorld, zoomAt, panBy, boxCenterXZ, fitNeed, refineFit2D, fitMinD, flyPose, dampTo, clampD } from './flat-core.mjs';
 const HAS = (view, id) => { const v = view && view.vis && view.vis.get(id); return !!(v && !v.gone && !v.hidden); };
 

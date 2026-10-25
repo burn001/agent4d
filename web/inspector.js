@@ -14,7 +14,8 @@ import { branchOf } from './session-core.mjs';
 import { toScreen, camScale } from './flat/flat-core.mjs';
 import { escapeHtml as esc } from './html-util.mjs';
 import { artInspectModel, ART } from './artifact-core.mjs'; // 작업 대상 팝업
-import { t as tr } from './i18n.mjs';
+import { userCardModel } from './user-core.mjs'; // 나 · 사용자 카드
+import { t as tr, fmtTime } from './i18n.mjs';
 
 let ixSum = null; // 특별 상호작용 요약(ix-core 가 있으면 그 문구, 없으면 느슨한 요약)
 let ixGlyph = { github: '⎇', db: '⛁', remote: '⇄', batch: '▦', tests: '✔' };
@@ -38,6 +39,7 @@ export function anchorOf(view, t) {
   let pos = null, wr = 1;
   if (t.type === 'cluster') { const c = view.clusterTarget && view.clusterTarget(t.pid); if (!c) return null; pos = c.center; wr = c.r || 6; }
   else if (t.type === 'artifact') { pos = view.artPos ? view.artPos(t.pid, t.id) : null; wr = 1.4; } // 바닥층 대상
+  else if (t.type === 'console') { pos = view.consolePos ? view.consolePos(t.id) : null; wr = 2.4; } // 사용자 콘솔(이름표가 화면보다 넓어 카드를 조금 더 띄움)
   else { if (!view.has || !view.has(t.id)) return null; pos = view.nodePos ? view.nodePos(t.id) : null; wr = view.nodeRadius ? view.nodeRadius(t.id) : 1; }
   if (!pos) return null;
   const dom = view.renderer && view.renderer.domElement;
@@ -237,6 +239,7 @@ export function mountInspector(h) {
     const view = h.getView();
     if (target.type === 'cluster') return !!(view && view.clusterTarget && view.clusterTarget(target.pid));
     if (target.type === 'artifact') return !!(h.getArt && h.getArt() && view && view.artPos && view.artPos(target.pid, target.id));
+    if (target.type === 'console') return !!(h.nodes.has(target.id) && view && view.consolePos && view.consolePos(target.id));
     if (!h.nodes.has(target.id) || !view || !view.has(target.id)) return false;
     const v = view.vis && view.vis.get(target.id);
     return !(v && (v.hidden || v.gone || (v.exiting != null && v.exiting !== false)));
@@ -248,7 +251,7 @@ export function mountInspector(h) {
     if (why) { close(why); return; }
     const nowMs = h.clock();
     el.classList.toggle('ins-wide', target.type === 'plan'); // 계획 보드 크게 보기
-    if (target.type === 'cluster') renderCluster(nowMs); else if (target.type === 'artifact') renderArtifact(nowMs); else if (target.type === 'plan') renderPlan(nowMs); else renderNode(nowMs);
+    if (target.type === 'cluster') renderCluster(nowMs); else if (target.type === 'artifact') renderArtifact(nowMs); else if (target.type === 'plan') renderPlan(nowMs); else if (target.type === 'console') renderUser(nowMs); else renderNode(nowMs);
     dirty = false;
     renderFoot(force);
   }
@@ -423,6 +426,27 @@ export function mountInspector(h) {
     setBody(m.html);
   }
 
+  /** 나 · 사용자: 상태(내 차례·메인 작업 중·질문 대기)·나에게 온 질문·최근 메시지(가려진 글, 시각)·마지막 최종 답변·메인 링크 */
+  function renderUser(nowMs) {
+    const n = h.nodes.get(target.id);
+    const e = h.userBook ? h.userBook.get(target.id) : null;
+    const m = userCardModel(e, nowMs, (t) => fmtTime(t));
+    setHead('◉', null, tr('cards.user.title'), tr('cards.user.kind'), 'var(--ix-user, #fcd34d)');
+    const pill = $('.ins-pill');
+    pill.className = 'ins-pill st-' + m.pill.key; pill.textContent = m.pill.label;
+    $('.ins-el').textContent = m.since;
+    $('.ins-sess').className = 'ins-sess'; $('.ins-sess').textContent = '';
+    const parts = [];
+    const tx = (s) => (s ? esc(s) : `<i class="ins-dim">${esc(tr('cards.user.noText'))}</i>`);
+    if (m.ask) parts.push(`<section class="ins-sec ins-user-ask"><h4>${esc(tr('cards.user.h.ask'))} <small>${esc(m.ask.ago)}</small></h4><p>${tx(m.ask.text)}</p><p class="ins-dim">${[m.ask.opts ? tr('cards.user.opts', { n: m.ask.opts }) : '', m.ask.multi ? tr('cards.user.multi') : ''].filter(Boolean).map(esc).join(' · ')}</p></section>`);
+    else if (m.lastAsk) parts.push(`<section class="ins-sec"><h4>${esc(tr('cards.user.h.lastAsk'))} <small>${esc(m.lastAsk.ago)}</small></h4><p>${tx(m.lastAsk.text)}</p><p class="${m.lastAsk.declined ? 'ins-user-no' : 'ins-dim'}">${esc(m.lastAsk.result)}</p></section>`);
+    if (m.msgs.length) parts.push(`<section class="ins-sec"><h4>${esc(tr('cards.user.h.msgs'))} <small>${m.msgs.length}</small></h4><ol class="ins-user-msgs">${m.msgs.map((x) => `<li class="op-${esc(x.op)}"><i aria-hidden="true">${esc(x.glyph)}</i><span class="ins-um-t" title="${esc(x.kind)}">${tx(x.text)}${x.images ? ` <small>${esc(tr('cards.user.images', { n: x.images }))}</small>` : ''}</span><small title="${esc(x.when)}">${esc(x.ago)}</small></li>`).join('')}</ol></section>`);
+    else if (!m.ask) parts.push(`<section class="ins-sec"><p class="ins-dim">${esc(tr('cards.user.none'))}</p></section>`);
+    if (m.reply) parts.push(`<section class="ins-sec"><h4>${esc(tr('cards.user.h.reply'))} <small>${esc(m.reply.ago)}</small></h4>${m.reply.text ? `<p>${esc(m.reply.text)}</p>` : ''}${m.reply.turn != null ? `<p class="ins-dim">${esc(tr('cards.user.turn', { t: fmtMs(m.reply.turn) }))}${m.reply.when ? ' · ' + esc(m.reply.when) : ''}</p>` : ''}</section>`);
+    if (n) parts.push(`<section class="ins-sec"><h4>${esc(tr('cards.user.h.main'))}</h4><ul class="ins-kids"><li><button type="button" class="ins-link st-${esc(n.status || 'idle')}" data-goto="${esc(n.id)}"><i aria-hidden="true"></i>${esc(kindInfo(n).icon)} ${esc(n.label || n.id)}</button></li></ul></section>`);
+    setBody(parts.join(''));
+  }
+
   /** 작업 대상: 누가 언제 무엇을(최근 기록)·변경 크기·관계 노드 */
   function renderArtifact(nowMs) {
     const A = h.getArt && h.getArt();
@@ -478,6 +502,7 @@ export function mountInspector(h) {
       if (!target) return;
       if (ev.type === 'node-remove' || ev.type === 'node-add' || ev.type === 'node-update') { dirty = true; return; }
       if (target.type === 'artifact') { if (ev.art) dirty = true; return; }
+      if (target.type === 'console') { if (ev.nodeId === target.id && ev.ix && ev.ix.cat === 'user') dirty = true; return; }
       if (id && (target.type === 'cluster' || id === target.id || (h.nodes.get(id) && parentIdOf(h.nodes.get(id)) === target.id))) dirty = true;
     },
     /** 스냅샷(재연결·재생 시크): 장부를 비우고 recent 로 다시 채움 */

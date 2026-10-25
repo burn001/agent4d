@@ -243,3 +243,11 @@ test('§41.5 히스테리시스: 작은 넘침(GROW 안)은 기다리고, 크게
   assert.equal(h.step(5.5, { c: C(0), D: D2 * 0.8 }, D2 * 0.8), false);
   assert.equal(h.step(6.1, { c: C(0), D: D2 * 0.8 }, D2 * 0.8), true);
 });
+
+test('카메라 따라가기(Follow my prompts): 기본 이동 · 수동 조작·팝업·자동 카메라 끔·일시정지·빠른 재생이면 안 옮김', async () => {
+  const { promptCamPlan } = await import('../camera-core.mjs');
+  const p = promptCamPlan({});
+  assert.ok(p.move && p.dur >= 0.6 && p.dur <= 0.9 && p.hold >= 2 && p.hold <= 3);
+  for (const o of [{ follow: false }, { manual: true }, { hold: true }, { enabled: false }, { paused: true }, { speed: 8 }, { has: false }, { dragging: true }]) assert.equal(promptCamPlan(o).move, false, JSON.stringify(o));
+  assert.ok(promptCamPlan({ speed: 4 }).dur < p.dur, '배속이 크면 짧게');
+});

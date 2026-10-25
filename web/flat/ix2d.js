@@ -3,6 +3,7 @@
 // three.js 를 불러오지 않는다. Flow 2D·Planet 2D 만 그리고 복셀 2D 는 그리지 않는다.
 import { IxModel, IxGeo, ixGeometry, IX_KEYS, ixKeyColor } from '../ix-core.mjs';
 import { toScreen, camScale } from './flat-core.mjs';
+import { userBook, consoleLines, wantsConsole, hitRect } from '../user-core.mjs'; // 사용자 콘솔
 
 const TILT = 0.55;
 const ABUCKET = 10; // 선 알파를 10단계로 묶어 Path2D 몇 개로
@@ -26,7 +27,11 @@ export class FlatIx {
       rad: (id) => { const v = view.vis.get(id); return v ? v.r * (v.drawS || 1) * 0.75 : 0.8; },
       root: (id) => this.rootOf(id),
       fade: (id) => { const v = view.vis.get(id); return v && v.projA != null ? v.projA : 1; }, // 프로젝트 페이드
+      consoleRoots: () => { const out = new Set(); for (const v of view.vis.values()) if (wantsConsole(v.node)) out.add(this.rootOf(v.id)); return out; },
+      consoleInfo: (root) => consoleLines(userBook.get(root), view.clock ? view.clock() : Date.now()),
     };
+    this.conHits = []; // 그린 콘솔 화면 사각형(px) {root, x0,y0,x1,y1}
+    this._cons = [];
     this._rootOf = (id) => this.rootOf(id);
     this.stats = { lines: 0, quads: 0, labels: 0, fx: 0 };
   }
@@ -44,6 +49,48 @@ export class FlatIx {
   /** 그리는 중이면 30fps 갱신(flat-view _update level 2) */
   animating(now) { if (this.off) return false; this.model.step(now); return this.model.animating(now); }
 
+  _anyMain() { for (const v of this.view.vis.values()) if (wantsConsole(v.node)) return true; return false; }
+  /** 콘솔 화면 사각형(집기) + 이름표 두 줄(화면에서 충분히 클 때만, 큰 것부터 8개) */
+  _drawConsoles(ctx, g, isLight) {
+    const a = this._p, b = this._q, list = [];
+    for (const c of g.cons) {
+      this._xy(c.x - c.w, c.y + c.h, c.z, a); this._xy(c.x + c.w, c.y - c.h, c.z, b);
+      const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
+      const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, hw = Math.max(9, (x1 - x0) / 2), hh = Math.max(6, (y1 - y0) / 2);
+      const h = { root: c.root, x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh, px: x1 - x0, top: y0, cx };
+      this.conHits.push(h); list.push(h);
+    }
+    this._cons = g.cons.map((c) => ({ root: c.root, x: c.x, z: c.z - c.y * TILT }));
+    const show = new Set(list.filter((h) => h.px >= 22).sort((p, q) => q.px - p.px).slice(0, 8).map((h) => h.root));
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    for (const d of g.clabels) {
+      if (!show.has(d.root)) continue;
+      const h = list.find((x) => x.root === d.root);
+      const col = ixKeyColor(d.key, isLight);
+      ctx.font = '600 10.5px system-ui, "Segoe UI", sans-serif';
+      const w1 = d.text ? ctx.measureText(d.text).width : 0;
+      ctx.font = '500 9.5px system-ui, "Segoe UI", sans-serif';
+      const w2 = ctx.measureText(d.status).width;
+      const w = Math.min(220, Math.max(w1, w2) + 14), lh = d.text ? 27 : 15;
+      const x = h.cx, y = h.top - 4;
+      ctx.globalAlpha = d.alpha * 0.92;
+      ctx.fillStyle = isLight ? 'rgba(255,255,255,.9)' : 'rgba(5,5,16,.72)';
+      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x - w / 2, y - lh, w, lh, 7) : ctx.rect(x - w / 2, y - lh, w, lh); ctx.fill();
+      ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.globalAlpha = d.alpha * 0.55; ctx.stroke();
+      ctx.globalAlpha = d.alpha;
+      if (d.text) { ctx.font = '600 10.5px system-ui, "Segoe UI", sans-serif'; ctx.fillStyle = col; ctx.fillText(d.text, x, y - 15, 210); }
+      ctx.font = '500 9.5px system-ui, "Segoe UI", sans-serif';
+      ctx.fillStyle = isLight ? 'rgba(60,50,20,.85)' : 'rgba(255,240,200,.78)';
+      ctx.fillText(d.status, x, y - 4, 210);
+      h.y0 = Math.min(h.y0, y - lh); h.x0 = Math.min(h.x0, x - w / 2); h.x1 = Math.max(h.x1, x + w / 2); // 이름표도 집기 범위
+    }
+    ctx.globalAlpha = 1;
+  }
+  /** 화면 px(캔버스 기준) → 콘솔 뿌리 id | null */
+  consoleAt(x, y) { const h = hitRect(this.conHits, x, y, 5); return h ? h.root : null; }
+  /** 콘솔 화면 가운데 — 2D 평면 좌표 {x, z}(toScreen 용, 높이는 위로 기울여 넣음) */
+  consolePos(root) { const c = this._cons.find((q) => q.root === root); return c ? { x: c.x, z: c.z } : null; }
+
   _xy(x, y, z, out) {
     const v = this.view;
     return toScreen(v.cam, v.W, v.H, x, z - y * TILT, out);
@@ -51,8 +98,10 @@ export class FlatIx {
 
   draw(ctx, now) {
     const m = this.model;
-    if (this.off || (!m.fx.size && !m.portal.size && !m.console.size)) { this.stats.fx = 0; return; }
+    this.conHits.length = 0;
+    if (this.off || (!m.fx.size && !m.portal.size && !m.console.size && !this._anyMain())) { this.stats.fx = 0; this._cons = []; return; }
     const isLight = !!(this.view.tokens && this.view.tokens.isLight);
+    this._env.light = isLight; // 콘솔 진하기
     const g = ixGeometry(m, now, this._env, this.geo);
     const s = camScale(this.view.cam, this.view.H);
     const cols = IX_KEYS.map((k) => ixKeyColor(k, isLight));
@@ -63,6 +112,18 @@ export class FlatIx {
     // 선: (색, 알파 단계)별 Path2D
     const paths = new Map();
     const a = this._p, b = this._q;
+    // 콘솔 화면 바탕(선보다 먼저 — 2D 에선 선만으로는 빈 틀처럼 보여 옅은 화면을 깐다)
+    if (g.cons.length) {
+      ctx.save(); ctx.globalCompositeOperation = 'source-over';
+      for (const c of g.cons) {
+        this._xy(c.x - c.w, c.y + c.h, c.z, a); this._xy(c.x + c.w, c.y - c.h, c.z, b);
+        const fa = this._env.fade(c.root);
+        ctx.globalAlpha = 0.85 * fa;
+        ctx.fillStyle = isLight ? '#fffaf0' : '#14110a';
+        ctx.fillRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
+      }
+      ctx.restore();
+    }
     for (let i = 0; i < g.nl; i++) {
       const o = i * 6;
       this._xy(g.L[o], g.L[o + 1], g.L[o + 2], a); this._xy(g.L[o + 3], g.L[o + 4], g.L[o + 5], b);
@@ -100,6 +161,7 @@ export class FlatIx {
       ctx.fillStyle = c;
       ctx.fillText(d.text, a.x, a.y - 3);
     }
+    this._drawConsoles(ctx, g, isLight);
     ctx.restore();
     this.stats.lines = g.nl; this.stats.quads = g.nq; this.stats.labels = g.labels.length; this.stats.fx = m.fx.size;
   }

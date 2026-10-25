@@ -274,15 +274,16 @@ export class IxModel {
 }
 
 // ───────────────────────── 도형 목록 ─────────────────────────
-export const IXGEO = { LINES: 3000, QUADS: 900, LABELS: 10 };
+export const IXGEO = { LINES: 3000, QUADS: 900, LABELS: 10, CLABELS: 24 };
+const CONSOLE_IDLE = { lastAt: 0, replyAt: null, promptAt: null, asking: 0, failAt: null }; // 사용자 이벤트 전 콘솔(처음부터 보임)
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const ease = (x) => { x = clamp01(x); return x * x * (3 - 2 * x); };
 const hash = (s) => { let h = 2166136261 >>> 0; s = String(s); for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; } return (h >>> 0) / 4294967296; };
 
 /** 도형 버퍼(재사용): 선 = [x1,y1,z1,x2,y2,z2,색,알파], 사각 = [x,y,z,크기,색,알파], 라벨 = {x,y,z,text,key,alpha,cls} */
 export class IxGeo {
-  constructor() { this.L = new Float32Array(IXGEO.LINES * 6); this.LC = new Uint8Array(IXGEO.LINES); this.LA = new Float32Array(IXGEO.LINES); this.Q = new Float32Array(IXGEO.QUADS * 4); this.QC = new Uint8Array(IXGEO.QUADS); this.QA = new Float32Array(IXGEO.QUADS); this.labels = []; this.reset(); }
-  reset() { this.nl = 0; this.nq = 0; this.labels.length = 0; this.dropped = 0; this.ka = 1; }
+  constructor() { this.L = new Float32Array(IXGEO.LINES * 6); this.LC = new Uint8Array(IXGEO.LINES); this.LA = new Float32Array(IXGEO.LINES); this.Q = new Float32Array(IXGEO.QUADS * 4); this.QC = new Uint8Array(IXGEO.QUADS); this.QA = new Float32Array(IXGEO.QUADS); this.labels = []; this.cons = []; this.clabels = []; this.reset(); }
+  reset() { this.nl = 0; this.nq = 0; this.labels.length = 0; this.dropped = 0; this.ka = 1; this.cons.length = 0; this.clabels.length = 0; }
   // ka = 지금 그리는 뿌리·노드의 프로젝트 페이드 투명도(env.fade) — 선·사각·라벨이 모두 곱한다
   line(x1, y1, z1, x2, y2, z2, key, a) {
     a *= this.ka;
@@ -298,6 +299,8 @@ export class IxGeo {
     const o = this.nq * 4; this.Q[o] = x; this.Q[o + 1] = y; this.Q[o + 2] = z; this.Q[o + 3] = s;
     this.QC[this.nq] = IX_KEYS.indexOf(key); this.QA[this.nq] = Math.min(1, a); this.nq++;
   }
+  /** 사용자 콘솔 이름표(효과 라벨과 따로, 상한 CLABELS): info = consoleLines 결과 */
+  conLabel(x, y, z, info, root, key, a) { a *= this.ka; if (a > 0.05 && this.clabels.length < IXGEO.CLABELS) this.clabels.push({ x, y, z, text: info.text || '', status: info.status || '', state: info.state || 'idle', root, key, alpha: Math.min(1, a) }); }
   label(x, y, z, text, key, a, cls = '') { a *= this.ka; if (a > 0.05 && this.labels.length < IXGEO.LABELS) this.labels.push({ x, y, z, text, key, alpha: Math.min(1, a), cls }); }
   /** 수평 원(xz 평면) */
   circle(cx, cy, cz, r, key, a, seg = 28, from = 0, to = Math.PI * 2, tilt = 0) {
@@ -363,7 +366,9 @@ export function ixGeometry(model, now, env, geo = new IxGeo()) {
       if (failA > 0.05) geo.circle(c.x, c.y, c.z, 0.6, 'err', failA, 18);
     }
   }
-  // ---- 사용자 콘솔: 섬 위 사용자 쪽 작은 단말(Planet = 지상 관제소). 평소 은은하게, 답변 뒤 '읽음 대기' 맥동, 오래 쉬면 어두워짐 ----
+  // ---- 사용자 콘솔: 섬 위 사용자 쪽 작은 단말(Planet = 지상 관제소 + 작은 화면).
+  //      메인마다 처음부터(env.consoleRoots — 사용자 이벤트를 기다리지 않음). 평소에도 화면 안 글줄 + 위 이름표(마지막 입력 첫 몇 단어 · 상태 · 시간, env.consoleInfo),
+  //      답변 뒤 '읽음 대기' 맥동, 오래 쉬면 조금 어두워짐(찾을 수 있게 하한 0.6). 집기용 자리는 geo.cons ----
   const consolePos = new Map();
   const consoleAt = (rootId) => {
     if (consolePos.has(rootId)) return consolePos.get(rootId);
@@ -371,32 +376,53 @@ export function ixGeometry(model, now, env, geo = new IxGeo()) {
     let c = null;
     if (rp) {
       if (flow) c = { x: rp.x - 4.6, y: rp.y + 5.2, z: rp.z - 3.4 };
-      else { const rr = R(rootId); c = { x: rp.x - rr * 0.55, y: rp.y + rr * 0.95, z: rp.z, mast: { x: rp.x - rr * 0.45, y: rp.y + rr * 0.7, z: rp.z } }; }
+      else { const rr = R(rootId); c = { x: rp.x - rr * 0.55, y: rp.y + rr * 0.95, z: rp.z, mast: { x: rp.x - rr * 0.45, y: rp.y + rr * 0.7, z: rp.z }, rr }; }
     }
     consolePos.set(rootId, c);
     return c;
   };
-  for (const [rootId, cs] of model.console) {
+  const roots = new Set(model.console.keys());
+  if (env.consoleRoots) for (const r of env.consoleRoots()) roots.add(r);
+  for (const rootId of roots) {
     const c = consoleAt(rootId);
     if (!c) continue;
+    const cs = model.console.get(rootId) || CONSOLE_IDLE;
+    const info = env.consoleInfo ? env.consoleInfo(rootId) : null;
+    const asking = cs.asking || (info && info.state === 'asking') ? 1 : 0;
     geo.ka = fadeOf(rootId);
     const since = cs.replyAt != null ? now - cs.replyAt : null;
-    const dim = since == null ? 1 : Math.max(0.25, 1 - since / IXFX.CONSOLE_DIM_S); // 오래 기다리면 점점 어두워짐
+    const dim = since == null ? 1 : Math.max(0.6, 1 - since / IXFX.CONSOLE_DIM_S); // 오래 기다리면 조금 어두워짐(찾을 수 있게)
     const waitPulse = since != null && since < 30 ? 0.18 * (0.5 + 0.5 * Math.sin(now * 2.4)) * (1 - since / 30) : 0; // 읽음 대기
     const fail = cs.failAt != null && now - cs.failAt < 1.5 ? 1 - (now - cs.failAt) / 1.5 : 0;
     const key = fail > 0.05 ? 'err' : 'user';
-    const a = (0.16 + waitPulse + (cs.asking ? 0.2 + 0.15 * Math.sin(now * 5) : 0)) * dim + fail * 0.6;
+    const a = (((flow ? 0.26 : 0.34) + waitPulse + (asking ? 0.2 + 0.15 * Math.sin(now * 5) : 0)) * dim + fail * 0.6) * (env.light ? 1.7 : 1); // 라이트는 배경 쪽 섞임이라 진하게
+    // 화면(가운데 sx,sy,sz · 반폭 w · 반높이 h)
+    let sx, sy, sz, w, h;
     if (flow) {
-      const w = 0.9, h = 0.55;
-      geo.line(c.x - w, c.y - h, c.z, c.x + w, c.y - h, c.z, key, a); geo.line(c.x + w, c.y - h, c.z, c.x + w, c.y + h, c.z, key, a);
-      geo.line(c.x + w, c.y + h, c.z, c.x - w, c.y + h, c.z, key, a); geo.line(c.x - w, c.y + h, c.z, c.x - w, c.y - h, c.z, key, a);
-      geo.line(c.x - 0.25, c.y - h - 0.2, c.z, c.x + 0.25, c.y - h - 0.2, c.z, key, a * 0.7); // 받침
-      geo.quad(c.x, c.y, c.z, 0.2 + waitPulse * 0.4, key, Math.min(1, a * 2.2)); // 빛나는 별
+      w = 1.2; h = 0.72; sx = c.x; sy = c.y; sz = c.z;
+      geo.line(sx - 0.25, sy - h - 0.2, sz, sx + 0.25, sy - h - 0.2, sz, key, a * 0.7); // 받침
+      geo.line(sx, sy - h, sz, sx, sy - h - 0.2, sz, key, a * 0.5);
     } else {
       geo.line(c.mast.x, c.mast.y, c.mast.z, c.x, c.y, c.z, key, a);   // 관제소 안테나
-      geo.circle(c.x, c.y + 0.12, c.z, 0.32, key, a, 12, Math.PI, Math.PI * 2, 0.9); // 접시
-      geo.quad(c.x, c.y + 0.1, c.z, 0.16 + waitPulse * 0.3, key, Math.min(1, a * 2.2));
+      geo.circle(c.x, c.y + 0.12, c.z, 0.46, key, a, 14, Math.PI, Math.PI * 2, 0.9); // 접시
+      geo.quad(c.x, c.y + 0.1, c.z, 0.2 + waitPulse * 0.3, key, Math.min(1, a * 2.2));
+      w = 0.6; h = 0.36; sx = c.x - (c.rr || 1) * 0.8 - 1.3; sy = c.y + (c.rr || 1) * 0.45 + 0.45; sz = c.z; // 관제소 옆 작은 화면(행성 고리 밖으로)
+      geo.line(sx + w, sy - h * 0.4, sz, c.x - 0.1, c.y, c.z, key, a * 0.45);
     }
+    geo.line(sx - w, sy - h, sz, sx + w, sy - h, sz, key, a); geo.line(sx + w, sy - h, sz, sx + w, sy + h, sz, key, a);
+    geo.line(sx + w, sy + h, sz, sx - w, sy + h, sz, key, a); geo.line(sx - w, sy + h, sz, sx - w, sy - h, sz, key, a);
+    // 화면 안 글줄(비어 보이지 않게): 첫 줄 = 마지막 입력 길이, 둘째 줄 = 상태 막대(작업 중이면 그 위를 점이 흐름)
+    const st = info ? info.state : 'idle';
+    const l1 = info && info.text ? 0.35 + 0.55 * Math.min(1, info.text.length / 22) : 0.18;
+    const x0 = sx - w * 0.78, lw = w * 1.56;
+    geo.line(x0, sy + h * 0.32, sz, x0 + lw * l1, sy + h * 0.32, sz, key, a * 0.85);
+    if (info && info.text) geo.line(x0, sy - h * 0.02, sz, x0 + lw * l1 * 0.62, sy - h * 0.02, sz, key, a * 0.55);
+    const l2 = st === 'idle' ? 0.3 : 0.55;
+    geo.line(x0, sy - h * 0.4, sz, x0 + lw * l2, sy - h * 0.4, sz, st === 'asking' ? 'user' : key, a * 0.5);
+    if (st === 'working' && !env.reduced) geo.quad(x0 + lw * l2 * ((now * 0.45) % 1), sy - h * 0.4, sz, 0.09, key, Math.min(1, a * 2));
+    if (flow) geo.quad(sx + w * 0.78, sy + h * 0.62, sz, 0.14 + waitPulse * 0.4 + (asking ? 0.08 : 0), key, Math.min(1, a * 2.2)); // 빛나는 별(상태 등)
+    geo.cons.push({ root: rootId, x: sx, y: sy, z: sz, w, h, a, state: st });
+    if (info) geo.conLabel(sx, sy + h + 0.12, sz, info, rootId, key, Math.min(1, 0.55 + a));
   }
   // ---- 효과 ----
   for (const f of model.fx.values()) {
