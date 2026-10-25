@@ -1,0 +1,10 @@
+Agent4D
+Copyright 2026 burn001 (Dr. Cho, Sangkyu)
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+It loads three.js (https://threejs.org), Copyright 2010-2024 three.js authors,
+at runtime from a CDN under the MIT License. three.js is not redistributed here.
+
+"Claude" and "Claude Code" are trademarks of Anthropic, PBC. Agent4D is an
+independent project, not made, endorsed or supported by Anthropic.

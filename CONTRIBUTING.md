@@ -9,3 +9,7 @@ Thanks for your interest in Agent4D (formerly cc-agent-viz).
 - Most code comments are in Korean. English comments are fine in new code.
 
 Versions follow [Semantic Versioning](https://semver.org/) (0.x until a stable 1.0). Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+By contributing, you agree that your contributions are licensed under the [Apache License 2.0](LICENSE), as described in its section 5.

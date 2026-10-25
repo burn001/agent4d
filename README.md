@@ -2,7 +2,7 @@
 
 **Agent4D — your coding agents in 3D space + time**
 
-[![version](https://img.shields.io/github/v/release/burn001/agent4d?label=version)](CHANGELOG.md) [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![version](https://img.shields.io/github/v/release/burn001/agent4d?label=version)](CHANGELOG.md) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 **English** (canonical) · [한국어](README.ko.md)
 
@@ -260,4 +260,4 @@ Most code comments are in Korean. Bug reports and pull requests are welcome; ple
 
 ## License
 
-[MIT](LICENSE) © 2026 burn001 (Dr. Cho, Sangkyu). Uses [three.js](https://threejs.org) (MIT).
+[Apache License 2.0](LICENSE) © 2026 burn001 (Dr. Cho, Sangkyu). See [NOTICE](NOTICE). Uses [three.js](https://threejs.org) (MIT).
