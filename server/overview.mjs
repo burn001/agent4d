@@ -14,7 +14,7 @@ const log = (...a) => console.error('[ccviz] overview', ...a);
 
 /**
  * 루트 공급자(source) 인터페이스
- *  desired({inactive}) → Promise<{roots:[{sessionId, projectId, live, liveStatus, tier, orphanSdk, activityMs}], overflow?:Set}>
+ *  desired → Promise<{roots:[{sessionId, projectId, live, liveStatus, tier, orphanSdk, activityMs}], overflow?:Set}>
  *  acquire(sid) → Promise<runtime{graph}>   release(sid)
  *  projects({overview}) → Promise<projects[]>   (항목)
  */
@@ -85,14 +85,13 @@ export class OverviewHub {
     this.sleep();
   }
 
-  /** sub = {inactive:boolean, onEvent(ev), onProjects(payload)} */
+  /** sub = {inactive:boolean, onEvent(ev), onProjects(payload)}.
+   *  inactive:true = 숨은 루트(R.visible=false — 기동기가 붙든 끝난 메인 등)까지 받는 내부 구독(시험·진단용). /events 는 늘 false */
   subscribe(sub) {
     this.subs.add(sub);
     if (this.sleepTimer) { clearTimeout(this.sleepTimer); this.sleepTimer = null; }
     return () => { this.subs.delete(sub); if (!this.subs.size) this._scheduleSleep(); };
   }
-
-  get anyInactive() { for (const s of this.subs) if (s.inactive) return true; return false; }
 
   // ───────────── 주기 계산 ─────────────
 
@@ -105,8 +104,7 @@ export class OverviewHub {
   async _tick() {
     if (this.stopped || !this.awake) return;
     const t0 = Date.now();
-    const inactive = this.anyInactive;
-    const want = await this.source.desired({ inactive });
+    const want = await this.source.desired();
     if (!this.awake || this.stopped) return;
     const now = this.now();
     const wantMap = new Map();
@@ -502,11 +500,12 @@ const audOk = (aud, inactive) => aud === 'all' || (inactive ? aud === 'inactive'
 
 /**
  * RootManager + SessionIndex 로 루트 공급자를 만든다.
- * live cli 메인 전부(최대 maxRoots, 활동 시각 순) + 매칭 안 된 live sdk-cli + (inactive 구독 시) 2시간 안 recent 메인(합 최대 maxWithInactive)
+ * live cli 메인 전부(최대 maxRoots, 활동 시각 순) + 기동기 회차가 붙든 메인 + 매칭 안 된 live sdk-cli(합 최대 maxWithInactive).
+ * 끝난 지 오래된(recent·inactive) 메인은 싣지 않는다 — 예전 '비활성 표시'(inactive=1) 구독은 없앴다
  */
 export function createRealSource({ manager, index, maxRoots = 12, maxWithInactive = 16 }) {
   return {
-    async desired({ inactive = false } = {}) {
+    async desired() {
       if (Date.now() - (index.lastRefresh || 0) > 4000) await index.refresh();
       const mains = [], sdk = [];
       for (const p of index.liveProcs()) {
@@ -549,17 +548,6 @@ export function createRealSource({ manager, index, maxRoots = 12, maxWithInactiv
           orphanSdk: false, activityMs: pe.mtimeMs, launcherOf: p.sessionId });
       }
       for (const r of sdk) if (roots.length < maxWithInactive) roots.push(r);
-      if (inactive) {
-        const liveSet = new Set(index.liveProcs().map((p) => p.sessionId));
-        const now = Date.now();
-        for (const e of index.sorted()) {
-          if (roots.length >= maxWithInactive) break;
-          if (now - e.mtimeMs > 2 * 3600_000) break;
-          if (liveSet.has(e.sessionId) || overflow.has(e.sessionId)) continue;
-          if (!(await index.isCandidate(e))) continue;
-          roots.push({ sessionId: e.sessionId, projectId: e.projectDir, live: false, liveStatus: null, tier: 'recent', entrypoint: 'cli', orphanSdk: false, activityMs: e.mtimeMs });
-        }
-      }
       return { roots, overflow };
     },
     acquire: (sid) => manager.pin(sid),

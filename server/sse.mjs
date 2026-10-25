@@ -100,11 +100,10 @@ function attachLimits(write, limits) {
 }
 
 /**
- * 3차: /events?scope=all[&inactive=1]&since=<hseq>. hub 는 OverviewHub.
+ * 3차: /events?scope=all&since=<hseq>. hub 는 OverviewHub. 기본 구독자만(비활성 세션은 장면에 싣지 않는다)
  * snapshot(전체 보기 형식) → ev(id = hseq) · projects · limits · 15초 ping
  */
 export async function handleOverviewEvents(req, res, url, hub, opts = {}) {
-  const inactive = ['1', 'true', 'yes'].includes(String(url.searchParams.get('inactive') || ''));
   const sinceRaw = url.searchParams.get('since') ?? req.headers['last-event-id'];
   const since = sinceRaw != null && sinceRaw !== '' ? Number(sinceRaw) : NaN;
   await hub.wake();
@@ -116,16 +115,16 @@ export async function handleOverviewEvents(req, res, url, hub, opts = {}) {
   const write = (s) => { if (!closed) res.write(s); };
   const X = opts.external ? externalEv : (e) => e, XS = opts.external ? externalSnap : (s) => s;
   const sub = {
-    inactive,
+    inactive: false,
     onEvent: (e) => write(formatEvent('ev', X(e), e.seq)),
     onProjects: (p) => write(formatEvent('projects', p)),
   };
   // 스냅샷과 구독을 같은 틱에 해서 사이 이벤트를 놓치지 않는다
-  const evs = hub.eventsSince(since, { inactive });
+  const evs = hub.eventsSince(since);
   if (evs) for (const e of evs) write(formatEvent('ev', X(e), e.seq));
-  else write(formatEvent('snapshot', XS(hub.snapshot({ inactive })), hub.hseq));
+  else write(formatEvent('snapshot', XS(hub.snapshot()), hub.hseq));
   const unsub = hub.subscribe(sub);
-  if (evs) write(formatEvent('projects', { projects: hub.projectsState.projects, roots: hub.rootsPayload(inactive) }));
+  if (evs) write(formatEvent('projects', { projects: hub.projectsState.projects, roots: hub.rootsPayload() }));
   const limitsOff = attachLimits(write, opts.limits);
   const ping = setInterval(() => write(': ping\n\n'), PING_MS);
   const cleanup = () => {

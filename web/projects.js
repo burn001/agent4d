@@ -54,19 +54,22 @@ export function countsText(p) {
   return tr('app.proj.countsPast', { n: num(p.sessions) });
 }
 
-/** 정렬·묶음: live(활동 내림차순) → recent → inactive(접기), temp 는 따로(접기) */
+/** 정렬·묶음: live(활동 내림차순) → recent, temp 는 따로(접기). 비활성(임시 아닌 inactive) 프로젝트는 목록에서 뺀다
+ *  hidden 에 개수만, totals.projects 도 보이는 것만 센다 */
 export function groupProjects(projects, nowMs = Date.now()) {
-  const g = { live: [], recent: [], inactive: [], temp: [], totals: { projects: 0, liveSessions: 0, activeSessions: 0 } };
+  const g = { live: [], recent: [], temp: [], hidden: 0, totals: { projects: 0, liveSessions: 0, activeSessions: 0 } };
   for (const p of projects || []) {
     if (!p || !p.projectId) continue;
+    const tier = tierOf(p, nowMs);
+    if (!p.temp && tier === 'inactive') { g.hidden++; continue; }
     g.totals.projects++;
     g.totals.liveSessions += num(p.liveSessions);
     g.totals.activeSessions += num(p.activeSessions);
     if (p.temp) { g.temp.push(p); continue; }
-    g[tierOf(p, nowMs)].push(p);
+    g[tier].push(p);
   }
   const byAct = (a, b) => (lastActivity(b) - lastActivity(a)) || (a.projectId < b.projectId ? -1 : 1);
-  for (const k of ['live', 'recent', 'inactive']) g[k].sort(byAct);
+  for (const k of ['live', 'recent']) g[k].sort(byAct);
   const tierRank = { live: 0, recent: 1, inactive: 2 };
   g.temp.sort((a, b) => (tierRank[tierOf(a, nowMs)] - tierRank[tierOf(b, nowMs)]) || byAct(a, b));
   return g;
@@ -161,7 +164,7 @@ export function mountProjectList({ el, onSelect = () => {}, getNodeCount = null,
   let projects = [], sel = { scope: 'all' }, disabled = false, collapsed = false, archive = null;
   let expanded = null;            // 세션 목록을 펼친 프로젝트
   let chipOpen = false;           // 좁은 화면: 선택 칩의 세션 목록
-  const openGroups = new Set();   // 사용자가 펼친 접기 묶음(inactive·temp)
+  const openGroups = new Set();   // 사용자가 펼친 접기 묶음(temp)
   const forcedOpen = new Set();   // 선택 항목이 들어 있어 render 가 연 묶음(사용자 선택으로 기억하지 않음)
   try { collapsed = localStorage.getItem(LS_KEY) === 'collapsed'; } catch (e) { /* 저장소 없음 */ }
 
@@ -223,7 +226,7 @@ export function mountProjectList({ el, onSelect = () => {}, getNodeCount = null,
     if (!d || !d.dataset || !d.dataset.grp) return;
     const key = d.dataset.grp;
     // render 가 선택 때문에 연 것(innerHTML 의 open 속성도 toggle 이벤트를 낸다)은 기억하지 않는다 — 예전엔 이 때문에
-    // '전체'로 돌아간 뒤에도 비활성·(임시) 묶음이 펼쳐진 채 남았다
+    // '전체'로 돌아간 뒤에도 (임시) 묶음이 펼쳐진 채 남았다
     if (d.open) { if (!forcedOpen.has(key)) openGroups.add(key); }
     else { openGroups.delete(key); forcedOpen.delete(key); }
   }, true);
@@ -266,6 +269,12 @@ export function mountProjectList({ el, onSelect = () => {}, getNodeCount = null,
       <span class="pl-name">${esc(tr('app.proj.all'))}</span><span class="pl-meta">${esc(tr('app.proj.allMeta', { n: g.totals.projects, a: g.totals.activeSessions }))}</span></button>`;
     for (const p of g.live) h += rowHtml(p, nowMs);
     for (const p of g.recent) h += rowHtml(p, nowMs);
+    // 지금 고른 프로젝트가 2시간이 지나 비활성이 됐으면(또는 오래된 세션 링크) 그 한 줄만 남겨 무엇을 보고 있는지 보이게 —
+    // 선택은 그대로 두고, 다른 것을 고르면 사라진다
+    const selP = sel.scope !== 'all' && sel.scope !== 'archive' && sel.projectId
+      && ![...g.live, ...g.recent, ...g.temp].some((p) => p.projectId === sel.projectId)
+      ? projects.find((x) => x.projectId === sel.projectId) : null;
+    if (selP) h += rowHtml(selP, nowMs);
     const fold = (key, label, arr) => {
       if (!arr.length) return '';
       const hasSel = sel.scope !== 'archive' && arr.some((p) => sel.projectId === p.projectId);
@@ -273,7 +282,6 @@ export function mountProjectList({ el, onSelect = () => {}, getNodeCount = null,
       if (hasSel && !openGroups.has(key)) forcedOpen.add(key); else forcedOpen.delete(key);
       return `<details class="pl-grp" data-grp="${key}"${open ? ' open' : ''}><summary>${esc(tr('app.proj.group', { name: label, n: arr.length }))}</summary>${arr.map((p) => rowHtml(p, nowMs)).join('')}</details>`;
     };
-    h += fold('inactive', tr('app.proj.inactive'), g.inactive);
     h += fold('temp', tr('app.proj.temp'), g.temp);
     if (!projects.length) h += `<p class="pl-empty">${esc(tr('app.proj.waiting'))}</p>`;
     h += archiveGroupHtml(archive, sel);

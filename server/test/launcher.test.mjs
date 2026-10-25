@@ -297,21 +297,21 @@ test('전체 보기: 살아 있는 회차의 기동 세션(끝난 메인)을 루
   try {
     await index.refresh();
     const src = createRealSource({ manager: {}, index });
-    const want = await src.desired({ inactive: false });
+    const want = await src.desired();
     const parent = want.roots.find((r) => r.sessionId === M);
     assert.ok(parent, '기동한 메인이 루트 후보');
     assert.equal(parent.launcherOf, C2);
     assert.equal(parent.orphanSdk, false);
     assert.ok(want.roots.some((r) => r.sessionId === C2 && r.orphanSdk), '아직 안 붙었으면 회차도 후보(허브가 30초 기다림)');
     index.claimedChildren.add(C2);
-    const want2 = await src.desired({ inactive: false });
+    const want2 = await src.desired();
     assert.ok(want2.roots.some((r) => r.sessionId === M), '붙은 뒤에도 회차가 살아 있는 동안 부모 루트 유지');
     assert.ok(!want2.roots.some((r) => r.sessionId === C2));
     // 붙이지 못한 회차(다른 기동기 겹침): 트리는 그대로 독립 루트, 같은 프로젝트의 살아 있는 메인을 추정 소속으로
     fs.writeFileSync(path.join(sessions, `${process.pid}1.json`), JSON.stringify({ pid: process.pid, sessionId: C4, cwd: repo2, status: 'busy', entrypoint: 'sdk-cli' }));
     fs.writeFileSync(path.join(sessions, `${process.pid}2.json`), JSON.stringify({ pid: process.pid, sessionId: M3, cwd: repo2, status: 'idle', entrypoint: 'cli' }));
     await index.refresh();
-    const want3 = await src.desired({ inactive: false });
+    const want3 = await src.desired();
     const o = want3.roots.find((r) => r.sessionId === C4);
     assert.ok(o && o.orphanSdk);
     assert.equal(o.unlinkedReason, 'ambiguous');

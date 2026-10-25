@@ -25,13 +25,18 @@ test('상대 시각', () => {
   assert.equal(relTime(null, NOW), '');
 });
 
-test('정렬·접기 묶음: live(최근순) → recent → 비활성, temp 따로', () => {
+test('정렬·묶음: live(최근순) → recent, temp 따로, 비활성은 목록에서 뺌(§26.2)', () => {
   const g = groupProjects(sample(), NOW);
   assert.deepEqual(g.live.map((p) => p.projectId), ['alpha', 'beta']);
   assert.deepEqual(g.recent.map((p) => p.projectId), ['gamma']);
-  assert.deepEqual(g.inactive.map((p) => p.projectId), ['old']);
+  assert.equal(g.inactive, undefined);
+  assert.equal(g.hidden, 1);
   assert.deepEqual(g.temp.map((p) => p.projectId), ['tmp']);
-  assert.equal(g.totals.projects, 5);
+  assert.equal(g.totals.projects, 4);
+  // 임시 폴더 프로젝트는 비활성이어도 (임시) 묶음에 그대로
+  const g2 = groupProjects([P('t-old', { temp: true, lastActivityAt: ago(60 * 30) })], NOW);
+  assert.deepEqual(g2.temp.map((p) => p.projectId), ['t-old']);
+  assert.equal(g2.hidden, 0);
   assert.equal(g.totals.activeSessions, 1);
   assert.equal(tierOf(P('x', { lastActivityAt: ago(119) }), NOW), 'recent');
   assert.equal(tierOf(P('x', { lastActivityAt: ago(121) }), NOW), 'inactive');

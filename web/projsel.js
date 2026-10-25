@@ -1,12 +1,13 @@
 // 상단 바 프로젝트 선택기: 버튼 하나 + 누르면 펼쳐지는 프로젝트 목록(전체 · 프로젝트들, 활성 점·세션 수).
 // 예전의 상단 바 범위 드롭다운 + 사이드 패널 프로젝트 목록(세션 펼침) + 재생 고르기 창(프로젝트 칩·세션 목록)을 이것 하나로 합쳤다.
 // 세션 단위 고르기는 화면 아래 매크로 타임라인(macro/macro.js)이 맡는다.
-//   const ps = mountProjectSelector({ host, onSelect(sel), getNodeCount, onInactive(on), inactive });
+//   const ps = mountProjectSelector({ host, onSelect(sel), getNodeCount });
+// 목록은 live·recent(임시 묶음·보관함)만 — 비활성 프로젝트는 싣지 않는다
 //   ps.setProjects(list); ps.setArchive(summary); ps.setSelection(sel); ps.setLabel(text); ps.setDisabled(bool, title); ps.open(hint); ps.close();
 import { mountProjectList, selectionLabel, dotOf, groupProjects } from './projects.js';
 import { t } from './i18n.mjs';
 
-export function mountProjectSelector({ host, onSelect = () => {}, getNodeCount = null, onInactive = null, inactive = false } = {}) {
+export function mountProjectSelector({ host, onSelect = () => {}, getNodeCount = null } = {}) {
   host.classList.add('psel');
   host.innerHTML = `
     <button type="button" class="tb psel-btn" id="proj-btn" aria-haspopup="listbox" aria-expanded="false" title="${t('app.psel.title')}">
@@ -25,17 +26,6 @@ export function mountProjectSelector({ host, onSelect = () => {}, getNodeCount =
     el: host.querySelector('.psel-list'), sessions: false, getNodeCount,
     onSelect: (s) => { close(); if (!s.again) onSelect(s); },
   });
-  // '비활성 표시'(최근 2시간 안 끝난 세션도 장면에 희미하게) — 예전 패널 목록 머리의 같은 버튼
-  if (onInactive) {
-    const head = host.querySelector('.pl-head');
-    const b = document.createElement('button');
-    b.type = 'button'; b.className = 'pl-inact'; b.textContent = t('app.psel.inactive');
-    b.title = t('app.psel.inactiveTitle');
-    b.setAttribute('aria-pressed', String(!!inactive));
-    b.addEventListener('click', (e) => { e.stopPropagation(); const on = b.getAttribute('aria-pressed') !== 'true'; b.setAttribute('aria-pressed', String(on)); onInactive(on); });
-    head.appendChild(b);
-  }
-
   function renderBtn() {
     const arc = sel.scope === 'archive';
     const p = sel.scope !== 'all' && !arc ? projects.find((x) => x.projectId === sel.projectId) : null;
@@ -74,7 +64,6 @@ export function mountProjectSelector({ host, onSelect = () => {}, getNodeCount =
     setLabel(s) { label = s || null; renderBtn(); },
     setArchive(a) { pl.setArchive(a); renderBtn(); }, // 보관함 요약(GET /archive)
     setDisabled(on, title = '') { disabled = !!on; btn.disabled = disabled; btn.dataset.dtitle = title; if (disabled) close(); renderBtn(); },
-    setInactive(on) { const b = host.querySelector('.pl-inact'); if (b) b.setAttribute('aria-pressed', String(!!on)); },
     open, close,
     get isOpen() { return !pop.hidden; },
     list: pl,

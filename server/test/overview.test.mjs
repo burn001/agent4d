@@ -221,8 +221,9 @@ test('--demo 전체 보기: 프로젝트 4개(§66 같은 프로젝트 live 메�
   const kinds = new Set(st.nodes.map((n) => n.kind));
   for (const k of ['main', 'subagent', 'workflow', 'workflow-agent', 'claude-p', 'bash-bg', 'monitor']) assert.ok(kinds.has(k), k);
   assert.equal(new Set(st.nodes.map((n) => n.id)).size, st.nodes.length);
+  // 예전 '비활성 표시'(inactive=1)는 없앴다: 붙여 보내도 기본 장면과 같다(recent 메인 없음)
   const inact = JSON.parse((await get(`${demoBase}/state?scope=all&inactive=1`, H)).body);
-  assert.ok(Array.isArray(inact.roots));
+  assert.ok(!inact.roots.some((r) => r.projectId === 'demo-gamma'));
   const got = [];
   const unsub = dh.subscribe({ inactive: false, onEvent: (e) => got.push(e), onProjects: () => {} });
   const osid = demoMgr.ov.orphan;

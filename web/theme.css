@@ -281,14 +281,6 @@ body.panel-collapsed #stage { right: 40px; }
   background: var(--hover); color: var(--accent); font-weight: 600; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 #stream.show-proj .ln .pchip { display: inline-block; }
-/* 프로젝트 목록 머리의 비활성 표시 토글 */
-.pl-head .pl-inact {
-  margin-left: auto; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 11px; cursor: pointer; white-space: nowrap;
-  background: transparent; border: 1px solid var(--border); color: var(--muted); flex: none;
-}
-.pl-head .pl-inact:hover { background: var(--hover); }
-.pl-head .pl-inact[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
-.pl-collapsed .pl-head .pl-inact { display: none; }
 #to-latest {
   position: absolute; right: 16px; bottom: 14px; display: none; padding: 4px 10px; border-radius: 999px;
   background: var(--accent); color: var(--bg); border: none; cursor: pointer; font-weight: 600; box-shadow: var(--shadow);

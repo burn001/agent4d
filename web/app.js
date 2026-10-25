@@ -628,12 +628,6 @@ function demoLimitsFor() {
   return { ok: true, source: 'statusline', capturedAt: cap, ageSec: 720, stale: true, five_hour: w(72, 2 * H + 40 * 60000), seven_day: w(93, 53 * H), plan: 'max' };
 }
 let pl = null;
-function setInactive(on) {
-  showInactive = !!on;
-  lsSet('ccviz.inactive', showInactive ? 'on' : 'off');
-  if (pl && pl.setInactive) pl.setInactive(showInactive);
-  if (streamAll && !replaying) { if (MODE === 'live') connect(); else if (view.setScope) view.setScope(scopeArgs()); }
-}
 
 // ---------------- 범위(전체·프로젝트·세션) ----------------
 // sel = {scope:'all'} | {scope:'project', projectId} | {scope:'session', projectId?, sessionId}  ('session:auto' = 기존 자동 단일 세션)
@@ -646,7 +640,8 @@ function initialSelection() {
 }
 let sel = initialSelection();
 let streamAll = false;       // 지금 /events?scope=all 에 붙어 있는가
-let showInactive = CAN_ALL && lsGet('ccviz.inactive') === 'on';
+// 예전 '비활성 표시' 토글(ccviz.inactive)은 없앴다 — 비활성 세션은 목록·장면 어디에도 싣지 않는다. 남은 저장값은 지운다
+try { localStorage.removeItem('ccviz.inactive'); } catch (e) { /* 저장소 없음 */ }
 let sessionsResp = null;     // /sessions 응답(선택지 보충용)
 if (CAN_ALL) {
   // 상단 바 프로젝트 선택기 하나(전체 · 프로젝트들). 예전 범위 드롭다운·패널 프로젝트 목록·재생 고르기 창을 합침
@@ -654,7 +649,6 @@ if (CAN_ALL) {
     host: $('proj-sel'),
     onSelect: (s) => selectScope(s),
     getNodeCount: (pid) => { let n = 0; for (const x of store.nodes.values()) if (x.projectId === pid) n++; return n; },
-    inactive: showInactive, onInactive: (on) => setInactive(on),
   });
   pl.setSelection(sel);
 } else {
@@ -693,7 +687,7 @@ let archive = null;
 const archiveSession = (sid) => (archive && (archive.sessions || []).find((x) => x.sessionId === sid)) || null;
 const archiveName = (pid) => { const p = pid && archive && (archive.projects || []).find((x) => x.projectId === pid); return p ? p.name : null; };
 function scopeArgs() {
-  return { mode: 'all', roots: store.roots, projects: store.projects, showInactive, focusProject: focusProjectOf(sel) };
+  return { mode: 'all', roots: store.roots, projects: store.projects, showInactive: false, focusProject: focusProjectOf(sel) };
 }
 
 /** 3D·카메라·패널에 현재 선택 반영(전체 보기 스트림일 때). fly = 사용자가 방금 고름 */
@@ -865,7 +859,7 @@ function connect() {
   store.seq = 0;
   const all = wantAll(sel);
   setLoading(all ? tr('app.loading.all') : tr('app.loading.session'));
-  const q = all ? { scope: 'all', inactive: showInactive ? '1' : null } : { session: sel.scope === 'session' ? sel.sessionId : 'auto' };
+  const q = all ? { scope: 'all' } : { session: sel.scope === 'session' ? sel.sessionId : 'auto' };
   if (!all) streamAll = false;
   refreshScopeUi();
   const src = (es = new EventSource(relApi('events', q)));
@@ -1190,7 +1184,7 @@ async function setPaused(on, { drop = false } = {}) {
     let snap = null;
     if (MODE === 'live') {
       // 지금 범위 그대로 현재 상태를 받는다(전체 보기면 scope=all, 아니면 그 세션)
-      const q = streamAll ? { scope: 'all', inactive: showInactive ? '1' : null } : { session: store.sessionId || 'auto' };
+      const q = streamAll ? { scope: 'all' } : { session: store.sessionId || 'auto' };
       try { const r = await fetch(relApi('state', q), { cache: 'no-store' }); if (r.ok) snap = await r.json(); } catch (e) { /* 아래 대체 */ }
     } else snap = snap0;
     const buffered = pauseBuf.events.slice();
@@ -1294,7 +1288,7 @@ window.__ccviz = {
   // 3차
   get scope() { return { ...sel }; }, setScope: (x) => selectScope(typeof x === 'string' ? parseSelection(x, store.projects) : x),
   get projects() { return store.projects; }, get roots() { return store.roots; }, get limits() { return lg.value; },
-  get streamAll() { return streamAll; }, projectList: pl, limitsGauge: lg, setInactive: (on) => setInactive(on),
+  get streamAll() { return streamAll; }, projectList: pl, limitsGauge: lg,
   macro, // 매크로 타임라인
   get archive() { return archive; }, archiveCard: arcCard, setDemo, get demo() { return demoOn; },
   env, get weather() { return weather; }, // 배경 환경(기상은 3D 에서만 불러옴)

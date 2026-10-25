@@ -455,10 +455,10 @@ export class DemoOverview {
     this.orphan = orphanSid(this.orphanN);
     return sid;
   }
-  async desired({ inactive = false } = {}) {
+  async desired() {
     const roots = [];
     for (const m of DEMO_OVERVIEW.mains) {
-      if (m.recent) { if (inactive) roots.push({ sessionId: m.sid, projectId: m.projectId, live: false, liveStatus: null, tier: 'recent', orphanSdk: false }); continue; }
+      if (m.recent) continue; // 비활성(recent) 메인은 장면에 싣지 않는다(목록에만)
       roots.push({ sessionId: m.sid, projectId: m.projectId, live: true, liveStatus: this.status.get(m.sid), tier: 'live', orphanSdk: false });
     }
     if (!this.claimed.has(this.orphan)) roots.push({ sessionId: this.orphan, projectId: 'demo-beta', live: true, liveStatus: 'busy', tier: 'live', orphanSdk: true });

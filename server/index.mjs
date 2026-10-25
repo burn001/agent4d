@@ -322,8 +322,7 @@ export function createServer({ token, manager, webRoot = WEB_ROOT, project = nul
         const hub = manager.overview();
         if (p === '/events') return handleOverviewEvents(req, res, url, hub, { headers, limits, external: isExternalReq(req) });
         await hub.wake();
-        const inactive = truthy(url.searchParams.get('inactive'), false);
-        const hs = hub.snapshot({ inactive });
+        const hs = hub.snapshot();
         return sendJsonZ(req, res, 200, isExternalReq(req) ? externalSnap(hs) : hs, headers);
       }
       if (p === '/state') {

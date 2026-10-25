@@ -104,7 +104,6 @@ body.panel-collapsed #proj-list { display: none !important; }
 .psel-pop .pl-fold svg, .psel-pop .pl-cur { display: none; }
 .psel-pop .pl-body { display: block !important; padding-bottom: 8px; }
 .psel-pop .pl-chips, .psel-pop .pl-chip-sessions { display: none !important; }
-.psel-pop .pl-collapsed .pl-head .pl-inact { display: inline-flex; }
 .psel-pop .pl-row { padding-top: 6px; padding-bottom: 6px; }
 @media (min-width: 720px) and (max-width: 1023px) { .psel-btn { max-width: 190px; } .psel-btn .psel-meta { display: none; } }
 @media (max-width: 719px) {
