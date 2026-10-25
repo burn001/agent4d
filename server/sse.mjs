@@ -1,0 +1,140 @@
+// SSE 송신·heartbeat
+import { externalEv, externalSnap } from './artifacts.mjs'; // 외부 링크: 작업 대상 경로 접기
+const PING_MS = 15_000;
+
+export function sseHeaders(extra = {}) {
+  return {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    'X-Accel-Buffering': 'no',
+    Connection: 'keep-alive',
+    ...extra,
+  };
+}
+
+export function formatEvent(event, data, id) {
+  let s = '';
+  if (event) s += `event: ${event}\n`;
+  if (id != null) s += `id: ${id}\n`;
+  s += `data: ${JSON.stringify(data)}\n\n`; // JSON.stringify 는 줄바꿈을 \n 으로 이스케이프 → 한 줄
+  return s;
+}
+
+/**
+ * /events 처리. manager 는 resolve/acquire/release/onAuto 를 가진다.
+ * @param {{headers?:object}} opts
+ */
+export async function handleEvents(req, res, url, manager, opts = {}) {
+  const param = url.searchParams.get('session') || 'auto';
+  const sinceRaw = url.searchParams.get('since') ?? req.headers['last-event-id'];
+  const since = sinceRaw != null && sinceRaw !== '' ? Number(sinceRaw) : NaN;
+
+  let sid = await manager.resolve(param);
+  let rt = null;
+  if (sid) {
+    try { rt = await manager.acquire(sid); } catch { rt = null; }
+  }
+  if (!rt) {
+    res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8', ...(opts.headers || {}) });
+    res.end(JSON.stringify({ error: 'not_found' }));
+    return;
+  }
+
+  req.socket.setNoDelay?.(true);
+  req.socket.setTimeout?.(0);
+  res.writeHead(200, sseHeaders(opts.headers));
+  res.write('retry: 3000\n\n');
+
+  let closed = false;
+  let unsub = null;
+  const write = (s) => { if (!closed) res.write(s); };
+  const X = opts.external ? externalEv : (e) => e, XS = opts.external ? externalSnap : (s) => s;
+
+  const attach = (runtime, allowSince) => {
+    const g = runtime.graph;
+    const evs = allowSince ? g.eventsSince(since) : null;
+    if (evs) for (const e of evs) write(formatEvent('ev', X(e), e.seq));
+    else write(formatEvent('snapshot', XS(g.snapshot()), g.lastSeq));
+    unsub = g.subscribe((e) => write(formatEvent('ev', X(e), e.seq)));
+  };
+  attach(rt, true);
+  const limitsOff = attachLimits(write, opts.limits);
+
+  let autoUnsub = null;
+  if (param === 'auto' && manager.onAuto) {
+    autoUnsub = manager.onAuto(async (newSid) => {
+      if (closed || newSid === sid) return;
+      let next;
+      try { next = await manager.acquire(newSid); } catch { return; }
+      if (closed) { manager.release(next); return; }
+      unsub?.();
+      manager.release(rt);
+      rt = next; sid = newSid;
+      write(formatEvent('root', { sessionId: newSid }));
+      attach(rt, false);
+    });
+  }
+
+  const ping = setInterval(() => write(': ping\n\n'), PING_MS);
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    clearInterval(ping);
+    unsub?.();
+    autoUnsub?.();
+    limitsOff();
+    manager.release(rt);
+  };
+  req.on('close', cleanup);
+  res.on('error', cleanup);
+}
+
+/** 3차: 연결 직후 limits 한 번 + 값이 바뀔 때. id 없음. 보는 사람 수에 넣는다 */
+function attachLimits(write, limits) {
+  if (!limits) return () => {};
+  const offViewer = limits.addViewer();
+  let off = () => {};
+  Promise.resolve(limits.get({ waitMs: 0 })).then((cur) => write(formatEvent('limits', cur))).catch(() => {});
+  off = limits.onChange((cur) => write(formatEvent('limits', cur)));
+  return () => { off(); offViewer(); };
+}
+
+/**
+ * 3차: /events?scope=all[&inactive=1]&since=<hseq>. hub 는 OverviewHub.
+ * snapshot(전체 보기 형식) → ev(id = hseq) · projects · limits · 15초 ping
+ */
+export async function handleOverviewEvents(req, res, url, hub, opts = {}) {
+  const inactive = ['1', 'true', 'yes'].includes(String(url.searchParams.get('inactive') || ''));
+  const sinceRaw = url.searchParams.get('since') ?? req.headers['last-event-id'];
+  const since = sinceRaw != null && sinceRaw !== '' ? Number(sinceRaw) : NaN;
+  await hub.wake();
+  req.socket.setNoDelay?.(true);
+  req.socket.setTimeout?.(0);
+  res.writeHead(200, sseHeaders(opts.headers));
+  res.write('retry: 3000\n\n');
+  let closed = false;
+  const write = (s) => { if (!closed) res.write(s); };
+  const X = opts.external ? externalEv : (e) => e, XS = opts.external ? externalSnap : (s) => s;
+  const sub = {
+    inactive,
+    onEvent: (e) => write(formatEvent('ev', X(e), e.seq)),
+    onProjects: (p) => write(formatEvent('projects', p)),
+  };
+  // 스냅샷과 구독을 같은 틱에 해서 사이 이벤트를 놓치지 않는다
+  const evs = hub.eventsSince(since, { inactive });
+  if (evs) for (const e of evs) write(formatEvent('ev', X(e), e.seq));
+  else write(formatEvent('snapshot', XS(hub.snapshot({ inactive })), hub.hseq));
+  const unsub = hub.subscribe(sub);
+  if (evs) write(formatEvent('projects', { projects: hub.projectsState.projects, roots: hub.rootsPayload(inactive) }));
+  const limitsOff = attachLimits(write, opts.limits);
+  const ping = setInterval(() => write(': ping\n\n'), PING_MS);
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    clearInterval(ping);
+    unsub();
+    limitsOff();
+  };
+  req.on('close', cleanup);
+  res.on('error', cleanup);
+}

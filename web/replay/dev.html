@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>재생 엔진 단독 확인</title>
+  <meta name="description" content="cc-agent-viz 재생 엔진·재생 UI·효과음 단독 확인 페이지(개발용, 정식 화면에서 링크하지 않음)">
+  <meta name="color-scheme" content="dark light">
+  <script>
+    (function () {
+      var q = new URLSearchParams(location.search), pref = q.get('theme') || 'auto';
+      try { if (!q.get('theme')) pref = localStorage.getItem('ccviz.theme') || 'auto'; } catch (e) {}
+      var dark = pref === 'dark' || (pref !== 'light' && !(window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches));
+      document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    })();
+  </script>
+  <link rel="stylesheet" href="../theme.css">
+  <!-- index.html 과 같은 CSP·importmap(three@0.170.0 + SRI) -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    },
+    "integrity": {
+      "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js": "sha384-GY5FqjttLCFRt/McQbyaVdCk2O1IQtOeX8Py6NfD89BIAsIyJFRl4UgSXrk2vXAk",
+      "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/controls/OrbitControls.js": "sha384-aJoe4qqS/DgF2jh9njAuvA6QIveJYoCuYOfYjdFY8P3eawzmc9bEQ40jq2TvOyuP",
+      "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/renderers/CSS2DRenderer.js": "sha384-9CXQqRjuKfYvfHem9p/LPU6b7PaeeiDuC/gp1qRz3bEV9txWG5wi9XhrkE/0/Dn9"
+    }
+  }
+  </script>
+  <style>
+    #dev-out { position: fixed; left: 12px; top: 92px; z-index: 16; max-width: min(520px, calc(100vw - 400px)); max-height: 60vh; overflow: auto;
+      margin: 0; padding: 8px 10px; border-radius: 8px; font: 11px/1.4 Consolas, monospace; color: var(--text); background: var(--panel-bg); border: 1px solid var(--link); }
+    #dev-out:empty { display: none; }
+    .devbadge { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand"><span class="logo"></span><span class="txt">재생 엔진 확인</span></div>
+    <span id="conn" class="conn wait" title="상태"><i></i><b>준비 중</b></span>
+    <span class="devbadge" id="src-badge"></span>
+    <div class="spacer"></div>
+    <button id="btn-replay" class="tb" title="재생할 세션 고르기">재생</button>
+    <button id="btn-theme" class="tb">테마</button>
+    <div class="music">
+      <button id="btn-sfx" class="tb" aria-pressed="false">효과음 꺼짐</button>
+      <input id="sfx-vol" type="range" min="0" max="1" step="0.01" value="0.5" aria-label="효과음 볼륨" title="효과음 볼륨">
+    </div>
+  </header>
+  <main id="stage"><div id="labels"></div></main>
+  <div id="cam-chip">자동 카메라</div>
+  <div id="stats-chip">노드 0</div>
+  <aside id="panel" aria-label="실황">
+    <header>
+      <button id="panel-toggle" title="패널 접기/펼치기" aria-label="패널 접기/펼치기">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3l5 5-5 5"/></svg>
+      </button>
+      <h2>실황</h2>
+      <span class="count" id="stream-count"></span>
+      <span class="spacer"></span>
+      <span class="filter" id="stream-filter" title="필터 해제"><b></b><i>×</i></span>
+    </header>
+    <div id="stream" role="log" aria-live="off"></div>
+    <button id="to-latest">최신으로 ↑</button>
+  </aside>
+  <div id="notice"></div>
+  <div id="replay-bar" hidden></div>
+  <div id="replay-picker" hidden></div>
+  <pre id="dev-out"></pre>
+  <pre id="selftest" hidden></pre>
+
+<script type="module">
+// 사용법(정적 서버로 web/ 를 띄우고):
+//   replay/dev.html?demo=1                  demo-events.jsonl + 인위적 유휴 구간(3분·10분) 을 메모리 재생 API 로
+//   replay/dev.html?mock=1&minutes=20       mock.js MockGenerator 로 만든 긴 세션
+//   replay/dev.html?session=demo-replay     실제 서버(--demo) 의 /timeline·/replay/* (같은 출처)
+// 추가: &autoplay=1 &speed=8 &at=0.4(비율) &picker=1 &theme=light &selftest=1 &sfxcheck=1 &shapes=0
+import { ReplayEngine, createLocalReplayApi, injectGaps, SPEEDS } from './engine.mjs';
+import { mountReplayUI } from './ui.mjs';
+import { createState, applyEvent, summarize, stateFromSnapshot } from './state.mjs';
+import { Sfx, SOUNDS, synth, createBus, scaleNotes } from '../sfx.mjs';
+
+const q = new URLSearchParams(location.search);
+const flag = (k, d = false) => (q.has(k) ? q.get(k) !== '0' && q.get(k) !== 'false' : d);
+const $ = (id) => document.getElementById(id);
+const out = $('dev-out');
+const log = (...a) => { out.textContent += a.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(' ') + '\n'; };
+const errors = [];
+window.addEventListener('error', (e) => errors.push(String(e.message || e)));
+window.addEventListener('unhandledrejection', (e) => errors.push('rejection: ' + String(e.reason && e.reason.message || e.reason)));
+const origErr = console.error.bind(console);
+console.error = (...a) => { errors.push(a.map(String).join(' ')); origErr(...a); };
+
+// ---------- 데이터 원천 ----------
+const TOKEN = q.get('t');
+function serverApi() {
+  return {
+    async getJson(path, query = {}) {
+      const sp = new URLSearchParams();
+      for (const [k, v] of Object.entries(query)) if (v != null) sp.set(k, v);
+      if (TOKEN) sp.set('t', TOKEN);
+      const r = await fetch('../' + path + '?' + sp, { cache: 'no-store', credentials: 'same-origin' });
+      let body = null; try { body = await r.json(); } catch (e) {}
+      return { status: r.status, body };
+    },
+  };
+}
+async function demoEvents() {
+  const r = await fetch('../demo-events.jsonl', { cache: 'no-cache' });
+  const lines = (await r.text()).split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  return flag('gaps', true) ? injectGaps(lines, [{ after: 250, ms: 3 * 60000 }, { after: 600, ms: 10 * 60000 }]) : lines;
+}
+async function mockEvents(minutes) {
+  const { MockGenerator } = await import('../mock.js');
+  const gen = new MockGenerator({ seed: 2026, startMs: Date.parse('2026-10-21T05:03:00.000Z'), stress: Number(q.get('stress') || 0) });
+  const evs = [];
+  while (true) { const at = Math.min(...gen.q.map((x) => x.at)); if (at > minutes * 60000) break; evs.push(...gen.next().events); }
+  return evs;
+}
+let api, SID, srcName;
+if (flag('demo') || flag('mock')) {
+  const raw = flag('mock') ? await mockEvents(Number(q.get('minutes') || 20)) : await demoEvents();
+  SID = flag('mock') ? 'mock-replay' : 'demo-replay';
+  const title = flag('mock') ? '가짜 세션(시뮬레이터)' : 'Claude Code 세션 시각화 개발 (데모)';
+  const base = createLocalReplayApi(raw, { sessionId: SID, title, buildPolls: Number(q.get('build') || 0), delayMs: Number(q.get('delay') || 0) });
+  // 세션 고르기 확인용 가짜 목록(프로젝트 3개, claude -p 자식 포함)
+  const now = Date.parse(base.timeline.endTs);
+  const mk = (i, o) => ({ sessionId: o.sid || `f${i}aa0000-0000-4000-8000-00000000000${i}`, projectDir: o.pd, cwd: o.cwd, title: o.title, entrypoint: o.child ? 'sdk-cli' : 'cli', isChild: !!o.child,
+    mtime: new Date(now - o.ago).toISOString(), sizeBytes: 1, live: !!o.live, liveStatus: o.live || null, startedAt: new Date(now - o.ago - o.dur).toISOString(),
+    endedAt: new Date(now - o.ago).toISOString(), durationMs: o.dur, eventCount: null, eventCountEst: o.n, replayCached: !!o.cached });
+  const sessions = [
+    { ...mk(0, { sid: SID, pd: 'D--work-Projects-2026', cwd: 'D:\\work\\Projects\\2026', title, ago: 0, dur: base.timeline.durationMs, n: base.events.length, cached: true, live: 'busy' }), eventCount: base.events.length },
+    mk(1, { pd: 'D--work-Projects-2026', cwd: 'D:\\work\\Projects\\2026', title: '분기 성과 보고서 초안 작성', ago: 26 * 3600e3, dur: 72 * 60e3, n: 12400 }),
+    mk(2, { pd: 'D--work-Projects-2026', cwd: 'D:\\work\\Projects\\2026', title: '표 데이터 비교 분석', ago: 50 * 3600e3, dur: 2.5 * 3600e3, n: 38200 }),
+    mk(3, { pd: 'C--Users-dev-AppData-Local-Temp-claude-scratch', cwd: 'C:\\Users\\dev\\AppData\\Local\\Temp\\claude\\scratch', title: '자식 세션: 계약 검토 요약', child: true, ago: 3 * 3600e3, dur: 4 * 60e3, n: 380 }),
+    mk(4, { pd: 'D--dev-repos-survey-dashboard', cwd: 'D:\\dev_repos\\survey-dashboard', title: '설문 응답률 대시보드 점검', ago: 5 * 86400e3, dur: 45 * 1000, n: 90 }),
+  ];
+  api = { ...base, async getJson(path, qq) { if (path === 'sessions') return { status: 200, body: { sessions, auto: SID, projects: [] } }; const r = await base.getJson(path, { ...qq, session: qq.session && qq.session !== SID && qq.session !== 'auto' ? qq.session : SID }); return r; } };
+  srcName = flag('mock') ? `가짜 세션 ${base.events.length}건` : `데모 ${base.events.length}건(+유휴 13분)`;
+} else {
+  api = serverApi();
+  SID = q.get('session') || 'demo-replay';
+  srcName = '서버 ' + SID;
+}
+$('src-badge').textContent = srcName;
+
+// ---------- 장면(단순 도형) · 패널 · 카메라 ----------
+let view = null, director = null, panel = null;
+const store = { nodes: new Map(), root: null, seq: 0, sessionId: null };
+if (flag('shapes', true)) {
+  try {
+    const [{ SceneView }, { CameraDirector }, { Panel }] = await Promise.all([import('../scene.js'), import('../camera.js'), import('../panel.js')]);
+    view = new SceneView($('stage'), $('labels'));
+    view.applyTheme();
+    director = new CameraDirector(view, (id) => store.nodes.get(id));
+    director.onStatus = (s) => { $('cam-chip').textContent = s.text; };
+    panel = new Panel({ getNode: (id) => store.nodes.get(id), onPickNode: (id) => { view.setFocus(id); director.focusNode(id); } });
+    view.onFrame = (dt, now) => director.update(dt, now);
+  } catch (e) { log('장면 모듈 실패(엔진 시험은 계속):', String(e)); view = null; }
+}
+
+// ---------- 효과음 ----------
+const sfx = new Sfx({ getMusicTime: () => null });
+sfx.bindControls({ button: $('btn-sfx'), slider: $('sfx-vol') });
+
+// ---------- sink (app.js onSnapshot/onEvent 의 축소판 + quiet 규칙) ----------
+const seen = { events: 0, quiet: 0, snapshots: 0, lastSeq: 0, violations: 0 };
+const sink = {
+  onSnapshot(snap) {
+    seen.snapshots++; seen.lastSeq = snap.seq;
+    store.nodes.clear(); store.root = snap.root; store.seq = snap.seq; store.sessionId = snap.sessionId;
+    if (view) { view.reset(); view.setRoot(store.root); }
+    if (panel) panel.reset();
+    if (director) director.resetActivity();
+    for (const n of snap.nodes || []) { const c = { ...n, meta: { ...(n.meta || {}) }, openTools: [...(n.openTools || [])] }; store.nodes.set(c.id, c); if (view) view.addNode(c, false); }
+    if (view) view.layoutNow();
+    if (panel) for (const ev of snap.recent || []) panel.add(ev);
+    if (director) director.overview(true);
+  },
+  onEvent(ev, o) {
+    if (ev.seq !== seen.lastSeq + 1) seen.violations++;
+    seen.lastSeq = ev.seq; seen.events++; if (o.quiet) seen.quiet++;
+    const n = store.nodes.get(ev.nodeId);
+    // 상태 갱신은 reducer 와 같은 규칙(상점 객체를 view 가 그대로 읽는다)
+    const before = n;
+    if (ev.seq <= store.seq) return; store.seq = ev.seq;
+    switch (ev.type) {
+      case 'node-add': {
+        const prev = store.nodes.get(ev.node.id);
+        if (prev) { Object.assign(prev, ev.node); view && view.updateNode(prev.id, ev.node); }
+        else { const c = { ...ev.node, meta: { ...(ev.node.meta || {}) }, openTools: [...(ev.node.openTools || [])] }; store.nodes.set(c.id, c); if (!store.root && (c.kind === 'main' || !c.parentId)) { store.root = c.id; view && view.setRoot(c.id); } view && view.addNode(c, !o.quiet); }
+        break;
+      }
+      case 'node-update': if (n) { const { meta, ...rest } = ev.patch || {}; Object.assign(n, rest); if (meta) n.meta = { ...(n.meta || {}), ...meta }; view && view.updateNode(n.id, ev.patch || {}); } break;
+      case 'tool-start': if (n) { n.openTools = n.openTools || []; if (!n.openTools.some((t) => t.toolUseId === ev.toolUseId)) n.openTools.push({ toolUseId: ev.toolUseId, tool: ev.tool, cat: ev.cat, skill: ev.skill, startedAt: ev.ts, text: ev.text }); view && view.toolStart(n.id, ev, o.quiet); } break;
+      case 'tool-end': if (n) { n.openTools = (n.openTools || []).filter((t) => t.toolUseId !== ev.toolUseId); view && view.toolEnd(n.id, ev); } break;
+      case 'text': if (view && !o.quiet) view.ripple(ev.nodeId); break;
+      case 'user': if (view && !o.quiet) { if (ev.origin === 'human') view.beam(ev.nodeId); else view.wave(ev.nodeId, view.tokens.skill, 1.2); } break;
+      case 'result': if (view && !o.quiet) { if (n && n.parentId && store.nodes.has(n.parentId)) view.orb(ev.nodeId, n.parentId, ev.ok === false ? view.tokens.error : view.tokens.ok, 1.0); else view.ripple(ev.nodeId); } break;
+      case 'output': if (view && !o.quiet) view.wave(ev.nodeId, null, 0.9); break;
+    }
+    if (before && ev.ts) before.lastActivityAt = ev.ts;
+    if (director) director.noteEvent(ev);
+    if (panel) panel.add(ev);
+    sfx.onEvent(ev, { node: store.nodes.get(ev.nodeId), speed: o.speed, quiet: o.quiet, replay: true });
+  },
+};
+
+// ---------- 재생 UI ----------
+const calls = { live: 0, pick: [] };
+let eng = null;
+const ui = mountReplayUI({
+  bar: $('replay-bar'), picker: $('replay-picker'), api,
+  getEngine: () => eng, getCurrentSessionId: () => SID,
+  onPick: (sid) => { calls.pick.push(sid); openSession(sid); },
+  onLive: () => { calls.live++; if (eng) eng.close(); eng = null; ui.unbind(); ui.setVisible(false); setConn('ok', '실시간 복귀 콜백 호출됨'); },
+});
+$('btn-replay').addEventListener('click', () => ui.openPicker());
+$('btn-theme').addEventListener('click', () => {
+  const t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', t); $('btn-theme').textContent = '테마: ' + (t === 'dark' ? '다크' : '라이트');
+  view && view.applyTheme();
+});
+$('btn-theme').textContent = '테마: ' + (document.documentElement.getAttribute('data-theme') === 'dark' ? '다크' : '라이트');
+function setConn(state, text) { const c = $('conn'); c.className = 'conn ' + state; c.querySelector('b').textContent = text; }
+
+async function openSession(sid) {
+  if (eng) eng.close();
+  eng = new ReplayEngine({ api, sessionId: sid, sink, onState: (s) => {
+    const lbl = { loading: '준비 중', buffering: '불러오는 중', ready: '준비됨', playing: '재생 중', paused: '일시정지', ended: '재생 끝', error: '오류' }[s.status];
+    setConn(s.status === 'error' ? 'bad' : s.status === 'playing' ? 'ok' : 'wait', `${lbl} · ${s.speed}×`);
+  } });
+  window.__eng = eng;
+  if (view && view.setClock) view.setClock(() => (eng ? eng.vt : Date.now()));
+  ui.bind(eng);
+  ui.setVisible(true);
+  const ok = await eng.open();
+  if (!ok) { log('open 실패', eng.state); return; }
+  if (q.get('speed')) eng.setSpeed(Number(q.get('speed')));
+  if (q.get('at')) await eng.seek(eng.startT + Number(q.get('at')) * (eng.endT - eng.startT));
+  if (flag('autoplay')) eng.play();
+}
+window.__dev = { get eng() { return eng; }, ui, sink, seen, store, calls, errors, sfx };
+
+if (!flag('selftest') && !flag('sfxcheck')) {
+  await openSession(SID);
+  if (flag('picker')) ui.openPicker();
+  if (q.get('stop')) setTimeout(() => eng && eng.pause(), Number(q.get('stop')));
+}
+
+// ---------- 자동 확인(selftest=1) ----------
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function until(pred, ms = 20000) { const t0 = performance.now(); while (!pred() && performance.now() - t0 < ms) await sleep(30); return pred(); }
+function ptr(type, el, frac) {
+  const r = el.getBoundingClientRect();
+  el.dispatchEvent(new PointerEvent(type, { bubbles: true, clientX: r.left + r.width * frac, clientY: r.top + r.height / 2, pointerId: 1, button: 0, buttons: type === 'pointerup' ? 0 : 1 }));
+}
+function referenceAt(at) {
+  const st = createState({ root: null });
+  for (const e of api.events) { if (e.t > at) break; applyEvent(st, e); }
+  return st;
+}
+function storeSummary() { return summarize(stateFromSnapshot({ root: store.root, seq: store.seq, nodes: [...store.nodes.values()] })); }
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+if (flag('selftest')) {
+  const R = {}; const t0 = performance.now();
+  const LOCAL = !!api.events;
+  try {
+    if (!LOCAL) { // 서버 모드: 기준 비교용으로 전 이벤트를 받아 둔다
+      await api.getJson('timeline', { session: SID, wait: 1 });
+      const all = []; let from = 1;
+      while (from) { const r = await api.getJson('replay/events', { session: SID, from, limit: 5000 }); all.push(...r.body.events); from = r.body.next; }
+      for (const e of all) if (typeof e.t !== 'number') e.t = Date.parse(e.ts);
+      api.events = all;
+      R.server = true;
+    }
+    await openSession(SID);
+    R.opened = eng.status === 'ready';
+    R.total = eng.total;
+    // 재생·정지
+    eng.setSpeed(1); eng.play();
+    await sleep(600);
+    R.playAdvanced = eng.vt > eng.startT + 50 && eng.status === 'playing';
+    eng.pause(); const v1 = eng.vt; await sleep(300);
+    R.pauseHolds = eng.vt === v1 && eng.status === 'paused';
+    // 단축키: Space → 재생, ] → 속도 증가, [ → 감소
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true }));
+    R.spaceToggles = eng.status === 'playing';
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: ']', bubbles: true }));
+    R.speedUpKey = eng.speed === 2;
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: '[', bubbles: true }));
+    R.speedDownKey = eng.speed === 1;
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: '.', bubbles: true }));
+    eng.pause();
+    // 속도 선택
+    const sel = document.querySelector('.rp-speed select');
+    R.speeds = [];
+    for (const s of SPEEDS) { sel.value = String(s); sel.dispatchEvent(new Event('change')); R.speeds.push(eng.speed === s); }
+    R.speedsOk = R.speeds.every(Boolean);
+    // 유휴 압축: 3분 공백 직전으로 가서 1× 재생
+    const gi = api.events.findIndex((e, i) => i > 0 && e.t - api.events[i - 1].t > 60000);
+    R.gapIndex = gi;
+    if (gi > 0) {
+      eng.setSpeed(1); eng.setCompressIdle(true);
+      await eng.seek(api.events[gi - 1].t);
+      const sk0 = eng.skippedIdleMs; eng.play();
+      await until(() => eng.skippedIdleMs > sk0, 4000);
+      R.idleSkippedMs = Math.round(eng.skippedIdleMs - sk0);
+      R.idleToast = document.querySelector('.rp-toast').textContent;
+      eng.pause();
+      // 끄면 건너뛰지 않음
+      const chk = document.querySelector('.rp-idle input'); chk.checked = false; chk.dispatchEvent(new Event('change'));
+      await eng.seek(api.events[gi - 1].t); const sk1 = eng.skippedIdleMs; eng.play(); await sleep(1800); eng.pause();
+      R.idleOffNoSkip = eng.skippedIdleMs === sk1 && eng.compressIdle === false;
+      chk.checked = true; chk.dispatchEvent(new Event('change'));
+    }
+    // 스크럽(앞으로 75% → 뒤로 10%), 놓은 뒤 상태 == 처음부터 적용
+    const cv = document.querySelector('.rp-tl canvas');
+    ptr('pointerdown', cv, 0.25); await sleep(50); ptr('pointermove', cv, 0.5); await sleep(150); ptr('pointermove', cv, 0.75); await sleep(50); ptr('pointerup', cv, 0.75);
+    await sleep(100);
+    const frac = (eng.vt - eng.startT) / (eng.endT - eng.startT);
+    R.scrubForward = Math.abs(frac - 0.75) < 0.01;
+    R.scrubForwardState = same(storeSummary(), summarize(referenceAt(eng.vt)));
+    ptr('pointerdown', cv, 0.1); ptr('pointerup', cv, 0.1); await sleep(100);
+    R.scrubBack = Math.abs((eng.vt - eng.startT) / (eng.endT - eng.startT) - 0.1) < 0.01;
+    R.scrubBackState = same(storeSummary(), summarize(referenceAt(eng.vt)));
+    R.seqViolations = seen.violations;
+    // 32× 로 끝까지
+    seen.violations = 0;
+    eng.setSpeed(32); eng.play();
+    R.ended = await until(() => eng.status === 'ended', 120000);
+    R.endState = same(storeSummary(), summarize(referenceAt(Infinity)));
+    R.endSeq = seen.lastSeq === eng.total;
+    R.endViolations = seen.violations;
+    R.playIconAtEnd = document.querySelector('.rp-play').getAttribute('aria-label');
+    // 끝에서 재생 → 처음부터
+    document.querySelector('.rp-play').click();
+    R.replayFromStart = eng.status === 'playing' && eng.vt - eng.startT < 2000;
+    eng.pause();
+    // 세션 고르기
+    ui.openPicker(); await sleep(LOCAL ? 200 : 800);
+    if (!LOCAL) {
+      R.pickerItems = document.querySelectorAll('#replay-picker .rp-item').length;
+      R.pickerHidesChild = R.pickerShowsChild = R.pickerSearch = true; // 가짜 목록 전용 확인은 생략
+      R.pickerHasDemoReplay = !!document.querySelector(`#replay-picker [data-sid="${SID}"]`);
+    }
+    if (LOCAL) {
+    const items = document.querySelectorAll('#replay-picker .rp-item');
+    R.pickerItems = items.length;
+    R.pickerHidesChild = ![...items].some((b) => b.textContent.includes('자식 세션'));
+    const childChk = document.querySelector('.rp-child'); childChk.checked = true; childChk.dispatchEvent(new Event('change'));
+    R.pickerShowsChild = [...document.querySelectorAll('#replay-picker .rp-item')].some((b) => b.textContent.includes('자식 세션'));
+    const search = document.querySelector('#replay-picker input[type=search]'); search.value = '교육'; search.dispatchEvent(new Event('input'));
+    R.pickerSearch = document.querySelectorAll('#replay-picker .rp-item').length === 1;
+    search.value = ''; search.dispatchEvent(new Event('input'));
+    R.pickerGroups = [...document.querySelectorAll('#replay-picker .rp-grp h3')].map((h) => h.textContent.trim());
+    R.pickerFirstMeta = (document.querySelector('#replay-picker .rp-grp:not(.cur) .rp-m') || {}).textContent;
+    }
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    R.pickerEsc = document.getElementById('replay-picker').hidden;
+    ui.openPicker(); await sleep(100);
+    document.querySelector(`#replay-picker [data-sid="${SID}"]`).click();
+    await until(() => eng && eng.status === 'ready', 5000);
+    R.pickCallback = calls.pick[calls.pick.length - 1] === SID && eng.status === 'ready';
+    // 실시간으로
+    document.querySelector('.rp-live').click();
+    R.liveCallback = calls.live === 1 && document.getElementById('replay-bar').hidden;
+  } catch (e) { R.exception = String(e && e.stack || e); }
+  R.consoleErrors = errors;
+  R.ms = Math.round(performance.now() - t0);
+  const pass = ['opened', 'playAdvanced', 'pauseHolds', 'spaceToggles', 'speedUpKey', 'speedDownKey', 'speedsOk', ...(R.gapIndex > 0 ? ['idleOffNoSkip'] : []), 'scrubForward', 'scrubForwardState', 'scrubBack', 'scrubBackState', 'ended', 'endState', 'endSeq', 'replayFromStart', 'pickerHidesChild', 'pickerShowsChild', 'pickerSearch', 'pickerEsc', 'pickCallback', 'liveCallback'].every((k) => R[k] === true)
+    && (R.gapIndex > 0 ? R.idleSkippedMs > 170000 : true) && R.endViolations === 0 && R.seqViolations === 0 && errors.length === 0 && !R.exception;
+  R.PASS = pass;
+  const pre = $('selftest'); pre.textContent = JSON.stringify(R, null, 1); pre.dataset.done = '1'; pre.hidden = false;
+  log(pass ? 'SELFTEST PASS' : 'SELFTEST FAIL');
+}
+
+// ---------- 효과음 수치 확인(sfxcheck=1): OfflineAudioContext 로 음마다 렌더 ----------
+if (flag('sfxcheck')) {
+  const SR = 44100;
+  const res = {};
+  for (const name of Object.keys(SOUNDS)) {
+    const ctx = new OfflineAudioContext(2, Math.round(SR * 1.5), SR);
+    const { bus } = createBus(ctx, Number(q.get('vol') || 1));
+    const t0 = 0.05;
+    synth(ctx, bus, name, t0, { notes: scaleNotes(null), pitchIndex: 0 });
+    const buf = await ctx.startRendering();
+    const L = buf.getChannelData(0), Rr = buf.getChannelData(1);
+    let peak = 0, first = -1, last = -1, sumSq = 0;
+    const thr = 0.001; // −60 dBFS
+    for (let i = 0; i < L.length; i++) {
+      const a = Math.max(Math.abs(L[i]), Math.abs(Rr[i]));
+      if (a > peak) peak = a;
+      if (a > thr) { if (first < 0) first = i; last = i; }
+      sumSq += L[i] * L[i];
+    }
+    // 시작 딸깍임: 첫 1ms 안 최대값 / 전체 피크
+    const s0 = Math.round(t0 * SR); let onset = 0;
+    for (let i = s0; i < s0 + Math.round(SR * 0.001); i++) onset = Math.max(onset, Math.abs(L[i]), Math.abs(Rr[i]));
+    // 끝 딸깍임: 마지막 유효 샘플 직전 5ms 의 최대값
+    let tail = 0; for (let i = Math.max(0, last - Math.round(SR * 0.005)); i <= last; i++) tail = Math.max(tail, Math.abs(L[i]), Math.abs(Rr[i]));
+    res[name] = {
+      lengthMs: first < 0 ? 0 : Math.round(((last - s0) / SR) * 1000),
+      leadMs: first < 0 ? null : Math.round(((first - s0) / SR) * 10000) / 10,
+      peakDb: Math.round(20 * Math.log10(peak || 1e-9) * 10) / 10,
+      rmsDb: Math.round(10 * Math.log10(sumSq / L.length || 1e-12) * 10) / 10,
+      onset1msRatio: Math.round((onset / (peak || 1)) * 1000) / 1000,
+      tail5msDb: Math.round(20 * Math.log10(tail || 1e-9) * 10) / 10,
+      specMs: Math.round(SOUNDS[name].dur * 1000),
+    };
+  }
+  const lim = (n) => (n === 'done' ? 900 : 400);
+  const bad = Object.entries(res).filter(([n, r]) => r.lengthMs > lim(n) + 10 || r.peakDb > -1 || r.lengthMs === 0 || r.onset1msRatio > 0.35);
+  const pre = $('selftest');
+  pre.textContent = JSON.stringify({ PASS: bad.length === 0, bad: bad.map((b) => b[0]), sounds: res, consoleErrors: errors }, null, 1);
+  pre.dataset.done = '1'; pre.hidden = false;
+}
+</script>
+</body>
+</html>

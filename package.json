@@ -1,0 +1,36 @@
+{
+  "name": "cc-agent-viz",
+  "version": "0.1.0",
+  "description": "Unofficial, local, read-only 3D viewer for Claude Code sessions: main agent, subagents, workflows, claude -p runs and background jobs as one live tree in the browser",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/burn001/cc-agent-viz.git"
+  },
+  "homepage": "https://github.com/burn001/cc-agent-viz#readme",
+  "bugs": {
+    "url": "https://github.com/burn001/cc-agent-viz/issues"
+  },
+  "keywords": [
+    "claude-code",
+    "agents",
+    "visualization",
+    "three.js",
+    "sse",
+    "developer-tools"
+  ],
+  "bin": {
+    "ccviz": "bin/ccviz.mjs"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node bin/ccviz.mjs start",
+    "server": "node server/index.mjs",
+    "demo": "node server/index.mjs --demo",
+    "test": "node --test server/test && node --test \"web/test/*.test.mjs\""
+  }
+}

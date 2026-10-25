@@ -1,0 +1,130 @@
+/* 매크로 타임라인. 이벤트 띠(#timeline) 바로 위 — 자리(left·width·bottom)는 macro.js 가 띠를 재서 맞춘다.
+   색은 테마 토큰만(--bg --text --muted --border --panel-bg --accent --ok --k-main --k-claude-p --hover). */
+.mt {
+  position: fixed; left: 0; bottom: 30px; width: 60%; z-index: 15;
+  display: flex; flex-direction: column; font-size: 11.5px; color: var(--text);
+  background: color-mix(in srgb, var(--panel-bg) 88%, transparent); border-top: 1px solid var(--border);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  --mt-bar: color-mix(in srgb, var(--k-main) 55%, var(--panel-bg));
+  --mt-bar-hi: var(--k-main);
+  --mt-kid: color-mix(in srgb, var(--k-claude-p, #f5b84a) 70%, var(--panel-bg));
+}
+.mt[hidden] { display: none; }
+.mt-head { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px 0 4px; flex: none; min-width: 0; }
+.mt-fold { width: 24px; height: 22px; border: none; background: transparent; border-radius: 6px; cursor: pointer; color: var(--muted); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.mt-fold:hover { background: var(--hover); color: var(--text); }
+.mt-fold svg { width: 13px; height: 13px; transition: transform .2s; }
+.mt-collapsed .mt-fold svg { transform: rotate(180deg); }
+.mt-title { font-weight: 700; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 32%; }
+.mt-sub { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.mt-sp { flex: 1; min-width: 4px; }
+.mt-ctl { display: flex; align-items: center; gap: 4px; flex: none; }
+.mt-presets { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.mt-presets button, .mt-z {
+  height: 22px; padding: 0 7px; border: none; background: transparent; cursor: pointer; font: inherit; color: var(--muted); white-space: nowrap;
+}
+.mt-presets button + button { border-left: 1px solid var(--border); }
+.mt-z { border: 1px solid var(--border); border-radius: 6px; min-width: 24px; padding: 0; font-weight: 700; }
+.mt-presets button:hover, .mt-z:hover { background: var(--hover); color: var(--text); }
+.mt-kids { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); cursor: pointer; white-space: nowrap; margin-left: 4px; }
+.mt-kids input { margin: 0; accent-color: var(--accent); }
+.mt[data-mode="all"] .mt-kids { display: none; }
+
+.mt-body { position: relative; flex: none; }
+.mt-collapsed .mt-body { display: none; }
+.mt-scroll { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; overscroll-behavior-x: contain; cursor: default; -webkit-overflow-scrolling: touch; }
+.mt-dragging .mt-scroll { cursor: grabbing; user-select: none; }
+.mt-inner { position: relative; min-width: 100%; padding-bottom: 4px; }
+.mt-axis { position: relative; height: 16px; border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+.mt-tk { position: absolute; top: 1px; transform: translateX(-50%); color: var(--muted); font-size: 10.5px; white-space: nowrap; font-variant-numeric: tabular-nums; pointer-events: none; }
+.mt-tk::after { content: ""; position: absolute; left: 50%; top: 13px; width: 1px; height: 3px; background: var(--border); }
+.mt-tk.day { color: var(--text); font-weight: 650; }
+.mt-lanes { position: relative; margin-top: 3px; }
+.mt-lanes::before { /* 날 경계 가는 세로 띠는 축 눈금만으로 충분 — 배경 없음 */ content: none; }
+
+.mt-bar {
+  position: absolute; display: block; padding: 0; margin: 0; border: 1px solid color-mix(in srgb, var(--mt-bar-hi) 70%, transparent);
+  border-radius: 4px; background: var(--mt-bar); cursor: pointer; overflow: hidden; text-align: left; font: inherit; color: var(--text);
+  transition: filter .12s, box-shadow .12s;
+}
+.mt-bar:hover, .mt-bar:focus-visible { filter: brightness(1.18); box-shadow: 0 0 0 1px var(--mt-bar-hi); outline: none; z-index: 2; }
+.mt-bar.kid { background: var(--mt-kid); border-color: color-mix(in srgb, var(--k-claude-p, #f5b84a) 80%, transparent); }
+.mt-bar.approx { border-style: dashed; }
+.mt-bar.on { box-shadow: 0 0 0 2px var(--accent); z-index: 3; }
+.mt-lab { position: absolute; left: 5px; right: 3px; top: 50%; transform: translateY(-50%); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 10.5px; font-weight: 600; line-height: 1; pointer-events: none; text-shadow: 0 0 3px var(--panel-bg); }
+.mt-lab small { color: var(--muted); font-weight: 500; }
+/* claude -p 자식: 부모 막대 아래 가는 띠 */
+.mt-seg { position: absolute; bottom: 0; height: 3px; background: var(--k-claude-p, #f5b84a); opacity: .9; border-radius: 1px; pointer-events: none; }
+/* 실행 중: 오른쪽 끝(지금)이 맥동 */
+.mt-bar.run { border-right-width: 0; background: linear-gradient(to right, var(--mt-bar) calc(100% - 18px), color-mix(in srgb, var(--ok) 55%, var(--mt-bar))); }
+.mt-bar.run::after {
+  content: ""; position: absolute; right: 0; top: 0; bottom: 0; width: 3px; background: var(--ok);
+  box-shadow: 0 0 6px var(--ok); animation: mt-pulse 1.4s ease-in-out infinite;
+}
+.mt-bar.run:not(.busy)::after { animation-duration: 2.6s; opacity: .7; }
+@keyframes mt-pulse { 50% { opacity: .25; box-shadow: 0 0 1px var(--ok); } }
+
+.mt-rowlab { position: absolute; left: 0; right: 0; pointer-events: auto; cursor: pointer; }
+.mt-rowlab span {
+  position: sticky; left: 4px; display: inline-block; max-width: 140px; padding: 0 5px; border-radius: 4px; z-index: 4;
+  font-size: 10.5px; font-weight: 650; color: var(--muted); background: color-mix(in srgb, var(--panel-bg) 80%, transparent);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 14px; margin-top: 0;
+}
+.mt-rowlab:hover span { color: var(--text); }
+.mt[data-mode="all"] .mt-bar { opacity: .85; }
+
+.mt-line { position: absolute; top: 0; bottom: 0; width: 0; pointer-events: none; z-index: 5; }
+.mt-line[hidden] { display: none; }
+.mt-now { border-left: 1px dashed color-mix(in srgb, var(--ok) 70%, transparent); }
+.mt-now::before { content: attr(data-label); position: absolute; top: 1px; left: 3px; font-size: 9.5px; color: var(--ok); white-space: nowrap; }
+.mt-play { border-left: 2px solid var(--accent); }
+.mt-play::before { content: ""; position: absolute; top: 12px; left: -5px; border: 4px solid transparent; border-top: 6px solid var(--accent); }
+.mt-hov { border-left: 1px solid color-mix(in srgb, var(--muted) 60%, transparent); }
+
+.mt-tip {
+  position: absolute; bottom: calc(100% + 34px); left: 0; z-index: 8; max-width: min(360px, 92vw); padding: 6px 9px; border-radius: 8px;
+  background: var(--panel-bg); border: 1px solid var(--border); box-shadow: var(--shadow); pointer-events: none; line-height: 1.45;
+}
+.mt-tip[hidden] { display: none; }
+.mt-tip b { font-size: 12px; overflow-wrap: anywhere; }
+.mt-tip em { font-style: normal; font-size: 10.5px; color: var(--ok); border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+.mt-tip span { display: block; color: var(--muted); font-variant-numeric: tabular-nums; }
+.mt-tip i { display: block; font-style: normal; color: var(--accent); font-size: 11px; }
+.mt-empty { margin: 0; padding: 6px 12px 8px; color: var(--muted); }
+.mt-empty[hidden] { display: none; }
+.mt-loading .mt-sub::after { content: attr(data-loading); }
+.mt-flash { animation: mt-flash 1.5s ease-out; }
+@keyframes mt-flash { 0%, 40% { box-shadow: inset 0 0 0 2px var(--accent); } 100% { box-shadow: inset 0 0 0 0 transparent; } }
+
+/* 이 패널만큼 왼쪽 아래 칩을 올린다 */
+html body.macro-on #stats-chip { transform: translateY(calc(-1 * var(--mt-h, 0px))); }
+
+@media (max-width: 719px) {
+  .mt-head { height: 30px; gap: 4px; }
+  .mt-sub { display: none; }
+  .mt-title { max-width: 40%; }
+  .mt-presets button[data-span="259200000"], .mt-presets button[data-span="2419200000"] { display: none; }
+  .mt-kids span { font-size: 10.5px; }
+  .mt-tip { bottom: calc(100% + 30px); }
+}
+@media (max-width: 400px) {
+  .mt-presets button[data-fit] { display: none; }
+  .mt-kids span { display: none; }
+  .mt-kids::after { content: "-p"; font-size: 10.5px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mt-bar.run::after, .mt-flash { animation: none; }
+}
+
+/* 연속 재생 단추 · 보관함 모드(자식 줄 토글 없음) */
+.mt-auto {
+  height: 22px; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; cursor: pointer;
+  font: inherit; color: var(--muted); white-space: nowrap;
+}
+.mt-auto[hidden] { display: none; }
+.mt-auto:hover { background: var(--hover); color: var(--text); }
+.mt-auto[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: 650; }
+.mt[data-mode="archive"] .mt-kids { display: none; }
+@media (max-width: 400px) { .mt-auto { padding: 0 5px; } }
+/* 같은 프로젝트 live 메인 여럿: 실행 중 막대를 그 세션 색으로(--sc 는 theme.css .sN) */
+.mt-bar.sess { --mt-bar: color-mix(in srgb, var(--sc) 55%, var(--chip-bg)); border-color: var(--sc); }

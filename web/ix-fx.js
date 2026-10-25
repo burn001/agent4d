@@ -1,0 +1,162 @@
+// 특별 상호작용 연출 — 3D 그리기. 순수 부분(IxModel·ixGeometry)은 ix-core.mjs.
+// SceneView(Planet)·FlowView(Flow, SceneView 상속)가 하나씩 갖는다. 복셀은 쓰지 않는다.
+// 그리기 호출 2번(선 LineSegments 1개 + 작은 정이십면체 InstancedMesh 1개) + CSS2D 라벨 풀 10개. 프레임마다 객체 생성 없음,
+// 효과가 없으면 갱신도 건너뛴다. 알파는 색을 배경으로 섞어 낸다(다크 = 가산 혼합, 라이트 = 일반 혼합).
+import * as THREE from 'three';
+import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { IxModel, IxGeo, ixGeometry, IXGEO, IX_KEYS, ixKeyColor, ensureIxCss } from './ix-core.mjs';
+
+export class IxLayer {
+  constructor(scene, view) {
+    ensureIxCss();
+    this.scene = scene;
+    this.view = view;
+    this.model = new IxModel();
+    this.geo = new IxGeo();
+    this.enabled = true;
+    this.theme = view.constructor && view.constructor.modeId === 'flow' ? 'flow' : 'planet';
+    // 선
+    this.lPos = new Float32Array(IXGEO.LINES * 6);
+    this.lCol = new Float32Array(IXGEO.LINES * 6);
+    const lg = this.lGeo = new THREE.BufferGeometry();
+    lg.setAttribute('position', new THREE.BufferAttribute(this.lPos, 3).setUsage(THREE.DynamicDrawUsage));
+    lg.setAttribute('color', new THREE.BufferAttribute(this.lCol, 3).setUsage(THREE.DynamicDrawUsage));
+    lg.setDrawRange(0, 0);
+    this.lMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 1, depthWrite: false });
+    this.lines = new THREE.LineSegments(lg, this.lMat);
+    this.lines.frustumCulled = false;
+    this.lines.renderOrder = 3;
+    scene.add(this.lines);
+    // 작은 점(패킷·타일·칸)
+    this.qMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.95, depthWrite: false });
+    this.quads = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.5, 0), this.qMat, IXGEO.QUADS);
+    this.quads.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.quads.setColorAt(0, new THREE.Color(0));
+    this.quads.count = 0;
+    this.quads.frustumCulled = false;
+    this.quads.renderOrder = 3;
+    scene.add(this.quads);
+    this._m = new THREE.Matrix4(); this._c = new THREE.Color(); this._q = new THREE.Quaternion(); this._s = new THREE.Vector3(); this._p = new THREE.Vector3();
+    // 라벨 풀
+    this.labels = [];
+    for (let i = 0; i < IXGEO.LABELS; i++) {
+      const el = document.createElement('div');
+      el.className = 'ix-lab';
+      const o = new CSS2DObject(el);
+      o.center.set(0.5, 1);
+      o.visible = false;
+      scene.add(o);
+      this.labels.push({ o, el, text: '', cls: '', key: '' });
+    }
+    this.colors = [];
+    this.applyTheme(view.tokens);
+    this._env = {
+      theme: this.theme, reduced: false,
+      pos: (id) => {
+        const v = this.view.vis.get(id);
+        if (!v || v.gone || v.hidden || v.exiting != null || !v.group.visible || (v.scopeD ?? 1) < 0.5) return null; // 페이드 중엔 그대로(투명도는 fade)
+        return v.group.position;
+      },
+      rad: (id) => { const v = this.view.vis.get(id); return v ? v.r * (v.size || 1) * (this.theme === 'flow' ? 0.75 : 1) : 0.8; },
+      root: (id) => this.rootOf(id),
+      fade: (id) => { const v = this.view.vis.get(id); return v && v.projA != null ? v.projA : 1; }, // 프로젝트 페이드
+    };
+    this._rootOf = (id) => this.rootOf(id);
+    this.stats = { lines: 0, quads: 0, labels: 0, fx: 0 };
+  }
+
+  rootOf(id) {
+    let cur = id;
+    for (let i = 0; i < 64; i++) {
+      const p = this.view.parentOf.get(cur) ?? this.view.vis.get(cur)?.node?.parentId;
+      if (!p || !this.view.vis.has(p)) return cur;
+      cur = p;
+    }
+    return cur;
+  }
+
+  applyTheme(t) {
+    if (!t) return;
+    this.isLight = !!t.isLight;
+    this.bg = (t.bg && t.bg.clone) ? t.bg.clone() : new THREE.Color(this.isLight ? 0xffffff : 0);
+    this.colors = IX_KEYS.map((k) => new THREE.Color(ixKeyColor(k, this.isLight)));
+    const bl = this.isLight ? THREE.NormalBlending : THREE.AdditiveBlending;
+    this.lMat.blending = bl; this.qMat.blending = bl;
+    this.lMat.needsUpdate = true; this.qMat.needsUpdate = true;
+    this.theme = this.view.constructor && this.view.constructor.modeId === 'flow' ? 'flow' : 'planet';
+    if (this._env) this._env.theme = this.theme;
+    for (const L of this.labels) L.key = ''; // 색 다시
+  }
+
+  /** app.onEvent → view.flowEvent(라이브·mock·재생 같은 길, quiet 제외) */
+  event(ev, opts = {}) { this.model.event(ev, performance.now() / 1000, opts.speed || 1, this._rootOf); }
+  clear() { this.model.clear(); this._hide(); }
+  dropNode(id) { this.model.dropNode(id); }
+
+  _mix(out, ci, a) {
+    const c = this.colors[ci] || this.colors[0];
+    if (this.isLight) out.copy((this.view.tokens && this.view.tokens.bg) || this.bg).lerp(c, a); // 흐름 표현은 applyTheme 뒤에 배경을 바꾼다
+    else out.copy(c).multiplyScalar(a);
+    return out;
+  }
+  _hide() {
+    this.lGeo.setDrawRange(0, 0);
+    this.quads.count = 0;
+    for (const L of this.labels) if (L.o.visible) L.o.visible = false;
+    this._shown = false;
+  }
+
+  update(now) {
+    const m = this.model;
+    m.step(now);
+    if (!this.enabled || (!m.fx.size && !m.portal.size && !m.console.size)) { if (this._shown) this._hide(); this.stats.fx = 0; return; }
+    const g = ixGeometry(m, now, this._env, this.geo);
+    // 선
+    const P = this.lPos, C = this.lCol, c = this._c;
+    for (let i = 0; i < g.nl; i++) {
+      const o = i * 6;
+      for (let k = 0; k < 6; k++) P[o + k] = g.L[o + k];
+      this._mix(c, g.LC[i], g.LA[i]);
+      C[o] = C[o + 3] = c.r; C[o + 1] = C[o + 4] = c.g; C[o + 2] = C[o + 5] = c.b;
+    }
+    this.lGeo.attributes.position.needsUpdate = true;
+    this.lGeo.attributes.color.needsUpdate = true;
+    this.lGeo.setDrawRange(0, g.nl * 2);
+    // 점
+    const q = this.quads;
+    for (let i = 0; i < g.nq; i++) {
+      const o = i * 4;
+      this._p.set(g.Q[o], g.Q[o + 1], g.Q[o + 2]);
+      this._s.setScalar(g.Q[o + 3]);
+      this._m.compose(this._p, this._q, this._s);
+      q.setMatrixAt(i, this._m);
+      q.setColorAt(i, this._mix(c, g.QC[i], g.QA[i]));
+    }
+    q.count = g.nq;
+    q.instanceMatrix.needsUpdate = true;
+    if (q.instanceColor) q.instanceColor.needsUpdate = true;
+    // 라벨
+    for (let i = 0; i < this.labels.length; i++) {
+      const L = this.labels[i], d = g.labels[i];
+      if (!d) { if (L.o.visible) L.o.visible = false; continue; }
+      L.o.position.set(d.x, d.y, d.z);
+      if (L.text !== d.text) { L.el.textContent = d.text; L.text = d.text; }
+      const cls = 'ix-lab ' + d.cls;
+      if (L.cls !== cls) { L.el.className = cls; L.cls = cls; }
+      if (L.key !== d.key) { L.el.style.setProperty('--ix-c', ixKeyColor(d.key, this.isLight)); L.key = d.key; }
+      const op = (Math.round(d.alpha * 20) / 20).toFixed(2);
+      if (L.el.style.opacity !== op) L.el.style.opacity = op;
+      if (!L.o.visible) L.o.visible = true;
+    }
+    this._shown = true;
+    this.stats.lines = g.nl; this.stats.quads = g.nq; this.stats.labels = g.labels.length; this.stats.fx = m.fx.size;
+  }
+
+  dispose() {
+    this.scene.remove(this.lines, this.quads);
+    this.lGeo.dispose(); this.lMat.dispose(); this.quads.geometry.dispose(); this.qMat.dispose();
+    for (const L of this.labels) { this.scene.remove(L.o); L.el.remove(); }
+    this.labels = [];
+    this.model.clear();
+  }
+}

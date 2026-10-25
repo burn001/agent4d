@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>복셀 오피스 시험</title>
+  <meta name="description" content="복셀 오피스 렌더러 단독 시험 페이지(가짜 데이터)">
+  <meta name="color-scheme" content="dark light">
+  <script>
+    (function () {
+      var q = new URLSearchParams(location.search).get('theme');
+      var pref = q || 'auto';
+      if (!q) { try { pref = localStorage.getItem('ccviz.theme') || 'auto'; } catch (e) {} }
+      var dark = pref === 'dark' || (pref !== 'light' && !(window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches));
+      document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    })();
+  </script>
+  <link rel="stylesheet" href="../theme.css">
+  <!-- index.html 과 같은 CSP·importmap(three@0.170.0 + SRI) -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    },
+    "integrity": {
+      "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js": "sha384-GY5FqjttLCFRt/McQbyaVdCk2O1IQtOeX8Py6NfD89BIAsIyJFRl4UgSXrk2vXAk",
+      "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/controls/OrbitControls.js": "sha384-aJoe4qqS/DgF2jh9njAuvA6QIveJYoCuYOfYjdFY8P3eawzmc9bEQ40jq2TvOyuP",
+      "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/renderers/CSS2DRenderer.js": "sha384-9CXQqRjuKfYvfHem9p/LPU6b7PaeeiDuC/gp1qRz3bEV9txWG5wi9XhrkE/0/Dn9"
+    }
+  }
+  </script>
+  <style>
+    #stage { right: 0 !important; }
+    #topbar .chip { font-size: 12px; color: var(--muted); white-space: nowrap; }
+    #topbar select { background: var(--chip-bg); border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; }
+  </style>
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand"><span class="logo"></span><span class="txt">복셀 오피스 시험</span></div>
+    <span id="conn" class="conn wait"><i></i><b>준비 중</b></span>
+    <div class="spacer"></div>
+    <button id="btn-view" class="tb">표현: 복셀 오피스</button>
+    <label class="sel"><span>속도</span>
+      <select id="speed"><option>1</option><option>2</option><option>4</option><option>8</option><option>16</option><option>32</option></select>
+    </label>
+    <button id="btn-theme" class="tb">테마</button>
+    <span id="stats" class="chip">-</span>
+  </header>
+  <main id="stage"><div id="labels"></div></main>
+  <div id="cam-chip">자동 카메라</div>
+  <script type="module">
+    import { SceneView } from '../scene.js';
+    import { VoxelView } from './office.js';
+    import { CameraDirector } from '../camera.js';
+    import { createMockSource } from '../mock.js';
+
+    const P = new URLSearchParams(location.search);
+    const flag = (k) => P.has(k) && P.get(k) !== '0' && P.get(k) !== 'false';
+    const MODE = flag('demo') ? 'demo' : 'mock';
+    const STRESS = Number(P.get('stress') || 0) || 0;
+    const VIEWS = { shapes: SceneView, voxel: VoxelView };
+    let viewMode = P.get('view') === 'shapes' ? 'shapes' : 'voxel';
+    let speed = Number(P.get('speed') || 1) || 1;
+    const $ = (id) => document.getElementById(id);
+    $('speed').value = String(speed);
+
+    const store = { nodes: new Map(), root: null, seq: 0 };
+    const getNode = (id) => store.nodes.get(id);
+    const created = []; // 만든 renderer (누수 확인)
+    let view = new VIEWS[viewMode]($('stage'), $('labels'));
+    created.push(view.renderer);
+    view.applyTheme();
+    view.setTimeScale(speed);
+    const director = new CameraDirector(view, getNode);
+    director.onStatus = (s) => { $('cam-chip').textContent = s.text; $('cam-chip').classList.toggle('manual', s.mode === 'manual'); };
+    let frames = 0;
+    const hookFrame = () => { view.onFrame = (dt, now) => { director.update(dt, now); frames++; }; };
+    hookFrame();
+
+    // 캔버스 입력(app.js 와 같은 방식, 전환 때 다시 붙임)
+    let downAt = null, hoverRaf = 0, hoverEv = null;
+    function bindCanvas(v) {
+      const c = v.renderer.domElement;
+      c.addEventListener('pointermove', (e) => { hoverEv = e; if (!hoverRaf) hoverRaf = requestAnimationFrame(() => { hoverRaf = 0; if (view !== v) return; const id = v.pick(hoverEv.clientX, hoverEv.clientY); v.setHover(id); c.style.cursor = id ? 'pointer' : ''; }); });
+      c.addEventListener('pointerleave', () => v.setHover(null));
+      c.addEventListener('pointerdown', (e) => { downAt = { x: e.clientX, y: e.clientY }; });
+      c.addEventListener('click', (e) => {
+        if (!downAt || Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 6) return;
+        const id = v.pick(e.clientX, e.clientY);
+        if (id) { v.setFocus(id); director.focusNode(id); focusId = id; } else { v.setFocus(null); focusId = null; }
+      });
+    }
+    let focusId = null;
+    bindCanvas(view);
+
+    // 표현 전환 (절차 그대로)
+    function switchMode(next) {
+      next = next || (viewMode === 'voxel' ? 'shapes' : 'voxel');
+      if (next === viewMode) return;
+      const old = view;
+      const nv = new VIEWS[next]($('stage'), $('labels'));
+      created.push(nv.renderer);
+      nv.applyTheme();
+      nv.setRoot(store.root);
+      const nodes = [...store.nodes.values()];
+      for (const n of nodes) nv.addNode(n, false);
+      nv.layoutNow();
+      nv.setClock(Date.now);
+      nv.setTimeScale(speed);
+      director.attach(nv);
+      view = nv;
+      bindCanvas(nv);
+      hookFrame();
+      if (focusId) nv.setFocus(focusId);
+      old.dispose();
+      viewMode = next;
+      $('btn-view').textContent = '표현: ' + VIEWS[next].modeLabel;
+    }
+    $('btn-view').textContent = '표현: ' + VIEWS[viewMode].modeLabel;
+    $('btn-view').addEventListener('click', () => switchMode());
+    $('speed').addEventListener('change', (e) => { speed = Number(e.target.value) || 1; view.setTimeScale(speed); });
+    $('btn-theme').addEventListener('click', () => {
+      const t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+      view.applyTheme();
+    });
+
+    // 이벤트 → store → view (app.js onEvent 와 같은 규칙 + say 연결)
+    function onSnapshot(snap) {
+      store.nodes.clear(); view.reset(); director.resetActivity();
+      store.root = snap.root || null; store.seq = snap.seq || 0;
+      view.setRoot(store.root);
+      for (const n of snap.nodes || []) { const c = { ...n, meta: { ...(n.meta || {}) }, openTools: [...(n.openTools || [])] }; store.nodes.set(c.id, c); view.addNode(c, false); }
+      view.layoutNow();
+      director.overview(true);
+    }
+    function onEvent(ev) {
+      if (!ev || !ev.type) return;
+      if (typeof ev.seq === 'number') { if (ev.seq <= store.seq) return; store.seq = ev.seq; }
+      const n = store.nodes.get(ev.nodeId);
+      const sayOk = speed < 16 || ev.nodeId === focusId;
+      switch (ev.type) {
+        case 'node-add': {
+          const node = ev.node; if (!node) break;
+          const prev = store.nodes.get(node.id);
+          if (prev) { Object.assign(prev, node); view.updateNode(node.id, node); }
+          else {
+            const c = { ...node, meta: { ...(node.meta || {}) }, openTools: [...(node.openTools || [])] };
+            store.nodes.set(c.id, c);
+            if (!store.root && (c.kind === 'main' || !c.parentId)) { store.root = c.id; view.setRoot(c.id); }
+            view.addNode(c, true);
+          }
+          break;
+        }
+        case 'node-update': {
+          if (!n) break;
+          const { meta, ...rest } = ev.patch || {};
+          Object.assign(n, rest);
+          if (meta) n.meta = { ...(n.meta || {}), ...meta };
+          view.updateNode(n.id, ev.patch || {});
+          break;
+        }
+        case 'tool-start':
+          if (n) {
+            n.openTools = n.openTools || [];
+            if (!n.openTools.some((t) => t.toolUseId === ev.toolUseId)) n.openTools.push({ toolUseId: ev.toolUseId, tool: ev.tool, cat: ev.cat, skill: ev.skill, startedAt: ev.ts, text: ev.text });
+            view.toolStart(n.id, ev);
+            if (sayOk && ev.text) view.say(n.id, ev.text, { type: 'tool', cat: ev.cat });
+          }
+          break;
+        case 'tool-end':
+          if (n) { n.openTools = (n.openTools || []).filter((t) => t.toolUseId !== ev.toolUseId); view.toolEnd(n.id, ev); }
+          break;
+        case 'text': view.ripple(ev.nodeId); if (sayOk && ev.role === 'assistant') view.say(ev.nodeId, ev.text, { type: 'text' }); break;
+        case 'user':
+          if (ev.origin === 'human') { view.beam(ev.nodeId); if (sayOk) view.say(ev.nodeId, ev.text, { type: 'user' }); }
+          else view.wave(ev.nodeId, view.tokens.skill, 1.2);
+          break;
+        case 'result':
+          if (n && n.parentId && store.nodes.has(n.parentId)) view.orb(ev.nodeId, n.parentId, ev.ok === false ? view.tokens.error : view.tokens.ok, 1.0);
+          else view.ripple(ev.nodeId, ev.ok === false ? view.tokens.error : view.tokens.ok);
+          if (sayOk) view.say(ev.nodeId, ev.text, { type: 'result', ok: ev.ok });
+          break;
+        case 'output': view.wave(ev.nodeId, null, 0.9); break;
+      }
+      if (n && ev.ts) n.lastActivityAt = ev.ts;
+      director.noteEvent(ev);
+    }
+    const src = createMockSource({ onSnapshot, onEvent, onStatus: (s, t) => { $('conn').className = 'conn ' + s; $('conn').querySelector('b').textContent = t; } },
+      { mode: MODE, stress: STRESS, url: '../demo-events.jsonl' });
+
+    // 통계: fps · draw call · 노드 수
+    let fps = 0, fpsT = performance.now(), fpsHist = [];
+    setInterval(() => {
+      const t = performance.now();
+      fps = Math.round((frames * 1000) / (t - fpsT)); frames = 0; fpsT = t;
+      fpsHist.push(fps); if (fpsHist.length > 60) fpsHist.shift();
+      const info = view.renderer.info.render;
+      $('stats').textContent = `${fps}fps · draw ${info.calls} · 노드 ${store.nodes.size} · 화면 ${view.size}`;
+    }, 1000);
+
+    // 시험 핸들
+    window.__vx = {
+      store, director, get view() { return view; }, get viewMode() { return viewMode; }, switchMode, onEvent, created,
+      get fps() { return fps; }, get fpsHist() { return fpsHist.slice(); },
+      info() { const r = view.renderer.info; return { calls: r.render.calls, triangles: r.render.triangles, geometries: r.memory.geometries, textures: r.memory.textures, nodes: store.nodes.size, visible: view.size, canvases: document.querySelectorAll('#stage canvas').length, labelsDom: $('labels').childElementCount }; },
+      lostContexts() { return created.map((r) => { try { return r.getContext().isContextLost(); } catch (e) { return 'err'; } }); },
+      src,
+    };
+    // ?switch=N : N 번 전환 반복(누수 확인)
+    const SW = Number(P.get('switch') || 0) || 0;
+    if (SW) {
+      let k = 0;
+      const tick = () => { if (k >= SW) { window.__vx.switchDone = true; return; } switchMode(); k++; setTimeout(tick, 700); };
+      setTimeout(tick, 2500);
+    }
+  </script>
+</body>
+</html>

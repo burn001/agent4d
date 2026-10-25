@@ -1,0 +1,70 @@
+/* 사용 한도 게이지. 테마 토큰만 쓴다. --warn 은 I 가 theme.css 에 넣는다(없을 때 테마별 대체색). */
+.lim {
+  --lim-warn: var(--warn, #f59e0b);
+  --lim-ok: var(--k-main);
+  --lim-danger: var(--error);
+  position: relative; display: inline-flex; align-items: center; gap: 6px; flex: none;
+  font-variant-numeric: tabular-nums;
+}
+:root[data-theme="light"] .lim { --lim-warn: var(--warn, #b45309); }
+.lim[hidden] { display: none !important; }
+.lim-pills { display: inline-flex; align-items: center; gap: 6px; }
+.lim-pill {
+  position: relative; display: inline-flex; align-items: baseline; gap: 5px; height: 30px; padding: 0 10px 0 9px;
+  border-radius: 999px; border: 1px solid var(--border); background: var(--chip-bg); white-space: nowrap;
+  font-size: 12px; line-height: 28px; overflow: hidden; cursor: default;
+}
+.lim-pill .lim-bar { position: absolute; left: 9px; right: 9px; bottom: 4px; height: 3px; }
+.lim-name { color: var(--muted); font-weight: 500; }
+.lim-pct { font-weight: 700; color: var(--text); }
+.lim-reset { color: var(--muted); font-size: 11.5px; }
+.lim-age { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.lim-bar { display: block; border-radius: 2px; background: color-mix(in srgb, var(--text) 12%, transparent); overflow: hidden; }
+.lim-bar i { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--lim-ok); transition: width .4s ease; }
+
+.lv-warn .lim-bar i { background: var(--lim-warn); }
+.lv-danger .lim-bar i { background: var(--lim-danger); }
+.lim-pill.lv-warn { border-color: color-mix(in srgb, var(--lim-warn) 55%, transparent); }
+.lim-pill.lv-warn .lim-pct { color: var(--lim-warn); }
+.lim-pill.lv-danger { border-color: var(--lim-danger); background: color-mix(in srgb, var(--lim-danger) 12%, var(--chip-bg)); }
+.lim-pill.lv-danger .lim-pct { color: var(--lim-danger); }
+.lv-expired .lim-pct, .lv-expired b { color: var(--muted); font-weight: 600; }
+.lim-pill.stale, .lim-row.stale { opacity: .62; }
+.lim-pill.stale .lim-bar i { filter: saturate(.4); }
+
+/* 좁은 화면용 작은 묶음(기본 숨김) */
+.lim-mini {
+  display: none; flex-direction: column; justify-content: center; gap: 2px; width: 92px; height: 30px; padding: 2px 7px;
+  border-radius: 8px; border: 1px solid var(--border); background: var(--chip-bg); cursor: pointer; text-align: left;
+}
+.lim-mini:hover { background: var(--hover); }
+.lim-row { display: grid; grid-template-columns: 16px 1fr auto; align-items: center; gap: 4px; font-size: 10.5px; line-height: 11px; }
+.lim-row .lim-k { color: var(--muted); font-weight: 600; }
+.lim-row .lim-bar { height: 4px; }
+.lim-row b { font-weight: 700; min-width: 26px; text-align: right; }
+.lim-row.lv-warn b { color: var(--lim-warn); }
+.lim-row.lv-danger b { color: var(--lim-danger); }
+
+.lim-card {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 40; width: 264px; padding: 10px 12px 8px;
+  border-radius: 10px; background: var(--panel-bg); border: 1px solid var(--border); box-shadow: var(--shadow);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); font-size: 12px;
+}
+.lim-card[hidden] { display: none; }
+.lim-card h4 { margin: 0 0 6px; font-size: 12px; font-weight: 650; }
+.lim-card h4 small { color: var(--muted); font-weight: 500; margin-left: 4px; }
+.lim-crow { margin: 6px 0 8px; }
+.lim-ch { display: flex; justify-content: space-between; align-items: baseline; }
+.lim-ch span { color: var(--muted); }
+.lim-ch b { font-size: 15px; }
+.lim-crow.lv-warn .lim-ch b { color: var(--lim-warn); }
+.lim-crow.lv-danger .lim-ch b { color: var(--lim-danger); }
+.lim-crow .lim-bar { height: 6px; margin: 3px 0; }
+.lim-cm { color: var(--muted); font-size: 11.5px; }
+.lim-src { margin: 4px 0 0; color: var(--muted); font-size: 11px; border-top: 1px solid var(--border); padding-top: 6px; }
+
+@media (max-width: 719px) {
+  .lim-pills { display: none; }
+  .lim-mini { display: inline-flex; }
+  .lim-card { position: fixed; top: calc(var(--topbar-h, 88px) + 6px); left: 12px; right: 12px; width: auto; }
+}

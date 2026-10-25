@@ -1,0 +1,60 @@
+/* 작업 대상 층 — 바닥층 라벨·⚙ 메뉴 줄·상세 팝업·실황 고정 줄 */
+.art-lab {
+  pointer-events: none;
+  font: 600 10px/1.2 system-ui, "Segoe UI", sans-serif;
+  color: var(--art-c, #94a3b8);
+  white-space: nowrap;
+  padding: 1px 5px;
+  border-radius: 6px;
+  text-shadow: 0 0 5px rgba(0, 0, 0, .6);
+  transform: translateY(-2px);
+}
+.art-lab.art-zone { font-weight: 500; font-size: 9.5px; letter-spacing: .02em; opacity: .8; }
+.art-lab.art-item { font-size: 11px; border: 1px solid color-mix(in srgb, var(--art-c, #94a3b8) 50%, transparent); background: rgba(5, 5, 16, .72); }
+.art-lab.art-alarm { font-size: 11.5px; color: #fecaca; border: 1px solid #f87171; background: rgba(60, 6, 6, .78); }
+:root[data-theme="light"] .art-lab { text-shadow: 0 0 4px rgba(255, 255, 255, .9); }
+:root[data-theme="light"] .art-lab.art-item { background: rgba(255, 255, 255, .9); }
+:root[data-theme="light"] .art-lab.art-alarm { color: #991b1b; background: rgba(254, 226, 226, .95); border-color: #dc2626; }
+
+/* ⚙ 메뉴: 작업 대상 층 켬/끔 */
+#btn-artifacts[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+#btn-artifacts[disabled] { opacity: .55; cursor: not-allowed; }
+.sm-v .art-soon { font-size: 11px; color: var(--muted); align-self: center; }
+
+/* 상세 팝업: 대상 */
+.ins-art-log { list-style: none; margin: 0; padding: 0; }
+.ins-art-log li { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; align-items: baseline; padding: 1px 0; font-size: 12px; }
+.ins-art-log li.x b { color: var(--error); }
+.ins-art-log small { color: var(--muted); font-variant-numeric: tabular-nums; }
+.ins-art-log .ins-link { padding: 0 3px; }
+.ins-art-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 3px; }
+.ins-art-badges span { font-size: 11px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--border); }
+.ins-art-badges .imp { color: #b45309; border-color: #f59e0b; }
+.ins-art-badges .x { color: var(--error); border-color: var(--error); }
+:root:not([data-theme="light"]) .ins-art-badges .imp { color: #fcd34d; }
+
+/* 실황 패널 고정 줄(파괴적 작업) */
+#art-pins { display: flex; flex-direction: column; gap: 3px; padding: 0 8px; }
+#art-pins:empty { display: none; }
+#art-pins .art-pin { display: flex; gap: 6px; align-items: center; font-size: 12px; padding: 3px 6px; border-radius: 6px;
+  color: var(--error); border: 1px solid color-mix(in srgb, var(--error) 60%, transparent); background: color-mix(in srgb, var(--error) 9%, transparent); }
+#art-pins .art-pin span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#art-pins .art-pin button { border: 0; background: none; color: inherit; cursor: pointer; font-size: 13px; padding: 0 2px; }
+
+/* 바닥 글씨가 읽히면 떠 있는 섬 이름표는 흐리게 */
+.ov-island.art-dim { opacity: .22 !important; transition: opacity .4s; }
+
+/* ⚙ 밝기·채움 · 라벨 · 범례 기호 */
+#art-bright { width: 90px; }
+#art-fill { font-size: 12px; }
+.art-lab.art-ext, .art-lab.art-glyph { font: 600 9px/1 ui-monospace, Consolas, monospace; padding: 1px 3px; border: 1px solid color-mix(in srgb, var(--art-c, #94a3b8) 45%, transparent); border-radius: 3px; opacity: .8; }
+.art-legend ul { list-style: none; padding: 0; margin: 0; }
+.art-legend .al { display: inline-block; width: 14px; height: 10px; margin-right: 6px; vertical-align: -1px; border: 1px solid var(--muted); box-sizing: border-box; }
+.art-legend .al-file { background: repeating-linear-gradient(0deg, transparent 0 2px, var(--muted) 2px 3px); background-clip: content-box; }
+.art-legend .al-db { border-radius: 40% / 25%; border-style: double; border-width: 3px; }
+.art-legend .al-repo { border-radius: 50%; width: 10px; }
+.art-legend .al-remote { border-style: dashed; border-radius: 0 0 8px 8px; border-top: 0; }
+.art-legend .al-svc { border-style: dotted; border-radius: 50%; width: 10px; }
+.art-legend .al-out { width: 9px; height: 12px; }
+.art-legend .al-imp { border-color: #b45309; border-radius: 2px 2px 7px 7px; width: 9px; }
+.art-legend .al-x { border-color: var(--error); border-radius: 50%; width: 10px; }

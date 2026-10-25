@@ -1,0 +1,21 @@
+node_modules/
+*.log
+.cc-session-viz/
+.cc-agent-viz/
+web/assets/bgm.wav
+# cf build 산출물(KV ID 등 배포 값 포함) — 커밋 금지
+cloudflare/.cloudflare/
+cloudflare/.wrangler/
+cloudflare/dist/
+.dev.vars
+*.secrets.json
+
+# 배경음악 mp3 는 Releases 자산(공개판) — 받아 넣은 파일이 변경으로 잡히지 않게. 개발 레포에 이미 추적 중인 파일에는 영향 없음
+web/assets/bgm*.mp3
+# 개발 중 스크린샷·임시 파일
+/screenshots/
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+.env

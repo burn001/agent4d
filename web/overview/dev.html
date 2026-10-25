@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>전체 보기 시험</title>
+  <meta name="description" content="전체 보기(프로젝트 클러스터·복셀 캠퍼스)·프로젝트 목록·사용 한도 게이지 단독 시험 페이지(가짜 데이터)">
+  <meta name="color-scheme" content="dark light">
+  <script>
+    (function () {
+      var q = new URLSearchParams(location.search).get('theme');
+      var pref = q || 'auto';
+      if (!q) { try { pref = localStorage.getItem('ccviz.theme') || 'auto'; } catch (e) {} }
+      var dark = pref === 'dark' || (pref !== 'light' && !(window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches));
+      document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    })();
+  </script>
+  <link rel="stylesheet" href="../theme.css">
+  <!-- index.html 과 같은 CSP·importmap(three@0.170.0 + SRI) -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    },
+    "integrity": {
+      "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js": "sha384-GY5FqjttLCFRt/McQbyaVdCk2O1IQtOeX8Py6NfD89BIAsIyJFRl4UgSXrk2vXAk",
+      "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/controls/OrbitControls.js": "sha384-aJoe4qqS/DgF2jh9njAuvA6QIveJYoCuYOfYjdFY8P3eawzmc9bEQ40jq2TvOyuP",
+      "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/renderers/CSS2DRenderer.js": "sha384-9CXQqRjuKfYvfHem9p/LPU6b7PaeeiDuC/gp1qRz3bEV9txWG5wi9XhrkE/0/Dn9"
+    }
+  }
+  </script>
+  <style>
+    /* 시험 페이지 전용: Integrate 단계에서 theme.css 로 옮길 자리 표시 */
+    #scope-chip { font-size: 12px; color: var(--muted); white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+    #topbar select { height: 30px; background: var(--chip-bg); border: 1px solid var(--border); border-radius: 7px; padding: 0 6px; }
+    #panel { display: flex; flex-direction: column; }
+    @media (max-width: 719px) { #scope-chip { display: none; } #limcase { display: none; } }
+  </style>
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand"><span class="logo"></span><span class="txt">전체 보기 시험</span></div>
+    <span id="conn" class="conn wait" title="연결 상태"><i></i><b>준비 중</b></span>
+    <span id="scope-chip">전체</span>
+    <button id="btn-replay" class="tb" title="재생 고르기 창(프로젝트 필터 확인용, 실제 재생 안 함)">재생</button>
+    <div class="spacer"></div>
+    <div id="limits" hidden></div>
+    <button id="btn-view" class="tb tb-wrap">표현: 단순 도형</button>
+    <button id="btn-inactive" class="tb" aria-pressed="false" title="비활성(recent) 세션도 장면에 희미하게">비활성 표시</button>
+    <button id="btn-camera" class="tb" aria-pressed="true">자동 카메라</button>
+    <select id="limcase" title="한도 시험 값">
+      <option value="demo">한도: 데모(72%·93%·12분 전)</option><option value="ok">한도: 보통</option><option value="warn">한도: 70% 경계</option>
+      <option value="danger">한도: 90% 경계</option><option value="expired">한도: 재설정됨</option><option value="none">한도: 없음</option>
+    </select>
+    <button id="btn-theme" class="tb">테마</button>
+  </header>
+  <main id="stage"><div id="labels"></div></main>
+  <div id="cam-chip">자동 카메라</div>
+  <div id="stats-chip">노드 0</div>
+  <aside id="panel" aria-label="실황">
+    <div id="proj-list"></div>
+    <header>
+      <button id="panel-toggle" title="패널 접기/펼치기" aria-label="패널 접기/펼치기">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3l5 5-5 5"/></svg>
+      </button>
+      <h2>실황</h2>
+      <span class="count" id="stream-count"></span>
+      <span class="spacer"></span>
+      <span class="filter" id="stream-filter" title="필터 해제"><b></b><i>×</i></span>
+    </header>
+    <div id="stream" role="log" aria-live="off"></div>
+    <button id="to-latest">최신으로 ↑</button>
+  </aside>
+  <div id="notice"></div>
+  <div id="replay-bar" hidden></div>
+  <div id="replay-picker" hidden></div>
+
+  <script type="module">
+    import { SceneView } from '../scene.js';
+    import { VoxelView } from '../voxel/office.js';
+    import { CameraDirector } from '../camera.js';
+    import { Panel } from '../panel.js';
+    import { createOverviewMock, demoLimits } from './mock.js';
+    import { mountProjectList, serializeSelection, parseSelection, selectionLabel } from '../projects.js';
+    import { mountLimits } from '../limits.js';
+    import { mountReplayUI } from '../replay/ui.mjs';
+
+    const P = new URLSearchParams(location.search);
+    const VIEWS = { shapes: SceneView, voxel: VoxelView };
+    const $ = (id) => document.getElementById(id);
+    let viewMode = P.get('view') === 'voxel' ? 'voxel' : 'shapes';
+    let showInactive = P.get('inactive') === '1';
+    const nProj = Number(P.get('projects') || 4) || 4;
+    const mains = (P.get('mains') || '2,1,0,1').split(',').map((x) => Number(x) || 0);
+    const stress = Number(P.get('stress') || 0) || 0;
+    const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+    const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+
+    // ---- 상태 ----
+    const store = { nodes: new Map(), seq: 0, projects: [], roots: [] };
+    const getNode = (id) => store.nodes.get(id);
+    let sel = parseSelection(P.get('scope') || lsGet('ccviz.scope') || 'all');
+    let focusId = null;
+
+    let view = new VIEWS[viewMode]($('stage'), $('labels'));
+    view.applyTheme();
+    const created = [view.renderer];
+    const director = new CameraDirector(view, getNode);
+    director.onStatus = (s) => { $('cam-chip').textContent = s.text; $('cam-chip').classList.toggle('manual', s.mode === 'manual'); };
+    let frames = 0;
+    const hookFrame = () => { view.onFrame = (dt, now) => { director.update(dt, now); frames++; }; };
+    hookFrame();
+    const panel = new Panel({ getNode, onPickNode: (id) => { focusId = id; view.setFocus(id); director.focusNode(id); } });
+
+    // 범위 필터(Integrate 의 panel.setScopeFilter 자리 — 여기서는 줄 DOM 을 직접 거른다)
+    function lineVisible(nodeId) {
+      if (sel.scope === 'all') return true;
+      const n = store.nodes.get(nodeId);
+      if (!n) return true;
+      if (sel.scope === 'project') return n.projectId === sel.projectId;
+      return n.rootSessionId === sel.sessionId;
+    }
+    function refilter() { for (const ln of $('stream').children) ln.classList.toggle('k-scope', !lineVisible(ln.dataset.node)); }
+    const st = document.createElement('style'); st.textContent = '.ln.k-scope{display:none}'; document.head.appendChild(st);
+    const origFlush = panel.flush.bind(panel);
+    panel.flush = () => { origFlush(); refilter(); };
+
+    function scopeArgs() {
+      const fp = sel.scope === 'all' ? null : sel.projectId;
+      return { mode: 'all', roots: store.roots, projects: store.projects, showInactive, focusProject: fp };
+    }
+    function applyScope(fly = true) {
+      view.setScope(scopeArgs());
+      director.setScope({ mode: 'all', focusProject: sel.scope === 'all' ? null : sel.projectId });
+      if (sel.scope === 'session') {
+        const id = 's:' + sel.sessionId;
+        if (view.has(id)) { focusId = id; view.setFocus(id); }
+      } else if (focusId) { focusId = null; view.setFocus(null); }
+      $('scope-chip').textContent = selectionLabel(sel, store.projects);
+      pl.setSelection(sel);
+      refilter();
+      const u = new URL(location.href); u.searchParams.set('scope', serializeSelection(sel)); history.replaceState(null, '', u);
+      lsSet('ccviz.scope', serializeSelection(sel));
+    }
+
+    const pl = mountProjectList({
+      el: $('proj-list'),
+      onSelect: (s) => { sel = s; applyScope(); },
+      getNodeCount: (pid) => { let n = 0; for (const x of store.nodes.values()) if (x.projectId === pid) n++; return n; },
+    });
+    const lg = mountLimits({ el: $('limits') });
+    let limcase = P.get('limits') || 'demo';
+    $('limcase').value = limcase;
+    const setLimits = (k) => { limcase = k; lg.set(demoLimits(k)); };
+    setLimits(limcase);
+    $('limcase').addEventListener('change', (e) => setLimits(e.target.value));
+
+    // ---- 이벤트 → store → view (app.js 규칙 + node-remove) ----
+    function onSnapshot(snap) {
+      store.nodes.clear(); view.reset(); panel.reset(); director.resetActivity();
+      store.seq = snap.seq || 0;
+      store.projects = snap.projects || []; store.roots = snap.roots || [];
+      view.setRoot(null);
+      for (const n of snap.nodes || []) { const c = { ...n, meta: { ...(n.meta || {}) }, openTools: [...(n.openTools || [])] }; store.nodes.set(c.id, c); view.addNode(c, false); }
+      view.setScope(scopeArgs());
+      view.layoutNow();
+      pl.setProjects(store.projects);
+      for (const ev of snap.recent || []) panel.add(ev);
+      applyScope(false);
+      director.overview(true);
+    }
+    function onProjects(d) {
+      store.projects = d.projects || store.projects; store.roots = d.roots || store.roots;
+      pl.setProjects(store.projects);
+      view.setScope(scopeArgs());
+      $('scope-chip').textContent = selectionLabel(sel, store.projects);
+    }
+    function onEvent(ev) {
+      if (!ev || !ev.type) return;
+      if (typeof ev.seq === 'number') { if (ev.seq <= store.seq) return; store.seq = ev.seq; }
+      const n = store.nodes.get(ev.nodeId);
+      switch (ev.type) {
+        case 'node-add': {
+          const node = ev.node; if (!node) break;
+          const prev = store.nodes.get(node.id);
+          if (prev) { Object.assign(prev, node); view.updateNode(node.id, node); }
+          else { const c = { ...node, meta: { ...(node.meta || {}) }, openTools: [...(node.openTools || [])] }; store.nodes.set(c.id, c); view.addNode(c, true); }
+          break;
+        }
+        case 'node-remove':
+          for (const id of ev.ids || [ev.nodeId]) { store.nodes.delete(id); view.removeNode(id); if (focusId === id) { focusId = null; view.setFocus(null); } }
+          break;
+        case 'node-update': {
+          if (!n) break;
+          const { meta, ...rest } = ev.patch || {};
+          Object.assign(n, rest);
+          if (meta) n.meta = { ...(n.meta || {}), ...meta };
+          view.updateNode(n.id, ev.patch || {});
+          break;
+        }
+        case 'tool-start':
+          if (n) {
+            n.openTools = n.openTools || [];
+            if (!n.openTools.some((t) => t.toolUseId === ev.toolUseId)) n.openTools.push({ toolUseId: ev.toolUseId, tool: ev.tool, cat: ev.cat, skill: ev.skill, startedAt: ev.ts, text: ev.text });
+            view.toolStart(n.id, ev);
+            if (ev.text) view.say(n.id, ev.text, { type: 'tool', cat: ev.cat });
+          }
+          break;
+        case 'tool-end': if (n) { n.openTools = (n.openTools || []).filter((t) => t.toolUseId !== ev.toolUseId); view.toolEnd(n.id, ev); } break;
+        case 'text': view.ripple(ev.nodeId); if (ev.role === 'assistant') view.say(ev.nodeId, ev.text, { type: 'text' }); break;
+        case 'user': if (ev.origin === 'human') { view.beam(ev.nodeId); view.say(ev.nodeId, ev.text, { type: 'user' }); } else view.wave(ev.nodeId, view.tokens.skill, 1.2); break;
+        case 'result':
+          if (n && n.parentId && store.nodes.has(n.parentId)) view.orb(ev.nodeId, n.parentId, ev.ok === false ? view.tokens.error : view.tokens.ok, 1.0);
+          else view.ripple(ev.nodeId, ev.ok === false ? view.tokens.error : view.tokens.ok);
+          view.say(ev.nodeId, ev.text, { type: 'result', ok: ev.ok });
+          break;
+        case 'output': view.wave(ev.nodeId, null, 0.9); break;
+      }
+      if (n && ev.ts && ev.type !== 'node-remove') n.lastActivityAt = ev.ts;
+      director.noteEvent(ev);
+      if (ev.type !== 'node-remove') panel.add(ev);
+    }
+
+    const mock = createOverviewMock({ projects: nProj, mainsPerProject: mains, seed: 2026, matchAfterMs: Number(P.get('match') || 60000) });
+    setTimeout(() => {
+      onSnapshot(mock.snapshot());
+      $('conn').className = 'conn ok'; $('conn').querySelector('b').textContent = '가짜 데이터(전체)';
+      mock.start(onEvent, onProjects);
+    }, 0);
+
+    // ---- 캔버스 입력 ----
+    let downAt = null, hoverRaf = 0, hoverEv = null;
+    function bindCanvas(v) {
+      const c = v.renderer.domElement;
+      c.addEventListener('pointermove', (e) => { hoverEv = e; if (!hoverRaf) hoverRaf = requestAnimationFrame(() => { hoverRaf = 0; if (view !== v) return; const id = v.pick(hoverEv.clientX, hoverEv.clientY); v.setHover(id); c.style.cursor = id ? 'pointer' : ''; }); });
+      c.addEventListener('pointerleave', () => v.setHover(null));
+      c.addEventListener('pointerdown', (e) => { downAt = { x: e.clientX, y: e.clientY }; });
+      c.addEventListener('click', (e) => {
+        if (view !== v || !downAt || Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 6) return;
+        const id = v.pick(e.clientX, e.clientY);
+        if (id) { focusId = id; v.setFocus(id); director.focusNode(id); return; }
+        const pid = v.pickCluster && v.pickCluster(e.clientX, e.clientY);
+        if (pid) { sel = { scope: 'project', projectId: pid }; applyScope(); }
+        else { focusId = null; v.setFocus(null); }
+      });
+    }
+    bindCanvas(view);
+
+    // ---- 표현 전환(setScope) ----
+    function switchView(next) {
+      next = next || (viewMode === 'voxel' ? 'shapes' : 'voxel');
+      if (next === viewMode) return;
+      const old = view;
+      const nv = new VIEWS[next]($('stage'), $('labels'));
+      created.push(nv.renderer);
+      nv.applyTheme();
+      nv.setRoot(null);
+      for (const n of store.nodes.values()) nv.addNode(n, false);
+      nv.setScope(scopeArgs());
+      nv.layoutNow();
+      director.attach(nv);
+      view = nv;
+      bindCanvas(nv); hookFrame();
+      if (focusId && nv.has(focusId)) nv.setFocus(focusId);
+      old.dispose();
+      viewMode = next;
+      $('btn-view').textContent = '표현: ' + VIEWS[next].modeLabel;
+      const u = new URL(location.href); u.searchParams.set('view', next); history.replaceState(null, '', u);
+    }
+    $('btn-view').textContent = '표현: ' + VIEWS[viewMode].modeLabel;
+    $('btn-view').addEventListener('click', () => switchView());
+    $('btn-inactive').setAttribute('aria-pressed', String(showInactive));
+    $('btn-inactive').addEventListener('click', () => { showInactive = !showInactive; $('btn-inactive').setAttribute('aria-pressed', String(showInactive)); view.setScope(scopeArgs()); });
+    let auto = true;
+    $('btn-camera').addEventListener('click', () => { auto = !auto; director.setEnabled(auto); $('btn-camera').setAttribute('aria-pressed', String(auto)); });
+    $('btn-theme').addEventListener('click', () => {
+      const t = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+      view.applyTheme();
+    });
+    new ResizeObserver(() => document.documentElement.style.setProperty('--topbar-h', $('topbar').offsetHeight + 'px')).observe($('topbar'));
+
+    // ---- 재생 고르기 창(프로젝트 필터 확인용) ----
+    const fakeApi = {
+      async getJson(path) {
+        if (path !== 'sessions') return { status: 404, body: null };
+        const sessions = [];
+        for (const p of store.projects) {
+          for (const s of [...(p.liveList || []), ...(p.recentList || [])]) {
+            if (sessions.some((x) => x.sessionId === s.sessionId)) continue;
+            sessions.push({ sessionId: s.sessionId, projectDir: p.projectId, cwd: p.path, title: s.title, entrypoint: s.entrypoint || 'cli', isChild: s.entrypoint === 'sdk-cli', mtime: s.activityAt, sizeBytes: 1, live: !!(p.liveList || []).some((x) => x.sessionId === s.sessionId), liveStatus: s.liveStatus || null, startedAt: s.activityAt, endedAt: s.activityAt, durationMs: 1800000, eventCount: null, eventCountEst: 1200, replayCached: false });
+          }
+        }
+        return { status: 200, body: { sessions, auto: sessions[0] && sessions[0].sessionId, projects: [] } };
+      },
+    };
+    const ui = mountReplayUI({ bar: $('replay-bar'), picker: $('replay-picker'), api: fakeApi, onPick: (sid) => { $('conn').querySelector('b').textContent = '고름: ' + sid.slice(0, 12); }, onLive: () => {},
+      getProjects: () => store.projects, getSelectedProject: () => (sel.scope === 'all' ? null : sel.projectId) });
+    $('btn-replay').addEventListener('click', () => ui.openPicker());
+
+    // ---- 통계·시험 핸들 ----
+    let fps = 0, fpsT = performance.now();
+    setInterval(() => {
+      const t = performance.now(); fps = Math.round((frames * 1000) / (t - fpsT)); frames = 0; fpsT = t;
+      const info = view.renderer.info.render;
+      $('stats-chip').textContent = `노드 ${store.nodes.size} · 화면 ${view.size} · 섬 ${view.clusters().length} · ${fps}fps · draw ${info.calls}`;
+    }, 1000);
+    window.__ov = {
+      store, director, panel, pl, lg, ui, mock, created,
+      get view() { return view; }, get viewMode() { return viewMode; }, get sel() { return sel; }, get fps() { return fps; },
+      switchView, setLimits,
+      select(str) { sel = parseSelection(str, store.projects); applyScope(); },
+      setInactive(on) { showInactive = !!on; view.setScope(scopeArgs()); },
+      clusters: () => view.clusters().map((c) => ({ projectId: c.projectId, name: c.name, x: +c.center.x.toFixed(1), z: +c.center.z.toFixed(1), r: +c.r.toFixed(1), active: c.active, inactive: c.inactive })),
+      info() { const r = view.renderer.info; return { calls: r.render.calls, geometries: r.memory.geometries, textures: r.memory.textures, nodes: store.nodes.size, visible: view.size, canvases: document.querySelectorAll('#stage canvas').length, labelsDom: $('labels').childElementCount }; },
+      lostContexts() { return created.map((r) => { try { return r.getContext().isContextLost(); } catch (e) { return 'err'; } }); },
+      shot: () => ({ ...director.shot, mode: director.mode, tour: director.tour }),
+    };
+    // ?switch=N : N 번 전환(누수 확인)
+    const SW = Number(P.get('switch') || 0) || 0;
+    if (SW) { let k = 0; const tick = () => { if (k >= SW) { window.__ov.switchDone = true; return; } switchView(); k++; setTimeout(tick, 700); }; setTimeout(tick, 2500); }
+  </script>
+</body>
+</html>

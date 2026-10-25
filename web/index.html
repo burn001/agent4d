@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title data-i18n="app.doc.title">cc-agent-viz — Claude Code agent viewer</title>
+  <meta name="description" data-i18n-content="app.doc.desc" content="이 PC 의 Claude Code 프로젝트·세션(메인·서브에이전트·백그라운드 작업)을 3D 로 실시간 표시하고 사용 한도를 보여 주며 지난 세션을 재생">
+  <meta name="color-scheme" content="dark light">
+  <script>
+    // 첫 화면 깜빡임 방지: 저장된 테마를 먼저 적용
+    (function () {
+      var pref = 'auto';
+      try { pref = localStorage.getItem('ccviz.theme') || 'auto'; } catch (e) {}
+      var dark = pref === 'dark' || (pref !== 'light' && !(window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches));
+      document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+      // 언어(i18n.mjs resolveLang 과 같은 규칙): ?lang= → 저장값 'ccviz.lang' → 브라우저 언어 중 ko* 면 ko, 아니면 en
+      var lg = null;
+      try { lg = (new URLSearchParams(location.search).get('lang') || '').toLowerCase().slice(0, 2); } catch (e) {}
+      if (lg !== 'en' && lg !== 'ko') { try { lg = localStorage.getItem('ccviz.lang'); } catch (e) {} }
+      if (lg !== 'en' && lg !== 'ko') {
+        var ls = (navigator.languages && navigator.languages.length) ? navigator.languages : [navigator.language || ''];
+        lg = 'en'; for (var i = 0; i < ls.length; i++) if (/^ko(|[-_])/i.test(String(ls[i] || ''))) { lg = 'ko'; break; }
+      }
+      document.documentElement.lang = lg;
+    })();
+  </script>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2 29 16 16 30 3 16z' fill='%237aa2ff'/%3E%3Ccircle cx='16' cy='16' r='5' fill='%235eead4'/%3E%3C/svg%3E">
+  <!-- 공급망 방어: 외부 스크립트는 jsdelivr 의 three@0.170.0 만(SRI 고정), 데이터 요청(connect)은 같은 출처로만 -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    },
+    "integrity": {
+      "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js": "sha384-GY5FqjttLCFRt/McQbyaVdCk2O1IQtOeX8Py6NfD89BIAsIyJFRl4UgSXrk2vXAk",
+      "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/controls/OrbitControls.js": "sha384-aJoe4qqS/DgF2jh9njAuvA6QIveJYoCuYOfYjdFY8P3eawzmc9bEQ40jq2TvOyuP",
+      "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/renderers/CSS2DRenderer.js": "sha384-9CXQqRjuKfYvfHem9p/LPU6b7PaeeiDuC/gp1qRz3bEV9txWG5wi9XhrkE/0/Dn9"
+    }
+  }
+  </script>
+  <!-- 첫 로딩: 모듈 그래프(깊이 5)를 한 번에 요청 — 고정 링크(Worker→터널) 경유 시 왕복 5번이 1번으로.
+       3D(three.js) 모듈 미리 받기는 아래 스크립트가 3D 로 열 때만 넣는다 — 2D(저사양)는 three.js 요청 0 -->
+  <script>
+    (function () {
+      // app.js initialDim 과 같은 규칙: URL ?dim= 우선(이번 접속만), 없으면 저장값 'ccviz.dim', 없으면 3D
+      function norm(x) { x = String(x == null ? '' : x).trim().toLowerCase(); return x === '2d' || x === '2' || x === 'flat' || x === 'low' ? '2d' : x === '3d' || x === '3' ? '3d' : null; }
+      var d = null;
+      try { d = norm(new URLSearchParams(location.search).get('dim')); } catch (e) {}
+      if (!d) { try { d = norm(localStorage.getItem('ccviz.dim')); } catch (e) {} }
+      d = d || '3d';
+      document.documentElement.setAttribute('data-dim', d);
+      var cdn = 'https://cdn.jsdelivr.net/npm/three@0.170.0/';
+      // 2D 표현 미리 받기: URL ?view= 우선, 없으면 저장값 'ccviz.view2'(app.js 와 같은 이름, 옛 별칭 shapes 는 planet)
+      var v2d = null;
+      try { v2d = new URLSearchParams(location.search).get('view'); } catch (e) {}
+      if (!v2d) { try { v2d = localStorage.getItem('ccviz.view2'); } catch (e) {} }
+      v2d = String(v2d || '').toLowerCase(); if (v2d === 'shapes' || v2d === 'shape') v2d = 'planet';
+      var pre = d === '2d'
+        ? [[v2d === 'planet' ? 'flat/planet2d.js' : v2d === 'voxel' ? 'flat/voxel2d.js' : 'flat/flow2d.js'], ['flat/flat-view.js'], ['flat/flat-core.mjs'], ['flat/flat-draw.js'], ['flat/camera2d.js'], ['html-util.mjs'], ['overview/island-label.mjs']]
+        : [[cdn + 'build/three.module.js', 'sha384-GY5FqjttLCFRt/McQbyaVdCk2O1IQtOeX8Py6NfD89BIAsIyJFRl4UgSXrk2vXAk'],
+           [cdn + 'examples/jsm/controls/OrbitControls.js', 'sha384-aJoe4qqS/DgF2jh9njAuvA6QIveJYoCuYOfYjdFY8P3eawzmc9bEQ40jq2TvOyuP'],
+           [cdn + 'examples/jsm/renderers/CSS2DRenderer.js', 'sha384-9CXQqRjuKfYvfHem9p/LPU6b7PaeeiDuC/gp1qRz3bEV9txWG5wi9XhrkE/0/Dn9'],
+           ['camera.js'], ['scene.js'], ['env/ground.js'], ['env/weather.js'], ['overview/islands.js'], ['flow.js'], ['holo.js'],
+           ['flowview/flow-view.js'], ['flowview/chips.js'], ['flowview/beams.js'], ['flowview/backdrop.js'], ['flowview/bubbles.js']];
+      for (var i = 0; i < pre.length; i++) {
+        var l = document.createElement('link');
+        l.rel = 'modulepreload'; l.href = pre[i][0];
+        if (pre[i][1]) { l.integrity = pre[i][1]; l.crossOrigin = 'anonymous'; }
+        document.head.appendChild(l);
+      }
+    })();
+  </script>
+  <link rel="modulepreload" href="app.js">
+  <link rel="preload" as="style" href="limits.css">
+  <link rel="preload" as="style" href="projects.css">
+  <link rel="preload" as="style" href="overview/overview.css">
+  <link rel="preload" as="style" href="replay/replay.css">
+  <link rel="modulepreload" href="panel.js">
+  <link rel="modulepreload" href="audio.js">
+  <link rel="modulepreload" href="sfx.mjs">
+  <link rel="modulepreload" href="sound.mjs">
+  <link rel="modulepreload" href="mock.js">
+  <link rel="modulepreload" href="renderers.js">
+  <link rel="modulepreload" href="replay/ui.mjs">
+  <link rel="modulepreload" href="limits.js">
+  <link rel="modulepreload" href="replay/engine.mjs">
+  <link rel="modulepreload" href="replay/state.mjs">
+  <link rel="modulepreload" href="projects.js">
+  <link rel="modulepreload" href="projsel.js">
+  <link rel="modulepreload" href="env/env.js">
+  <link rel="modulepreload" href="env/env-core.mjs">
+  <link rel="preload" as="style" href="env/env.css">
+  <link rel="modulepreload" href="macro/macro.js">
+  <link rel="modulepreload" href="macro/macro-core.mjs">
+  <link rel="preload" as="style" href="macro/macro.css">
+  <link rel="modulepreload" href="icons.js">
+  <link rel="modulepreload" href="overview/layout.mjs">
+  <link rel="modulepreload" href="layout.js">
+  <link rel="modulepreload" href="flow-core.mjs">
+  <link rel="modulepreload" href="timeline.mjs">
+  <link rel="modulepreload" href="holo-core.mjs">
+  <link rel="modulepreload" href="flowview/flow-style.mjs">
+  <link rel="preload" as="style" href="flowview/flowview.css">
+  <link rel="preload" as="style" href="holo.css">
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand"><span class="logo"></span><span class="txt" data-i18n="app.brand">cc-agent-viz</span></div>
+    <span id="conn" class="conn wait" title="연결 상태" data-i18n-title="app.conn.title"><i></i><b data-i18n="app.conn.connecting">연결 중</b></span>
+    <!-- 프로젝트 선택기(전체 · 프로젝트들). 세션 고르기·재생은 화면 아래 매크로 타임라인 -->
+    <div id="proj-sel"></div>
+    <button id="btn-replay" class="tb" aria-pressed="false" title="세션 재생: 아래 매크로 타임라인에서 세션 막대를 누르세요" data-i18n-title="app.btn.replayTitle" data-i18n="app.btn.replay">재생</button>
+    <div class="spacer"></div>
+    <!-- 보조 조작 묶음: 넓은 화면은 display:contents(배치 그대로), 720px 미만은 가로로 밀리는 한 줄 -->
+    <div class="tb-more">
+    <button id="btn-view" class="tb tb-wrap" title="표현 고르기(흐름 · Planet · 복셀 오피스 / 3D · 2D)" data-i18n-title="app.btn.viewTitle" data-i18n="app.btn.viewDefault">표현: 흐름</button>
+    <button id="btn-camera" class="tb" aria-pressed="true" title="활성 에이전트를 따라 카메라를 자동 전환" data-i18n-title="app.btn.autoCamTitle" data-i18n="app.btn.autoCam">자동 카메라</button>
+    <button id="btn-done" class="tb" aria-pressed="false" title="끝난(완료·중지됨) 노드 표시. 꺼 두면 끝난 노드는 흐려지며 퇴장" data-i18n-title="app.btn.doneTitle" data-i18n="app.btn.done">완료 표시</button>
+    <button id="btn-env" class="tb" aria-pressed="false" title="배경: 바닥 그리드 · 기상(안개·비·눈)" data-i18n-title="app.btn.envTitle" data-i18n="app.btn.env">배경</button>
+    <button id="btn-legend" class="tb" aria-pressed="false" data-i18n="app.btn.legend">범례</button>
+    <button id="btn-theme" class="tb" title="테마 전환(자동·다크·라이트)" data-i18n-title="app.theme.title">테마: 자동</button>
+    <div class="sound">
+      <button id="btn-sound" class="tb" aria-pressed="false" aria-label="소리(음악·효과음) 꺼짐" title="소리(배경음악·효과음) 함께 켜기/끄기" data-i18n-aria-label="app.html.soundAria" data-i18n-title="app.html.soundTitle" data-i18n="app.html.soundOff">소리 꺼짐</button>
+      <input id="vol" type="range" min="0" max="1" step="0.01" value="0.35" aria-label="배경음악 볼륨" title="배경음악 볼륨" data-i18n-aria-label="app.html.musicVol" data-i18n-title="app.html.musicVol">
+      <input id="sfx-vol" type="range" min="0" max="1" step="0.01" value="0.5" aria-label="효과음 볼륨" title="효과음 볼륨" data-i18n-aria-label="app.html.sfxVol" data-i18n-title="app.html.sfxVol">
+      <span id="music-sec" title="곡 구간" data-i18n-title="app.html.musicSec"></span>
+    </div>
+    </div>
+    <div id="limits" hidden></div>
+  </header>
+
+  <main id="stage"><div id="labels"></div></main>
+  <div id="cam-chip" data-i18n="app.btn.autoCam">자동 카메라</div>
+  <div id="stats-chip" data-i18n="app.html.nodes0">노드 0</div>
+  <div id="timeline"></div>
+  <div id="macro-tl" hidden></div>
+
+  <aside id="panel" aria-label="실황" data-i18n-aria-label="app.panel.title">
+    <header>
+      <button id="panel-toggle" title="패널 접기/펼치기" aria-label="패널 접기/펼치기" data-i18n-title="app.panel.toggle" data-i18n-aria-label="app.panel.toggle">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3l5 5-5 5"/></svg>
+      </button>
+      <h2 data-i18n="app.panel.title">실황</h2>
+      <span class="count" id="stream-count"></span>
+      <span class="spacer"></span>
+      <span class="filter" id="stream-filter" title="필터 해제" data-i18n-title="app.panel.filterOff"><b></b><i>×</i></span>
+    </header>
+    <div id="stream" role="log" aria-live="off"></div>
+    <button id="to-latest" data-i18n="app.panel.toLatest">최신으로 ↑</button>
+  </aside>
+
+  <div id="legend" hidden></div>
+  <div id="notice"></div>
+  <div id="loading" role="status" aria-live="polite" hidden><i aria-hidden="true"></i><span></span></div>
+  <div id="replay-bar" hidden></div>
+
+  <audio id="bgm" loop preload="none"></audio>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

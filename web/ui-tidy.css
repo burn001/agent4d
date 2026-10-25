@@ -1,0 +1,69 @@
+/* UI 정리 — settings-menu.js 가 붙인다. 기능은 지우지 않고 숨기거나 ⚙ 메뉴로 옮긴다. 색은 테마 토큰만. */
+
+/* ── 상단 바 ── */
+body.ui-tidy #topbar { flex-wrap: nowrap; }
+body.ui-tidy #topbar .brand .txt { display: none; }
+/* 연결 상태: 점만(글자는 title·스크린리더용으로 남김) */
+body.ui-tidy #conn { padding: 0 4px; }
+body.ui-tidy #conn b { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+body.ui-tidy #topbar .tb-more[hidden] { display: none !important; }
+/* 한도 게이지: 늘 작은 두 줄 묶음(누르면 카드) — 큰 알약은 상단 바를 두 줄로 밀어냈다 */
+body.ui-tidy #limits .lim-pills { display: none !important; }
+body.ui-tidy #limits .lim-mini { display: flex !important; }
+/* 컨텍스트 알약은 짧게(ctx 42%) */
+body.ui-tidy .ctxg-who, body.ui-tidy .ctxg-name { display: none; }
+body.ui-tidy .ctxg-pill::before { content: "ctx"; color: var(--muted); font-size: 11px; }
+/* 소리 버튼은 상단 바에 그대로(문구는 sound.mjs) */
+body.ui-tidy #topbar > #btn-sound { flex: none; }
+#btn-settings { display: inline-flex; align-items: center; justify-content: center; width: 34px; padding: 0; flex: none; }
+#btn-settings.on { border-color: var(--accent); color: var(--accent); }
+
+/* ── ⚙ 설정 메뉴 ── */
+#settings-menu {
+  position: fixed; z-index: 60; width: 340px; max-width: calc(100vw - 16px); max-height: calc(100vh - 80px); overflow: auto;
+  padding: 10px 12px 8px; border-radius: 12px; background: var(--panel-bg); border: 1px solid var(--border); box-shadow: var(--shadow);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); font-size: 12.5px; color: var(--text);
+}
+#settings-menu[hidden] { display: none; }
+#settings-menu .sm-row { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: 4px 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+#settings-menu .sm-row:last-of-type { border-bottom: none; }
+#settings-menu .sm-k { color: var(--muted); font-size: 11.5px; font-weight: 600; }
+#settings-menu .sm-v { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+#settings-menu .sm-v > .tb, #settings-menu .sm-v .vsel > .tb { height: 28px; }
+#settings-menu .sm-range { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11.5px; }
+/* 좁은 화면 규칙이 볼륨 슬라이더를 숨기던 것을 메뉴 안에선 되살림 */
+#settings-menu #vol, #settings-menu #sfx-vol { display: inline-block !important; width: 96px; accent-color: var(--accent); }
+#settings-menu select { max-width: 100%; }
+#settings-menu #btn-pause[hidden] { display: none; }
+#settings-menu #btn-pause .pz-t { display: inline !important; }
+#settings-menu .sm-lang { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+#settings-menu .sm-lang > .tb { height: 28px; }
+#settings-menu .sm-note { color: var(--muted); font-size: 11.5px; }
+#settings-menu .sm-hint { margin: 6px 0 0; color: var(--muted); font-size: 11px; }
+#settings-menu .vsel-pop { z-index: 61; }
+@media (max-width: 719px) {
+  #settings-menu { left: 8px; right: 8px !important; width: auto; }
+}
+
+/* ── 화면 위 덜어 내기 ── */
+/* 노드 수 칩: ?fps=1 일 때만 */
+body.ui-tidy:not(.show-stats) #stats-chip { display: none; }
+/* '자동 카메라' 칩: 손으로 조작 중일 때만(복귀까지 남은 시간 안내) */
+body.ui-tidy #cam-chip:not(.manual) { display: none; }
+/* 노드 라벨 아래 도구 종류 꼬리표: 없앰(클릭 상세 팝업의 최근 도구로) */
+body.ui-tidy #labels .node-label .cats { display: none; }
+
+/* ── 화면 아래 타임라인: 평소 숨김(자리 유지 — 카메라 맞춤이 튀지 않게), 재생 중·마우스·포커스일 때만 ── */
+body.ui-tidy:not(.replaying):not(.tl-show) #timeline,
+body.ui-tidy:not(.replaying):not(.tl-show) #macro-tl { opacity: 0; pointer-events: none; transition: opacity .25s ease .1s; }
+body.ui-tidy #timeline, body.ui-tidy #macro-tl { transition: opacity .18s ease; }
+#tl-zone {
+  position: fixed; left: 0; right: var(--panel-w, 360px); bottom: 0; height: 22px; z-index: 13; border: none; padding: 0; margin: 0;
+  background: linear-gradient(to top, color-mix(in srgb, var(--text) 10%, transparent), transparent); opacity: .5; cursor: ns-resize;
+}
+#tl-zone:hover, #tl-zone:focus-visible { opacity: 1; outline: none; }
+#tl-zone:focus-visible { box-shadow: inset 0 2px 0 var(--accent); }
+body.replaying #tl-zone, body.tl-show #tl-zone { pointer-events: none; opacity: 0; }
+body.panel-collapsed #tl-zone { right: 40px; }
+@media (max-width: 719px) { #tl-zone { right: 0; } }
+@media (prefers-reduced-motion: reduce) { body.ui-tidy #timeline, body.ui-tidy #macro-tl { transition: none; } }

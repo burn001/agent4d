@@ -1,0 +1,326 @@
+// 복셀 2D 평면도의 개편 연출 — 3D(vx-flow·vx-holo·vx-ix·vx-client)와 같은 순수 규칙(office-core·client-core·flow-core)을
+// 위에서 본 평면으로: 바닥 조명 라인(흐르는 대시)·빛 패킷, 스탠딩 데스크 홀로그램 모니터(종류 색 판 + 가까우면 도구 이름),
+// 탕비실·특별 상호작용 시설·의뢰인 스크린(정적), 특별 상호작용 은유(시설 맥박·소포 점·요약 칩), 의뢰인 창구(카드·메모·질문 선택지).
+// Voxel2DView 가 하나 만든다. 캔버스 2D 만 쓴다(three 없음).
+import { FLOW, PacketPool, planFlow, easeInOut, catColor } from '../flow-core.mjs';
+import { OFFICE_FX, ixSpot, floorRoute, routeCum, routeAt, dashStarts, lineStyle, clientScreen, clientSpot, breakSpot, BREAK_N, MON } from '../voxel/office-core.mjs';
+import { ClientDesk, clientOp, CLIENT } from '../voxel/client-core.mjs';
+import * as IX from '../ix-core.mjs';
+import { DEG, degOf, degOfLink, packetGone, lineFlicker, brokenDash, seedOf } from '../degrade-core.mjs';
+const DG_DASH = [0, 0, 0, 0]; // 끊긴 선 무늬(재사용)
+
+
+const FONT = '"Pretendard", "Segoe UI", "Malgun Gothic", system-ui, sans-serif';
+const MIX = new Map();
+/** 색 섞기(#rrggbb 둘, k = b 쪽 비율) → rgb() 문자열(기억) */
+export function mixHex(a, b, k) {
+  const key = a + b + Math.round(k * 50);
+  let r = MIX.get(key);
+  if (r) return r;
+  const p = (h) => { const m = /^#?([0-9a-f]{6})/i.exec(h || ''); const n = m ? parseInt(m[1], 16) : 0x888888; return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+  const A = p(a), B = p(b), kk = Math.round(k * 50) / 50;
+  r = `rgb(${A.map((x, i) => Math.round(x + (B[i] - x) * kk)).join(',')})`;
+  if (MIX.size > 4000) MIX.clear();
+  MIX.set(key, r);
+  return r;
+}
+
+export class Vx2DExtra {
+  constructor(view) {
+    this.view = view;
+    this.pool = new PacketPool(128, 6);
+    this.fstate = { lastUp: new Map(), lastOut: new Map() };
+    this.routes = new Map();
+    this._ver = -1;
+    this.desks = new Map();
+    this.cst = { ixSeen: false, askId: null };
+    this._pt = { x: 0, z: 0, dx: 0, dz: 1 };
+    this.ixModel = new IX.IxModel(); // 복셀 2D 특별 상호작용 장부(바탕 FlatIx 는 복셀에서 꺼져 있음)
+  }
+  clear() { this.pool.clear(); this.desks.clear(); this.routes.clear(); this._ver = -1; this.ixModel.clear(); }
+  _nodes() { return this.view._nodeMap(); }
+
+  // ---------------- 이벤트 ----------------
+  event(ev, { speed = 1 } = {}) {
+    const v = this.view, nm = this._nodes(), now = v._now;
+    const plans = planFlow(ev, {
+      has: (id) => v.chars.has(id) || v.machines.has(id),
+      parentOf: (id) => { const n = nm.get(id); return n ? n.parentId : null; },
+      activeChild: (id) => { for (const ch of v.chars.values()) if (ch.node.parentId === id && ch.node.status === 'active') return ch.id; return null; },
+      now, speed, state: this.fstate,
+    });
+    for (const pl of plans) {
+      if (pl.kind !== 'link') continue;
+      const s = this.pool.alloc(pl.from, now);
+      s.from = pl.from; s.to = pl.to; s.color = pl.color; s.size = pl.size || 1; s.speed = Math.min(2, Math.max(1, Math.sqrt(speed))); s.dur = 0;
+    }
+    // 특별 상호작용(장부)
+    const rootOf = (id) => { let cur = id; for (let i = 0; i < 64; i++) { const n = nm.get(cur); if (!n || !n.parentId || !nm.has(n.parentId)) return cur; cur = n.parentId; } return cur; };
+    this.ixModel.event(ev, now, speed, rootOf);
+    // 의뢰인 창구
+    const isMain = (id) => { const n = nm.get(id); return !!n && n.kind === 'main'; };
+    const o = clientOp(ev, isMain, this.cst);
+    if (o && o.lead && nm.has(o.lead)) {
+      if (o.op === 'ask') this.cst.askId = o.toolUseId || null;
+      if (o.op === 'answer' || o.op === 'alert') this.cst.askId = null;
+      let d = this.desks.get(o.lead); if (!d) { d = new ClientDesk(); this.desks.set(o.lead, d); }
+      const n = nm.get(o.lead);
+      if (d.apply(o, now, !!n && n.status === 'active' && (n.openTools || []).length > 0) && o.op === 'alert') {
+        const room = v.layout && v.layout.roomOf ? v.layout.roomOf.get(o.lead) : null;
+        for (const ch of v.chars.values()) if (ch.room && ch.room.id === room) ch.flinchUntil = now + CLIENT.FLINCH;
+      }
+    }
+  }
+  breakSpot(ch) {
+    if (!ch.room || ch.room.type !== 'office') return null;
+    let k = 0;
+    for (const o of this.view.chars.values()) if (o !== ch && o.room === ch.room && o.target && o.target.type === 'break') k++;
+    return breakSpot(ch.room, (ch.hash + k) % BREAK_N);
+  }
+  /** 매 프레임(상태): 팀장 심부름·카드 읽기·모니터 열림 */
+  step(now, dt) {
+    const v = this.view;
+    for (const [id, d] of this.desks) {
+      d.step(now);
+      const ch = v.chars.get(id);
+      if (!ch || !ch.room) continue;
+      const er = d.errand(now);
+      if (er) { const sp = clientSpot(ch.room); if (sp) ch.errand = { spot: sp, until: er.until, kind: er.kind }; }
+      ch.readUntil = d.readUntil;
+    }
+    const book = v.holo && v.holo.book;
+    for (const ch of v.chars.values()) {
+      let has = false, cat = null, bt = -Infinity;
+      if (book) for (const e of book.list(ch.id)) { if (e.slot < 0) continue; const ph = book.phaseOf(e, now); if (ph.phase === 'gone') continue; has = true; const t = Math.max(e.t0, e.swapAt ?? -Infinity) + (e.endAt == null ? 1e3 : 0); if (t > bt) { bt = t; cat = e.cat; ch._monTool = e.label ? e.label.tool : e.tool; } }
+      const want = has && ch.atDesk() && ch.seat && ch.seat.kind !== 'meet' && ch.state !== 'gone';
+      ch._monK = Math.max(0, Math.min(1, (ch._monK || 0) + (want ? dt / MON.OPEN : -dt / MON.CLOSE)));
+      ch._monCat = cat;
+    }
+  }
+  /** 움직임이 있나(2D 갱신 단계) */
+  animating(now) {
+    if (this.pool.size || this.ixModel.fx.size) return 2;
+    for (const d of this.desks.values()) if (d.cards.length || d.ask || d.report || now - d.alertAt < CLIENT.ALERT) return 2;
+    for (const ch of this.view.chars.values()) if (ch._monK > 0 && ch._monK < 1) return 2;
+    return this.routes.size ? 1 : 0;
+  }
+
+  // ---------------- 정적(방 지역 좌표, 돌린 방은 캔버스가 돌아 있음) ----------------
+  /** 탕비실·특별 상호작용 시설·의뢰인 스크린 틀·스탠딩 데스크 발광대 */
+  drawRoomStatic(ctx, r, s) {
+    const v = this.view, pal = v.pal, o = r.origin, F = OFFICE_FX;
+    const R = (x, z, w, d, c) => { ctx.fillStyle = c; v._rect(ctx, x, z, w, d); };
+    R(o.x + F.pantry.x, o.z + F.pantry.z, 0.75, F.pantry.len, pal.counter);
+    R(o.x + F.pantry.x - 0.05, o.z + F.pantry.z - 0.55, 0.42, 0.4, pal.machine);
+    R(o.x + F.archive.x - 0.05, o.z + F.archive.z, 0.7, 1.4, pal.metal);
+    R(o.x + F.vault.x - 0.05, o.z + F.vault.z, 0.72, 1.4, pal.vault);
+    if (s > 4) { ctx.strokeStyle = pal.vaultDoor; ctx.lineWidth = Math.max(1, 0.08 * s); ctx.beginPath(); ctx.arc(v._X(o.x + F.vault.x + 0.25), v._Y(o.z + F.vault.z), 0.35 * s, 0, Math.PI * 2); ctx.stroke(); }
+    R(o.x + F.qc.x + 0.05, o.z + F.qc.z, 0.12, F.qc.len, pal.boardFrame);
+    R(o.x + F.conveyor.x, (o.z * 2 + F.conveyor.z0 + F.conveyor.z1) / 2, 0.66, F.conveyor.z1 - F.conveyor.z0, pal.belt);
+    R(o.x + 11.5, o.z + F.booth.z - 0.8, 0.95, 0.08, pal.booth); R(o.x + 11.5, o.z + F.booth.z + 0.8, 0.95, 0.08, pal.booth);
+    R(o.x + F.dispatch.x, o.z + F.dispatch.z + (r.ext || 0), 1.5, 1.5, pal.pad);
+    if (s > 6) { ctx.fillStyle = pal.paper; ctx.font = `700 ${Math.round(Math.min(14, s * 0.6))}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; v._text(ctx, 'H', v._X(o.x + F.dispatch.x), v._Y(o.z + F.dispatch.z + (r.ext || 0))); }
+  }
+
+  // ---------------- 동적(세계 좌표) ----------------
+  _rebuild() {
+    const v = this.view, nm = this._nodes();
+    this.routes.clear();
+    const anchor = (id) => {
+      const ch = v.chars.get(id);
+      if (ch) return ch.seat && ch.room && ch.placed && ch.state !== 'gone' && !ch.offstage ? { seat: ch.seat, room: ch.room } : null;
+      const m = v.machines.get(id);
+      if (m && m.pos && !m.released) return { seat: { x: m.pos.x, z: m.pos.z }, room: v.roomsById.get(m.pos.roomId) || null };
+      return null;
+    };
+    for (const [id, n] of nm) {
+      if (this.routes.size >= 240) break;
+      const p = n.parentId;
+      if (!p || !nm.has(p)) continue;
+      const a = anchor(p), b = anchor(id);
+      if (!a || !b) continue;
+      const same = a.room && b.room && a.room.id === b.room.id;
+      const pts = same ? floorRoute(a.seat, b.seat, a.room) : [{ x: a.seat.x, z: a.seat.z }, { x: b.seat.x, z: b.seat.z }];
+      const cum = routeCum(pts), L = cum[cum.length - 1];
+      if (L > 0.5) this.routes.set(p + '|' + id, { pid: p, cid: id, pts, cum, L, air: !same });
+    }
+  }
+  _lineColor(id) {
+    const v = this.view, vv = v.vis.get(id);
+    return (vv && vv.node && v.vsess.sessColor(vv.node)) || v.tokens['flow-call'] || v.tokens['k-main'];
+  }
+  /** 바닥 라인·대시·패킷 */
+  drawFlow(ctx, now, s) {
+    const v = this.view, t = v.tokens, pal = v.pal, nm = this._nodes();
+    if (this._ver !== v._layoutVer) { this._ver = v._layoutVer; this._rebuild(); }
+    const X = v._X, Y = v._Y, pt = this._pt, L = !!t.isLight;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const r of this.routes.values()) {
+      const vv = v.vis.get(r.cid);
+      if (!vv || vv.hidden || !(vv.scopeK ?? 1)) continue;
+      const fa = vv.projA ?? 1; // 프로젝트 페이드(문턱 대신 투명도)
+      const n = nm.get(r.cid);
+      const ch = v.chars.get(r.cid);
+      if (!n || (ch && (ch.state === 'gone' || ch.state === 'leave'))) continue;
+      const st = lineStyle(n.status), lc = this._lineColor(r.cid);
+      ctx.beginPath();
+      if (r.air) { const A = r.pts[0], B = r.pts[1], mx = (A.x + B.x) / 2, mz = (A.z + B.z) / 2 - Math.hypot(B.x - A.x, B.z - A.z) * 0.18; ctx.moveTo(X(A.x), Y(A.z)); ctx.quadraticCurveTo(X(mx), Y(mz), X(B.x), Y(B.z)); }
+      else { ctx.moveTo(X(r.pts[0].x), Y(r.pts[0].z)); for (let i = 1; i < r.pts.length; i++) ctx.lineTo(X(r.pts[i].x), Y(r.pts[i].z)); }
+      // 신호 열화: 그 세션 바닥 라인은 끊긴 토막으로 깜빡인다
+      const dg = DEG.on ? degOf(r.cid) : 0, tt = DEG.reduced ? 0 : DEG.t, sd = dg > 0 ? (r.seed ?? (r.seed = seedOf(r.cid))) : 0;
+      ctx.strokeStyle = lc; ctx.globalAlpha = Math.min(1, st.k * (L ? 1.6 : 1.1) * (dg > 0 ? (1 + dg) * lineFlicker(sd, tt, dg) : 1)) * (r.air ? 0.6 : 1) * fa;
+      ctx.lineWidth = Math.max(1, 0.07 * s); ctx.setLineDash(dg > 0 ? brokenDash(sd, tt, dg, Math.max(3, s * 0.35), DG_DASH) : r.air ? [Math.max(2, 0.3 * s), Math.max(2, 0.3 * s)] : []); ctx.stroke();
+      if (st.v && !v.reduced) { // 흐르는 대시(부모 → 자식)
+        const gap = 4.2 * s, dl = 0.55 * s;
+        ctx.setLineDash([dl, gap - dl]); ctx.lineDashOffset = -now * st.v * s;
+        ctx.globalAlpha = Math.min(1, st.dash * (L ? 1.5 : 1.2)) * fa; ctx.lineWidth = Math.max(1.5, 0.12 * s); ctx.stroke();
+        ctx.lineDashOffset = 0;
+      }
+      ctx.setLineDash([]);
+    }
+    // 패킷
+    const dead = [];
+    for (const p of this.pool.active) {
+      let r = this.routes.get(p.from + '|' + p.to), rev = false;
+      if (!r) { r = this.routes.get(p.to + '|' + p.from); rev = true; }
+      if (!r) { if (now - p.t0 > 1.6) dead.push(p); continue; }
+      if (!p.dur) { p.dur = Math.max(0.7, Math.min(2.4, r.L / 9)) / p.speed; p.t0 = now; }
+      const rv = v.vis.get(r.cid), pa = rv ? rv.projA ?? 1 : 1;
+      if (rv && (rv.hidden || pa <= 0)) continue;
+      const u = (now - p.t0) / p.dur;
+      if (u >= 1) { dead.push(p); continue; }
+      if (DEG.on && !DEG.reduced && packetGone((p.t0 * 1000) | 0, u, degOfLink(p.from, p.to))) continue; // 패킷 중간 소실
+      const col = p.color === 'call' ? (t['flow-call'] || t.text) : p.color === 'ok' ? t.ok : p.color === 'error' ? t.error : p.color === 'stopped' ? t.stopped : t['k-bash-bg'];
+      const e = easeInOut(Math.max(0, u));
+      for (let i = 5; i >= 0; i--) {
+        const w = e - i * 0.03;
+        if (w < 0) continue;
+        const uu = rev ? 1 - w : w;
+        if (r.air) { const A = r.pts[0], B = r.pts[1]; pt.x = A.x + (B.x - A.x) * uu; pt.z = A.z + (B.z - A.z) * uu - Math.sin(uu * Math.PI) * Math.hypot(B.x - A.x, B.z - A.z) * 0.09; }
+        else routeAt(r.pts, r.cum, uu, pt);
+        ctx.globalAlpha = (i ? 0.5 * (1 - i / 6) : 1) * pa; ctx.fillStyle = col;
+        ctx.beginPath(); ctx.arc(X(pt.x), Y(pt.z), Math.max(1.5, (i ? 0.12 : 0.2) * s * (p.size || 1)), 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    for (const p of dead) this.pool.release(p);
+    ctx.globalAlpha = 1;
+  }
+
+  /** 스탠딩 데스크 홀로그램 모니터(위에서 본 종류 색 판 — 가까우면 도구 이름) */
+  drawMonitors(ctx, now, s) {
+    const v = this.view, t = v.tokens, X = v._X, Y = v._Y, L = !!t.isLight;
+    for (const ch of v.chars.values()) {
+      if (!(ch._monK > 0.02) || !ch.seat || ch.offstage) continue;
+      const vv = v.vis.get(ch.id);
+      if (!vv || vv.hidden || !(vv.scopeK ?? 1)) continue;
+      const fa = vv.projA ?? 1; // 프로젝트 페이드(문턱 대신 투명도)
+      const lead = ch.seat.kind === 'lead', k = ch._monK;
+      const face = ch.seat.face || 0, fx = Math.sin(face), fz = Math.cos(face);
+      const W = (lead ? 2.2 : 1.6) * Math.min(1, k / 0.45), D = 0.5 * Math.max(0.1, (k - 0.45) / 0.55);
+      const cx = X(ch.seat.deskX + fx * 0.15), cy = Y(ch.seat.deskZ + fz * 0.15);
+      const c = ch._monCat === 'skill' ? t.skill : catColor(ch._monCat || 'other', L);
+      const w = (Math.abs(fz) > 0.5 ? W : D) * s, h = (Math.abs(fz) > 0.5 ? D : W) * s;
+      ctx.globalAlpha = 0.35 * k * fa; ctx.fillStyle = c; ctx.fillRect(cx - w / 2, cy - h / 2, w, h);
+      ctx.globalAlpha = 0.95 * k * fa; ctx.strokeStyle = c; ctx.lineWidth = Math.max(1, 0.06 * s); ctx.strokeRect(cx - w / 2, cy - h / 2, w, h);
+      if (s > 14 && k > 0.9 && ch._monTool) { ctx.fillStyle = L ? '#1b2433' : '#e6eefb'; ctx.font = `600 ${Math.round(Math.min(11, s * 0.32))}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(ch._monTool).slice(0, 14), cx, cy); }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /** 특별 상호작용 은유(평면): 시설 맥박 + 책상 ↔ 시설 소포 점 + 요약 칩 */
+  drawIx(ctx, now, s) {
+    const v = this.view, model = this.ixModel, mod = IX;
+    model.step(now);
+    if (!model.fx.size) return;
+    const X = v._X, Y = v._Y, L = !!v.tokens.isLight;
+    let chips = 0;
+    for (const f of model.fx.values()) {
+      if (now < (f.showAt || 0)) continue;
+      const ch = v.chars.get(f.nodeId) || (f.bgNode && v.chars.get(f.bgNode));
+      const m = !ch && (v.machines.get(f.nodeId) || (f.bgNode && v.machines.get(f.bgNode)));
+      const room = ch ? ch.room : m && m.pos ? v.roomsById.get(m.pos.roomId) : null;
+      const off = room && room.type === 'office' ? room : room && room.officeId ? v.roomsById.get(room.officeId) : null;
+      const sp = off && ixSpot(off, f.cat);
+      if (!sp) continue;
+      const vv = v.vis.get(f.nodeId);
+      if (vv && (vv.hidden || !(vv.scopeK ?? 1))) continue;
+      const col = colorOf(mod, f.ok === false ? 'err' : f.cat, L);
+      const te = f.tEnd == null ? null : now - f.tEnd;
+      const A = (te == null ? 1 : Math.max(0, 1 - te / 3)) * (vv ? vv.projA ?? 1 : 1); // 프로젝트 페이드
+      // 맥박 고리
+      ctx.globalAlpha = A * (0.5 + 0.4 * Math.sin(now * 5)); ctx.strokeStyle = col; ctx.lineWidth = Math.max(1.2, 0.08 * s);
+      ctx.beginPath(); ctx.arc(X(sp.x), Y(sp.z), (0.9 + 0.25 * Math.sin(now * 3)) * s, 0, Math.PI * 2); ctx.stroke();
+      // 책상 ↔ 시설 소포
+      const a = ch ? { x: ch.seat ? ch.seat.deskX : ch.pos.x, z: ch.seat ? ch.seat.deskZ : ch.pos.z } : m ? { x: m.pos.x, z: m.pos.z } : null;
+      if (a && te == null) {
+        const out = f.cat === 'github' ? f.op !== 'pull' && f.op !== 'fetch' && f.op !== 'clone' : f.cat === 'db' ? f.ix.rw === 'w' || f.ix.rw === 'rw' : f.cat === 'remote' ? f.ix.transfer !== 'down' : true;
+        const u = (now * 0.7 + (f.seq || 0) * 0.13) % 1, P = out ? a : sp, Q = out ? sp : a;
+        ctx.globalAlpha = A; ctx.fillStyle = col;
+        ctx.fillRect(X(P.x + (Q.x - P.x) * u) - 0.14 * s, Y(P.z + (Q.z - P.z) * u) - 0.14 * s, 0.28 * s, 0.28 * s);
+      }
+      // 진행 막대(대량 처리·테스트)
+      const ixd = f.ix || {};
+      const p = ixd.n ? Math.min(1, (ixd.i || 0) / ixd.n) : (ixd.pass != null || ixd.fail != null) ? (ixd.pass || 0) / Math.max(1, (ixd.pass || 0) + (ixd.fail || 0) + (ixd.skip || 0)) : null;
+      if (p != null && s > 5) { ctx.globalAlpha = A; ctx.fillStyle = L ? 'rgba(0,0,0,.15)' : 'rgba(255,255,255,.15)'; ctx.fillRect(X(sp.x) - 0.9 * s, Y(sp.z) + 1.1 * s, 1.8 * s, 0.18 * s); ctx.fillStyle = col; ctx.fillRect(X(sp.x) - 0.9 * s, Y(sp.z) + 1.1 * s, 1.8 * s * p, 0.18 * s); }
+      // 요약 칩(가까울 때, 최대 6)
+      if (mod && s > 8 && chips < 6) {
+        const txt = (mod.IX_GLYPH[f.cat] || '') + ' ' + (mod.ixSummary(ixd) || mod.IX_LABEL[f.cat] || '');
+        ctx.font = `600 10.5px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        const tw = Math.min(220, ctx.measureText(txt).width + 12), x = X(sp.x), y = Y(sp.z) - 1.3 * s - 10;
+        ctx.globalAlpha = A; ctx.fillStyle = L ? 'rgba(255,255,255,.92)' : 'rgba(20,24,34,.9)'; ctx.strokeStyle = col; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x - tw / 2, y - 8, tw, 16, 8) : ctx.rect(x - tw / 2, y - 8, tw, 16); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = v.tokens.text; ctx.fillText(txt.length > 34 ? txt.slice(0, 33) + '…' : txt, x, y + 0.5);
+        chips++;
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /** 의뢰인 스크린·카드·메모·질문 선택지 */
+  drawClient(ctx, now, s) {
+    const v = this.view, t = v.tokens, pal = v.pal, X = v._X, Y = v._Y;
+    const user = t['flow-call'] || t['k-main'];
+    for (const r of v.rooms) {
+      if (r.type !== 'office' || !r.leadDesk || r.external) continue;
+      const ov = v.vis.get(r.ownerId);
+      if (!ov || ov.node.kind !== 'main' || ov.hidden || !(ov.scopeK ?? 1)) continue;
+      const fa = ov.projA ?? 1; // 프로젝트 페이드
+      const d = this.desks.get(r.ownerId);
+      const mode = d ? d.screen(now, ov.node.status === 'idle') : 'idle';
+      const sc = clientScreen(r);
+      if (!sc) continue;
+      const odd = r.xf && r.local ? (Math.round(r.xf.k) % 2 !== 0) : false;
+      const w = (odd ? 0.3 : 2.4) * s, h = (odd ? 2.4 : 0.3) * s;
+      ctx.globalAlpha = fa;
+      ctx.fillStyle = mode === 'alert' ? (Math.floor(now * 4) % 2 ? t.error : pal.screenOff) : mode === 'saver' ? pal.screenOff : mode === 'idle' ? mixHex(pal.screenDim, user, 0.15) : mixHex(pal.screenDim, user, 0.6);
+      ctx.fillRect(X(sc.x) - w / 2, Y(sc.z) - h / 2, w, h);
+      if (d && d.ask && s > 3) {
+        const n = d.ask.n, sp = clientSpot(r);
+        for (let i = 0; i < n; i++) {
+          const u = n > 1 ? i / (n - 1) - 0.5 : 0, chosen = d.ask.chosen === i;
+          const cx = (sc.x + sp.x) / 2 + (odd ? 0 : u * 2.2), cz = (sc.z + sp.z) / 2 + (odd ? u * 2.2 : 0);
+          ctx.fillStyle = chosen ? t.ok : mixHex(pal.paper, user, 0.25);
+          ctx.fillRect(X(cx) - 0.2 * s, Y(cz) - 0.14 * s, 0.4 * s, 0.28 * s);
+        }
+      }
+      if (d) {
+        for (const c of d.liveCards(now)) {
+          const u = (now - c.t0) / CLIENT.CARD_DUR, e = easeInOut(Math.min(1, u)), ld = r.leadDesk;
+          const x = sc.x + (ld.x - sc.x) * e, z = sc.z + (ld.z - sc.z) * e - Math.sin(e * Math.PI) * 1.2;
+          ctx.fillStyle = c.kind === 'memo' ? mixHex(pal.paper, t.skill, 0.35) : pal.paper; ctx.strokeStyle = user; ctx.lineWidth = 1;
+          ctx.fillRect(X(x) - 0.17 * s, Y(z) - 0.13 * s, 0.34 * s, 0.26 * s); ctx.strokeRect(X(x) - 0.17 * s, Y(z) - 0.13 * s, 0.34 * s, 0.26 * s);
+        }
+        if (d.memo && s > 3) { ctx.fillStyle = mixHex(pal.paper, t.skill, 0.45); for (let i = 0; i < d.memo; i++) ctx.fillRect(X(r.leadDesk.x - 0.75) + i * 1.5, Y(r.leadDesk.z + 0.18) - i * 1.5, 0.24 * s, 0.24 * s); }
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+const IXC = new Map();
+function colorOf(mod, key, L) {
+  const k = key + (L ? 'L' : 'D');
+  let c = IXC.get(k);
+  if (!c) { c = mod ? mod.ixKeyColor(key, L) : '#888'; IXC.set(k, c); }
+  return c;
+}

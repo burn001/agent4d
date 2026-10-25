@@ -1,0 +1,37 @@
+/* 흐름(Flow) 표현. flow-view.js 가 스스로 불러오고, 라벨 그릇(#labels)에 .flow-mode 를 붙인다.
+   색은 flow-view.js 가 테마마다 --flow-* 로 넣는다(agent-flow 풍 고정 남색 팔레트 / 라이트는 같은 색상을 진하게). */
+.flow-mode .node-label {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, "D2Coding", monospace;
+  font-size: 11px; font-weight: 600; color: var(--flow-text, var(--text)); letter-spacing: .01em;
+  text-shadow: 0 0 6px var(--flow-bg, transparent), 0 0 2px var(--flow-bg, transparent);
+  padding: 2px 7px 3px; border-radius: 6px;
+}
+.flow-mode .node-label small { color: var(--flow-dim, var(--muted)); font-size: 10px; font-weight: 500; }
+.flow-mode .node-label .ntitle { color: var(--flow-dim, var(--muted)); font-size: 9.5px; font-weight: 400; font-style: italic; opacity: .85; }
+/* 작업 한 줄: 칩 아래 유리 띠(늘 보임) */
+.flow-mode .node-label .act {
+  margin-top: 3px; padding: 1px 6px; border-radius: 4px; max-width: 260px;
+  background: var(--flow-bg, transparent); border: 1px solid color-mix(in srgb, var(--hc, var(--flow-holo)) 35%, transparent);
+  color: var(--flow-text, var(--text));
+}
+.flow-mode .node-label .act.say { border-color: color-mix(in srgb, var(--flow-holo) 25%, transparent); }
+.flow-mode .node-label.focus { background: var(--flow-bg); border: 1px solid color-mix(in srgb, var(--flow-holo) 40%, transparent); box-shadow: 0 0 14px color-mix(in srgb, var(--flow-holo) 25%, transparent); }
+.flow-mode .node-label .hist { border-top-color: color-mix(in srgb, var(--flow-holo) 20%, transparent); color: var(--flow-dim); }
+
+/* 말풍선: 역할 머리표 + 최대 3줄 */
+.flow-bubble {
+  pointer-events: none; max-width: 230px; padding: 4px 8px 5px; border-radius: 8px;
+  font: 500 10.5px/1.35 ui-monospace, "Cascadia Mono", Consolas, "D2Coding", monospace;
+  color: var(--flow-text, var(--text)); background: var(--flow-bg, var(--chip-bg));
+  border: 1px solid color-mix(in srgb, var(--flow-holo, var(--accent)) 30%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--flow-holo, var(--accent)) 14%, transparent);
+  transition: opacity .3s;
+}
+.flow-bubble b { display: block; font-size: 9px; letter-spacing: .08em; color: var(--flow-holo, var(--accent)); margin-bottom: 1px; }
+.flow-bubble p { margin: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+.flow-bubble[data-role="user"] { border-color: color-mix(in srgb, var(--flow-tool) 40%, transparent); }
+.flow-bubble[data-role="user"] b { color: var(--flow-tool); }
+.flow-bubble[data-role="result"] b { color: var(--ok); }
+.flow-bubble[data-role="error"] { border-color: color-mix(in srgb, var(--error) 50%, transparent); }
+.flow-bubble[data-role="error"] b { color: var(--error); }
+@media (max-width: 720px) { .flow-bubble { max-width: 160px; font-size: 9.5px; } .flow-mode .node-label .act { max-width: 180px; } }

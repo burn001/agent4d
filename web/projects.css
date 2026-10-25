@@ -1,0 +1,124 @@
+/* 사이드 패널 프로젝트 목록. 테마 토큰만 쓴다. #proj-list 는 #panel 맨 위(헤더 앞)에 둔다. */
+.pl {
+  flex: none; display: flex; flex-direction: column; min-height: 0; max-height: 42%;
+  border-bottom: 1px solid var(--border); font-size: 12px;
+}
+.pl-head { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 8px 0 8px; flex: none; }
+.pl-fold {
+  display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 6px; border-radius: 6px;
+  border: none; background: transparent; cursor: pointer; font-weight: 650; font-size: 12.5px;
+}
+.pl-fold:hover { background: var(--hover); }
+.pl-fold svg { width: 13px; height: 13px; transition: transform .2s; }
+.pl-collapsed .pl-fold svg { transform: rotate(-90deg); }
+.pl-cur { color: var(--muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.pl-body { overflow-y: auto; overflow-x: hidden; padding: 0 0 6px; overscroll-behavior: contain; min-height: 0; }
+.pl-collapsed .pl-body, .pl-collapsed .pl-chips, .pl-collapsed .pl-chip-sessions { display: none !important; }
+
+.pl-row, .pl-srow {
+  display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; align-items: center; gap: 0 7px; width: 100%;
+  padding: 4px 10px 4px 12px; border: none; background: transparent; cursor: pointer; text-align: left;
+  border-left: 2px solid transparent;
+}
+.pl-row:hover, .pl-srow:hover { background: var(--hover); }
+.pl-row.on, .pl-srow.on { background: var(--hover); border-left-color: var(--accent); }
+.pl-row.on .pl-name { color: var(--accent); }
+.pl-row.dim .pl-name { color: var(--muted); }
+.pl-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-meta { color: var(--muted); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pl-all .pl-name { font-weight: 700; }
+.pl-sess { padding: 0 0 4px 14px; }
+.pl-srow { padding: 3px 10px 3px 10px; grid-template-columns: 10px minmax(0, 1fr) auto; }
+.pl-st { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-empty { margin: 4px 12px; color: var(--muted); font-size: 11.5px; }
+
+.pl-grp > summary {
+  list-style: none; cursor: pointer; padding: 4px 12px; color: var(--muted); font-size: 11.5px; user-select: none;
+}
+.pl-grp > summary::-webkit-details-marker { display: none; }
+.pl-grp > summary::before { content: "▸"; display: inline-block; width: 12px; transition: transform .15s; }
+.pl-grp[open] > summary::before { transform: rotate(90deg); }
+.pl-grp > summary:hover { color: var(--text); }
+
+.pl-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; box-sizing: border-box; }
+.pl-dot.sm { width: 7px; height: 7px; }
+.pl-dot.busy { background: var(--ok); box-shadow: 0 0 0 0 var(--ok); animation: pl-pulse 1.4s ease-out infinite; }
+.pl-dot.idle { background: var(--muted); }
+.pl-dot.off { border: 1.5px solid var(--muted); background: transparent; opacity: .8; }
+@keyframes pl-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 60%, transparent); }
+  80%, 100% { box-shadow: 0 0 0 6px transparent; }
+}
+
+.pl-disabled .pl-body, .pl-disabled .pl-chips, .pl-disabled .pl-chip-sessions { opacity: .45; pointer-events: none; filter: saturate(.6); }
+
+/* 좁은 화면 칩 줄(기본 숨김) — 재생 고르기 창의 프로젝트 칩도 이 모양을 쓴다 */
+.pl-chips { display: none; gap: 6px; padding: 4px 10px 6px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; flex: none; }
+.pl-chips::-webkit-scrollbar { display: none; }
+.pl-chip {
+  display: inline-flex; align-items: center; gap: 5px; flex: none; height: 26px; padding: 0 10px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--chip-bg); cursor: pointer; white-space: nowrap; font-size: 12px;
+}
+.pl-chip:hover { background: var(--hover); }
+.pl-chip.on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.pl-caret { font-size: 10px; margin-left: 1px; }
+.pl-chip-sessions { max-height: 30vh; overflow-y: auto; border-top: 1px solid var(--border); flex: none; }
+.pl-chip-sessions .pl-sess { padding-left: 4px; }
+
+body.panel-collapsed #proj-list { display: none !important; }
+
+@media (max-width: 719px) {
+  .pl { max-height: none; }
+  .pl-head, .pl-body { display: none; }
+  .pl-chips { display: flex; }
+}
+
+/* 재생 고르기 창의 프로젝트 필터 칩 */
+.rp-proj { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 8px; }
+.rp-proj[hidden] { display: none; }
+.rp-proj .pl-chip small { color: var(--muted); font-weight: 500; font-size: 10.5px; }
+.rp-proj .pl-chip.on small { color: inherit; }
+
+/* 상단 바 프로젝트 선택기: 버튼 + 펼침 목록. 목록은 위 .pl 모양을 그대로 쓰되 세션 펼침·칩 줄·접기는 쓰지 않는다 */
+/* 선택기는 줄어들어도 점·이름 앞부분·펼침 표시는 남기고(min-width), 내용은 버튼 밖으로 넘치지 않게 자른다 —
+   예전엔 min-width:0 + overflow visible 이라 40px 까지 눌리면 '프로젝트 5'가 옆 '재생' 버튼 위로 삐져나왔다 */
+.psel { position: relative; display: flex; align-items: center; min-width: 88px; flex: 0 1 auto; }
+.psel-btn { display: inline-flex; align-items: center; gap: 6px; max-width: 300px; min-width: 0; width: 100%; overflow: hidden; background: var(--chip-bg); }
+.psel-btn .psel-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
+.psel-btn .psel-name { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.psel-btn .psel-meta { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.psel-btn .psel-meta:empty { display: none; }
+.psel-btn svg { width: 12px; height: 12px; flex: none; color: var(--muted); }
+.psel-btn[aria-expanded="true"] { border-color: var(--accent); }
+.psel-pop {
+  position: fixed; z-index: 45; width: 340px; max-height: min(62vh, 560px); display: flex; flex-direction: column;
+  background: var(--panel-bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); overflow: hidden;
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+.psel-pop[hidden] { display: none; }
+.psel-hint { margin: 0; padding: 8px 12px; font-size: 12px; color: var(--accent); border-bottom: 1px solid var(--border); }
+.psel-hint[hidden] { display: none; }
+.psel-pop .pl { max-height: none; border-bottom: none; min-height: 0; flex: 1; }
+.psel-pop .pl-head { display: flex !important; }
+.psel-pop .pl-fold { pointer-events: none; }
+.psel-pop .pl-fold svg, .psel-pop .pl-cur { display: none; }
+.psel-pop .pl-body { display: block !important; padding-bottom: 8px; }
+.psel-pop .pl-chips, .psel-pop .pl-chip-sessions { display: none !important; }
+.psel-pop .pl-collapsed .pl-head .pl-inact { display: inline-flex; }
+.psel-pop .pl-row { padding-top: 6px; padding-bottom: 6px; }
+@media (min-width: 720px) and (max-width: 1023px) { .psel-btn { max-width: 190px; } .psel-btn .psel-meta { display: none; } }
+@media (max-width: 719px) {
+  .psel { min-width: 0; }
+  .psel-btn { max-width: 150px; }
+  .psel-btn .psel-meta { display: none; }
+  .psel-pop { left: 8px !important; right: 8px; width: auto; }
+}
+@media (max-width: 400px) { .psel-btn { max-width: 112px; padding: 0 8px; } }
+
+/* 보관함 묶음: 목록 맨 아래, 구분선 + 상자 아이콘. 색은 테마 토큰만 */
+.pl-arc { margin-top: 6px; padding-top: 4px; border-top: 1px dashed var(--border); }
+.pl-arc .pl-row { grid-template-columns: 16px minmax(0, 1fr) auto; }
+.pl-arc-ic { width: 16px; text-align: center; font-size: 12px; line-height: 1; }
+.pl-arc-all .pl-name { font-weight: 700; }
+.pl-arc-row { padding-left: 22px; }
+.pl-arc-row .pl-name { font-weight: 550; }

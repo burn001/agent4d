@@ -1,0 +1,39 @@
+/* 소리 설정 팝업 — sound-pop.js 가 붙인다. 색은 테마 토큰만(밝은·어두운 공용). */
+#btn-sound-pop { display: inline-flex; align-items: center; justify-content: center; width: 34px; padding: 0; flex: none; }
+#btn-sound-pop[hidden] { display: none; }
+#btn-sound-pop.on { border-color: var(--accent); color: var(--accent); }
+
+#sound-pop {
+  position: fixed; z-index: 60; width: 330px; max-width: calc(100vw - 16px); max-height: calc(100vh - 80px); overflow: auto;
+  padding: 10px 12px 8px; border-radius: 12px; background: var(--panel-bg); border: 1px solid var(--border); box-shadow: var(--shadow);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); font-size: 12.5px; color: var(--text); box-sizing: border-box;
+}
+#sound-pop[hidden] { display: none; }
+#sound-pop .sp-head { display: flex; align-items: baseline; gap: 8px; }
+#sound-pop .sp-state { color: var(--muted); font-size: 11.5px; min-width: 0; }
+#sound-pop .sp-now { margin: 8px 0 4px; padding: 8px 10px; border-radius: 8px; background: var(--chip-bg); border: 1px solid var(--border); }
+#sound-pop .sp-now-t { font-weight: 650; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#sound-pop .sp-now-s { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+#sound-pop .sp-now-s:empty { display: none; }
+#sound-pop .sp-row { display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: center; gap: 4px 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+#sound-pop .sp-row:last-of-type { border-bottom: none; }
+#sound-pop .sp-k { color: var(--muted); font-size: 11.5px; font-weight: 600; }
+#sound-pop .sp-seg, #sound-pop .sp-tracks, #sound-pop .sp-vols { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; }
+#sound-pop .sp-chip {
+  height: 26px; padding: 0 9px; border-radius: 7px; cursor: pointer; white-space: nowrap; font: inherit; font-size: 12px;
+  background: transparent; color: var(--text); border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 5px;
+}
+#sound-pop .sp-chip:hover:not(:disabled) { background: var(--hover); }
+#sound-pop .sp-chip:disabled { opacity: .45; cursor: not-allowed; }
+#sound-pop .sp-chip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+#sound-pop .sp-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+#sound-pop .sp-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border); flex: none; }
+#sound-pop .sp-track.cur .sp-dot { background: var(--accent); box-shadow: 0 0 5px var(--accent); }
+#sound-pop .sp-range { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11.5px; }
+/* 좁은 화면 규칙이 상단 바 볼륨 슬라이더를 숨기던 것을 팝업 안에선 되살림 */
+#sound-pop #vol, #sound-pop #sfx-vol { display: inline-block !important; width: 84px; accent-color: var(--accent); }
+#sound-pop #bgm-track { display: none !important; }
+#sound-pop .sp-hint { margin: 6px 0 0; color: var(--muted); font-size: 11px; }
+@media (max-width: 719px) {
+  #sound-pop { left: 8px !important; right: 8px !important; width: auto; max-width: none; }
+}
