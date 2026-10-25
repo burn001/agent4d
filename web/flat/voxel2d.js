@@ -105,6 +105,8 @@ export class Voxel2DView extends FlatView {
   }
   /** 배치 장치(복합기) 이름표는 위 — 팀장 책상 바로 옆이라 아래면 팀장 이름표와 겹친다(3D 도 장치 위·뒤) */
   labelUp(v) { return !!v.device; }
+  /** 계획 보드 앵커의 제자리: 캐릭터는 걸어 다녀도 자기 책상 자리(seat), 장치(기동기 등)는 그 자리 */
+  planHome(id) { const v = this.vis.get(id); if (!v) return null; const ch = this.chars.get(id); return ch && ch.seat ? { x: ch.seat.x, z: ch.seat.z } : { x: v.target.x, z: v.target.z }; }
   /** 이름표는 캐릭터 바로 아래 */
   _labelGap(v, s, k) { return Math.min(60, v.r * k * s * 1.1 + 3); }
 

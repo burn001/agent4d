@@ -403,6 +403,8 @@ export class VoxelView {
   has(id) { return this.vis.has(id); }
   nodeTarget(id) { const v = this.vis.get(id); return v ? v.target : null; }
   nodePos(id) { return this.nodeTarget(id); }
+  /** 계획 보드 앵커의 제자리: 캐릭터는 걸어 다녀도 자기 책상 자리(seat), 장치(기동기 등)는 그 자리 */
+  planHome(id) { const v = this.vis.get(id); if (!v) return null; const ch = this.chars.get(id); return ch && ch.seat ? v.target.clone().set(ch.seat.x, 1, ch.seat.z) : v.target.clone(); }
   nodeRadius(id) { const v = this.vis.get(id); return v ? v.r : 1; }
   get size() { return this.vis.size; }
   children(id) {

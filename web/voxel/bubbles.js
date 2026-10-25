@@ -1,6 +1,7 @@
 // 말풍선·이름표·방 문패 — CSS2D. DOM 은 미리 만든 풀을 돌려 쓴다(프레임마다 생성 0).
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { placeLabels, textWidth as textPx } from '../label-place.mjs';
+import { planLabelRects } from '../plan-core.mjs'; // 계획 보드 = 라벨의 고정 장애물
 
 const VX_SHIFTS = [0, 14, 28], VX_FAR = [42, [0.6, 14], [-0.6, 14], 56, [0.6, 42], [-0.6, 42], 70];
 
@@ -119,6 +120,7 @@ export class Bubbles {
     const rects = [];
     const pl = this._placed || [];
     for (let j = 0; j + 3 < pl.length; j += 4) rects.push([pl[j], pl[j + 1], pl[j + 2], pl[j + 3]]);
+    planLabelRects(rects); // 계획 보드(라벨이 비킴)
     const placed = placeLabels(cands, discs, { shifts: VX_SHIFTS, farShifts: VX_FAR, bounds: [0, W], rects });
     for (const c of cands) {
       const it = items[c.i], r = placed.get(c.id);

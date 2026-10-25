@@ -1,6 +1,6 @@
 // 계획 보드 — 순수 규칙(three·DOM 없음, 시험·세 표현 공용).
 // 서버가 소유 노드 meta.plans 로 낸 계획 = [{id, src, title, doc?, at, by, cy?, n, items:[{k, t, s, at, by?, cy?, hold?}]}].
-// 메인 옆 보드: 세션 메인으로 모으기·줄 창·배치·카메라 맞춤 점, 변경 연출 큐·팝업 모델·⚙ 저장 규칙.
+// 보드: 세션 메인으로 모으기·보드 모델, 앵커 단일화(러너 > 메인)·월드 고정 자리·라벨 장애물, 변경 연출 큐·팝업 모델·⚙ 저장 규칙.
 
 import { t } from './i18n.mjs'; // 다국어
 
@@ -9,24 +9,21 @@ const tLabels = (pre, keys) => Object.freeze(Object.defineProperties({}, Object.
 
 export const PLAN_UI = {
   MAX_BOARDS: 4,      // 화면에 동시에 띄우는 보드 수(메인마다 한 장 — 전체 보기에서 섬 여럿)
-  MAX_CELLS: 24,      // 회차 연결 대상 항목 상한
-  HOLO_K: 2,          // 보드 = 일반 홀로그램 모니터 크기의 이 배
-  BOARD_MIN: 210,     // 보드 폭 하한(px, 제목·진행률·지금 줄이 읽히는 폭)
-  BOARD_MAX: 360,     // 보드 폭 상한
-  GAP: 16,            // 메인 원과 보드 사이(px)
+  MAX_CELLS: 24,      // 보드 칸 띠 항목 상한
+  NEXT_N: 2,          // 판에 보이는 다음 단계 수(지금 단계 뒤)
+  BASE_PX: 180,       // 보드 DOM 기준 폭(px) — 화면 크기는 월드 크기 × 원근 배율로 scale(글자도 함께)
+  HOLO_H_K: 1.5,      // 보드 높이 = 그 표현 일반 홀로그램 모니터 높이 × 이 배(폭은 모니터와 같음)
+  VX_MON_H: 1.0,      // 복셀 모니터(voxel/office-core MON.H·ASP — 시험이 같은지 확인)
+  VX_MON_ASP: 1.62,
+  BOOST: { flow: [30, 10], voxel: [64, 1.9] }, // 활동 노드 모니터와 같은 최소 크기 키움 [모니터 최소 높이 px, 배율 상한] (holo-core HOLO.MIN_PX_ACTIVE·BOOST_MAX, office-core MON.MIN_PX·BOOST)
+  GAP_W: 0.8,         // 앵커 원 바깥 ~ 보드 왼쪽 변(월드 단위, 원 반지름 × 1.3 바깥에서)
+  DROP_K: 0.5,        // 보드 아래 변 = 앵커 중심보다 반지름 × 이만큼 아래(3D 는 y, 2D 는 화면 아래 = +z)
+  HIDE_PX: 14,        // 화면 폭이 이보다 작으면 숨김(아주 먼 전체 보기 — 홀로그램 LOD 와 같은 뜻)
+  LOD_PX: 96,         // 화면 폭이 이보다 작으면 간략(출처 글리프·완료/전체·막대·칸만)
+  S_MAX: 4,           // 원근 배율 상한(아주 가까울 때 — 자리는 그대로, 크기만)
   HOT_MS: 6000,       // 바뀐 뒤 이만큼 밝게
   FX_MS: 1600,        // 항목 변경 연출 길이
   DEL_MS: 1100,       // 지운 항목 잔상
-  LINK_CYCLES: 3,     // 회차 ↔ 항목 연결선: 최근 회차 수
-  // 자리 안정: 고른 자리는 '확실히 나빠진 상태'가 WAIT_MS 이어지고 마지막 이동 뒤 MIN_MS 가 지나야 옮김
-  HOLD_RATIO: 1.6,    // 지금 자리 비용 > 최선 × 이 배 + HOLD_AREA 면 '확실히 나쁨'
-  HOLD_AREA: 2500,    // (px² — 이름표 하나 반쯤 덮는 정도는 참음)
-  HOLD_TAU_MS: 3000,  // 후보 비용 평균 시간(걸어 다니는 캐릭터 이름표·잠깐 뜨는 말풍선을 거름)
-  HOLD_WAIT_MS: 1500,
-  HOLD_MIN_MS: 4000,
-  ANCHOR_MS: 2000,    // 앵커(회차·러너·메인) 바꿀 후보가 이만큼 이어져야 바꿈(지금 앵커가 안 보이면 바로)
-  DEADBAND: 12,       // 같은 후보 안에서 목표 자리(앵커 기준) 변화가 이 px 미만이면 그대로
-  SIZE_STEP: 8,       // 보드 폭이 이 px 넘게 바뀔 때만 다시 그림(확대·축소 중 매 프레임 다시 짓지 않게)
 };
 
 export const PLAN_SRC_LABEL = tLabels('boards.plan.src.', ['todo', 'tasks', 'exitplan', 'file', 'phases', 'workflow']);
@@ -175,41 +172,75 @@ export function gatherPlans(nodes, { isRunner = (n) => !!(n && n.meta && (n.meta
 }
 
 /**
- * 보드 크기(px) = 그 표현의 일반 홀로그램 모니터(세계 높이 1.25 + 0.3·노드 반지름, 폭 = 높이 × 1.5)의 약 2배.
- * anchorR = 메인 화면 원 반지름(px, anchorOf = 세계 반지름 × 1.3 × 축척), worldR = 메인 세계 반지름.
- * 폭은 읽히는 하한·상한 안, 글자 배율 k(폭 280px = 1).
+ * 보드 월드 크기·자리(앵커 기준 고정 오프셋, 월드 단위). 크기 = 그 앵커의 **일반 홀로그램 모니터 기준**: 폭은 모니터와 같고
+ * 높이는 모니터 높이 × HOLO_H_K(1.5). 모니터 = 흐름·Planet 높이 1.25 + 0.3·r · 폭 × 1.5, 복셀(MON) 높이 1.0 · 폭 × 1.62.
+ * holo = 표현이 따로 낸 모니터 크기 {w, h}(view.holoSize — 있으면 그것이 우선). 자리 = 앵커 오른쪽(x 월드) — 왼쪽 변이 앵커 원(반지름 × 1.3)
+ * 바깥 GAP_W, 아래 변이 중심보다 r × DROP_K 아래. 카메라·화면과 무관(되먹임 없음).
+ * 반환 {w, h, aspect(h/w), holo:{w, h}, off(앵커 중심 → 왼쪽 변 x), drop(앵커 중심 → 아래 변, 아래로)}
  */
-export function boardSize(anchorR, worldR, vw = 1e4) {
-  const wr = Math.max(0.1, worldR || 1);
-  const scale = (anchorR || 0) / (1.3 * wr);           // px / 세계 단위
-  const holoH = (1.25 + 0.3 * wr) * scale;               // 일반 홀로그램 모니터 높이(px)
-  const w = Math.round(Math.min(vw - 32, Math.max(PLAN_UI.BOARD_MIN, Math.min(PLAN_UI.BOARD_MAX, holoH * 1.5 * PLAN_UI.HOLO_K))));
-  return { w, k: Math.max(0.9, Math.min(1.2, w / 280)), holoH };
+export function holoMonitor(worldR, mode = 'flow') {
+  const r = Math.max(0.1, worldR || 1);
+  if (mode === 'voxel') return { w: PLAN_UI.VX_MON_H * PLAN_UI.VX_MON_ASP, h: PLAN_UI.VX_MON_H };
+  const h = 1.25 + 0.3 * r;
+  return { w: h * 1.5, h };
+}
+export function boardWorld(worldR, mode = 'flow', holo = null) {
+  const r = Math.max(0.1, worldR || 1);
+  const m = holo && holo.w > 0 && holo.h > 0 ? holo : holoMonitor(r, mode);
+  const w = m.w, h = m.h * PLAN_UI.HOLO_H_K;
+  return { w, h, aspect: h / w, holo: { w: m.w, h: m.h }, boost: PLAN_UI.BOOST[mode === 'voxel' ? 'voxel' : 'flow'], off: r * 1.3 + PLAN_UI.GAP_W, drop: r * PLAN_UI.DROP_K };
+}
+
+/**
+ * 화면 그리기 값: 보드 왼쪽 아래 모서리의 화면 투영 p {x, y}·월드 1 단위의 화면 px(ppw) → 원근 배율 s(= 월드 폭 × ppw / BASE_PX),
+ * 활동 모니터와 같은 최소 크기 키움(BOOST), 숨김(카메라 뒤·HIDE_PX 미만·판 전체가 화면 밖), 간략(lod: LOD_PX 미만). **화면 안으로 끌어오지 않는다**(가장자리 밀어 넣기 없음).
+ */
+export function boardScreen(p, ppw, wb, vw, vh) {
+  if (!p || p.behind || !(ppw > 0)) return { hidden: true };
+  let s0 = (wb.w * ppw) / PLAN_UI.BASE_PX;
+  // 활동 노드 모니터처럼 멀리서도 모니터 높이가 최소 px 는 되게 키움(배율 상한까지) — 같은 거리의 모니터와 같은 크기 규칙
+  const hp = wb.holo.h * ppw, bo = wb.boost;
+  if (bo && hp > 0 && hp < bo[0]) s0 *= Math.min(bo[1], bo[0] / hp);
+  if (s0 * PLAN_UI.BASE_PX < PLAN_UI.HIDE_PX) return { hidden: true, s: s0 };
+  const s = Math.min(PLAN_UI.S_MAX, s0);
+  const w = PLAN_UI.BASE_PX * s, h = w * wb.aspect;
+  const box = { x: p.x, y: p.y - h, w, h };
+  const off = box.x > vw || box.y > vh || box.x + w < 0 || box.y + h < 0;
+  return { hidden: off, s, box, lod: w < PLAN_UI.LOD_PX };
 }
 
 /**
  * 메인 옆 보드(작은 판) 모델: 가장 앞 계획 하나(gatherPlans 순서) — 제목·주인·완료/전체·막대·항목 칸 띠(≤MAX_CELLS)·지금 줄(진행 중 ≤2,
  * 없으면 보류 아닌 대기 첫째, 다 끝나면 '모두 완료')·외부 대기 수·다른 계획 수. 칸은 회차 선 끝.
- * opts = {nowMs, fx(PlanFx), labelOf(id), mainId}
+ * opts = {nowMs, fx(PlanFx), labelOf(id), mainId, liveCy(진행 중 회차 번호 — 지금 칸 강조·'회차 N 진행 중' 표시, 선 대신)}
  */
-export function boardCard(entries, { nowMs = 0, fx = null, labelOf = null, mainId = '' } = {}) {
+export function boardCard(entries, { nowMs = 0, fx = null, labelOf = null, mainId = '', liveCy = null } = {}) {
   if (!entries || !entries.length) return null;
   const e = entries[0], p = e.plan, pr = planProgress(p);
   const cells = p.items.slice(0, PLAN_UI.MAX_CELLS).map((it, i) => {
     const f = fx ? fx.cell(e.owner, p.id, it.k, nowMs) : null;
     const st = it.s === 'pending' && it.hold ? 'hold' : it.s;
-    return { k: it.k, s: it.s, st, cur: i === pr.cur, cy: e.runner && it.cy != null && it.s !== 'pending' ? it.cy : null, fx: f ? f.kind : null, t: it.t || t('boards.plan.item', { n: i + 1 }) };
+    return { k: it.k, s: it.s, st, cur: i === pr.cur, live: liveCy != null && i === pr.cur, cy: e.runner && it.cy != null && it.s !== 'pending' ? it.cy : null, fx: f ? f.kind : null, t: it.t || t('boards.plan.item', { n: i + 1 }) };
   });
+  // 판에는 지금 단계 하나(진행 중 첫째, 없으면 보류 아닌 다음 대기) + 그 뒤 대기 단계 NEXT_N 개만 — 나머지는 크게 보기
   const lines = [];
-  p.items.forEach((it, i) => { if (it.s === 'in_progress' && lines.length < 2) lines.push({ i, st: 'in_progress', mark: PLAN_ST_GLYPH.in_progress, t: it.t || t('boards.plan.item', { n: i + 1 }), cy: e.runner && it.cy != null ? it.cy : null }); });
-  if (!lines.length && pr.cur >= 0) { const it = p.items[pr.cur]; lines.push({ i: pr.cur, st: 'pending', mark: PLAN_ST_GLYPH.pending, t: it.t || t('boards.plan.item', { n: pr.cur + 1 }), next: true }); }
+  if (pr.cur >= 0) {
+    const it = p.items[pr.cur], prog = it.s === 'in_progress';
+    lines.push({ i: pr.cur, st: prog ? 'in_progress' : 'pending', mark: prog ? PLAN_ST_GLYPH.in_progress : PLAN_ST_GLYPH.pending, t: it.t || t('boards.plan.item', { n: pr.cur + 1 }), cy: prog && e.runner && it.cy != null ? it.cy : null, next: !prog });
+    for (let i = pr.cur + 1; i < p.items.length && lines.length < 1 + PLAN_UI.NEXT_N; i++) {
+      const x = p.items[i];
+      if (x.s === 'done') continue;
+      const st = x.s === 'pending' && x.hold ? 'hold' : x.s;
+      lines.push({ i, st, mark: PLAN_ST_GLYPH[st] || PLAN_ST_GLYPH.pending, t: x.t || t('boards.plan.item', { n: i + 1 }), up: true });
+    }
+  }
   const ownerLabel = e.owner === mainId ? t('boards.plan.main') : (labelOf ? labelOf(e.owner) : '') || e.owner;
   return {
     pid: p.id, owner: e.owner, ownerLabel, src: p.src, srcLabel: PLAN_SRC_LABEL[p.src] || '', glyph: PLAN_SRC_GLYPH[p.src] || '☐', title: p.title || PLAN_SRC_LABEL[p.src] || t('boards.plan.plan'),
     done: pr.done, prog: pr.prog, total: pr.total, count: `${pr.done}/${pr.total}`, frac: pr.frac,
     fracDone: pr.total ? pr.done / pr.total : 0, fracProg: pr.total ? pr.prog / pr.total : 0, allDone: pr.total > 0 && pr.done === pr.total,
     cells, extra: Math.max(0, p.items.length - PLAN_UI.MAX_CELLS), lines, hold: p.items.filter((x) => x.s === 'pending' && x.hold).length,
-    more: entries.length - 1, runner: e.runner, hot: fx ? entries.some((x) => fx.isHot(x.owner, nowMs)) : false,
+    more: entries.length - 1, runner: e.runner, liveCy: e.runner ? liveCy : null, hot: fx ? entries.some((x) => fx.isHot(x.owner, nowMs)) : false,
     dels: fx ? fx.delsOf(e.owner, p.id, nowMs) : [],
   };
 }
@@ -232,122 +263,11 @@ export function sheetInspectModel(entries, { nowMs = Date.now(), labelOf = null,
 }
 
 /**
- * 메인 옆 보드 자리(px). anchor = 메인 화면 원 {x,y,r}, size = {w,h}, bounds = 무대, avoid = [{x,y,w,h,k(무게)}].
- * 후보: 오른쪽(가운데·위 맞춤·아래 맞춤) → 왼쪽(같은 셋) → 아래 → 위. 무대 안으로 밀어 넣은 뒤 겹친 넓이 × 무게가 가장 작은 자리,
- * core(메인 원 + 메인 이름표 상자, 없으면 원)는 덮지 않음(무게 1000). prevSide 와 같은 쪽이면 비용을 조금 깎아 쉽게 뒤집히지 않게. 결정적.
- * 반환 {x, y, w, h, side: 1(오른쪽)|-1(왼쪽)|0(아래·위), cost}
+ * 라벨이 피할 보드 화면 상자(지금 표현 캔버스 좌표 [x0, y0, x1, y1]) — 보드는 고정 장애물, 라벨이 비킨다.
+ * plan-ui 가 매 프레임 채우고 세 표현의 라벨 배치(scene·flat-view·voxel bubbles)가 장애물 사각형에 더한다. 자동 카메라는 보드를 모른다.
  */
-export function placeSheet(anchor, size, bounds, { avoid = [], gap = PLAN_UI.GAP, prevSide = null, core = null } = {}) {
-  const { x, y } = anchor, r = Math.max(6, anchor.r || 0), { w, h } = size;
-  // core = 덮으면 안 되는 메인 상자(원 + 메인 이름표). 후보는 그 상자 바깥 변에 붙인다
-  const C = core || { x: x - r, y: y - r, w: 2 * r, h: 2 * r };
-  const L = C.x, R = C.x + C.w, T = C.y, B = C.y + C.h;
-  const cands = [
-    [R + gap, y - h / 2, 1], [R + gap, T, 1], [R + gap, B - h, 1],
-    [L - gap - w, y - h / 2, -1], [L - gap - w, T, -1], [L - gap - w, B - h, -1],
-    [x - w / 2, B + gap, 0], [x - w / 2, T - gap - h, 0],
-  ];
-  const ov = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
-  let best = null;
-  const all = [];
-  cands.forEach(([bx, by, side], i) => {
-    const b = { x: Math.round(Math.max(bounds.left + 4, Math.min(bounds.right - 4 - w, bx))), y: Math.round(Math.max(bounds.top + 4, Math.min(bounds.bottom - 4 - h, by))), w, h };
-    const cov = ov(b, C);
-    let cost = cov * 1000 + i * 0.5 + (side === 0 ? w * 4 : 0); // 옆(좌우)을 먼저, 아래·위는 옆이 막혔을 때
-    for (const q of avoid) cost += ov(b, q) * (q.k ?? 1);
-    if (prevSide != null && side === prevSide) cost *= 0.8;
-    all.push({ x: b.x, y: b.y, side, cost, i, cov });
-    if (!best || cost < best.cost - 1e-6) best = { ...b, side, cost, i, cov };
-  });
-  best.all = all;
-  return best;
-}
-
-/**
- * 보드 자리 붙들기: placeSheet 는 매 프레임 기억 없이 최선 후보를 고르므로, 걸어 다니는 캐릭터 이름표·잠깐 뜨는 말풍선·
- * 카메라 이동 중 250ms 묵은 장애물 상자만으로도 좌우를 오갔다(라이브 복셀 3D·2D 5초마다 300px 왕복, Planet 3D 카메라 이동 중 400px).
- * 고른 후보(index)를 기억하고, 후보 비용의 지수 평균(HOLD_TAU_MS)으로 그 자리가 '확실히 나빠진 상태'(평균 > 최선 평균 × HOLD_RATIO + HOLD_AREA)가 HOLD_WAIT_MS 이어지고
- * 마지막 이동 뒤 HOLD_MIN_MS 가 지났을 때만 옮긴다. 같은 후보 안의 작은 변화(이름표 폭 등)는 DEADBAND 로 무시.
- * 반환 = 그릴 후보 {x, y, side, i}(앵커 기준 상대 자리 rel 은 부르는 쪽이 계산).
- */
-export class BoardHold {
-  constructor() { this.i = null; this.at = -1e9; this.bad = null; this.ema = null; this.t = 0; }
-  reset() { this.i = null; this.bad = null; this.ema = null; }
-  pick(p, now) {
-    const all = p.all || [p];
-    // 후보마다 비용의 지수 평균(HOLD_TAU_MS) — 잠깐 지나가는 이름표·말풍선은 평균에 조금만 남고, 계속 있는 장애물만 쌓인다
-    if (!this.ema || this.ema.length !== all.length) { this.ema = all.map((c) => c.cost); this.t = now; }
-    else { const k = 1 - Math.exp(-Math.max(0, now - this.t) / PLAN_UI.HOLD_TAU_MS); this.t = now; all.forEach((c, i) => { this.ema[i] += (c.cost - this.ema[i]) * k; }); }
-    const cur = this.i != null ? all[this.i] : null;
-    if (!cur) { this.i = p.i ?? 0; this.at = now; this.bad = null; return all[this.i]; }
-    let bi = 0; for (let i = 1; i < all.length; i++) if (this.ema[i] < this.ema[bi] - 1e-6) bi = i;
-    const urgent = cur.cov > 400 && !(all[p.i ?? 0].cov > 400); // 지금 자리가 앵커(원·이름표)를 덮게 됐으면(화면 가장자리 밀어 넣기 등) 바로
-    if (urgent) { this.i = p.i; this.at = now; this.bad = null; return all[this.i]; }
-    if (bi === this.i || !(this.ema[this.i] > this.ema[bi] * PLAN_UI.HOLD_RATIO + PLAN_UI.HOLD_AREA)) { this.bad = null; return cur; }
-    if (this.bad == null) this.bad = now;
-    if (now - this.bad < PLAN_UI.HOLD_WAIT_MS || now - this.at < PLAN_UI.HOLD_MIN_MS) return cur;
-    this.i = bi; this.at = now; this.bad = null;
-    return all[bi];
-  }
-}
-
-/**
- * 앵커 붙들기: 원하는 앵커(boardAnchor)가 지금과 다르면 ANCHOR_MS 동안 이어질 때만 바꾼다. 지금 앵커가 더는 쓸 수 없으면(ok=false) 바로.
- * st = {id, cand, since} (부르는 쪽 보관). 반환 = 쓸 앵커 id.
- */
-export function holdAnchor(st, want, now, ok = () => true) {
-  if (!st.id || !ok(st.id)) { st.id = want; st.cand = null; return want; }
-  if (want === st.id) { st.cand = null; return st.id; }
-  if (st.cand !== want) { st.cand = want; st.since = now; }
-  if (now - st.since >= PLAN_UI.ANCHOR_MS) { st.id = want; st.cand = null; }
-  return st.id;
-}
-
-/**
- * 앵커 상자(core)의 이름표 부분 — 앵커 바로 위·아래에 걸친 이름표 중 **앵커 자기 것 하나**(가로 중심이 가장 가까운 것)만,
- * 앵커 중심 기준 상대 상자로. 예전에는 걸친 이름표를 모두 합쳐 지나가는 다른 노드 이름표가 core 를 부풀려 보드가 옆으로 튀었다.
- */
-export function anchorLabelRel(a, boxes) {
-  let best = null, bd = Infinity;
-  for (const q of boxes) {
-    if (!(q.x < a.x + 8 && q.x + q.w > a.x - 8 && q.y < a.y + a.r + 40 && q.y + q.h > a.y - a.r - 40)) continue;
-    const d = Math.abs(q.x + q.w / 2 - a.x) + 0.5 * Math.max(0, Math.abs(q.y + q.h / 2 - a.y) - a.r);
-    if (d < bd) { bd = d; best = q; }
-  }
-  return best ? { x: best.x - a.x, y: best.y - a.y, w: best.w, h: best.h } : null;
-}
-
-/**
- * 자동 카메라가 메인을 잡을 때 보드도 담도록: 보드를 세운 노드(앵커, — 메인 또는 회차·러너) → 쪽(1·-1·0). 카메라(3D·2D)가 planFitPts(id, target, r, right, pts) 로
- * 그 메인 맞춤 점 옆에 보드 자리 점을 더한다(right = 화면 오른쪽 세계 단위 벡터, 2D 는 +x).
- */
-export const PLAN_CAM = { boards: new Map() };
-export function planFitPts(id, target, r, right, pts) {
-  const side = PLAN_CAM.boards.get(id);
-  if (side == null || !target) return pts;
-  const rr = Math.max(0.1, r || 1);
-  const dx = right ? right.x : 1, dz = right ? right.z || 0 : 0;
-  // 보드 ≈ 홀로그램 모니터의 2배(세계 높이 2·(1.25 + 0.3r), 폭 1.5배): 중심이 메인 원 바깥 + 반폭만큼 옆, 반지름 = 반대각
-  const hh = PLAN_UI.HOLO_K * (1.25 + 0.3 * rr) / 2, hw = hh * 1.5;
-  const off = rr * 1.3 + 0.6 + hw, R = Math.hypot(hw, hh * 1.3);
-  pts.push(side === 0
-    ? { p: { x: target.x, y: target.y || 0, z: target.z + rr * 1.3 + 0.6 + hh * 1.3 }, r: R, must: true }
-    : { p: { x: target.x + dx * side * off, y: target.y || 0, z: target.z + dz * side * off }, r: R, must: true });
-  return pts;
-}
-
-/**
- * 앵커 이름표 상자 갱신: 커지면 바로(덮지 않게), 줄면 HOLD_WAIT_MS × 2 이어진 뒤에 — 작업 줄 글이 바뀔 때마다 이름표 폭이
- * 늘었다 줄었다 해 보드가 옆으로 60px 씩 오가던 것(라이브 Planet 2D). prev = {rel, small, at}. 반환 = 새 상태.
- */
-export function nextLabelRel(prev, rel, now) {
-  if (!prev || !prev.rel || !rel) return { rel, small: null };
-  const o = prev.rel, inside = rel.x >= o.x - 4 && rel.y >= o.y - 4 && rel.x + rel.w <= o.x + o.w + 4 && rel.y + rel.h <= o.y + o.h + 4;
-  if (!inside) return { rel, small: null };
-  const small = prev.small == null ? now : prev.small;
-  if (now - small >= PLAN_UI.HOLD_WAIT_MS * 2) return { rel, small: null };
-  return { rel: o, small };
-}
+export const PLAN_CAM = { rects: [] };
+export function planLabelRects(rects) { for (const r of PLAN_CAM.rects) rects.push(r); return rects; }
 
 /** 회차 노드 찾기: 그 노드가 회차(claude-p · meta.cycle)면 그대로, 회차의 하위면 그 회차, 아니면 null */
 export function cycleNodeOf(id, nodes) {
@@ -359,30 +279,36 @@ export function cycleNodeOf(id, nodes) {
   return null;
 }
 
+const TERMINAL = new Set(['done', 'error', 'stopped', 'gone']);
+export const isRunnerNode = (n) => !!(n && n.meta && (n.meta.runner || n.meta.launcher));
+
 /**
- * 보드를 세울 노드(앵커): 러너 계획이면 회차 쪽에 붙여 회차 선을 짧게 — 지금 계획을 붙든 진행 중 회차(화면에 그려진 것) >
- * 계획 주인(러너·기동기, 회차들의 부모라 바로 곁) > 세션 메인. 러너 계획이 아니면 늘 메인. shown(id) = 화면에 그려진 노드인가.
+ * 보드 앵커 단일화: 그 메인에 러너 계획(주인 = 러너·기동기 노드)이 있으면 **그 러너**, 없으면 **메인**. 회차·화면 상태로 바꾸지 않는다.
+ * 러너 노드가 기록에 아예 없거나, 끝났고(done·error·stopped) 화면에서도 사라졌으면(shown false) 러너 없음 → 메인(한 번뿐인 전환).
+ * 러너가 여럿이면 끝나지 않은 것 > 최근 갱신. 반환 {id, entries(고른 러너 계획을 맨 앞으로)}.
  */
-export function boardAnchor(entry, mainId, nodes, shown = () => true) {
-  if (!entry || !entry.runner) return mainId;
-  const p = entry.plan;
-  const cid = p && p.by ? cycleNodeOf(p.by, nodes) : null;
-  const cn = cid && nodes.get(cid);
-  if (cn && cn.status === 'active' && shown(cid)) return cid;
-  if (entry.owner && entry.owner !== mainId && shown(entry.owner)) return entry.owner;
-  return mainId;
+export function boardAnchor(entries, mainId, nodes, shown = () => true) {
+  const L = entries || [];
+  let best = -1, bs = -Infinity;
+  L.forEach((e, i) => {
+    if (!e || !e.runner || !e.owner || e.owner === mainId) return;
+    const n = nodes.get(e.owner);
+    if (!isRunnerNode(n)) return;
+    const end = TERMINAL.has(n.status);
+    if (end && !shown(e.owner)) return;
+    const sc = (end ? 0 : 1e15) + ((e.plan && e.plan.at) || 0);
+    if (sc > bs) { bs = sc; best = i; }
+  });
+  if (best < 0) return { id: mainId, entries: L };
+  return { id: L[best].owner, entries: best === 0 ? L : [L[best], ...L.filter((_, i) => i !== best)] };
 }
 
-/** 회차 ↔ 항목 연결: 칸 index 마다 처리 회차 노드 id — 최근 LINK_CYCLES 회차만 [{by, cy, idx:[…]}] */
-export function cycleLinks(plan) {
-  if (!plan) return [];
-  const m = new Map();
-  plan.items.slice(0, PLAN_UI.MAX_CELLS).forEach((it, i) => {
-    if (it.cy == null || !it.by || it.s === 'pending') return;
-    const e = m.get(it.by) || { by: it.by, cy: it.cy, idx: [] };
-    e.idx.push(i); m.set(it.by, e);
-  });
-  return [...m.values()].sort((a, b) => b.cy - a.cy).slice(0, PLAN_UI.LINK_CYCLES);
+/** 지금 계획을 붙든 진행 중 회차 번호(보드 안 표시용, 없으면 null) — 선은 긋지 않는다 */
+export function liveCycleOf(plan, nodes) {
+  const cid = plan && plan.by ? cycleNodeOf(plan.by, nodes) : null;
+  const cn = cid && nodes.get(cid);
+  if (!cn || cn.status !== 'active') return null;
+  return cn.meta && cn.meta.cycle != null ? cn.meta.cycle : (plan.cy ?? '');
 }
 
 const fmtAgo = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); if (s < 60) return t('boards.ago.s', { n: s }); const m = Math.round(s / 60); if (m < 60) return t('boards.ago.m', { n: m }); const h = Math.round(m / 60); if (h < 48) return t('boards.ago.h', { n: h }); return t('boards.ago.d', { n: Math.round(h / 24) }); };

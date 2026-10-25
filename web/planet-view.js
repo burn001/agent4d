@@ -3,6 +3,7 @@
 import { SceneView } from './scene.js';
 import { PlanetArt3D } from './art-layer3d.js';
 import { PlanetDeco } from './planet-deco.js';
+import { bodyK } from './planet-core.mjs';
 
 export class PlanetView extends SceneView {
   static modeId = 'planet';
@@ -11,7 +12,12 @@ export class PlanetView extends SceneView {
   constructor(container, labelContainer) {
     super(container, labelContainer);
     this.deco = new PlanetDeco(this);
-    for (const v of this.vis.values()) this.deco.attach(v);
+    for (const v of this.vis.values()) { this._planetBody(v); this.deco.attach(v); }
+    // 홀로그램: 궤도계 바깥에 놓고, 궤도 위성이 투사하는 빛줄로 잇는다(흐름과 같은 HoloBook·문구, 그리기 위치만)
+    this.holoBeam = true;
+    this.holoR = (v) => v.r * v.size * Math.min(2.6, 0.55 + 0.6 * (this.deco ? this.deco.extentOf(v.id) : 1));
+    // 빛줄 출발점 = 패널 쪽 궤도 둘레(노드 중심에서 패널 방향으로 궤도계 반지름의 0.8) — 위성 하나에서 여러 줄이 모이던 거미줄 대신 링에서 뻗는다
+    this.holoFrom = (v, slot, out, p) => { if (!p) return false; const o = v.group.position; out.copy(p).sub(o); const L = out.length(); if (L < 1e-6) return false; const R = Math.min(L * 0.6, this.holoR(v) * 0.8); out.multiplyScalar(R / L).add(o); return true; };
     // 프레임 끝 렌더 직전 갈고리: 행성 연출 + (켰을 때) 작업 대상 층
     this._preRender = (now, dt) => { if (this.deco) this.deco.update(now, dt || 0.016); if (this.pArt) this.pArt.update(now); };
   }
@@ -19,7 +25,18 @@ export class PlanetView extends SceneView {
   addNode(node, spawn = true) {
     super.addNode(node, spawn);
     const v = this.vis.get(node.id);
+    if (v) this._planetBody(v);
     if (v && this.deco) this.deco.attach(v);
+  }
+  /** 본체 축소: 그리는 반지름(v.r)만 줄인다 — 배치 간격(RADIUS)은 그대로, 클릭·라벨·홀로그램·연결선·카메라·선택 페이드가 v.r 을 따른다 */
+  _planetBody(v) {
+    if (v._plR) return;
+    v._plR = true;
+    v.r *= bodyK(v.kind, !!v.device);
+    const r = v.r;
+    if (v.kind === 'bash-bg' || v.kind === 'monitor') v.label.position.set(0, -r * 1.2 - 0.4, 0);
+    else v.label.position.set(0, r * 1.2 + 0.5, 0);
+    v.mesh.scale.setScalar(r);
   }
   _disposeVis(v) { if (this.deco) this.deco.detach(v); super._disposeVis(v); }
 

@@ -1,12 +1,14 @@
-// 계획 보드(웹 순수 코어): 진행·변경 비교·연출 큐·세션 메인으로 모으기·크기(홀로그램 2배)·배치·보드 모델·크게 보기·카메라 맞춤 점·회차 연결·팝업 모델·⚙ 첫 값·mock 드라이버
+// 계획 보드(웹 순수 코어): 진행·변경 비교·연출 큐·세션 메인으로 모으기·월드 크기·자리(앵커 고정)·화면 투영(끌어오지 않음)·앵커 단일화·보드 모델·크게 보기·라벨 장애물·팝업 모델·⚙ 첫 값·mock 드라이버
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  PLAN_UI, planInitial, plansOf, planProgress, diffPlans, PlanFx, mainOf, gatherPlans, boardSize, boardCard, sheetInspectModel, placeSheet, PLAN_CAM, planFitPts,
-  cycleNodeOf, cycleLinks, planInspectModel, boardAnchor, PLAN_ST_LABEL, BoardHold, holdAnchor, anchorLabelRel, nextLabelRel,
+  PLAN_UI, planInitial, plansOf, planProgress, diffPlans, PlanFx, mainOf, gatherPlans, boardWorld, holoMonitor, boardScreen, boardCard, sheetInspectModel, PLAN_CAM, planLabelRects,
+  cycleNodeOf, planInspectModel, boardAnchor, liveCycleOf, PLAN_ST_LABEL,
 } from '../plan-core.mjs';
 import { _setLangForTest } from '../i18n.mjs';
 import { PlanMockDriver } from '../plan-mock.mjs';
+import { MON } from '../voxel/office-core.mjs';
+import { HOLO } from '../holo-core.mjs';
 
 const I = (k, s, o = {}) => ({ k, t: `항목 ${k}`, s, at: 1000, ...o });
 const P = (id, items, o = {}) => ({ id, src: 'todo', title: '할 일', at: 5000, by: 's:m', n: items.length, items, ...o });
@@ -73,28 +75,38 @@ test('§83 보드 주인 = 세션 메인: 부모 사슬 → 부모 없는 기동
   assert.equal(g.get('s:m').find((e) => e.plan.id === 'pr').runner, true);
 });
 
-test('§83 보드 크기 = 홀로그램 모니터의 약 2배(하한·상한), 배치: 메인 상자(원+이름표)는 덮지 않고 옆 먼저 · 결정적', () => {
-  const s1 = boardSize(40, 2, 1440); // 축척 = 40/(1.3·2) ≈ 15.4px, 홀로 높이 ≈ (1.25+0.6)·15.4 ≈ 28.5px → 2배 폭 ≈ 85 → 하한
-  assert.equal(s1.w, PLAN_UI.BOARD_MIN);
-  const s2 = boardSize(200, 2, 1440); // 홀로 높이 ≈ 142 → 2배 폭 ≈ 427 → 상한
-  assert.equal(s2.w, PLAN_UI.BOARD_MAX);
-  const s3 = boardSize(110, 2, 1440);
-  assert.ok(Math.abs(s3.w - (1.25 + 0.6) * (110 / 2.6) * 1.5 * PLAN_UI.HOLO_K) < 1, '그 사이는 정확히 2배');
-  assert.equal(boardSize(200, 2, 300).w, 268, '좁은 화면이면 화면 폭 안');
-  const bounds = { left: 0, top: 48, right: 1200, bottom: 860 };
-  const a = { x: 600, y: 400, r: 30 };
-  const core = { x: 560, y: 370, w: 80, h: 90 }; // 원 + 아래 이름표
-  const p = placeSheet(a, { w: 210, h: 100 }, bounds, { core });
-  assert.deepEqual(placeSheet(a, { w: 210, h: 100 }, bounds, { core }), p, '결정적');
-  assert.equal(p.side, 1, '오른쪽 먼저');
-  assert.ok(p.x >= core.x + core.w, '메인 상자 밖');
-  // 오른쪽이 막히면 왼쪽
-  const q = placeSheet(a, { w: 210, h: 100 }, bounds, { core, avoid: [{ x: 640, y: 200, w: 400, h: 400, k: 3 }] });
-  assert.equal(q.side, -1);
-  assert.ok(q.x + q.w <= core.x);
-  // 화면 가장자리면 무대 안으로 밀어 넣음
-  const e = placeSheet({ x: 1180, y: 60, r: 20 }, { w: 210, h: 100 }, bounds, {});
-  assert.ok(e.x >= bounds.left && e.x + e.w <= bounds.right && e.y >= bounds.top && e.y + e.h <= bounds.bottom);
+test('§83.9 보드 크기 = 홀로그램 모니터 폭 × 높이 1.5배, 앵커 기준 고정 오프셋(카메라 무관) · 화면 투영은 끌어오지 않음 · 간략·숨김', () => {
+  const w = boardWorld(2);
+  const hh = 1.25 + 0.3 * 2;
+  assert.ok(Math.abs(w.w - hh * 1.5) < 1e-9 && Math.abs(w.h - hh * 1.5) < 1e-9, '흐름·Planet: 폭 = 모니터 폭(높이 × 1.5), 높이 = 모니터 높이 × 1.5');
+  assert.deepEqual(w.holo, holoMonitor(2));
+  assert.ok(Math.abs(w.w / w.holo.w - 1) < 1e-9 && Math.abs(w.h / w.holo.h - PLAN_UI.HOLO_H_K) < 1e-9);
+  const vx = boardWorld(2, 'voxel');
+  assert.ok(Math.abs(vx.w - MON.H * MON.ASP) < 1e-9 && Math.abs(vx.h - MON.H * 1.5) < 1e-9, '복셀: 모니터(MON) 기준');
+  assert.equal(PLAN_UI.VX_MON_H, MON.H); assert.equal(PLAN_UI.VX_MON_ASP, MON.ASP);
+  assert.deepEqual(PLAN_UI.BOOST.voxel, [MON.MIN_PX, MON.BOOST]); assert.deepEqual(PLAN_UI.BOOST.flow, [HOLO.MIN_PX_ACTIVE, HOLO.BOOST_MAX]);
+  // 멀면 활동 모니터처럼 최소 높이까지 키움(상한까지)
+  const far = boardScreen({ x: 500, y: 400 }, 10, w, 1440, 900); // 모니터 높이 18.5px < 30 → ×1.62
+  assert.ok(Math.abs(far.box.w - w.w * 10 * (30 / (w.holo.h * 10))) < 1e-6);
+  const own = boardWorld(2, 'planet', { w: 3, h: 2 });
+  assert.equal(own.w, 3); assert.equal(own.h, 3, '표현이 낸 모니터 크기(view.holoSize)가 우선');
+  assert.ok(Math.abs(w.off - (2 * 1.3 + PLAN_UI.GAP_W)) < 1e-9, '원 바깥 오른쪽');
+  assert.deepEqual(boardWorld(2), w, '결정적 — 화면·카메라 입력이 없다');
+  // 화면 투영: 배율 = 월드 폭 × px/월드 / 기준 폭, 왼쪽 아래 모서리 = 투영 점, 높이 = 폭 × 비율
+  const sc = boardScreen({ x: 500, y: 400 }, 60, w, 1440, 900);
+  assert.ok(!sc.hidden && Math.abs(sc.s - (w.w * 60) / PLAN_UI.BASE_PX) < 1e-9);
+  assert.equal(sc.box.x, 500); assert.ok(Math.abs(sc.box.y + sc.box.h - 400) < 1e-9, '아래 변 = 투영 점');
+  assert.ok(Math.abs(sc.box.h / sc.box.w - w.aspect) < 1e-9); assert.equal(sc.lod, false);
+  assert.equal(boardScreen({ x: 500, y: 400 }, 20, w, 1440, 900).lod, true, '작으면 간략');
+  // 화면 가장자리 너머: 안으로 밀어 넣지 않고 그 자리(일부만 보임) 또는 숨김
+  const edge = boardScreen({ x: 1400, y: 400 }, 60, w, 1440, 900);
+  assert.equal(edge.hidden, false); assert.equal(edge.box.x, 1400, '오른쪽 끝 너머로 나가도 x 그대로');
+  assert.equal(boardScreen({ x: 1500, y: 400 }, 60, w, 1440, 900).hidden, true, '판 전체가 화면 밖이면 숨김(끌어오지 않음)');
+  assert.equal(boardScreen({ x: -2000, y: 400 }, 60, w, 1440, 900).hidden, true);
+  assert.equal(boardScreen({ behind: true }, 0, w, 1440, 900).hidden, true, '카메라 뒤');
+  assert.equal(boardScreen({ x: 500, y: 400 }, 0.5, w, 1440, 900).hidden, true, '너무 멀면(키움 상한 뒤에도 HIDE_PX 미만) 숨김');
+  assert.equal(boardScreen({ x: 500, y: 400 }, 1000, w, 1440, 900).s, PLAN_UI.S_MAX, '아주 가까우면 크기만 상한(자리 그대로)');
+  assert.equal(boardScreen({ x: 500, y: 400 }, 1000, w, 1440, 900).box.x, 500);
 });
 
 test('§83 보드 모델: 가장 앞 계획 — 완료/전체·칸(상태·외부 대기·회차)·지금 줄(진행 중 ≤2, 없으면 다음 대기)·다른 계획 수·연출', () => {
@@ -105,7 +117,8 @@ test('§83 보드 모델: 가장 앞 계획 — 완료/전체·칸(상태·외�
   assert.equal(m.cells.length, PLAN_UI.MAX_CELLS); assert.equal(m.extra, 30 - PLAN_UI.MAX_CELLS);
   assert.deepEqual(m.cells.slice(0, 4).map((c) => c.cy), [7, 8, 9, null]);
   assert.equal(m.cells[1].fx, 'done'); assert.equal(m.cells[3].cur, true);
-  assert.deepEqual(m.lines.map((l) => [l.i, l.st, l.mark]), [[3, 'in_progress', '▶'], [4, 'in_progress', '▶']], '진행 중 두 줄');
+  assert.deepEqual(m.lines.map((l) => [l.i, l.st, l.mark]), [[3, 'in_progress', '▶'], [4, 'in_progress', '▶'], [5, 'in_progress', '▶']], '지금 단계 + 다음 NEXT_N 개');
+  assert.deepEqual(m.lines.map((l) => !!l.up), [false, true, true]);
   assert.equal(m.count, '3/30'); assert.equal(m.more, 1); assert.equal(m.hold, 1); assert.equal(m.glyph, '▤'); assert.equal(m.ownerLabel, '러너 · autopilot.sh');
   assert.ok(m.hot);
   const n = boardCard([{ owner: 's:m', runner: false, plan: P('d', [I('1', 'done'), I('2', 'pending', { hold: 1 }), I('3', 'pending')]) }], { mainId: 's:m' });
@@ -115,104 +128,49 @@ test('§83 보드 모델: 가장 앞 계획 — 완료/전체·칸(상태·외�
   assert.equal(boardCard([]), null);
 });
 
-test('§83 크게 보기 모델: 모인 계획 전부, 항목마다 상태 기호(✓▶○⏸)·회차·처리 노드 · 카메라 맞춤 점 · 회차 노드 찾기', () => {
+test('§83 크게 보기 모델: 모인 계획 전부, 항목마다 상태 기호(✓▶○⏸)·회차·처리 노드 · 라벨 장애물 · 회차 노드 찾기', () => {
   const entries = [{ owner: 'b:R', runner: true, plan: P('p', [I('0', 'done', { cy: 3, by: 's:c3', at: 1 }), I('1', 'in_progress', { by: 'a:x', at: 1 }), I('2', 'pending', { hold: 1 }), I('3', 'pending')], { src: 'phases', title: 'x-design.md', n: 4 }) }];
   const [m] = sheetInspectModel(entries, { nowMs: 120_000, labelOf: (id) => ({ 'b:R': '러너', 's:c3': '회차 3', 'a:x': '서브' }[id]), mainId: 's:m' });
   assert.equal(m.ownerLabel, '러너'); assert.equal(m.count, '1/4'); assert.equal(m.hold, 1);
   assert.deepEqual(m.items.map((x) => [x.glyph, x.st, x.cy]), [['✓', 'done', 3], ['▶', 'in_progress', null], ['⏸', 'hold', null], ['○', 'pending', null]]);
-  PLAN_CAM.boards.clear();
-  assert.equal(planFitPts('s:m', { x: 0, y: 0, z: 0 }, 2, { x: 1, z: 0 }, []).length, 0, '보드 없으면 그대로');
-  PLAN_CAM.boards.set('s:m', 1);
-  const [pt] = planFitPts('s:m', { x: 0, y: 0, z: 0 }, 2, { x: 1, z: 0 }, []);
-  assert.ok(pt.p.x > 2.6 && pt.p.z === 0 && pt.r > 1 && pt.must, '오른쪽(화면) 옆, 반드시 담기');
-  PLAN_CAM.boards.set('s:m', -1);
-  assert.ok(planFitPts('s:m', { x: 0, y: 0, z: 0 }, 2, { x: 0, z: 1 }, [])[0].p.z < 0, '왼쪽');
-  PLAN_CAM.boards.clear();
+  PLAN_CAM.rects = [[1, 2, 3, 4]];
+  assert.deepEqual(planLabelRects([[0, 0, 1, 1]]), [[0, 0, 1, 1], [1, 2, 3, 4]], '라벨 장애물에 보드 상자를 더함');
+  PLAN_CAM.rects = [];
   const nodes = new Map([['s:c', { id: 's:c', kind: 'claude-p', parentId: 'b:R', meta: { cycle: 4 } }], ['a:k', { id: 'a:k', kind: 'subagent', parentId: 's:c', meta: {} }], ['a:z', { id: 'a:z', kind: 'subagent', parentId: 's:m', meta: {} }]]);
   assert.equal(cycleNodeOf('a:k', nodes), 's:c', '회차 하위 → 그 회차');
   assert.equal(cycleNodeOf('s:c', nodes), 's:c');
   assert.equal(cycleNodeOf('a:z', nodes), null, '회차 밖');
 });
 
-test('§83.7 보드 앵커: 러너 계획은 진행 중 회차(보일 때) > 러너 주인 > 메인, 러너 아니면 메인', () => {
-  const nodes = new Map([['s:m', { id: 's:m', kind: 'main' }], ['b:R', { id: 'b:R', kind: 'bash-bg', parentId: 's:m', meta: { runner: 1 } }],
+test('§83.9 보드 앵커 단일화: 러너 계획 → 러너(회차와 무관), 러너 없으면 메인 · 러너 계획을 맨 앞으로', () => {
+  const nodes = new Map([['s:m', { id: 's:m', kind: 'main' }], ['b:R', { id: 'b:R', kind: 'bash-bg', parentId: 's:m', status: 'active', meta: { runner: 1 } }],
     ['s:c2', { id: 's:c2', kind: 'claude-p', parentId: 'b:R', status: 'active', meta: { cycle: 2 } }], ['s:c1', { id: 's:c1', kind: 'claude-p', parentId: 'b:R', status: 'done', meta: { cycle: 1 } }],
-    ['a:k', { id: 'a:k', kind: 'subagent', parentId: 's:c2', status: 'active', meta: {} }]]);
-  const E = (by, runner = true) => ({ owner: 'b:R', runner, plan: P('p', [I('0', 'done', { cy: 2, by })], { src: 'phases', by }) });
-  assert.equal(boardAnchor(E('s:c2'), 's:m', nodes), 's:c2', '진행 중 회차');
-  assert.equal(boardAnchor(E('a:k'), 's:m', nodes), 's:c2', '회차 하위가 붙들면 그 회차');
-  assert.equal(boardAnchor(E('s:c2'), 's:m', nodes, (id) => id !== 's:c2'), 'b:R', '회차가 안 보이면 러너');
-  assert.equal(boardAnchor(E('s:c1'), 's:m', nodes), 'b:R', '끝난 회차엔 붙지 않음');
-  assert.equal(boardAnchor(E('s:c2'), 's:m', nodes, () => false), 's:m', '둘 다 안 보이면 메인');
-  assert.equal(boardAnchor(E('s:c2', false), 's:m', nodes), 's:m', '러너 계획 아님');
-  assert.equal(boardAnchor(null, 's:m', nodes), 's:m');
-});
-
-test('§83.8 보드 자리 안정: 오가는 이름표·말풍선엔 버팀(옛 방식은 좌우 왕복), 확실히 막히면 기다렸다 한 번, 앵커를 덮으면 바로', () => {
-  // 라이브 복셀 재현: 앵커는 그대로, 근처 캐릭터 이름표(k 1.5)가 왼쪽 자리 ↔ 오른쪽 장애물(k 2)이 번갈아 비용을 바꿈 — 2.5초마다
-  const bounds = { left: 0, top: 48, right: 1400, bottom: 860 };
-  const a = { x: 700, y: 400, r: 30 }, size = { w: 210, h: 90 };
-  const L = { x: 470, y: 340, w: 110, h: 34, k: 1.5 }, R = { x: 750, y: 360, w: 70, h: 36, k: 2 };
-  const run = (useHold) => {
-    const hold = new BoardHold(); let side = null, flips = 0, prev = null;
-    for (let f = 0; f < 60 * 30; f++) {
-      const now = f * 1000 / 60, phase = Math.floor(now / 2500) % 2;
-      const avoid = phase ? [L] : [R];
-      const p = placeSheet(a, size, bounds, { avoid, prevSide: side });
-      const q = useHold ? hold.pick(p, now) : p;
-      side = q.side;
-      if (prev != null && q.i !== prev) flips++;
-      prev = q.i;
-    }
-    return flips;
-  };
-  assert.ok(run(false) >= 6, '옛 방식(기억 없는 최선 후보)은 왕복');
-  assert.equal(run(true), 0, '붙들기: 왕복 없음');
-  // 지금 자리가 확실히 막히면 HOLD_WAIT_MS 이어진 뒤에 한 번 옮김
-  const hold = new BoardHold();
-  const big = { x: 740, y: 250, w: 300, h: 300, k: 3 };
-  const p0 = placeSheet(a, size, bounds, {});
-  assert.equal(hold.pick(p0, 0).side, 1);
-  let moved = null;
-  for (let t = 5000; t < 9000; t += 16) { const q = hold.pick(placeSheet(a, size, bounds, { avoid: [big], prevSide: 1 }), t); if (q.side !== 1 && moved == null) moved = t; }
-  assert.ok(moved != null && moved - 5000 >= PLAN_UI.HOLD_WAIT_MS && moved - 5000 < PLAN_UI.HOLD_WAIT_MS + 50, `막힌 뒤 ${PLAN_UI.HOLD_WAIT_MS}ms 쯤 옮김 (${moved})`);
-  // 옮긴 직후 HOLD_MIN_MS 안에는 다시 안 옮김
-  const q2 = hold.pick(placeSheet(a, size, bounds, { avoid: [{ x: 300, y: 250, w: 360, h: 300, k: 3 }], prevSide: -1 }), moved + 2000);
-  assert.equal(q2.side, -1);
-  // 앵커 상자를 덮게 되면(화면 가장자리 밀어 넣기) 기다리지 않음
-  const h2 = new BoardHold();
-  h2.pick(placeSheet(a, size, bounds, {}), 0);
-  const edge = { x: 1300, y: 400, r: 30 }; // 오른쪽 자리는 무대 안으로 밀려 원을 덮음
-  assert.equal(h2.pick(placeSheet(edge, size, bounds, { prevSide: 1 }), 100).side, -1, '덮으면 바로 반대쪽');
-});
-
-test('§83.8 앵커 붙들기 · 자기 이름표만 core', () => {
-  const st = { id: null };
-  assert.equal(holdAnchor(st, 'c2', 0), 'c2');
-  assert.equal(holdAnchor(st, 'R', 100), 'c2', '바뀐 후보가 잠깐이면 그대로');
-  assert.equal(holdAnchor(st, 'c2', 300), 'c2');
-  assert.equal(holdAnchor(st, 'R', 400), 'c2');
-  assert.equal(holdAnchor(st, 'R', 400 + PLAN_UI.ANCHOR_MS - 1), 'c2');
-  assert.equal(holdAnchor(st, 'R', 400 + PLAN_UI.ANCHOR_MS), 'R', '이어지면 바꿈');
-  assert.equal(holdAnchor(st, 'm', 3000, (id) => id !== 'R'), 'm', '지금 앵커를 못 쓰면 바로');
-  const a = { x: 500, y: 300, r: 20 };
-  const own = { x: 450, y: 325, w: 100, h: 30 }, pass = { x: 420, y: 270, w: 120, h: 30 };
-  assert.deepEqual(anchorLabelRel(a, [pass, own]), { x: -50, y: 25, w: 100, h: 30 }, '가로 중심이 가장 가까운 자기 이름표 하나');
-  assert.equal(anchorLabelRel(a, [{ x: 900, y: 300, w: 80, h: 30 }]), null);
-  // 이름표 폭: 커지면 바로, 줄면 한동안 이어진 뒤에
-  const wide = { x: -80, y: 25, w: 160, h: 30 }, thin = { x: -40, y: 25, w: 80, h: 30 };
-  let L = nextLabelRel(null, thin, 0);
-  L = nextLabelRel(L, wide, 250); assert.deepEqual(L.rel, wide, '커지면 바로');
-  L = nextLabelRel(L, thin, 500); assert.deepEqual(L.rel, wide, '줄어든 직후는 그대로');
-  L = nextLabelRel(L, wide, 750); L = nextLabelRel(L, thin, 1000); assert.deepEqual(L.rel, wide);
-  L = nextLabelRel(L, thin, 1000 + PLAN_UI.HOLD_WAIT_MS * 2); assert.deepEqual(L.rel, thin, '이어지면 줄임');
-});
-
-test('회차 연결: 처리 회차별 칸 묶음, 최근 회차 3개까지, 대기 칸 제외', () => {
-  const items = [I('0', 'done', { cy: 1, by: 's:c1' }), I('1', 'done', { cy: 2, by: 's:c2' }), I('2', 'done', { cy: 2, by: 's:c2' }), I('3', 'done', { cy: 3, by: 's:c3' }), I('4', 'in_progress', { cy: 4, by: 's:c4' }), I('5', 'pending', { cy: 4, by: 's:c4' })];
-  const L = cycleLinks(P('p', items));
-  assert.deepEqual(L.map((x) => [x.by, x.cy, x.idx]), [['s:c4', 4, [4]], ['s:c3', 3, [3]], ['s:c2', 2, [1, 2]]]);
-  assert.deepEqual(cycleLinks(null), []);
+    ['a:k', { id: 'a:k', kind: 'subagent', parentId: 's:c2', status: 'active', meta: {} }], ['a:s', { id: 'a:s', kind: 'subagent', parentId: 's:m', status: 'active', meta: {} }]]);
+  const R = (by) => ({ owner: 'b:R', runner: true, plan: P('p', [I('0', 'done', { cy: 2, by })], { src: 'phases', by }) });
+  const T = { owner: 's:m', runner: false, plan: P('t', [I('0', 'in_progress')]) };
+  // 진행 중 회차·끝난 회차·회차 안 보임 — 앵커는 늘 러너
+  for (const by of ['s:c2', 's:c1', 'a:k']) assert.equal(boardAnchor([R(by)], 's:m', nodes).id, 'b:R', by);
+  assert.equal(boardAnchor([R('s:c2')], 's:m', nodes, (id) => id !== 's:c2').id, 'b:R', '회차가 안 보여도 러너');
+  assert.equal(boardAnchor([R('s:c2')], 's:m', nodes, () => false).id, 'b:R', '러너가 잠깐 안 보여도 러너(보드는 숨김 — 메인으로 안 옮김)');
+  // 메인 할 일이 더 앞 순서여도 러너 계획이 판 맨 앞
+  const an = boardAnchor([T, R('s:c2')], 's:m', nodes);
+  assert.equal(an.id, 'b:R'); assert.deepEqual(an.entries.map((e) => e.owner), ['b:R', 's:m']);
+  // 러너 없는 계획(할 일·서브에이전트 체크박스·워크플로) → 메인
+  assert.equal(boardAnchor([T], 's:m', nodes).id, 's:m');
+  assert.equal(boardAnchor([{ owner: 'a:s', runner: false, plan: P('f', [I('0', 'pending')], { src: 'file' }) }], 's:m', nodes).id, 's:m');
+  assert.equal(boardAnchor([{ owner: 'a:s', runner: true, plan: P('ph', [I('0', 'pending')], { src: 'phases' }) }], 's:m', nodes).id, 's:m', '단계 설계서라도 주인이 러너 노드가 아니면 메인');
+  // 러너 노드가 기록에 없음 → 메인. 끝났고 화면에서도 사라짐 → 메인(한 번), 끝났어도 보이는 동안은 러너
+  assert.equal(boardAnchor([{ ...R('s:c2'), owner: 'b:X' }], 's:m', nodes).id, 's:m', '러너 노드 없음');
+  const ended = new Map(nodes); ended.set('b:R', { ...nodes.get('b:R'), status: 'done' });
+  assert.equal(boardAnchor([R('s:c2')], 's:m', ended).id, 'b:R', '퇴장 중(보임)');
+  assert.equal(boardAnchor([R('s:c2')], 's:m', ended, () => false).id, 's:m', '끝나고 사라짐');
+  assert.deepEqual(boardAnchor([], 's:m', nodes), { id: 's:m', entries: [] });
+  // 진행 중 회차는 보드 안 표시로만
+  assert.equal(liveCycleOf(R('a:k').plan, nodes), 2, '회차 하위가 붙들어도 그 회차 번호');
+  assert.equal(liveCycleOf(R('s:c1').plan, nodes), null, '끝난 회차');
+  const m = boardCard([R('s:c2')], { mainId: 's:m', liveCy: 2 });
+  assert.equal(m.liveCy, 2);
+  assert.equal(boardCard([T], { mainId: 's:m', liveCy: 2 }).liveCy, null, '러너 계획 아니면 회차 표시 없음');
 });
 
 test('팝업 모델: 계획마다 제목·출처·완료/전체·항목(표·회차·누가·얼마 전)', () => {

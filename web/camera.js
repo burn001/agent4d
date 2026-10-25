@@ -3,8 +3,6 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STALE_DWELL, isShown, isLive, isBusy, scoreOf, pickBest, shotLost, shotStale, shownAncestor, fitFrame, flightPose, boxCenter, requiredDist, refineFit, FitHold, safeBand, ZOOM, autoFloor, nearestKids } from './camera-core.mjs';
 import { stageInsets } from './screen-insets.js';
-import { planFitPts, PLAN_CAM } from './plan-core.mjs'; // 메인 옆 계획 보드도 담기
-const planBoardIds = () => PLAN_CAM.boards.keys();
 import { bestPose, perspPose, needRepack } from './overview/fill-pack.mjs';
 import { legacyPack } from './overview/pack-view.js';
 
@@ -409,12 +407,6 @@ export class CameraDirector {
   }
 
   // ---------- 프레이밍 ----------
-  /** 화면 오른쪽(바닥 평면, 단위) — 계획 보드 맞춤 점 방향 */
-  _rightXZ() {
-    const e = this.camera.matrixWorld.elements;
-    const l = Math.hypot(e[0], e[2]) || 1;
-    return { x: e[0] / l, z: e[2] / l };
-  }
   /** 거리 상한 dmax 에서 화면에 담기는 경계구 반지름(_frame 거리식의 역) */
   _rMax(dmax, scale) {
     const fov = (this.camera.fov * Math.PI) / 180;
@@ -427,7 +419,6 @@ export class CameraDirector {
     const view = this.view, id = shot.id;
     const pts = [{ p: view.nodeTarget(id), r: view.nodeRadius(id) + 1.6, must: true }];
     const seen = new Set([id]);
-    planFitPts(id, pts[0].p, view.nodeRadius(id), this._rightXZ(), pts); // 계획 보드가 떠 있으면 그 자리도
     let kids = view.children(id).filter((k) => this._shownId(k));
     if (!shot.wide) kids = nearestKids(kids, (k) => view.nodeTarget(k), pts[0].p || { x: 0, y: 0, z: 0 }, ZOOM.NODE_KIDS); // 가까운 자식 몇 개만
     const lim = kids.length;
@@ -455,7 +446,6 @@ export class CameraDirector {
       const p = view.nodeTarget ? view.nodeTarget(id) : v.target;
       if (p) pts.push({ p, r: (view.nodeRadius ? view.nodeRadius(id) : v.r || 1) * FIT_PAD_K + FIT_PAD });
     }
-    for (const id of planBoardIds()) if (this._shownId(id) && view.nodeTarget && !(fsid && (!view.vis.get(id).node || view.vis.get(id).node.rootSessionId !== fsid)) && !(fp && !fsid && this._clusterOf(id) !== fp)) { const t = view.nodeTarget(id); if (t) planFitPts(id, t, view.nodeRadius ? view.nodeRadius(id) : 1, this._rightXZ(), pts); }
     if (view.fitExtra3d) view.fitExtra3d(pts, this.scope); // 노드 말고도 담을 자리(복셀: 방 모서리 — 캐릭터만 맞추면 벽이 잘림)
     if (!pts.length && all && view.clusters) { // 살아 있는 노드가 없으면 섬(선택 섬 또는 전부)
       const c = fp && view.clusterTarget ? view.clusterTarget(fp) : null;

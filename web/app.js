@@ -413,7 +413,7 @@ function hookEnv(v) { const f = v.onFrame; v.onFrame = (dt, now) => { if (f) f(d
 
 // ---------------- 통계·FPS ----------------
 let statsDirty = true, frames = 0, fpsT = performance.now(), fps = 0;
-const hookFrame = (v) => { v.onFrame = (dt, now) => { director.update(dt, now); frames++; }; };
+const hookFrame = (v) => { v.onFrame = (dt, now) => { director.update(dt, now); frames++; if (plans && plans.on) plans.sync(); }; }; // 보드 자리는 카메라를 옮긴 바로 그 프레임에(한 프레임 늦게 따라오지 않게)
 hookFrame(view);
 hookEnv(view);
 setShowDone(showDone);

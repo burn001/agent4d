@@ -13,6 +13,7 @@ import { HoloLayer } from './holo.js';
 import { CAT_LABEL } from './icons.js';
 import { actLine, sayBrief, pushHist, panelPx } from './holo-core.mjs';
 import { placeLabels, LABEL_SHIFTS, LABEL_FAR_SHIFTS, textWidth, labelReserve, smoothReserve } from './label-place.mjs';
+import { planLabelRects } from './plan-core.mjs'; // 계획 보드 = 라벨의 고정 장애물
 import { spawnLinks, dashSpans, spawnTag } from './spawn-link.mjs';
 
 const SPAWN_CAP = 24, SPAWN_DASH = dashSpans(12, 0.5);
@@ -1132,7 +1133,7 @@ export class SceneView {
       cands.push({ id: v.id, x, y, up: v.label.center.y !== 0, gap: this._labelGapPx(v, px), force, pin, modes });
     }
     // 피할 사각형: 홀로그램 도구 패널·말풍선·섬 이름표
-    const rects = this._obstacleRects(W, H);
+    const rects = planLabelRects(this._obstacleRects(W, H)); // + 계획 보드(라벨이 비킴)
     const placed = placeLabels(cands, discs, { shifts: LABEL_SHIFTS, farShifts: LABEL_FAR_SHIFTS, bounds: [0, W], vbounds: [0, H], rects });
     this._labRes = smoothReserve(this._labRes, labelReserve(placed, cands, discs)); // 맞춤에 라벨 자리 포함
     const candOf = new Map(cands.map((c) => [c.id, c]));

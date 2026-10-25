@@ -2,7 +2,6 @@
 // three 없이 2D 팬·줌으로: 휠(커서 기준)·끌기·핀치·WASD/QE, 자동 카메라 = 살아 있는 노드 전체 맞춤(2D판, FitHold 히스테리시스),
 // '따라가기'는 활동 노드를 8초마다 확대(간이), 수동 조작 10초 뒤 복귀, 빈 곳 클릭 즉시 복귀(resumeAuto), 일시정지 얼림(enabled=false).
 import { isShown, isLive, scoreOf, pickBest, shotLost, FitHold, safeBand, ZOOM, autoFloor, nearestKids } from '../camera-core.mjs';
-import { planFitPts, PLAN_CAM } from '../plan-core.mjs'; // 메인 옆 계획 보드도 담기
 import { stageInsets } from '../screen-insets.js';
 import { t } from '../i18n.mjs';
 import { FLAT, toWorld, zoomAt, panBy, boxCenterXZ, fitNeed, fitMinD, flyPose, dampTo, clampD } from './flat-core.mjs';
@@ -232,7 +231,6 @@ export class Director2D {
       if (!this._shown(id) || !this._inScope(id, v)) continue;
       pts.push({ p: v.target, r: v.r * FLAT.FIT_PAD_K + FLAT.FIT_PAD });
     }
-    for (const id of PLAN_CAM.boards.keys()) { const v = view.vis.get(id); if (v && this._shown(id) && this._inScope(id, v)) planFitPts(id, v.target, v.r, null, pts); }
     // 표현이 노드 말고도 담고 싶은 자리(복셀 2D 평면도: 지금 범위의 방 모서리 — 캐릭터만 맞추면 방이 잘림)
     if (view.fitExtra) view.fitExtra(pts, this.scope);
     if (!pts.length && this.scope.mode === 'all' && view.clusters) {
@@ -275,7 +273,6 @@ export class Director2D {
     const view = this.view, v = view.vis.get(id);
     if (!v) return null;
     const pts = [{ p: v.target, r: v.r * FLAT.FIT_PAD_K + FLAT.FIT_PAD }];
-    planFitPts(id, v.target, v.r, null, pts); // 계획 보드가 떠 있으면 그 자리도
     let kids = view.children(id).filter((k) => view.vis.get(k) && this._shown(k));
     if (!wide) kids = nearestKids(kids, (k) => view.vis.get(k).target, v.target, ZOOM.NODE_KIDS); // 가까운 자식 몇 개만
     for (const kid of kids) { const k = view.vis.get(kid); pts.push({ p: k.target, r: k.r + 1.2 }); }

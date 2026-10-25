@@ -1,5 +1,5 @@
-/* 계획 보드 — 세션 메인 옆에 세운 작은 판(일반 홀로그램 모니터의 약 2배): 불투명 판·굵은 테·큰 진행률·상태별 색과 기호.
-   누르면 카드로 크게 보기(.ins-wide). */
+/* 계획 보드 — 러너(없으면 메인) 옆 월드 고정 자리에 세운 작은 판(일반 홀로그램 모니터의 약 2배): 불투명 판·굵은 테·큰 진행률·상태별 색과 기호.
+   기준 폭 280px 로 짜고 원근 배율을 transform scale 로(왼쪽 위 기준). 누르면 카드로 크게 보기(.ins-wide). */
 #plan-boards { position: fixed; inset: 0; z-index: 12; pointer-events: none; }
 #plan-links { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 11; pointer-events: none; overflow: visible; }
 .pb {
@@ -9,7 +9,7 @@
   background: color-mix(in srgb, var(--panel-bg) 94%, var(--bg));
   box-shadow: 0 8px 22px rgba(0, 0, 0, .45), 0 0 0 1px color-mix(in srgb, var(--pk, var(--accent)) 25%, transparent);
   color: var(--text); font: calc(12px * var(--pbk))/1.3 var(--font, system-ui, sans-serif); pointer-events: auto; cursor: zoom-in;
-  will-change: transform; user-select: none; transition: border-color .4s ease, box-shadow .4s ease;
+  transform-origin: 0 0; will-change: transform; user-select: none; transition: border-color .4s ease, box-shadow .4s ease;
 }
 :root[data-theme="light"] .pb { --pb-hold: #7c3aed; box-shadow: 0 6px 18px rgba(15, 23, 42, .18), 0 0 0 1px color-mix(in srgb, var(--pk, var(--accent)) 30%, transparent); }
 @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .pb { --pb-hold: #7c3aed; box-shadow: 0 6px 18px rgba(15, 23, 42, .18), 0 0 0 1px color-mix(in srgb, var(--pk, var(--accent)) 30%, transparent); } }
@@ -38,6 +38,7 @@
 .pc.st-pending { border: 1.5px solid color-mix(in srgb, var(--muted) 75%, transparent); }
 .pc.st-hold { border: 1.5px dashed var(--pb-hold, #a78bfa); }
 .pc.cur { outline: 1.5px solid var(--text); outline-offset: 1px; }
+.pc.cur.live { outline: 2px solid var(--k-claude-p, var(--accent)); outline-offset: 1.5px; animation: pb-pulse 1.6s ease-in-out infinite; } /* 진행 중 회차가 붙든 지금 칸(선 대신) */
 .pb-x { flex: none; color: var(--muted); font-size: .8em; }
 .pb-lines { display: flex; flex-direction: column; gap: 2px; }
 .pb-l, .pr { position: relative; display: flex; align-items: center; gap: .5em; min-height: 1.6em; padding: 0 .4em 0 .2em; border-radius: 5px; border-left: 3px solid transparent; }
@@ -48,6 +49,7 @@
 .pr-hold { color: var(--pb-hold, #a78bfa); background: color-mix(in srgb, var(--pb-hold, #a78bfa) 16%, transparent); }
 .pb-chips { display: flex; gap: .4em; justify-content: flex-end; margin-top: .35em; }
 .pb-chip { font-size: .78em; color: var(--muted); padding: 0 .55em; border-radius: 9px; border: 1px solid color-mix(in srgb, var(--muted) 40%, transparent); }
+.pb-chip.live { color: var(--k-claude-p, var(--accent)); border-color: color-mix(in srgb, var(--k-claude-p, var(--accent)) 55%, transparent); font-weight: 600; }
 .pb-chip.hold { color: var(--pb-hold, #a78bfa); border-color: color-mix(in srgb, var(--pb-hold, #a78bfa) 50%, transparent); }
 /* 상태별 줄(보드 지금 줄 · 크게 보기 목록 공용) */
 .st-done > .pl-m, .pl-m.st-done { background: var(--pb-ok, var(--ok)); color: var(--bg); }
@@ -92,14 +94,11 @@
 .ipb-ago { flex: none; color: var(--muted); font-size: 10.5px; }
 .ipb-by { font-size: 11px; }
 .ins-plan-big + .ins-plan-big { border-top: 1px solid var(--border); padding-top: 10px; }
-/* 선: 메인 → 보드 지시선 · 3D 기둥 · 주인 → 절 · 회차 → 줄 */
+/* 선: 앵커(러너·메인) → 보드 한 줄 */
 .pl-lead { fill: none; stroke: color-mix(in srgb, var(--accent) 70%, transparent); stroke-width: 1.5; }
-.pl-pole { fill: none; stroke: color-mix(in srgb, var(--accent) 45%, transparent); stroke-width: 2; }
-.pl-own { fill: none; stroke: color-mix(in srgb, var(--pk, var(--accent)) 60%, transparent); stroke-width: 1.5; stroke-dasharray: 1 4; stroke-linecap: round; }
-.pl-link { fill: none; stroke: color-mix(in srgb, var(--k-claude-p) 60%, transparent); stroke-width: 1.5; }
-.pl-link.live { stroke-dasharray: 4 4; animation: pl-dash 1.2s steps(12) infinite; } /* 초당 10걸음 — 매 프레임 SVG 를 다시 칠하지 않게 */
-.pl-link.cur { stroke: var(--k-claude-p); stroke-width: 2; }
-@keyframes pl-dash { to { stroke-dashoffset: -16; } }
+/* 복셀: 기동기·팀장 옆에 세운 게시판(나무 테·코르크 빛 머리) */
+#plan-boards.vx .pb { border: 3px solid #8b5a2b; border-radius: 4px; box-shadow: 0 6px 16px rgba(0, 0, 0, .4), inset 0 0 0 1px rgba(255, 220, 170, .18); }
+#plan-boards.vx .pb-h { margin: calc(-7px * var(--pbk)) calc(-9px * var(--pbk)) 0; padding: calc(6px * var(--pbk)) calc(9px * var(--pbk)) calc(4px * var(--pbk)); background: color-mix(in srgb, #c8995c 22%, transparent); }
 /* 범례 */
 .plan-legend .pl-m { display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; font-style: normal; font-size: 9px; font-weight: 800; vertical-align: -3px; margin: 0 3px 0 6px; box-sizing: border-box; }
 /* 상세 팝업 계획 절 */
@@ -116,5 +115,18 @@
 .ins-plist li small { flex: none; color: var(--muted); font-size: 10.5px; }
 @media (prefers-reduced-motion: reduce) {
   .pc, .pr, .pl-m, .pb-bar > i, .pb, .pb-n b { animation: none !important; transition: none !important; }
-  .pl-link.live { animation: none; }
 }
+/* 크기 = 홀로그램 모니터 폭 × 높이 1.5배(기준 180px 폭, 높이는 plan-ui 가 비율대로) — 넘치는 내용은 잘라 크게 보기에서 */
+.pb { overflow: hidden; }
+.pb-l.up { opacity: .62; }
+.pb-l.up .pr-t { font-weight: 400; }
+/* 간략(LOD: 화면 폭이 작을 때) — 출처 글리프·완료/전체·막대·칸만 크게 */
+.pb.lod .pb-ti, .pb.lod .pb-lines, .pb.lod .pb-chips { display: none; }
+.pb.lod .pb-h { justify-content: space-between; align-items: center; }
+.pb.lod .pb-g { width: 2.6em; height: 2.6em; font-size: 2.2em; }
+.pb.lod .pb-n b { font-size: 4.6em; }
+.pb.lod .pb-n small { font-size: 2.4em; }
+.pb.lod .pb-bar { height: 1.5em; margin: .9em 0; }
+.pb.lod .pb-cells { height: 2.6em; }
+.pb.lod .pc { height: 2.4em; max-width: none; }
+.pb.lod .pc.st-pending, .pb.lod .pc.st-hold { border-width: 6px; }

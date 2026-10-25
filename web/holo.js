@@ -394,7 +394,7 @@ export class HoloLayer {
       const lod = holoLod(px, focused || isShot);
       lodN[lod]++;
       if (!lod) continue;
-      const rr = v.r * v.size;
+      const rr = view.holoR ? view.holoR(v) : v.r * v.size; // Planet: 궤도계 바깥 반지름
       const R = rr + W * 0.56 + 0.25; // +N 표시 자리
       const pw = px2w(o.distanceTo(cp));
       v._holoPx = px; // 말풍선 자리 계산용(패널 높이 px)
@@ -461,7 +461,27 @@ export class HoloLayer {
         // 흐름 표현: 노드 → 도구 패널을 잇는 도구 빔(agent-flow 의 tool edge)
         // 도구 빔: Flow 는 늘, Planet 은 펼치거나 이어받는 순간(0.8초)만 — 노드에서 그 방향으로 뻗는 느낌
         const fresh = now - (e.swapAt ?? e.t0) < 0.8;
-        if ((view.holoToolTethers || fresh) && ph.phase !== 'fold' && nt < TETHER_CAP) {
+        // Planet: 궤도 위성이 패널을 투사 — 궤도 둘레 한 점 → 패널의 노드 쪽 모서리 두 끝(투사 원뿔), 열려 있는 동안
+        if (view.holoBeam && ph.phase !== 'fold' && nt + 2 <= TETHER_CAP && view.holoFrom && view.holoFrom(v, e.slot, this._bo || (this._bo = new THREE.Vector3()), p)) {
+          const bo = this._bo, bg = this.tokens.bg;
+          const hw = (We * ph.sx) / 2, hh = (He * ph.sy) / 2;
+          const horiz = Math.abs(d.y) > Math.abs(d.x) * 0.8;
+          const sx = horiz ? 0 : -Math.sign(d.x || 1), sy = horiz ? -Math.sign(d.y || 1) : 0;
+          const kb = (e.endAt == null ? 0.34 : 0.16) * fade * ph.alpha * Math.min(1, ph.sy * 1.5);
+          for (let j = 0; j < 2; j++) {
+            const t = j ? 1 : -1;
+            const ex = horiz ? t * hw : sx * hw, ey = horiz ? sy * hh : t * hh;
+            const q = nt * 6;
+            this.tPos[q] = bo.x; this.tPos[q + 1] = bo.y; this.tPos[q + 2] = bo.z;
+            this.tPos[q + 3] = p.x + right.x * ex + up.x * ey; this.tPos[q + 4] = p.y + right.y * ex + up.y * ey; this.tPos[q + 5] = p.z + right.z * ex + up.z * ey;
+            const kk = kb;
+            const c0 = this._c.copy(c).lerp(bg, 1 - kk);
+            this.tCol[q] = c0.r; this.tCol[q + 1] = c0.g; this.tCol[q + 2] = c0.b;
+            c0.copy(c).lerp(bg, 1 - kk * 0.35);
+            this.tCol[q + 3] = c0.r; this.tCol[q + 4] = c0.g; this.tCol[q + 5] = c0.b;
+            nt++;
+          }
+        } else if ((view.holoToolTethers || fresh) && ph.phase !== 'fold' && nt < TETHER_CAP) {
           const q = nt * 6, bg = this.tokens.bg;
           this.tPos[q] = o.x; this.tPos[q + 1] = o.y; this.tPos[q + 2] = o.z; this.tPos[q + 3] = p.x; this.tPos[q + 4] = p.y; this.tPos[q + 5] = p.z;
           const k = (e.endAt == null ? 0.75 : 0.35) * fade * ph.alpha * (view.holoToolTethers ? 1 : Math.max(0, 1 - (now - (e.swapAt ?? e.t0)) / 0.8));

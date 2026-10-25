@@ -105,8 +105,9 @@ function drawCard(view, ctx, { e, v, ph, hPx }, now, L, anchorOf) {
   const cat = e.cat;
   const ink = cat === 'skill' ? view.tokens.skill : cat === 'say' ? P.text : catColor(cat, L);
   const resCol = e.res === 'error' ? P.error : e.res === 'stopped' ? P.stopped : P.done;
-  // 노드 → 카드 도구 빔 — 아주 작은 카드는 생략
-  if (h >= 8) { ctx.globalAlpha = alpha * 0.32; ctx.strokeStyle = ink; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(nx, ny); ctx.lineTo(cx, cy); ctx.stroke(); }
+  // 노드 → 카드 도구 빔 — 아주 작은 카드는 생략. Planet(A.proj): 위성에서 카드 가까운 변으로 펼쳐지는 투사 빔(두 선 + 옅은 삼각)
+  if (h >= 44 && A && A.proj) drawProjector(ctx, A.proj(cx, cy) || { x: nx, y: ny }, x0, y0, w, h, ink, alpha);
+  else if (h >= 8) { ctx.globalAlpha = alpha * 0.32; ctx.strokeStyle = ink; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(nx, ny); ctx.lineTo(cx, cy); ctx.stroke(); }
   const small = h < 14;
   if (small) {
     // 먼 카드: 사각 하나(경로·자르기 없음)
@@ -121,6 +122,7 @@ function drawCard(view, ctx, { e, v, ph, hPx }, now, L, anchorOf) {
   ctx.fillStyle = L ? '#ffffff' : P.interior;
   ctx.fill();
   if (ph.flash > 0.01) { ctx.globalAlpha = alpha * Math.min(0.35, ph.flash * 0.35); ctx.fillStyle = resCol; ctx.fill(); } // 결과 물들임(섬광·남김)
+  if (A && A.scan && h >= 18) drawScan(ctx, x0, y0, w, h, rad, ink, alpha, now, L);
   ctx.globalAlpha = alpha;
   ctx.strokeStyle = ph.flash > 0.3 ? resCol : ink;
   ctx.lineWidth = ph.flash > 0.3 ? 2 : 1.2;
@@ -178,6 +180,32 @@ function drawCard(view, ctx, { e, v, ph, hPx }, now, L, anchorOf) {
     ctx.fillText(gl(fitChars((ln.mark === '$' ? '$ ' : '') + ln.text, lcols), i + 2), x0 + 6, ly + lh / 2);
   }
   ctx.globalAlpha = 1;
+}
+
+/** Planet 투사 빔: 시작점(위성) → 카드에서 그 점을 마주한 변의 두 끝 */
+function drawProjector(ctx, src, x0, y0, w, h, ink, alpha) {
+  const cx = x0 + w / 2, cy = y0 + h / 2;
+  let ax, ay, bx, by;
+  if (Math.abs(src.y - cy) / h > Math.abs(src.x - cx) / w) { const yy = src.y > cy ? y0 + h : y0; ax = x0 + w * 0.12; bx = x0 + w * 0.88; ay = by = yy; }
+  else { const xx = src.x > cx ? x0 + w : x0; ay = y0 + h * 0.15; by = y0 + h * 0.85; ax = bx = xx; }
+  ctx.globalAlpha = alpha * 0.07; ctx.fillStyle = ink;
+  ctx.beginPath(); ctx.moveTo(src.x, src.y); ctx.lineTo(ax, ay); ctx.lineTo(bx, by); ctx.closePath(); ctx.fill();
+  ctx.globalAlpha = alpha * 0.3; ctx.strokeStyle = ink; ctx.lineWidth = 0.8;
+  ctx.beginPath(); ctx.moveTo(src.x, src.y); ctx.lineTo(ax, ay); ctx.moveTo(src.x, src.y); ctx.lineTo(bx, by); ctx.stroke();
+  ctx.globalAlpha = alpha * 0.8; ctx.fillStyle = ink; ctx.beginPath(); ctx.arc(src.x, src.y, 1.6, 0, Math.PI * 2); ctx.fill();
+}
+/** Planet 카드 스캔라인: 가는 가로줄 + 천천히 내려가는 밝은 띠(카드 안만) */
+function drawScan(ctx, x0, y0, w, h, rad, ink, alpha, now, L) {
+  ctx.save();
+  rrect(ctx, x0, y0, w, h, rad); ctx.clip();
+  ctx.globalAlpha = alpha * (L ? 0.035 : 0.05); ctx.fillStyle = ink;
+  ctx.beginPath();
+  for (let yy = y0 + 2; yy < y0 + h; yy += 3) ctx.rect(x0, yy, w, 1);
+  ctx.fill();
+  const by = y0 + ((now * 0.22) % 1) * (h + 16) - 8;
+  ctx.globalAlpha = alpha * (L ? 0.05 : 0.08); ctx.fillRect(x0, by, w, 6);
+  ctx.restore();
+  rrect(ctx, x0, y0, w, h, rad); // 경로는 save/restore 대상이 아님 — 뒤따르는 테두리 stroke 가 카드 틀을 쓰게 되돌림
 }
 
 // ---------- 효과: 퍼지는 고리 하나(ripple·wave·beam) ----------

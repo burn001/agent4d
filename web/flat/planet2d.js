@@ -17,6 +17,9 @@ const DG_DASH = [0, 0, 0, 0]; // 끊긴 선 무늬(재사용)
 import { toScreen, camScale, planetShape, planetColor, mixColor, retractPt } from './flat-core.mjs';
 import { drawCards, drawRings, drawDeviceFace, drawIslands } from './flat-draw.js';
 import { drawMechPlanet, drawSubPlanet } from './planet-deco2d.js'; // 행성 연출
+import { stepOrbits, drawOrbits, drawBursts, emitTool, nearestSat, orbitExtent } from './planet-orbits2d.js'; // 궤도계
+import { bodyK } from '../planet-core.mjs';
+import { FLAT } from './flat-core.mjs';
 
 const TOP_ACTIVE = 6;
 const ENDED_OK = (st) => st === 'done' || st === 'stopped';
@@ -39,8 +42,8 @@ export class Planet2DView extends FlatView {
     this.applyTheme();
   }
 
-  /** 노드 그린 반지름(세계): scene.js 와 같음 — RADIUS × 0.68, 배치 장치는 2배 */
-  _nodeR(node, kind) { return RADIUS[kind] * NODE_SCALE * (isLauncher(node) ? 2 : 1); }
+  /** 노드 그린 반지름(세계): scene.js 와 같음 — RADIUS × 0.68, 배치 장치는 2배, 본체 축소 bodyK(둘레는 궤도계) */
+  _nodeR(node, kind) { const dev = isLauncher(node); return RADIUS[kind] * NODE_SCALE * (dev ? 2 : 1) * bodyK(kind, dev); }
   /** 라벨 거리: scene.js CSS2D 라벨 자리(반지름 × 1.2 + 0.5, 아래 붙는 종류는 + 0.4) */
   _labelGap(v, s, k) { return Math.min(90, (v.r * k * 1.2 + (this.labelUp(v) ? 0.5 : 0.4)) * s + 2); }
 
@@ -105,6 +108,10 @@ export class Planet2DView extends FlatView {
   fitExtra(pts, scope) { if (this.pArt) this.pArt.fitPoints(pts, scope); }
 
   _updateExtra(now) {
+    // 도구 입자가 날면 30fps. 일하는 노드가 없어도 궤도가 아주 느리게 돌도록 쉬는 동안 약 7fps 로 다시 그림(_schedule)
+    this._idleOrbit = !this.reduced && !this._frozen && this.vis.size > 0;
+    if (this._idleOrbit) this.dirty = true;
+    if (this._pb && this._pb.length) return 2;
     let level = this.pool.active.length ? 2 : 0;
     if (this.pArt) level = Math.max(level, this.pArt.level(now));
     if (this.scope.mode === 'all' && !this.reduced) for (const c of this._clusterV.values()) if (c.busy) { level = Math.max(level, 1); break; }
@@ -112,8 +119,17 @@ export class Planet2DView extends FlatView {
   }
 
   // ---------- 그리기 ----------
+  /** 쉬는 동안(level 0)의 4Hz 논리 갱신을 궤도용 약 7fps 로 — 그리기는 매번(dirty) */
+  _schedule(ms) { super._schedule(this._idleOrbit && ms === FLAT.IDLE_MS ? 140 : ms); }
+  /** 카드 기준점: 궤도계 바깥(본체 × extent), 투사 빔은 가장 가까운 위성에서, 스캔라인 */
+  _cardAnchor(v) {
+    const ext = v._po ? Math.min(orbitExtent(v), 3.4) * 0.9 : 1;
+    return { x: v._sp.x, y: v._sp.y, R: v._R * Math.max(1, ext), proj: (cx, cy) => nearestSat(v, cx, cy), scan: true };
+  }
+
   _drawScene(ctx, now) {
     const W = this.W, H = this.H, t = this.tokens;
+    this._pbNow = now;
     this._font = null; ctx.font = '10px sans-serif';
     ctx.fillStyle = t.bg;
     ctx.fillRect(0, 0, W, H);
@@ -133,8 +149,9 @@ export class Planet2DView extends FlatView {
     this.sess.drawUnder(ctx, now); // 충돌 곡선·세션 간 메시지
     // 큰 것(메인·장치)이 아래로 깔리지 않게 작은 것부터가 아니라 들어온 순서대로 — 3D 도 깊이로만 가림
     for (const v of this.vis.values()) if (v._on) this._drawNode(ctx, v, now);
+    drawBursts(this, ctx, now); // 도구 입자
     drawRings(this, ctx, now, s);
-    drawCards(this, ctx, now, s);
+    drawCards(this, ctx, now, s, this._cardAnchorFn || (this._cardAnchorFn = (v) => this._cardAnchor(v)));
     this.sess.drawOver(ctx, now); // 파일명 칩
   }
 
@@ -210,6 +227,14 @@ export class Planet2DView extends FlatView {
     ctx.globalAlpha = 1;
   }
 
+  /** 도구 입자가 향할 화면 점: 부모(연결선 쪽), 루트면 도구를 쓰는 자식, 없으면 null(바깥으로) */
+  _emitTarget(v) {
+    const pv = v.node.parentId && this.vis.get(v.node.parentId);
+    if (pv && !pv.hidden && pv._sp) return pv._sp;
+    for (const id of this.children(v.id)) { const cv = this.vis.get(id); if (cv && !cv.hidden && cv._on && cv.node.status === 'active') return cv._sp; }
+    return null;
+  }
+
   _drawNode(ctx, v, now) {
     const t = this.tokens, L = t.isLight;
     const st = v.node.status;
@@ -232,6 +257,12 @@ export class Planet2DView extends FlatView {
     const edge = v._edge;
     const shape = planetShape(v.kind, v.device);
     const rot = this.reduced ? 0 : now * (st === 'active' ? 0.35 : 0.08) + v.seed;
+    // 궤도계 뒤 반쪽(몸체 전) — 서브 유형의 뒤 부품(고리 뒤·혜성 꼬리·짝 몸체 뒤)도
+    stepOrbits(this, v, now);
+    const sub = shape === 'sphere';
+    const oOpt = sub && v._pd && v._pd.type === 'swarm' ? { spread: 1 + 0.32 * (v._pd.toolK || 0) } : undefined; // 위성 군단: 도구 때 산개
+    drawOrbits(this, ctx, v, x, y, R, alpha, now, col, 0, oOpt);
+    if (sub) drawSubPlanet(this, ctx, v, x, y, R, alpha, now, col, edge, 0);
     ctx.globalAlpha = alpha;
     ctx.fillStyle = col; ctx.strokeStyle = edge; ctx.lineWidth = Math.max(1, R * (foc ? 0.12 : 0.07));
     if (shape === 'ico') {
@@ -239,7 +270,7 @@ export class Planet2DView extends FlatView {
       drawMechPlanet(this, ctx, v, x, y, R, alpha, now, col, edge, pulse);
     } else if (shape === 'sphere') {
       // 서브에이전트 = 구름 띠·대기·위성
-      drawSubPlanet(this, ctx, v, x, y, R, alpha, now, col, edge, true);
+      drawSubPlanet(this, ctx, v, x, y, R, alpha, now, col, edge, 1);
     } else if (shape === 'torus') {
       // 워크플로 도넛(기울여 놓고 z 축으로 돎) = 납작한 고리
       ctx.lineWidth = Math.max(1.5, R * 0.36);
@@ -283,7 +314,8 @@ export class Planet2DView extends FlatView {
       ctx.fillRect(x - w * 0.44, y - h * 0.4, w * 0.88, h * 0.8);
       drawDeviceFace(this, ctx, v, x, y, w, h, R, alpha, now);
     }
-    if (shape === 'octa' || shape === 'box') drawSubPlanet(this, ctx, v, x, y, R, alpha, now, col, edge, false); // 작은 위성
+    drawOrbits(this, ctx, v, x, y, R, alpha, now, col, 1, oOpt); // 궤도계 앞 반쪽
+    if (active && v.icons && v.icons.size) emitTool(this, v, R, this._emitTarget(v), col);
     // 오류 고리: 처음 1.8초 깜빡, 10분 지난 오류는 옅게
     if (v.errorSince != null) {
       const e = now - v.errorSince;
