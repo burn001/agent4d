@@ -7,6 +7,8 @@
 
 import { isLauncher, isCycle, isEndedSt, isRunner } from '../batch-core.mjs';
 import { mapSeatLike, quarter } from './xf.mjs';
+import { isJob } from '../job-core.mjs';
+import { placeJobs } from './vx-job-core.mjs';
 
 const PI = Math.PI;
 export const OFFICE = { w: 24, d: 18 };
@@ -171,6 +173,7 @@ export function computeOffice(nodesIn, rootId, prev) {
   const offices = new Map();   // leadId → room
   const meetings = new Map();  // workflowId → room
   const leads = list.filter(isLead);
+  const jobList = []; // 작업 노드: 기계를 따로 세우지 않고 주인 기계의 작은 현황판 카드(아래 placeJobs)
   for (const L of leads) {
     offices.set(L.id, {
       id: 'o:' + L.id, type: 'office', ownerId: L.id, pd: pdOf(L.id), order: L.order, members: [], machines: [], meetings: [],
@@ -188,6 +191,7 @@ export function computeOffice(nodesIn, rootId, prev) {
     if (isLead(n)) continue;
     const k = kindOf(n);
     if (k === 'workflow') continue;
+    if (isJob(n)) { jobList.push(n); continue; }
     if (k === 'bash-bg' || k === 'monitor') { (offices.get(sessionOf(n)) || offices.get(root)).machines.push(n); continue; }
     const p = parentOf(n);
     if (k === 'workflow-agent' && p && meetings.has(p)) { meetings.get(p).members.push(n); continue; }
@@ -455,6 +459,8 @@ export function computeOffice(nodesIn, rootId, prev) {
     out.machine.set(m.ownerId, { roomId: m.id, x: room.board.x, y: 1.3, z: room.board.z, type: 'board', slot: 0, face: 0 });
     out.roomOf.set(m.ownerId, m.id);
   }
+  // 작업 카드: 주인(서버랙·모니터 벽·복합기·팀장 책상) 자리가 정해진 뒤 그 옆 현황판에 쌓는다
+  if (jobList.length) placeJobs(jobList, out, prevMach);
 
   // ---- 통로 ----
   for (const off of offices.values()) {

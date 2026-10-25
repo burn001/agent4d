@@ -31,6 +31,9 @@ import { ensureOverviewCss, islandLabelHtml } from '../overview/islands.js';
 import { pickRectAt, projectAreaPad } from '../overview/pick-core.mjs';
 import { ProjFade } from '../proj-fade.mjs';
 import { BATCH, batchFold, deviceInfo, deviceSummary, nodeTags, isLauncher, isCycle, rearmStandby, cycleProgress } from '../batch-core.mjs';
+import { isJob, jobOf } from '../job-core.mjs'; // 작업 노드
+import { jobCardModel, jobLabelAlways, jobBoardYaw, JOBCARD } from './vx-job-core.mjs';
+import { drawJobCard } from './vx-jobs.js';
 
 const MACHINE_KIND = { 'bash-bg': 'rack', monitor: 'screen', workflow: 'board' };
 const KNOWN = new Set(['main', 'subagent', 'workflow', 'workflow-agent', 'claude-p', 'bash-bg', 'monitor']);
@@ -229,8 +232,9 @@ export class VoxelView {
     if (MACHINE_KIND[kind]) {
       // 기동기는 배치 장치(복합기), 재무장 Monitor 는 앞 화면을 이어받아 새로 켜지는 연출 없이
       const rearm = node.meta && node.meta.rearmOf && this.machines.has(node.meta.rearmOf);
-      const m = { id: node.id, node, type: isLauncher(node) ? 'batch' : MACHINE_KIND[kind], flashUntil: 0, endWall: null, heldUntil: 0, released: false, seed: (hashStr(node.id) % 100) / 37, appearT0: spawn && !rearm ? now : null, info: null };
-      if (isEnded(node)) { m.endWall = now; m.heldUntil = now + (recent ? this._hold() : 0); if (!recent && !spawn) m.released = true; }
+      const job = isJob(node); // 작업 = 주인 기계 옆 현황판 카드(끝나도 자리를 지킨다 — 접기는 batchFold, 나감은 주인과 함께)
+      const m = { id: node.id, node, type: job ? 'job' : isLauncher(node) ? 'batch' : MACHINE_KIND[kind], flashUntil: 0, endWall: null, heldUntil: 0, released: false, seed: (hashStr(node.id) % 100) / 37, appearT0: spawn && !rearm ? now : null, info: null };
+      if (isEnded(node) && !job) { m.endWall = now; m.heldUntil = now + (recent ? this._hold() : 0); if (!recent && !spawn) m.released = true; }
       this.machines.set(node.id, m);
     } else {
       // 기동기 회차는 자기 사무실 없이 메인 사무실 직원(배치 장치 앞)
@@ -273,7 +277,8 @@ export class VoxelView {
         }
         if (ch.lead && n.kind === 'claude-p') this.staticSig = '';
       }
-      if (m) {
+      if (m && m.type === 'job') { m.flashUntil = now + 0.35; this.layoutDirty = true; } // 끝난 작업 접기(최근 3개)가 바뀔 수 있다
+      else if (m) {
         if (ended && m.endWall == null) {
           m.endWall = now; m.heldUntil = now + this._hold();
           // 만료된 Monitor 는 재무장을 기다리며 화면을 꺼 둔 채 자리를 지킨다(깜빡임 방지)
@@ -504,7 +509,10 @@ export class VoxelView {
       const m = this.machines.get(id);
       if (m && m.released && !(m.type === 'board' && wfMember.has(id))) continue;
       if (fold.rearmPrev.has(id)) continue;
-      out.push({ id, parentId: n.parentId, kind: n.kind, status: n.status, order: this.orderOf.get(id), projectId: n.projectId, rootSessionId: n.rootSessionId, meta: n.meta, sessionId: n.sessionId, lastActivityAt: n.lastActivityAt });
+      if (m && m.type === 'job' && fold.hidden.has(id)) continue; // 끝난 작업은 주인마다 최근 몇 개만(jobFold)
+      // 재무장 앞 Monitor 아래 작업은 대표(마지막 Monitor) 판에 — 서버가 parentId 를 옮기기 전에도 사라지지 않게
+      const pid = m && m.type === 'job' && fold.rearmPrev.has(n.parentId) ? fold.rearmPrev.get(n.parentId) : n.parentId;
+      out.push({ id, parentId: pid, kind: n.kind, status: n.status, order: this.orderOf.get(id), startedAt: n.startedAt, projectId: n.projectId, rootSessionId: n.rootSessionId, meta: n.meta, sessionId: n.sessionId, lastActivityAt: n.lastActivityAt });
     }
     return out;
   }
@@ -781,7 +789,7 @@ export class VoxelView {
       const show = !m.released && m.pos;
       let v = this.vis.get(m.id);
       if (!show) { if (v) { this.vis.delete(m.id); changed = true; } continue; }
-      if (!v) { v = { node: m.node, target: new THREE.Vector3(), r: m.type === 'board' ? 2.4 : m.type === 'batch' ? 1.6 : 1.2, icons: { size: 0 } }; this.vis.set(m.id, v); changed = true; }
+      if (!v) { v = { node: m.node, target: new THREE.Vector3(), r: m.type === 'board' ? 2.4 : m.type === 'batch' ? 1.6 : m.type === 'job' ? 0.5 : 1.2, icons: { size: 0 } }; this.vis.set(m.id, v); changed = true; }
       v.node = m.node;
       v.target.set(m.pos.x, m.type === 'rack' ? 1 : m.pos.y, m.pos.z);
       v.icons.size = (m.node.openTools || []).length;
@@ -795,7 +803,7 @@ export class VoxelView {
     if ((ch && ch.offstage) || this._isDim(id) || (this._farAll && id !== this.focusId)) return null; // 멀리서 본 전체 보기는 포커스 말풍선만
     if (ch && ch.state !== 'gone' && ch.placed) { p.x = ch.pos.x; p.y = Math.max(ch.headY() + 0.75, this.holo.monTop(ch) + 0.35); p.z = ch.pos.z; return p; }
     const m = this.machines.get(id);
-    if (m && m.pos && !m.released) { p.x = m.pos.x; p.y = (m.type === 'rack' ? 2.1 : m.pos.y + 0.6); p.z = m.pos.z; return p; }
+    if (m && m.pos && !m.released) { p.x = m.pos.x; p.y = (m.type === 'rack' ? 2.1 : m.type === 'job' ? m.pos.y + 0.2 : m.pos.y + 0.6); p.z = m.pos.z; return p; }
     return null;
   }
 
@@ -1021,8 +1029,10 @@ export class VoxelView {
     for (const r of this.rooms) r._brew = false;
     for (const ch of this.chars.values()) if (ch.room && ch.target && ch.target.type === 'break' && ch.state !== 'walk') ch.room._brew = true;
     // 기계
+    const clockMs = this.clock();
     for (const m of this.machines.values()) {
       if (m.released || !m.pos) continue;
+      if (m.type === 'job') { this._drawJob(m, now, clockMs, B); continue; } // 현황판 카드
       const st = this._mst || (this._mst = { status: '', flash: 0, t: 0, seed: 0, id: null, appear: 1, members: 0, doneMembers: 0 });
       st.status = m.node.status; st.t = t; st.seed = m.seed; st.id = m.id;
       st.flash = Math.max(0, Math.min(1, (m.flashUntil - now) / 0.35));
@@ -1090,6 +1100,49 @@ export class VoxelView {
       this.effects.length = w;
     }
     L.end(); G.end();
+  }
+
+  /** 작업 카드 한 장(주인 기계 옆 현황판) — 색·정체는 렌더러 시계(재생 = 가상 시계) */
+  _drawJob(m, now, clockMs, B) {
+    if (this.scope.mode === 'all' && this._isDim(m.id)) return;
+    const st = this._jst || (this._jst = { id: null, model: null, flash: 0, appear: 1, focus: false, ownerColor: null, seed: 0 });
+    st.id = m.id; st.seed = hashStr(m.id) % 97;
+    st.model = jobCardModel(m.node, clockMs, now, this.reduced);
+    st.flash = Math.max(0, Math.min(1, (m.flashUntil - now) / 0.35));
+    st.appear = m.appearT0 != null ? Math.min(1, Math.max(0.02, (now - m.appearT0) / 0.5)) : 1;
+    st.focus = m.id === this.focusId || m.id === this.hoverId;
+    const on = this.nodes.get(m.pos.owner);
+    st.ownerColor = on ? this.kindColor(isLauncher(on) ? 'bash-bg' : KNOWN.has(on.kind) ? on.kind : 'subagent') : null;
+    // 판은 카메라 쪽으로 조금 돈다(양면 카드 — 뒤에서 봐도 앞면처럼)
+    const cp = this.camera.position;
+    st.yaw = jobBoardYaw(m.pos.face || 0, Math.atan2(cp.x - m.pos.x, cp.z - m.pos.z));
+    const mr = this.roomsById && this.roomsById.get(m.pos.roomId);
+    if (mr && mr.xf && mr.xf.k && mr.local) { // 돌린 방: 회전 전 자리에 그려 xf 로 옮김
+      roomFrame(mr, B);
+      const lp = toLocal(mr.xf, m.pos.x, m.pos.z), q = this._jlp || (this._jlp = {});
+      Object.assign(q, m.pos); q.x = lp.x; q.z = lp.z; q.face = (m.pos.face || 0) - xfAngle(mr.xf);
+      st.yaw -= xfAngle(mr.xf);
+      drawJobCard(q, st, this.pal, this.tokens, B);
+      endXf(B);
+    } else drawJobCard(m.pos, st, this.pal, this.tokens, B);
+  }
+
+  /**
+   * 작업 이름표: 끝나지 않은 작업은 늘, 끝난 것은 포커스·호버 때만. 한 줄(상태 점 · 이름 · 꼬리표), 단계는 포커스·호버 때 둘째 줄.
+   * 자리 = 판 맨 아래 바로 밑(같은 판의 이름표는 라벨 배치가 아래로 차례로 민다)
+   */
+  _jobLabel(m, put, fid, hid, clockMs) {
+    if (m.released || !m.pos || this._isDim(m.id) || (this._farAll && m.id !== fid && m.id !== hid)) return;
+    const n0 = m.node, isF = m.id === fid || m.id === hid;
+    if (!isF && !jobLabelAlways(n0, clockMs)) return;
+    const job = jobOf(n0);
+    const md = jobCardModel(n0, clockMs, 0);
+    const key = md ? md.key : 'running';
+    const tags = nodeTags(n0, this.nodes, clockMs);
+    const tg = tags.length ? `<span class="ntags">${tags.map((x) => `<i>${esc(x)}</i>`).join('')}</span>` : '';
+    const ph = isF && job && job.phase ? `<span class="ntitle">${esc(trunc(job.phase, 40))}</span>` : '';
+    const y = m.pos.y - m.pos.slot * JOBCARD.PITCH - JOBCARD.PITCH / 2 - 0.04; // 판 맨 아래 바로 밑
+    put(m.id, `<span class="jrow"><b class="jdot"></b>${esc(trunc(n0.label || n0.id, 22))}${tg}</span>${ph}`, `machine job j-${key}` + (isF ? ' focus' : ''), m.pos.x, y, m.pos.z, null, true);
   }
 
   _deskState(ch, now) {
@@ -1166,19 +1219,27 @@ export class VoxelView {
       const sub = isF || isH ? `<small>${esc((KIND_LABEL[ch.kind] || ch.kind) + ' · ' + (STATUS_LABEL[n0.status] || n0.status || ''))}</small>` : '';
       const stt = nodeSubtitle(n0); // 자동 제목 부제: 세션(팀장)·claude -p 이름표 아래 흐린 한 줄
       const stH = stt ? `<span class="ntitle">${esc(trunc(stt, 40))}</span>` : '';
-      const tags = ch.lead && !(n0.meta && n0.meta.orphanSdk) ? EMPTY : nodeTags(n0, this.nodes);
+      const tags = ch.lead && !(n0.meta && n0.meta.orphanSdk) ? EMPTY : nodeTags(n0, this.nodes, this.clock());
       const tgH = tags.length ? `<span class="ntags">${tags.map((x) => `<i>${esc(x)}</i>`).join('')}</span>` : '';
       put(ch.id, name + stH + tgH + sub, (named ? 'lead' : '') + (isF ? ' focus' : ''), ch.pos.x, 0.02, ch.pos.z + 0.55, ch);
     }
+    const clockMs = this.clock();
+    // 작업 이름표: 판마다 아래 칸부터(같은 기준점이라 라벨 배치가 이 순서로 아래로 민다)
+    const jl = this._jlList || (this._jlList = []);
+    jl.length = 0;
+    for (const m of this.machines.values()) if (m.type === 'job' && m.pos && !m.released) jl.push(m);
+    jl.sort((a, b) => (a.pos.owner < b.pos.owner ? -1 : a.pos.owner > b.pos.owner ? 1 : a.pos.slot - b.pos.slot));
+    for (const m of jl) this._jobLabel(m, put, fid, hid, clockMs);
     for (const m of this.machines.values()) {
       const batch = m.type === 'batch';
+      if (m.type === 'job') continue;
       if (m.released || !m.pos || (m.id !== fid && m.id !== hid && !batch)) continue;
       if (batch && (this._isDim(m.id) || (this._farAll && m.id !== fid && m.id !== hid))) continue;
       const n0 = m.node;
       if (batch) {
         // 배치 장치는 늘: 이름 · 꼬리표(이어받음) · 회차 집계
         if (!m.info) m.info = deviceInfo(n0, this.nodes);
-        const tags = nodeTags(n0, this.nodes);
+        const tags = nodeTags(n0, this.nodes, this.clock());
         const spt = spawnTag(n0); if (spt) tags.push(spt); // 띄움 꼬리표
         const tg = tags.length ? `<span class="ntags">${tags.map((x) => `<i>${esc(x)}</i>`).join('')}</span>` : '';
         put(m.id, esc(trunc(n0.label || n0.id, 20)) + tg + `<small class="ndev">${esc(deviceSummary(m.info))}</small>`, 'machine batch' + (m.id === fid || m.id === hid ? ' focus' : ''), m.pos.x - 0.6, 1.9, m.pos.z - 0.6, null, true); // 장치 위·뒤(팀장 이름표와 겹치지 않게)

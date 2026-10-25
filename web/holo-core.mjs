@@ -3,6 +3,7 @@
 //   화면 크기(px)에 따른 단순화 단계(holoLod), 짧은 라벨(holoLabel), 노드별 도구 장부(HoloBook: 자리 배정·대기열·상한).
 // 라이브·재생·mock 은 모두 app.onEvent → view.toolStart/toolEnd 를 지나므로 같은 장부를 쓴다. node --test 로 시험(web/test/holo.test.mjs).
 import { t as tr } from './i18n.mjs';
+import { jobOf, jobCode } from './job-core.mjs';
 
 export const HOLO = {
   MAX: 512,           // 화면 전체 동시에 그리는 패널 상한(인스턴싱) — 넘으면 대기열
@@ -123,6 +124,68 @@ export function markStyle(mark, light) {
   const c = D[mark] || D.o;
   return { color: c[i], bg: BG[mark] ? BG[mark][i] : null, bold: mark === '$' || mark === '@', dim: mark === 'd' || mark === 'm' };
 }
+// ---- 주인 꼬리 패널에서 작업을 만든 줄 표시 ----
+// 작업 노드(meta.job.line = 마지막 줄, 서버가 공백 접기·160자 자름)와 패널 줄(100자 자름, 웹 normPanel 탭 → 공백)은
+// 자르는 길이가 달라 그대로 비교하면 긴 줄이 안 맞는다 — 둘 다 공백을 접고 끝 말줄임을 떼어 '같음 또는 앞부분'으로 판정한다.
+const JOB_LINE_MIN = 12; // 앞부분 일치로 볼 최소 글자 수(짧은 줄의 우연 일치 방지)
+/** 작업 줄 비교용 정리: 공백 접기 · 앞뒤 공백 · 끝 말줄임(… / ...) 제거 */
+export function jobLineNorm(s) {
+  return String(s ?? '').replace(/\s+/g, ' ').trim().replace(/(?:…|\.\.\.)$/, '').trimEnd();
+}
+/** 패널 줄이 작업의 마지막 줄인가: 같거나, 잘린 쪽(…)이 다른 쪽의 앞부분(정리 뒤 JOB_LINE_MIN 자 이상) */
+export function sameJobLine(panelLine, jobLine) {
+  const a = jobLineNorm(panelLine), b = jobLineNorm(jobLine);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const ca = /(?:…|\.\.\.)\s*$/.test(String(panelLine ?? '')), cb = /(?:…|\.\.\.)\s*$/.test(String(jobLine ?? ''));
+  if (ca && a.length >= JOB_LINE_MIN && b.startsWith(a)) return true;
+  if (cb && b.length >= JOB_LINE_MIN && a.startsWith(b)) return true;
+  return false;
+}
+/**
+ * 보일 줄(panelRows 결과 [{text, mark}]) 가운데 작업을 만든 줄: 작업마다 가장 아래(가장 최근) 맞는 줄 하나에 그 작업의 상태 번호.
+ * jobs = [{line, code}] (code = job-core JOB_CODE, 표시 상태 — 정체 5 포함). 말줄임 줄(m)은 건너뜀. 한 줄에 둘이 맞으면 앞 작업.
+ * @returns {number[]} rows 길이, 표시 없으면 -1
+ */
+export function jobRowHits(rows, jobs) {
+  const out = new Array((rows && rows.length) || 0).fill(-1);
+  if (!out.length || !jobs || !jobs.length) return out;
+  for (const j of jobs) {
+    if (!j || !j.line) continue;
+    for (let i = out.length - 1; i >= 0; i--) {
+      const r = rows[i];
+      if (!r || r.mark === 'm') continue;
+      if (sameJobLine(r.text, j.line)) { if (out[i] < 0) out[i] = j.code; break; }
+    }
+  }
+  return out;
+}
+/**
+ * 주인 노드의 자식 노드들 → 작업 줄 목록 [{line, code}](마지막 줄이 있는 작업만, 표시 상태는 렌더러 시계 nowMs 로).
+ * 최근 박동 순(가장 최근 작업이 같은 줄을 두고 이김)
+ */
+export function jobLinesOf(kids, nowMs) {
+  const out = [];
+  for (const n of kids || []) {
+    const j = jobOf(n);
+    if (!j || !j.line) continue;
+    out.push({ line: j.line, code: jobCode(j, nowMs), at: Date.parse(j.beatAt || '') || 0 });
+  }
+  out.sort((a, b) => b.at - a.at);
+  return out.map(({ line, code }) => ({ line, code }));
+}
+/** 작업 줄 표시가 바뀌었는지 볼 열쇠(글 칸 다시 그리기 판단) */
+export const jobLinesKey = (jobs) => (jobs && jobs.length ? jobs.map((j) => `${j.code}:${j.line}`).join('\n') : '');
+/** 작업 상태 번호 → 줄 표시 색(왼쪽 띠·옅은 바탕). 진행 호박 · 대기 파랑 흐림 · 줄 섬 회색 · 끝 초록 · 실패 빨강 · 정체 주황 */
+const JOB_INK = [['#9aa3b2', '#6b7280'], ['#facc15', '#b45309'], ['#8fa9e6', '#4b6cb7'], ['#34d399', '#059669'], ['#ef4444', '#dc2626'], ['#fb923c', '#c2410c']];
+export function jobLineStyle(code, light) {
+  const c = JOB_INK[code] || JOB_INK[1];
+  const hex = c[light ? 1 : 0];
+  const n = parseInt(hex.slice(1), 16);
+  const a = light ? 0.11 : 0.14;
+  return { bar: hex, bg: `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})` };
+}
+
 /**
  * 실루엣별 글 자리(uv, 0..1, y 위로): hd 머리 띠 아래 끝 · title 제목 칸 [x0,x1,y0,y1] · body 줄 칸 · glyph 글리프 왼쪽 아래(x,y)·크기 s(높이 단위).
  * 셰이더(holo.js glyphAt)의 머리 띠·글리프 자리와 같은 값
@@ -352,7 +415,7 @@ export class HoloBook {
     if (lg) {
       Object.assign(lg, { id, cat, tool: ev.tool || '', label: holoLabel({ ...ev, cat }), mode: k.mode, glyph: k.glyph, shape: k.shape, asp: k.asp,
         t0: now - HOLO.OPEN - 1e-3, endAt: null, minShow: 0, res: 'ok', result: '', swapAt: now, soft: false,
-        panel, pv: (lg.pv || 0) + 1, touchAt: null, scrollAt: null, scrollN: 0 });
+        panel, pv: (lg.pv || 0) + 1, touchAt: null, scrollAt: null, scrollN: 0, jobOwner: null });
       // 배열 끝으로(가장 최근)
       arr.splice(arr.indexOf(lg), 1); arr.push(lg);
       return lg;
@@ -362,7 +425,7 @@ export class HoloBook {
       shape: k.shape, asp: k.asp, dir: k.dir,
       seed: hashUnit(id), t0: quiet ? now - HOLO.OPEN - 1 : now, endAt: null, minShow, res: 'ok', slot: -1,
       foldAt: null, swapAt: null, soft: false, result: '',
-      panel, pv: 1, touchAt: null, scrollAt: null, scrollN: 0, sticky: null,
+      panel, pv: 1, touchAt: null, scrollAt: null, scrollN: 0, sticky: null, jobOwner: null,
     };
     e.slot = this._freeSlot(arr, e.dir);
     if (e.slot >= 0) this.shown++;
@@ -432,7 +495,7 @@ export class HoloBook {
     const e = {
       id, node: nodeId, cat, tool: name, label: { tool: name, target: p.title || '' }, mode: k.mode, glyph: k.glyph, shape: k.shape, asp: k.asp, dir: k.dir,
       seed: hashUnit(id), t0, endAt: t0, minShow: 0, res: 'ok', slot: -1, foldAt: null, swapAt: null, soft: true, result: '',
-      panel: p, pv: 1, touchAt: now, scrollAt: null, scrollN: 0, sticky: kind,
+      panel: p, pv: 1, touchAt: now, scrollAt: null, scrollN: 0, sticky: kind, jobOwner: kind === 'tail' ? nodeId : null,
     };
     e.slot = this._freeSlot(arr, e.dir);
     if (e.slot < 0) { if (!arr.length) this.byNode.delete(nodeId); return null; } // 자리가 없으면 기다리지 않는다(다음 갱신 때 다시)
@@ -458,7 +521,7 @@ export class HoloBook {
         const r = p.ref;
         let e = r && r.toolUseId ? this.find(r.nodeId, r.toolUseId) : null;
         if (e && (e.slot < 0 || e.foldAt != null)) e = null;
-        if (e) { if (this._setPanel(e, p, now, true)) n++; e.touchAt = now; }
+        if (e) { if (this._setPanel(e, p, now, true)) n++; e.touchAt = now; e.jobOwner = ev.nodeId; } // 꼬리를 낸 노드 = 작업 주인
         else if (this.sticky(ev.nodeId, 'tail', p, now, quiet)) n++;
       } else if (ev.type === 'text') {
         if (this.sticky(ev.nodeId, 'say', p, now, quiet)) n++;

@@ -19,6 +19,8 @@ export const DARK = {
   mug: '#f2f0ea', coffee: '#5a3a22', bag: '#6b4a2e', counter: '#2f3746', machine: '#20252e', bean: '#c27a3a',
   pad: '#2b3445', drone: '#c8d0dc', rotor: '#8a94a3', parcel: '#c79a5b', vault: '#5d6878', vaultDoor: '#7a8699', belt: '#232a35', bin: '#3d4859', booth: '#2c3646',
   lampOff: '#262b33', plant2: '#2f7a4e', plantPot: '#3a3f4b', lampShade: '#e9d8b0',
+  // 작업 카드: 대기 = 파랑 흐림 · 줄 섬 = 회색 흐림(진행·끝·실패·정체는 테마 토큰 skill·ok·error)
+  jobWait: '#5b8fd6', jobQueue: '#7b8494',
   dimFactor: 0.55,
 };
 export const LIGHT = {
@@ -39,6 +41,7 @@ export const LIGHT = {
   mug: '#ffffff', coffee: '#6b4423', bag: '#8a5a32', counter: '#c3ccd9', machine: '#4b5567', bean: '#b8692a',
   pad: '#b7c2d2', drone: '#eef1f6', rotor: '#7d8899', parcel: '#c9934f', vault: '#8a96a8', vaultDoor: '#a7b2c2', belt: '#7d8899', bin: '#9aa5b5', booth: '#a3aec0',
   lampOff: '#b9c2cf', plant2: '#3f9a62', plantPot: '#8a8f9b', lampShade: '#fff4d6',
+  jobWait: '#3f74c8', jobQueue: '#8d96a4',
   dimFactor: 0.75,
 };
 export const SKIN = ['#e8c4a0', '#c99a72', '#a8754f', '#f1d3b5'];

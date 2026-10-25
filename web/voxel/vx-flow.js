@@ -48,6 +48,7 @@ export class VxFlow {
     const v = this.view, ch = v.chars.get(id);
     if (ch) return ch.seat && ch.room && ch.placed && ch.state !== 'gone' && !ch.offstage ? { seat: ch.seat, room: ch.room } : null;
     const m = v.machines.get(id);
+    if (m && m.type === 'job') return null; // 작업 카드는 주인 기계에 붙어 있어 바닥 라인을 긋지 않는다
     if (m && m.pos && !m.released) return { seat: { x: m.pos.x, z: m.pos.z }, room: v.roomsById.get(m.pos.roomId) || null };
     return null;
   }

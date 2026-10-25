@@ -202,6 +202,8 @@ export function exitEligible(nodes, rootIds = []) {
     if (memo.has(id)) return memo.get(id);
     const n = nodes.get(id);
     let r = !!n && (n.status === 'done' || n.status === 'stopped') && !roots.has(id) && n.kind !== 'main';
+    // 끝난 작업은 주인(출력 스트림)이 살아 있는 동안 남는다 — 몇 개만 남기는 것은 접기(jobFold)가 맡는다
+    if (r && n.meta && n.meta.job) { const p = nodes.get(n.parentId); if (p && !['done', 'stopped', 'error'].includes(p.status)) r = false; }
     if (r && depth < 64) for (const c of kids.get(id) || []) if (!ok(c, depth + 1)) { r = false; break; }
     memo.set(id, r);
     return r;

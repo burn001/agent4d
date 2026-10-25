@@ -2,7 +2,8 @@
 //  ① 종류·상태·설명(kindInfo·statusInfo), ② 노드별 최근 기록 장부(InspectBook: 도구 타임라인·출력 꼬리·특별 상호작용·말),
 //  ③ 자식 집계·섬 요약, ④ 화면 배치(placeCard·sheetMode), ⑤ 자동 닫힘 판정(autoCloseReason).
 import { isLauncher, isRunner, isCycle, isOrphanRoot, deviceInfo, deviceSummary, fmtDur } from './batch-core.mjs';
-import { t as tr } from './i18n.mjs';
+import { t as tr, fmtTime, fmtDateTime } from './i18n.mjs';
+import { isJob, jobOf, jobInspect, jobStale, jobTags, jobFold, jobDisplayState, jobProgress, jobProgressText, isJobEndedState } from './job-core.mjs';
 
 export const INSPECT = {
   TOOLS: 8,          // 노드당 최근 도구 호출
@@ -29,6 +30,7 @@ export function kindInfo(n) {
 function kindInfo0(n) {
   const m = metaOf(n);
   if (!n) return { key: 'none', icon: '?', name: tr('cards.kind.none'), desc: '' };
+  if (isJob(n)) return { key: 'job', icon: '◈', name: tr('cards.job.kind'), desc: tr('cards.job.desc') }; // 작업 노드(kind bash-bg + meta.job)
   if (isLauncher(n)) return { key: 'launcher', icon: '⚙', name: tr('cards.kind.launcher'), desc: tr('cards.kind.launcher.desc', { script: m.launcher && m.launcher.script ? ' (' + m.launcher.script + ')' : '' }) };
   if (isRunner(n)) return { key: 'runner', icon: '↻', name: tr('cards.kind.runner'), desc: tr('cards.kind.runner.desc', { script: m.runner && m.runner.script ? ' (' + m.runner.script + ')' : '' }) };
   if (isCycle(n)) return { key: 'cycle', icon: '▣', name: tr('cards.kind.cycle'), desc: tr('cards.kind.cycle.desc', { n: Number.isFinite(m.cycle) ? ' (#' + m.cycle + ')' : '' }) };
@@ -296,6 +298,75 @@ export function limitsLine(l) {
   if (l.five_hour && Number.isFinite(l.five_hour.pct)) p.push(tr('cards.lim.5h', { p: Math.round(l.five_hour.pct) }));
   if (l.seven_day && Number.isFinite(l.seven_day.pct)) p.push(tr('cards.lim.7d', { p: Math.round(l.seven_day.pct) }));
   return p.length ? `${tr('cards.lim.line', { parts: p.join(' · ') })}${l.stale ? ` (${tr('cards.lim.stale')})` : ''}` : '';
+}
+
+// ---------- 작업(Job) 노드 ----------
+/** 표시 상태 → 상태 점·막대·배지 색 이름(inspector.css 의 .jd-<값>) */
+export const JOB_DISP = ['queued', 'running', 'waiting', 'done', 'failed', 'stale'];
+
+/** 출처 글: 'protocol' → 규약 줄 · 'rule:<묶음>' → 규칙 묶음 이름 */
+export function jobSrcText(src) {
+  if (!src) return '';
+  if (src === 'protocol') return tr('cards.job.src.protocol');
+  if (String(src).startsWith('rule:')) return tr('cards.job.src.rule', { name: String(src).slice(5) });
+  return String(src);
+}
+
+/**
+ * 작업 노드 인스펙터 내용(job-core jobInspect 를 화면 글로): 머리 배지(정체면 '정체 N분' + warn) · 행(상대 시간·재확인 남은 시간·출처 이름) · 마지막 줄.
+ * 시계(nowMs)는 렌더러 시계(재생이면 가상 시계)를 그대로 받는다
+ * @returns {{title, id, display, stale, warn, badge, rows:[{key,label,value,title,ratio?}], line, progress, startedAt, endedAt, ended}|null}
+ */
+export function jobCardModel(n, nowMs) {
+  const m = jobInspect(n, nowMs);
+  if (!m) return null;
+  const job = jobOf(n);
+  const st = jobStale(job, nowMs);
+  const badge = st.stale ? jobTags(job, nowMs)[0] : tr('cards.job.' + (JOB_DISP.includes(job.state) ? job.state : 'running'));
+  const rows = m.rows.map(([key, v]) => {
+    const r = { key, label: tr('cards.job.r.' + key), value: String(v ?? ''), title: '' };
+    if (key === 'beat') {
+      const t = tsOf(v);
+      if (t) { r.value = fmtAgo(Math.max(0, nowMs - t)); r.title = fmtDateTime(t, { seconds: true }); }
+    } else if (key === 'until') {
+      const t = tsOf(v);
+      if (t) {
+        const d = t - nowMs;
+        r.value = `${fmtTime(t)} · ${tr(d >= 0 ? 'cards.job.in' : 'cards.job.over', { t: fmtDur(Math.max(1000, Math.abs(d))) })}`;
+        r.title = fmtDateTime(t, { seconds: true });
+      }
+    } else if (key === 'src') { r.value = jobSrcText(v); r.title = String(v); }
+    else if (key === 'progress') r.ratio = m.progress;
+    return r;
+  });
+  return {
+    title: m.title, id: m.id, display: m.display, stale: m.stale, warn: m.stale, badge, rows,
+    line: m.line, progress: m.progress, startedAt: m.startedAt || null, endedAt: m.endedAt || null, ended: isJobEndedState(job.state), summary: m.summary,
+  };
+}
+
+/**
+ * 주인 노드(백그라운드 명령·Monitor·러너/기동기·메인) 아래 작업 목록 요약: 작업마다 한 줄(상태 점·제목·단계·진행).
+ * 끝난 작업 접기는 jobFold 와 같은 규칙(최근 3개만 보이고 나머지는 hidden 수).
+ * 순서: 끝나지 않은 것(시작 순) → 끝난 것(최근 끝난 것 먼저)
+ * @param nodes Map id → node
+ * @returns {{items:[{id,title,display,phase,progress,ratio}], hidden:number, total:number}|null} 작업이 없으면 null
+ */
+export function ownerJobsModel(nodes, ownerId, nowMs) {
+  if (!nodes || !ownerId) return null;
+  const mine = new Map();
+  for (const k of nodes.values()) if (k.parentId === ownerId && isJob(k)) mine.set(k.id, k);
+  if (!mine.size) return null;
+  const { hidden } = jobFold(mine);
+  const vis = [...mine.values()].filter((k) => !hidden.has(k.id));
+  const endT = (k) => tsOf(jobOf(k).endedAt || k.endedAt);
+  const live = vis.filter((k) => !isJobEndedState(jobOf(k).state)).sort((a, b) => tsOf(jobOf(a).startedAt || a.startedAt) - tsOf(jobOf(b).startedAt || b.startedAt) || (a.id < b.id ? -1 : 1));
+  const ended = vis.filter((k) => isJobEndedState(jobOf(k).state)).sort((a, b) => endT(b) - endT(a) || (a.id < b.id ? -1 : 1));
+  const items = live.concat(ended).map((k) => {
+    const j = jobOf(k);
+    return { id: k.id, title: j.title || j.id || k.label || k.id, display: jobDisplayState(j, nowMs), phase: j.phase || '', progress: jobProgressText(j), ratio: jobProgress(j) };
+  });
+  return { items, hidden: hidden.size, total: mine.size };
 }
 
 /** 좁은 화면이면 하단 시트 */

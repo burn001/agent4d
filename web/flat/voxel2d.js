@@ -16,6 +16,8 @@ import { packView, packStale } from '../overview/pack-view.js';
 import { Character, crewSpots } from '../voxel/character-core.mjs';
 import { DARK, LIGHT, SKIN } from '../voxel/palette-hex.mjs';
 import { BATCH, batchFold, isLauncher, isCycle, rearmStandby } from '../batch-core.mjs';
+import { isJob, jobOf, jobLabelKey } from '../job-core.mjs'; // 작업 노드
+import { JOBCARD, jobCardModel, jobFlatPos, jobLabelAlways, jobColorHex, mixHex } from '../voxel/vx-job-core.mjs';
 import { catColor } from '../flow-core.mjs';
 import { pickRectAt, projectAreaPad } from '../overview/pick-core.mjs';
 import { toScreen, toWorld, camScale } from './flat-core.mjs';
@@ -100,6 +102,7 @@ export class Voxel2DView extends FlatView {
   _nodeR(node, kind) {
     const k = KNOWN.has(node.kind) ? node.kind : 'subagent';
     if (isLauncher(node)) return 1.0;
+    if (isJob(node)) return 0.2; // 작업 칩
     if (MACHINE_KIND[k]) return k === 'workflow' ? 1.2 : 0.5;
     return charRadius(k === 'main' || k === 'claude-p');
   }
@@ -123,8 +126,9 @@ export class Voxel2DView extends FlatView {
     if (MACHINE_KIND[kind]) {
       // 기동기는 배치 장치(복합기), 재무장 Monitor 는 앞 화면을 이어받아 새로 켜지는 연출 없이
       const rearm = node.meta && node.meta.rearmOf && this.machines.has(node.meta.rearmOf);
-      const m = { id: node.id, node, type: isLauncher(node) ? 'batch' : MACHINE_KIND[kind], flashUntil: 0, endWall: null, heldUntil: 0, released: false, appearT0: spawn && !rearm ? now : null, pos: null };
-      if (isEnded(node)) { m.endWall = now; m.heldUntil = now + (recent ? this._hold() : 0); if (!recent && !spawn) m.released = true; }
+      const job = isJob(node); // 작업 = 주인 기계 옆 현황판 칩(끝나도 자리를 지킨다 — 접기는 batchFold, 나감은 주인과 함께)
+      const m = { id: node.id, node, type: job ? 'job' : isLauncher(node) ? 'batch' : MACHINE_KIND[kind], flashUntil: 0, endWall: null, heldUntil: 0, released: false, appearT0: spawn && !rearm ? now : null, pos: null };
+      if (isEnded(node) && !job) { m.endWall = now; m.heldUntil = now + (recent ? this._hold() : 0); if (!recent && !spawn) m.released = true; }
       this.machines.set(node.id, m);
     } else {
       const lead = kind === 'main' || (kind === 'claude-p' && !isCycle(node, nm)) || node.id === this.rootId || (!node.parentId && !this.rootId);
@@ -160,7 +164,8 @@ export class Voxel2DView extends FlatView {
         this.chars.set(id, c2);
         this.layoutDirty = true;
       }
-      if (m) {
+      if (m && m.type === 'job') { m.flashUntil = now + 0.35; this.layoutDirty = true; } // 끝난 작업 접기(최근 3개)가 바뀔 수 있다
+      else if (m) {
         if (ended && m.endWall == null) {
           m.endWall = now; m.heldUntil = now + this._hold();
           // 만료된 Monitor 는 재무장을 기다리며 화면을 꺼 둔 채 자리를 지킨다
@@ -305,7 +310,10 @@ export class Voxel2DView extends FlatView {
       const m = this.machines.get(id);
       if (m && m.released && !(m.type === 'board' && wfMember.has(id))) continue;
       if (fold.rearmPrev.has(id)) continue;
-      out.push({ id, parentId: n.parentId, kind: n.kind, status: n.status, order: n._order, projectId: n.projectId, rootSessionId: n.rootSessionId, meta: n.meta, sessionId: n.sessionId, lastActivityAt: n.lastActivityAt });
+      if (m && m.type === 'job' && fold.hidden.has(id)) continue; // 끝난 작업은 주인마다 최근 몇 개만(jobFold)
+      // 재무장 앞 Monitor 아래 작업은 대표(마지막 Monitor) 판에 — 서버가 parentId 를 옮기기 전에도 사라지지 않게
+      const pid = m && m.type === 'job' && fold.rearmPrev.has(n.parentId) ? fold.rearmPrev.get(n.parentId) : n.parentId;
+      out.push({ id, parentId: pid, kind: n.kind, status: n.status, order: n._order, startedAt: n.startedAt, projectId: n.projectId, rootSessionId: n.rootSessionId, meta: n.meta, sessionId: n.sessionId, lastActivityAt: n.lastActivityAt });
     }
     return out;
   }
@@ -427,7 +435,8 @@ export class Voxel2DView extends FlatView {
       const gone = !!m.released;
       if (gone !== !!v.gone) v.gone = gone;
       this._syncHidden(v);
-      if (m.pos) { v.pos.x = v.target.x = m.pos.x; v.pos.z = v.target.z = m.pos.z; }
+      if (m.pos && m.type === 'job') { const q = jobFlatPos(m.pos, this._jfp || (this._jfp = {})); v.pos.x = v.target.x = q.x; v.pos.z = v.target.z = q.z; } // 판 앞쪽 칩 줄
+      else if (m.pos) { v.pos.x = v.target.x = m.pos.x; v.pos.z = v.target.z = m.pos.z; }
       v.drawS = m.appearT0 != null ? Math.min(1, Math.max(0.02, (now - m.appearT0) / 0.5)) : 1;
       if (m.appearT0 != null && v.drawS < 1) moving = true;
     }
@@ -501,6 +510,16 @@ export class Voxel2DView extends FlatView {
     }
     // 재무장 대기 라벨
     for (const m of this.machines.values()) { const v = this.vis.get(m.id); if (v && !!m.standby !== !!v.standby) { v.standby = !!m.standby; this._labelText(v); } }
+    // 시계로만 바뀌는 작업 정체 표시(재생 = 가상 시계) — 0.25초마다 라벨 열쇠 비교
+    if (t - (this._jobAt || 0) >= 0.25) {
+      this._jobAt = t;
+      const cm = this.clock();
+      for (const m of this.machines.values()) {
+        if (m.type !== 'job') continue;
+        const v = this.vis.get(m.id);
+        if (v && v._jobKey != null && jobLabelKey(jobOf(v.node), cm) !== v._jobKey) this._labelText(v);
+      }
+    }
   }
 
   _update(now, dt) {
@@ -542,6 +561,7 @@ export class Voxel2DView extends FlatView {
     for (const m of this.machines.values()) {
       if (m.flashUntil > now) level = 2;
       if (m.type === 'batch' && !this.reduced && m.node.status === 'active') level = Math.max(level, 1);
+      if (m.type === 'job' && !this.reduced && m.pos && (m.node.status === 'active' || (m.node.meta && m.node.meta.job && m.node.meta.job.stale))) level = Math.max(level, 1); // 숨쉬는 표시등·정체 맥박
     }
     if (now - this.lastLabelPass > 0.25) this._labelPass(now);
     if (this.effects.length) {
@@ -574,13 +594,15 @@ export class Voxel2DView extends FlatView {
     return out;
   }
   /** 캐릭터 원판(v.r = 그린 반지름 0.5·팀장 0.66) */
-  _discK(v) { return v.device ? 1.6 : 1.05; }
+  _discK(v) { return v.device ? 1.6 : isJob(v.node) ? 0 : 1.05; } // 작업 칩은 작아 이름표가 비킬 원판에서 뺀다(칩 줄 위로 이름표가 놓여도 됨)
   /** 이름표 우선: 포커스·호버 > 팀장(메인 = 상급자) > 배치 장치 > 진행 회차·독립 claude -p > 작업 중 직원 > 나머지(적으면 전부). 기계(랙·화면)는 포커스·호버 때만 */
   _labelCandidates(push, actives, maxLabels, order, seen) {
     push(this.focusId, true); push(this.hoverId, true);
     const nm = this._nodeMap();
     for (const ch of this.chars.values()) if (ch.lead) push(ch.id, false);
     for (const v of this.vis.values()) if (v.device) push(v.id, false);
+    const cm = this.clock();
+    for (const m of this.machines.values()) if (m.type === 'job' && m.pos && jobLabelAlways(m.node, cm)) push(m.id, false, 'soft'); // 진행·대기·정체 작업(붐비면 리더선 달고 먼 자리)
     for (const ch of this.chars.values()) {
       const n = ch.node;
       if ((n.meta && n.meta.orphanSdk) || (ch.kind === 'claude-p' && !isEnded(n) && isCycle(n, nm))) push(ch.id, false);
@@ -1010,6 +1032,7 @@ export class Voxel2DView extends FlatView {
     v._sp = v._sp || {}; v._sp.x = x; v._sp.y = y;
     ctx.globalAlpha = A * Math.min(1, sk * 1.3) * (m.removing ? 0.4 + 0.6 * flash : 1);
     const foc = m.id === this.focusId || m.id === this.hoverId;
+    if (m.type === 'job') { this._drawJob(ctx, m, v, s, now, foc); ctx.globalAlpha = 1; return; }
     const led = st === 'active' ? (this.reduced || Math.sin(now * 6 + m.id.length) > 0 ? pal.led : pal.ledIdle) : st === 'error' ? t.error : isEnded(m.node) ? pal.ledOff : pal.ledIdle;
     if (m.type === 'rack') {
       const w = 0.75 * s * k, h = 1.0 * s * k;
@@ -1046,6 +1069,61 @@ export class Voxel2DView extends FlatView {
     }
     if (foc) { ctx.globalAlpha = 0.9; ctx.strokeStyle = t.text; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(x, y, (m.type === 'batch' ? 1.4 : 0.8) * s, 0, Math.PI * 2); ctx.stroke(); }
     ctx.globalAlpha = 1;
+  }
+
+  /**
+   * 작업 칩(위에서 본 현황판 카드): 판 뒤판 한 칸 + 흰 카드 + 왼쪽 상태 띠 + 진행 막대 + 오른쪽 표시등(정체 = 끊긴 맥박)·대기 모래시계.
+   * 칩 줄은 판 앞쪽(face)으로 늘어서고, 카드 긴 쪽은 판을 보는 사람의 오른쪽(3D 와 같은 축)
+   */
+  _drawJob(ctx, m, v, s, now, foc) {
+    const pal = this.pal, t = this.tokens;
+    const md = jobCardModel(m.node, this.clock(), now, this.reduced);
+    if (!md) return;
+    const k = v.drawS || 1, f = m.pos.face || 0;
+    const fx = Math.round(Math.sin(f)), fz = Math.round(Math.cos(f)), rx = Math.round(Math.cos(f)), rz = Math.round(-Math.sin(f));
+    const c = v._sp; // 칩 중심(화면) — _syncActors 가 v.pos 를 칩 자리로 둔다
+    const p = jobFlatPos(m.pos, this._jfp2 || (this._jfp2 = {}));
+    c.x = this._X(p.x); c.y = this._Y(p.z);
+    // 지역 (u = 오른쪽, w = 판 앞쪽) 사각형 → 화면 사각형
+    const rect = (u, w, du, dw, col) => {
+      const cx = c.x + (rx * u + fx * w) * s, cy = c.y + (rz * u + fz * w) * s;
+      const W = (Math.abs(rx) * du + Math.abs(fx) * dw) * s, H = (Math.abs(rz) * du + Math.abs(fz) * dw) * s;
+      ctx.fillStyle = col; ctx.fillRect(cx - W / 2, cy - H / 2, W, H);
+    };
+    const D = (JOBCARD.CHIP - 0.05) * k, CW = JOBCARD.W * k;
+    const sc = jobColorHex(md.key, t, pal);
+    const a0 = ctx.globalAlpha;
+    rect(0, 0, JOBCARD.BOARD_W, JOBCARD.CHIP + 0.005, pal.boardFrame);
+    if (m.pos.hi) rect(0, JOBCARD.CHIP / 2, JOBCARD.BOARD_W + 0.04, 0.05, this.kindColor('bash-bg'));
+    let card = pal.board;
+    if (md.dim) card = mixHex(card, pal.boardFrame, 0.35); else if (md.ended) card = mixHex(card, pal.boardFrame, 0.18);
+    if (md.key === 'stale' && md.lamp > 0.5) card = mixHex(card, sc, 0.3);
+    rect(0, 0, CW, D, card);
+    if (s < 6) { rect(-CW / 2 + 0.05, 0, 0.1, D, sc); return; } // 멀면 띠만
+    rect(-CW / 2 + 0.035, 0, 0.05, D - 0.02, sc);
+    if (md.progress != null) {
+      const tw = 0.4, u0 = -CW / 2 + 0.08, pr = Math.max(0, Math.min(1, md.progress));
+      rect(u0 + tw / 2, 0, tw, 0.06, pal.metalDark);
+      if (pr > 0.005) rect(u0 + (tw * pr) / 2, 0, tw * pr, 0.045, sc);
+    } else {
+      rect(-CW / 2 + 0.2, -0.03, 0.22, 0.025, pal.boardFrame); // 글 줄 흉내
+      rect(-CW / 2 + 0.17, 0.03, 0.16, 0.02, pal.boardFrame);
+    }
+    const ru = CW / 2 - 0.07;
+    if (md.wait != null) {
+      // 모래시계(위에서 본 네모): 테두리 + 아래쪽(판 앞쪽)부터 차오름
+      const cx = c.x + rx * ru * s, cy = c.y + rz * ru * s, R = 0.065 * s;
+      ctx.strokeStyle = pal.metalDark; ctx.lineWidth = Math.max(1, 0.015 * s); ctx.strokeRect(cx - R, cy - R, 2 * R, 2 * R);
+      const fw = 0.13 * md.wait;
+      if (fw > 0.004) rect(ru, 0.065 - fw / 2, 0.12, fw, sc);
+    } else {
+      const cx = c.x + rx * ru * s, cy = c.y + rz * ru * s;
+      ctx.globalAlpha = a0 * (md.lamp > 0.05 ? 0.35 + 0.65 * md.lamp : 1);
+      ctx.fillStyle = md.lamp > 0.05 ? sc : pal.ledOff;
+      ctx.beginPath(); ctx.arc(cx, cy, Math.max(1.2, 0.05 * s), 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = a0;
+    }
+    if (foc) { ctx.globalAlpha = 0.9; ctx.strokeStyle = t.text; ctx.lineWidth = 1.2; const W = (Math.abs(rx) * 0.84 + Math.abs(fx) * 0.3) * s, H = (Math.abs(rz) * 0.84 + Math.abs(fz) * 0.3) * s; ctx.strokeRect(c.x - W / 2, c.y - H / 2, W, H); }
   }
 
   _drawChar(ctx, ch, v, s, now) {

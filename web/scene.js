@@ -23,6 +23,7 @@ import { ExitParticles } from './exit-fx.js';
 import { nodeSubtitle } from './node-title.mjs';
 import { escapeHtml } from './html-util.mjs';
 import { t as _t } from './i18n.mjs';
+import { isJob, jobOf, jobLabelKey } from './job-core.mjs'; // 작업 노드
 import { BATCH, batchFold, isLauncher, isGuessLink, deviceInfo, deviceSummary, nodeTags, rearmStandby } from './batch-core.mjs';
 import { sessionColorMap, nodeSessIdx } from './multi-core.mjs';
 import { sessBadgeHtml, branchOf } from './session-core.mjs';
@@ -620,15 +621,18 @@ export class SceneView {
     const name = trunc(n.label || n.id, 24);
     // 메인이 워크플로·에이전트를 기다리는 동안은 turn 이 끝나 '대기'로 오지만 하위는 일하는 중 → 그렇다고 알려 준다
     const waiting = n.status === 'idle' && (v.kind === 'main' || v.kind === 'claude-p') && this._activeBelow(v.id);
-    const kindName = v.device ? _t('scene.kind.device') : v.dockK ? _t('scene.kind.dock') : (KIND_LABEL[v.kind] || v.kind);
-    const sub = `${kindName} · ${waiting ? _t('scene.waitingSub') : v.standby ? _t('scene.standby') : (STATUS_LABEL[n.status] || n.status || '')}`;
+    const job = isJob(n); // 작업 노드
+    const kindName = v.device ? _t('scene.kind.device') : v.dockK ? _t('scene.kind.dock') : job ? _t('cards.job.kind') : (KIND_LABEL[v.kind] || v.kind);
+    // 작업: 상태는 꼬리표(진행·대기·정체·rc)가 말하므로 둘째 줄은 종류만
+    const sub = job ? kindName : `${kindName} · ${waiting ? _t('scene.waitingSub') : v.standby ? _t('scene.standby') : (STATUS_LABEL[n.status] || n.status || '')}`;
     const tools = v.icons.size > 1 ? ' · ' + _t('scene.tools', { n: v.icons.size }) : '';
     // 세션·claude -p 노드는 라벨이 역할 표기("메인 · 프로젝트")라 자동 제목(meta.title)을 이름 아래 흐린 한 줄로
     const st = nodeSubtitle(n);
     v.subTitle = st;
     const stHtml = st ? `<span class="ntitle" title="${escapeHtml(st)}">${escapeHtml(st)}</span>` : '';
     // 꼬리표: 이어받음·회차 #k·연결 추정·재무장 ×N·추정 소속/외부 작업, 장치는 회차 집계 한 줄
-    const tags = nodeTags(n, this._nodeMap());
+    const tags = nodeTags(n, this._nodeMap(), this.clock());
+    if (job) v._jobKey = jobLabelKey(jobOf(n), this.clock()); // 시계로만 바뀌는 정체 표시를 _exitPass 가 다시 그림
     const spt = spawnTag(n); if (spt) tags.push(spt); // 띄움 꼬리표
     const tgHtml = tags.length ? `<span class="ntags">${tags.map((x) => `<i>${escapeHtml(x)}</i>`).join('')}</span>` : '';
     const devHtml = v.device && v.devInfo ? `<span class="ndev">${escapeHtml(deviceSummary(v.devInfo))}</span>` : '';
@@ -836,7 +840,11 @@ export class SceneView {
     if (!force && now - this._exitAt < 0.25) return;
     this._exitAt = now;
     if (this.showDone) {
-      for (const v of this.vis.values()) if (v.exiting != null || v.gone) this._unexit(v);
+      const cm = this.clock();
+      for (const v of this.vis.values()) {
+        if (v.exiting != null || v.gone) this._unexit(v);
+        if (v._jobKey != null && jobLabelKey(jobOf(v.node), cm) !== v._jobKey) this._labelText(v); // 정체 표시(시계)
+      }
       return;
     }
     const nodes = new Map();
@@ -853,6 +861,7 @@ export class SceneView {
       const ago = v.node.endedAt ? (clockMs - Date.parse(v.node.endedAt)) / 1000 : -1;
       const standby = v.kind === 'monitor' && !v.foldHidden && rearmStandby(v.node, nodes.get(v.node.parentId), ago);
       if (standby !== !!v.standby) { v.standby = standby; this._labelText(v); }
+      if (v._jobKey != null && jobLabelKey(jobOf(v.node), clockMs) !== v._jobKey) this._labelText(v); // 정체 표시(시계)
       let want = elig.has(id) && v.endWall != null && now - v.endWall >= linger && !standby;
       if (v.foldHidden && elig.has(id) && v.endWall != null) want = true; // 장치 안으로 접힌 노드는 연출 없이
       if (want && v.foldHidden && !v.gone) { if (v.exiting != null) this._exitingN = Math.max(0, this._exitingN - 1); v.exiting = null; v.gone = true; v.exitF = 0; this._syncHidden(v); continue; }
@@ -1128,7 +1137,7 @@ export class SceneView {
       const nowMs = this.clock();
       const rest = [];
       for (const v of this.vis.values()) {
-        if (seen.has(v.id) || v.kind === 'bash-bg' || v.kind === 'monitor') continue;
+        if (seen.has(v.id) || (v.kind === 'bash-bg' && !isJob(v.node)) || v.kind === 'monitor') continue; // 작업 노드는 라벨 후보
         const st = v.node.status;
         const recent = v.node.endedAt && nowMs - Date.parse(v.node.endedAt) < 600_000;
         if (st === 'idle' || st === 'error' || recent) rest.push(v);

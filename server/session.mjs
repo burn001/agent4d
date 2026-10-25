@@ -22,6 +22,8 @@ import { createHash } from 'node:crypto';
 import { artStart, artEnd } from './artifacts.mjs'; // 작업 대상 층
 import { PlanTracker, planStart } from './plans.mjs'; // 계획 보드
 import { classifyStart, classifyEnd, outputProgress, IxTracker, classifyUserMessage, USER_DENY_RE, ixSnip } from './interactions.mjs'; // 특별 상호작용
+import { JobBook, loadJobRules, jobNodeId, jobNodeStatus, jobLabel, isJobEnded, setMatchesProject } from './jobs.mjs'; // 작업 오브젝트
+import { ccvizHome } from './home.mjs';
 
 const SHELL = new Set(['Bash', 'PowerShell']);
 const SESSION_KINDS = new Set(['main', 'claude-p']);
@@ -223,8 +225,11 @@ export class RootRuntime {
    *  offline: 재생 재구성용. 타이머 없음, 시계 = 지금까지 처리한 레코드의 최대 시각,
    *  그래프는 keepAll·지역 seq, 출력 파일은 원문 조각만 보관(시각 배분은 replay.mjs 후처리).
    */
-  constructor({ sessionId, index, privacy = 'summary', maxDepth = 8, offline = false }) {
+  constructor({ sessionId, index, privacy = 'summary', maxDepth = 8, offline = false, jobRules = undefined }) {
     this.sessionId = sessionId;
+    this.privacy = privacy;
+    // 작업 규칙: undefined = 사용자·프로젝트 jobs.json 을 읽음, null = 대체 규칙 없음(규약 줄만), 객체 = compileJobRules 결과
+    this._jobRulesOpt = jobRules;
     this.index = index;
     this.maxDepth = maxDepth;
     this.offline = !!offline;
@@ -1247,6 +1252,7 @@ export class RootRuntime {
         const panel = this._outputPanel(target, ev + '\n');
         const ix = this.outputIx(target, ev + '\n');
         g.emit({ ts, type: 'output', nodeId: target, text: ev, ...(panel ? { panel } : {}), ...(ix ? { ix } : {}) });
+        this.jobFeed(target, ev + '\n', ts);
       }
       return;
     }
@@ -1389,6 +1395,7 @@ export class RootRuntime {
     const panel = this._outputPanel(o.nodeId, text);
     const ix = this.outputIx(o.nodeId, text);
     this.graph.emit({ ts, type: 'output', nodeId: o.nodeId, text, ...(panel ? { panel } : {}), ...(ix ? { ix } : {}) });
+    this.jobFeed(o.nodeId, text, ts);
   }
 
   /** 사용자 메시지 분류(메인만). 턴 열림·마지막 답변 시각으로 mid-turn·대기 시간을 판단 */
@@ -1923,6 +1930,7 @@ export class RootRuntime {
         }
         }
       }
+      if (n.meta?.job) continue; // 작업 노드 상태는 작업 상태가 정한다(활동 공백으로 대기 전환하지 않음)
       if (n.status !== 'active') continue;
       const last = Date.parse(n.lastActivityAt) || 0;
       // offline: 대기 전환 시각은 마지막 활동 + 60초(가상 시계)
@@ -1941,6 +1949,124 @@ export class RootRuntime {
     pass([...g.nodes.values()], false);
     pass(launchers, true);
     pass(runners, true);
+    if (!off) this._jobFiles();
+  }
+
+  // ───────────── 작업(Job) 오브젝트 ─────────────
+
+  /** 루트 cwd·프로젝트 폴더(작업 규칙의 project 조건) */
+  _jobCtx() {
+    const root = this.graph.get(`s:${this.sessionId}`);
+    const sess = this.index.findSession?.(this.sessionId);
+    return { cwd: root?.meta?.cwd || sess?.head?.cwd || null, projectDir: sess?.projectDir || null };
+  }
+
+  /** 작업 장부(처음 부를 때 만듦). 라이브는 5초마다 규칙 파일을 다시 확인(mtime 캐시) */
+  _jobBook() {
+    if (!this._jobs) {
+      const ctx = this._jobCtx();
+      this._jobs = new JobBook({ rules: this._jobRulesNow(ctx), privacy: this.privacy, ctx });
+      this._jobRulesAt = Date.now();
+    } else if (!this.offline && this._jobRulesOpt === undefined && Date.now() - (this._jobRulesAt || 0) > 5000) {
+      this._jobRulesAt = Date.now();
+      this._jobs.ctx = this._jobCtx();
+      this._jobs.setRules(this._jobRulesNow(this._jobs.ctx));
+    }
+    return this._jobs;
+  }
+  _jobRulesNow(ctx) {
+    if (this._jobRulesOpt !== undefined) return this._jobRulesOpt;
+    try { return loadJobRules({ stateDir: ccvizHome(), cwd: ctx.cwd }); } catch (e) { log('job rules', e); return null; }
+  }
+
+  /** 작업이 붙는 주인 열쇠: 재무장 Monitor 사슬(meta.rearmOf)의 머리 — 다시 건 Monitor 도 같은 작업 노드를 잇는다 */
+  _jobOwnerKey(id) {
+    let cur = id, g = 0;
+    while (g++ < 64) {
+      const p = this.graph.get(cur)?.meta?.rearmOf;
+      if (!p || !this.graph.has(p)) break;
+      cur = p;
+    }
+    return cur;
+  }
+
+  /**
+   * 출력 조각 → 작업 노드(라이브 _flushOutput · Monitor 알림 · 재생 4단계 · 설정 파일 꼬리가 부름).
+   * streamId = 출력을 낸 노드(파일이면 'file:<경로>'), ownerId = 작업을 붙일 노드(기본 streamId).
+   */
+  jobFeed(streamId, text, ts, { ownerId = null, file = false, final = false } = {}) {
+    if (!text) return;
+    const oid = ownerId || streamId;
+    const owner = this.graph.get(oid);
+    if (!owner || owner.meta?.job) return;
+    const key = this._jobOwnerKey(oid);
+    const ups = this._jobBook().feed(streamId, key, text, ts, { owner, file, final });
+    for (const u of ups) this._jobEmit(owner, key, u, ts);
+  }
+
+  _jobEmit(owner, key, u, ts) {
+    const g = this.graph;
+    const id = jobNodeId(key, u.jobId);
+    const job = u.job;
+    const status = jobNodeStatus(job.state);
+    const title = job.phase || null; // 부제 = 지금 단계
+    if (!g.has(id)) {
+      if (this.offline && !this.spawnHints.has(id)) this.spawnHints.set(id, ts);
+      // 새 노드는 active 로 낸 뒤 실제 상태로 고친다(재생 1단계가 node-add 를 active 로 다시 쓰므로 라이브·재생이 같은 이벤트)
+      g.addNode({ id, parentId: owner.id, kind: 'bash-bg', label: jobLabel(job), sessionId: owner.sessionId,
+        startedAt: ts, lastActivityAt: ts, status: 'active',
+        meta: { job, title, background: true, jobOwner: key } }, ts);
+      if (status !== 'active') g.updateNode(id, { status, endedAt: isJobEnded(job.state) ? (job.endedAt || ts) : null }, ts);
+      return;
+    }
+    const n = g.get(id);
+    const patch = { status, label: jobLabel(job), lastActivityAt: maxIso(n.lastActivityAt, ts), meta: { job, title } };
+    patch.endedAt = isJobEnded(job.state) ? (n.endedAt && isEnded(n.status) ? n.endedAt : (job.endedAt || ts)) : null;
+    if (n.parentId !== owner.id) patch.parentId = owner.id; // 재무장 Monitor: 새 Monitor 아래로 옮김(같은 노드)
+    g.updateNode(id, patch, ts);
+  }
+
+  /**
+   * 설정 묶음 files(예: 러너 출력 파일)의 꼬리 — 라이브만(기록 밖 파일이라 재생·보관함에는 없다). 읽기 전용.
+   * 주인 = 끝나지 않은 마지막 러너(없으면 기동기) · 'launcher' · 'main'. 경로는 루트 cwd 기준.
+   */
+  _jobFiles() {
+    if (this.closed) return;
+    const book = this._jobBook();
+    const R = book.rules;
+    if (!R || !R.sets.some((s) => s.files.length)) return;
+    const ctx = book.ctx;
+    const nodes = [...this.graph.nodes.values()];
+    const latest = (pred) => nodes.filter((n) => pred(n) && !isEnded(n.status)).sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))[0] || null;
+    const F = this._jobFileTails || (this._jobFileTails = new Map());
+    for (const set of R.sets) {
+      if (!set.files.length || !setMatchesProject(set, ctx)) continue;
+      for (const f of set.files) {
+        let owner;
+        if (f.owner === 'runner') owner = latest((n) => n.meta?.runner) || latest((n) => n.meta?.launcher);
+        else if (f.owner === 'launcher') owner = latest((n) => n.meta?.launcher);
+        else owner = this.graph.get(`s:${this.sessionId}`);
+        let ent = F.get(f.path);
+        if (!owner) { if (ent) ent.ownerId = null; continue; }
+        if (!ent) {
+          const abs = path.isAbsolute(f.path) ? f.path : (ctx.cwd ? path.resolve(ctx.cwd, f.path) : null);
+          if (!abs) continue;
+          const max = f.backlogKB * 1024;
+          let cut = false;
+          try { cut = fs.statSync(abs).size > max; } catch {}
+          ent = { abs, ownerId: owner.id, first: true };
+          ent.tail = new FileTail(abs, { mode: 'text', maxInitialText: max, onText: (s, info) => {
+            if (!ent.ownerId) return;
+            if (ent.first) { ent.first = false; if (cut) { const i = s.indexOf('\n'); s = i >= 0 ? s.slice(i + 1) : ''; } } // 잘린 첫 줄 버림
+            const ts = info.backlog && ent.tail.mtimeMs ? new Date(ent.tail.mtimeMs).toISOString() : this.nowIso();
+            this.jobFeed('file:' + f.path, s, ts, { ownerId: ent.ownerId, file: true });
+          } });
+          F.set(f.path, ent);
+          this.addTail(abs, ent.tail);
+        }
+        ent.ownerId = owner.id;
+      }
+    }
   }
 }
 

@@ -54,6 +54,18 @@
 .vx-label.crowded.focus { opacity: 1; }
 .vx-label.gone { color: var(--muted); opacity: .75; font-weight: 500; }
 .vx-label.machine { font-weight: 550; font-size: 10.5px; }
+/* 작업 카드 이름표: 한 줄(상태 점 · 이름 · 꼬리표), 점 색 = 카드 상태 색 */
+.vx-label.job { font-size: 10px; padding: 0 5px; }
+.vx-label.job .jrow { display: inline-flex; align-items: center; gap: 4px; }
+.vx-label.job .ntags { display: inline-flex; margin-top: 0; }
+.vx-label.job .jdot { display: inline-block; width: 7px; height: 7px; border-radius: 2px; background: var(--skill); }
+.vx-label.job.j-waiting .jdot { background: color-mix(in srgb, #4f86d0 75%, var(--muted)); }
+.vx-label.job.j-queued .jdot { background: var(--muted); }
+.vx-label.job.j-done .jdot { background: var(--ok); }
+.vx-label.job.j-failed .jdot { background: var(--error); }
+.vx-label.job.j-stale .jdot { background: color-mix(in srgb, var(--skill) 55%, var(--error)); animation: vx-jblink 1.8s steps(1) infinite; }
+@keyframes vx-jblink { 0%, 9% { opacity: 1; } 9.01%, 18% { opacity: .2; } 18.01%, 27% { opacity: 1; } 27.01%, 100% { opacity: .2; } }
+@media (prefers-reduced-motion: reduce) { .vx-label.job.j-stale .jdot { animation: none; } }
 
 .vx-room {
   padding: 2px 8px;

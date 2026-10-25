@@ -132,3 +132,41 @@
 .holo-tip b { color: var(--hc, var(--accent)); margin-right: 4px; }
 .holo-tip small { display: block; opacity: .6; font-size: 10px; margin-top: 1px; }
 .ins-tl li.hl { background: color-mix(in srgb, var(--accent) 16%, transparent); border-radius: 4px; outline: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+
+/* 작업(Job) 노드 — 표시 상태 색(표현 공통 의미: 진행 호박 · 대기 파랑 흐림 · 줄 섬 회색 · 끝 초록 · 실패 빨강 · 정체 주황 경고) */
+#inspector {
+  --jd-running: var(--skill); --jd-waiting: color-mix(in srgb, var(--accent) 70%, var(--muted)); --jd-queued: var(--muted);
+  --jd-done: var(--ok); --jd-failed: var(--error); --jd-stale: color-mix(in srgb, var(--skill) 45%, var(--error));
+}
+.jd-running { --jc: var(--jd-running); } .jd-waiting { --jc: var(--jd-waiting); } .jd-queued { --jc: var(--jd-queued); }
+.jd-done { --jc: var(--jd-done); } .jd-failed { --jc: var(--jd-failed); } .jd-stale { --jc: var(--jd-stale); }
+.ins-pill.jd { color: var(--jc); border-color: color-mix(in srgb, var(--jc) 50%, transparent); background: color-mix(in srgb, var(--jc) 12%, transparent); }
+.ins-pill.jd.warn { font-weight: 700; border-color: var(--jc); background: color-mix(in srgb, var(--jc) 20%, transparent); }
+.ins-pill.jd.warn::before { content: "⚠ "; }
+.ins-jrows { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 12px; margin: 0; }
+.ins-jrows dt { color: var(--muted); }
+.ins-jrows dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.ins-jrows dd.k-host, .ins-jrows dd.k-rc { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11.5px; }
+.ins-jrows dd [title] { text-decoration: underline dotted color-mix(in srgb, var(--muted) 60%, transparent); text-underline-offset: 2px; }
+.ins-jstate { color: var(--jc); font-weight: 600; }
+.ins-jstate i, .ins-jdot { display: inline-block; flex: none; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; background: var(--jc, var(--muted)); vertical-align: 1px; }
+.jd-waiting .ins-jdot, .jd-queued .ins-jdot, .ins-jstate.jd-waiting i, .ins-jstate.jd-queued i { opacity: .75; }
+.jd-stale .ins-jdot, .ins-jstate.jd-stale i { animation: ins-jblink 1.6s steps(2, jump-none) infinite; }
+@keyframes ins-jblink { 0% { opacity: 1; } 100% { opacity: .25; } }
+.ins-jprog { display: inline-flex; align-items: center; gap: 8px; width: 100%; }
+.ins-jbar { flex: 1; max-width: 160px; height: 7px; border-radius: 4px; background: var(--chip-bg); border: 1px solid var(--border); overflow: hidden; }
+.ins-jbar i { display: block; height: 100%; background: var(--jc); transition: width .4s ease; }
+.ins-jprog > span:last-child { font-variant-numeric: tabular-nums; }
+.ins-jline { margin: 0; padding: 4px 8px; border-radius: 6px; background: var(--chip-bg); border: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; word-break: normal; }
+.ins-jobs { list-style: none; margin: 2px 0 0; padding: 0; }
+.ins-jobs li { margin: 1px 0; }
+.ins-job { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; padding: 1px 2px; }
+.ins-job .ins-jdot { margin-right: 0; }
+.ins-jt { font-weight: 600; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ins-jp { color: var(--muted); flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ins-jn { flex: none; margin-left: auto; color: var(--jc); font-variant-numeric: tabular-nums; font-weight: 600; }
+.ins-jmore { padding-left: 15px; font-size: 11.5px; }
+@media (prefers-reduced-motion: reduce) {
+  .jd-stale .ins-jdot, .ins-jstate.jd-stale i { animation: none; opacity: .55; }
+  .ins-jbar i { transition: none; }
+}

@@ -3,7 +3,7 @@
 // 원칙: 캔버스는 내용(패널 판 pv)·보일 줄 수·테마·결과가 바뀔 때만 다시 그리고 올린다(프레임마다 다시 그리지 않음).
 //       프레임마다 하는 일은 자리·크기·투명도 uniform 갱신뿐. 꼬리 갱신의 '위로 흐름'도 uniform 하나(uScroll)로.
 import * as THREE from 'three';
-import { PANEL, shapeLayout, panelRows, fallbackPanel, markStyle, textRows } from './holo-core.mjs';
+import { PANEL, shapeLayout, panelRows, fallbackPanel, markStyle, textRows, jobRowHits, jobLinesKey, jobLineStyle } from './holo-core.mjs';
 import { DEG, degOf } from './degrade-core.mjs';
 import { t as tr } from './i18n.mjs';
 
@@ -83,8 +83,9 @@ function lock(ctx, cx, cy, s, color) {
 
 /**
  * 패널 하나를 캔버스에 그린다. rows = 보일 줄 수(0 이면 제목만 크게). ink = 도구 종류 잉크 색(CSS)
+ * jobs = [{line, code}] — 이 꼬리를 낸 노드 아래 작업들. 작업을 만든 줄은 왼쪽 상태색 띠 + 옅은 바탕
  */
-export function drawPanel(ctx, W, H, e, rows, light, ink) {
+export function drawPanel(ctx, W, H, e, rows, light, ink, jobs = null) {
   ctx.clearRect(0, 0, W, H);
   const L = shapeLayout(e.shape ?? 0, e.asp || 1.5);
   const p = e.panel || fallbackPanel(e);
@@ -140,10 +141,16 @@ export function drawPanel(ctx, W, H, e, rows, light, ink) {
     p.lines.forEach((t, i) => { for (const w of wrap(ctx, t, bw)) all.push({ text: w, mark: p.marks[i] || 'o' }); });
     list = all.length > R ? [{ text: '…', mark: 'm' }, ...all.slice(all.length - R + 1)] : all;
   } else list = panelRows(p, R);
+  const hits = jobs && jobs.length && p.mode !== 'say' ? jobRowHits(list, jobs) : null;
   list.forEach((r, i) => {
     const st = markStyle(r.mark, light);
     const yc = Y(by1) + rh * (i + 0.5);
     if (st.bg) { ctx.shadowBlur = 0; ctx.fillStyle = st.bg; ctx.fillRect(X(bx0) - 3, yc - rh / 2, bw + 6, rh); }
+    if (hits && hits[i] >= 0) { // 작업을 만든 줄: 왼쪽 상태색 띠 + 옅은 바탕
+      const js = jobLineStyle(hits[i], light), bw2 = Math.max(3, fs * 0.2);
+      ctx.shadowBlur = 0; ctx.fillStyle = js.bg; ctx.fillRect(X(bx0) - 3, yc - rh / 2, bw + 6, rh);
+      ctx.fillStyle = js.bar; ctx.fillRect(X(bx0) - 4 - bw2, yc - rh * 0.42, bw2, rh * 0.84);
+    }
     let x = X(bx0), maxW = bw;
     if (r.mark === '$') {
       ctx.font = `700 ${fs}px ${MONO}`; ctx.fillStyle = dimC; ctx.shadowBlur = 0;
@@ -177,7 +184,7 @@ export class HoloText {
       const mesh = new THREE.Mesh(this.geo, mat);
       mesh.frustumCulled = false; mesh.renderOrder = 5; mesh.visible = false;
       scene.add(mesh);
-      this.slots.push({ mesh, mat, cv, ctx: cv.getContext('2d'), tex, e: null, eid: null, pv: -1, rows: -1, light: null, res: '', result: '', target: '', used: -1, draws: 0 });
+      this.slots.push({ mesh, mat, cv, ctx: cv.getContext('2d'), tex, e: null, eid: null, pv: -1, rows: -1, light: null, res: '', result: '', target: '', jk: '', used: -1, draws: 0 });
     }
     this.stats = { drawn: 0, redraws: 0, why: {} }; // why: 다시 그린 까닭별 횟수(확인용)
   }
@@ -224,9 +231,10 @@ export class HoloText {
       const s = c.slot; if (!s) continue;
       const e = c.e;
       const rows = textRows(c.px, s.eid === e.id ? s.rows : null);
-      // 다시 그릴 까닭: 다른 패널 · 내용 판(pv) · 줄 수 단계(거리) · 테마 · (패널 데이터가 없을 때만) 결과·대상 요약
+      const jk = c.jobs ? jobLinesKey(c.jobs) : '';
+      // 다시 그릴 까닭: 다른 패널 · 내용 판(pv) · 줄 수 단계(거리) · 테마 · (패널 데이터가 없을 때만) 결과·대상 요약 · 작업 줄 표시
       const why = s.eid !== e.id ? (s.eid && s.e === e ? 'swap' : 'slot') : s.pv !== e.pv ? 'pv' : s.rows !== rows ? 'rows' : s.light !== this.light ? 'theme'
-        : !e.panel && (s.res !== e.res || s.result !== e.result || s.target !== e.label.target) ? 'summary' : null;
+        : !e.panel && (s.res !== e.res || s.result !== e.result || s.target !== e.label.target) ? 'summary' : s.jk !== jk ? 'job' : null;
       if (why) {
         this.stats.why[why] = (this.stats.why[why] || 0) + 1;
         const W = Math.round(PANEL.CH * (e.asp || 1.5));
@@ -234,9 +242,9 @@ export class HoloText {
           s.cv.width = W; s.cv.height = PANEL.CH;
           s.tex.dispose(); s.tex = this._tex(s.cv); s.mat.uniforms.uMap.value = s.tex;
         }
-        drawPanel(s.ctx, s.cv.width, s.cv.height, e, rows, this.light, c.ink);
+        drawPanel(s.ctx, s.cv.width, s.cv.height, e, rows, this.light, c.ink, c.jobs);
         s.tex.needsUpdate = true;
-        s.eid = e.id; s.pv = e.pv; s.rows = rows; s.light = this.light; s.res = e.res; s.result = e.result; s.target = e.label.target;
+        s.eid = e.id; s.pv = e.pv; s.rows = rows; s.light = this.light; s.res = e.res; s.result = e.result; s.target = e.label.target; s.jk = jk;
         const b = shapeLayout(e.shape ?? 0, e.asp || 1.5).body;
         s.mat.uniforms.uBody.value.set(b[0], b[2], b[1], b[3]);
         s.draws++; this.stats.redraws++;

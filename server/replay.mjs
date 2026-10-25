@@ -266,6 +266,12 @@ export async function normalize(rt, { now = Date.now() } = {}) {
       const ix = rt.outputIx ? rt.outputIx(o.nodeId, p.text + '\n') : null; // 진행(라이브와 같은 누적 규칙)
       const ev = g.emit({ ts: iso(t), type: 'output', nodeId: o.nodeId, text: p.text, synth: true, ...(panel ? { panel } : {}), ...(ix ? { ix } : {}) });
       items.push({ e: ev, t, o: (oSeq += 4), moved: false });
+      // 작업 노드: 라이브 _flushOutput 과 같은 줄을 같은 순서로(조각 경계만 다를 수 있음)
+      if (rt.jobFeed) {
+        const r0 = ring.length;
+        rt.jobFeed(o.nodeId, p.text + '\n', iso(t));
+        for (let k = r0; k < ring.length; k++) { ring[k].synth = true; items.push({ e: ring[k], t, o: (oSeq += 4), moved: false }); }
+      }
     }
   }
   await nextTick();
@@ -325,6 +331,7 @@ export async function normalize(rt, { now = Date.now() } = {}) {
   };
   for (const node of g.nodes.values()) {
     const id = node.id;
+    if (node.meta?.job) continue; // 작업 노드 상태는 작업 상태가 정한다(대기 합성 없음 — 라이브 sweep 과 같음)
     let list = per.get(id) || [];
     if (node.kind === 'workflow') {
       const extra = (childrenOf.get(id) || []).flatMap((c) => per.get(c) || []);
@@ -417,12 +424,12 @@ export async function fingerprintOf(entry, childFiles = []) {
 /**
  * buildReplay({ sessionId, index, privacy, onProgress }) → ReplayData
  */
-export async function buildReplay({ sessionId, index, privacy = 'summary', maxDepth = 8, job = null } = {}) {
+export async function buildReplay({ sessionId, index, privacy = 'summary', maxDepth = 8, job = null, jobRules = undefined } = {}) {
   const t0 = performance.now();
   let e = index.findSession(sessionId);
   if (!e) { await index.refresh(); e = index.findSession(sessionId); }
   if (!e) throw Object.assign(new Error('session not found'), { code: 'ENOSESSION' });
-  const rt = new RootRuntime({ sessionId: e.sessionId, index, privacy, maxDepth, offline: true });
+  const rt = new RootRuntime({ sessionId: e.sessionId, index, privacy, maxDepth, offline: true, jobRules }); // jobRules:(시험용 — 기본은 설정 파일)
   if (job) job.rt = rt;
   await rt.loadOffline();
   const loadMs = performance.now() - t0;

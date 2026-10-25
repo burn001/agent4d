@@ -5,7 +5,9 @@
 import {
   INSPECT, kindInfo, statusInfo, elapsedMs, fmtElapsed, fmtMs, fmtAgo, parentIdOf, childrenOf, childStats, childLine, nowDoing,
   InspectBook, ixLoose, deviceModel, barHeights, islandModel, limitsLine, sheetMode, placeCard, autoCloseReason, targetKey, easeToward,
+  jobCardModel, ownerJobsModel,
 } from './inspector-core.mjs';
+import { isJob } from './job-core.mjs';
 import { isLauncher, isRunner } from './batch-core.mjs';
 import { ctxShort, gaugeLevel } from './ctx-core.mjs';
 import { branchOf } from './session-core.mjs';
@@ -251,10 +253,10 @@ export function mountInspector(h) {
     renderFoot(force);
   }
 
-  function setHead(icon, kindKey, title, kindLine) {
+  function setHead(icon, kindKey, title, kindLine, color = null) {
     const ic = $('.ins-icon');
     ic.textContent = icon;
-    ic.style.setProperty('--kc', kindKey ? `var(--k-${kindKey})` : 'var(--accent)');
+    ic.style.setProperty('--kc', color || (kindKey ? `var(--k-${kindKey})` : 'var(--accent)'));
     const tt = $('#ins-title'); if (tt.textContent !== title) tt.textContent = title;
     const kl = $('.ins-kind'); if (kl.textContent !== kindLine) kl.textContent = kindLine;
   }
@@ -267,9 +269,57 @@ export function mountInspector(h) {
     if (keep) { const b = body.querySelector(`[data-goto="${CSS.escape(keep)}"]`); if (b) b.focus({ preventScroll: true }); }
   }
 
+  /** 작업 노드: 머리 = 제목 + 표시 상태 배지(정체면 경고색), 행 = 상태·단계·진행(막대)·호스트·박동(상대)·재확인·rc·출처, 마지막 줄 */
+  function renderJob(n, nowMs) {
+    const m = jobCardModel(n, nowMs);
+    if (!m) return;
+    const ki = kindInfo(n);
+    setHead(ki.icon, null, m.title, `${ki.name} — ${ki.desc}`, `var(--jd-${m.display})`);
+    const pill = $('.ins-pill');
+    pill.className = `ins-pill jd jd-${m.display}${m.warn ? ' warn' : ''}`; pill.textContent = m.badge;
+    const a = Date.parse(m.startedAt || ''), z = m.endedAt ? Date.parse(m.endedAt) : nowMs;
+    $('.ins-el').textContent = Number.isFinite(a) ? tr(m.endedAt ? 'cards.ins.took' : 'cards.ins.elapsed', { t: fmtElapsed(Math.max(0, z - a)) }) : '';
+    const si = h.sessIdx ? h.sessIdx(n) : null;
+    const sess = $('.ins-sess');
+    sess.className = 'ins-sess' + (Number.isInteger(si) ? ' s' + si : '');
+    sess.innerHTML = Number.isInteger(si) ? `<i aria-hidden="true"></i>${esc(tr('cards.ins.sessColor'))}` : '';
+    const parts = [];
+    const rows = m.rows.map((r) => {
+      let v = `<span${r.title ? ` title="${esc(r.title)}"` : ''}>${esc(r.value)}</span>`;
+      if (r.key === 'state') v = `<span class="ins-jstate jd-${esc(m.display)}"><i aria-hidden="true"></i>${esc(r.value)}</span>`;
+      if (r.key === 'progress' && r.ratio != null) {
+        const pct = Math.round(r.ratio * 1000) / 10;
+        v = `<span class="ins-jprog jd-${esc(m.display)}"><span class="ins-jbar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}" aria-label="${esc(r.label)}"><i style="width:${pct}%"></i></span><span>${esc(r.value)}</span></span>`;
+      }
+      return `<dt>${esc(r.label)}</dt><dd class="k-${esc(r.key)}">${v}</dd>`;
+    }).join('');
+    parts.push(`<section class="ins-sec"><h4>${esc(tr('cards.job.h.job'))}</h4><dl class="ins-jrows">${rows}</dl></section>`);
+    if (m.line) parts.push(`<section class="ins-sec"><h4>${esc(tr('cards.job.h.line'))}</h4><p class="ins-mono ins-jline" title="${esc(m.line)}">${esc(m.line)}</p></section>`);
+    const pid = parentIdOf(n);
+    const pn = pid ? h.nodes.get(pid) : null;
+    if (pn) parts.push(`<section class="ins-sec"><h4>${esc(tr('cards.ins.h.rel'))}</h4><p>${esc(tr('cards.ins.parent'))} <button type="button" class="ins-link" data-goto="${esc(pn.id)}">${esc(kindInfo(pn).icon)} ${esc(pn.label || pn.id)}</button></p></section>`);
+    setBody(parts.join(''));
+  }
+
+  /** 주인 노드 아래 작업 목록(작업마다 한 줄: 상태 점 · 제목 · 단계 · 진행) + 접혀 숨은 끝난 작업 수 */
+  function jobsHtml(n, nowMs) {
+    const jm = ownerJobsModel(h.nodes, n.id, nowMs);
+    if (!jm) return '';
+    const view = h.getView();
+    const li = jm.items.map((it) => {
+      const inner = `<i class="ins-jdot" aria-hidden="true"></i><b class="ins-jt">${esc(it.title)}</b>${it.phase ? `<span class="ins-jp">${esc(it.phase)}</span>` : ''}${it.progress ? `<small class="ins-jn">${esc(it.progress)}</small>` : ''}`;
+      const can = view && view.has && view.has(it.id);
+      const stT = it.display === 'stale' ? tr('cards.job.stale', { t: '' }).trim() : tr('cards.job.' + it.display);
+      return `<li class="jd-${esc(it.display)}">${can ? `<button type="button" class="ins-link ins-job" data-goto="${esc(it.id)}" title="${esc(stT)}">${inner}</button>` : `<span class="ins-job" title="${esc(stT)}">${inner}</span>`}</li>`;
+    }).join('');
+    const more = jm.hidden ? `<li class="ins-dim ins-jmore">${esc(tr('cards.job.hidden', { n: jm.hidden }))}</li>` : '';
+    return `<section class="ins-sec"><h4>${esc(tr('cards.job.h.jobs'))} <small>${jm.total}</small></h4><ul class="ins-jobs">${li}${more}</ul></section>`;
+  }
+
   function renderNode(nowMs) {
     const n = h.nodes.get(target.id);
     if (!n) return;
+    if (isJob(n)) { renderJob(n, nowMs); return; }
     const ki = kindInfo(n);
     const kids = childrenOf(h.nodes, n.id);
     const cs = childStats(kids);
@@ -311,6 +361,9 @@ export function mountInspector(h) {
       const cmd = (n.meta && (n.meta.command || n.meta.title)) || '';
       if (cmd) parts.push(`<section class="ins-sec"><h4>${esc(tr('cards.ins.h.cmd'))}</h4><p class="ins-mono">${esc(String(cmd).slice(0, 200))}</p></section>`);
     }
+    // 이 노드의 출력이 보고하는 작업(주인 노드)
+    const jh = jobsHtml(n, nowMs);
+    if (jh) parts.push(jh);
     // 특별 상호작용(메타가 있을 때만)
     const ixs = book.ix(n.id);
     if (ixs.length) {
@@ -334,9 +387,10 @@ export function mountInspector(h) {
     const pn = pid ? h.nodes.get(pid) : null;
     const rel = [];
     if (pn) rel.push(`<p>${esc(tr('cards.ins.parent'))} <button type="button" class="ins-link" data-goto="${esc(pn.id)}">${esc(kindInfo(pn).icon)} ${esc(pn.label || pn.id)}</button></p>`);
-    if (kids.length) {
-      rel.push(`<p class="ins-dim">${esc(childLine(cs))}</p><ul class="ins-kids">${kids.slice(0, INSPECT.KIDS).map((k) =>
-        `<li><button type="button" class="ins-link st-${esc(k.status || 'idle')}" data-goto="${esc(k.id)}"><i aria-hidden="true"></i>${esc(kindInfo(k).icon)} ${esc(k.label || k.id)}</button></li>`).join('')}${kids.length > INSPECT.KIDS ? `<li class="ins-dim">${esc(tr('cards.ins.more', { n: kids.length - INSPECT.KIDS }))}</li>` : ''}</ul>`);
+    const rk = jh ? kids.filter((k) => !isJob(k)) : kids; // 작업은 위 '작업' 구역에 따로(접힌 수 포함)
+    if (rk.length) {
+      rel.push(`<p class="ins-dim">${esc(childLine(jh ? childStats(rk) : cs))}</p><ul class="ins-kids">${rk.slice(0, INSPECT.KIDS).map((k) =>
+        `<li><button type="button" class="ins-link st-${esc(k.status || 'idle')}" data-goto="${esc(k.id)}"><i aria-hidden="true"></i>${esc(kindInfo(k).icon)} ${esc(k.label || k.id)}</button></li>`).join('')}${rk.length > INSPECT.KIDS ? `<li class="ins-dim">${esc(tr('cards.ins.more', { n: rk.length - INSPECT.KIDS }))}</li>` : ''}</ul>`);
     }
     if (rel.length) parts.push(`<section class="ins-sec"><h4>${esc(tr('cards.ins.h.rel'))}</h4>${rel.join('')}</section>`);
     setBody(parts.join(''));

@@ -5,7 +5,7 @@
 //        + 글 평면 풀(PANEL.TEXT_MAX개, 내용이 바뀔 때만 캔버스를 다시 그림) + 에이전트 포털 빛줄 LineSegments 1개 + 라벨(CSS2D).
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { HOLO, PANEL, HoloBook, holoDir, holoOffset, panelPx, holoLod } from './holo-core.mjs';
+import { HOLO, PANEL, HoloBook, holoDir, holoOffset, panelPx, holoLod, jobLinesOf } from './holo-core.mjs';
 import { HoloText } from './holo-text.js';
 import { catColor } from './flow-core.mjs';
 import { foldSlide, foldLine } from './exit-core.mjs';
@@ -322,6 +322,7 @@ export class HoloLayer {
     const o = this.overflow.get(nodeId);
     if (o) { o.removeFromParent(); o.element.remove(); this.overflow.delete(nodeId); }
     this._kidCache.delete(nodeId);
+    if (this._jobCache) this._jobCache.delete(nodeId);
   }
   clear() {
     this.book.clear();
@@ -342,6 +343,23 @@ export class HoloLayer {
     for (let i = kids.length - 1; i >= 0; i--) { const cv = this.view.vis.get(kids[i]); if (cv && !cv.hidden && cv.node.status === 'active') { id = cv.id; break; } }
     this._kidCache.set(nodeId, c = { t: now, id });
     return id ? this.view.vis.get(id) : null;
+  }
+
+  /**
+   * 꼬리를 낸 노드(작업 주인) 아래 작업 줄 [{line, code}] — 0.25초마다 다시 셈(정체는 렌더러 시계로 바뀌므로).
+   * 작업이 없으면 null(글 칸이 작업 줄 표시를 건너뜀)
+   */
+  _jobsFor(ownerId, now) {
+    const cc = this._jobCache || (this._jobCache = new Map());
+    let c = cc.get(ownerId);
+    if (c && now - c.t < 0.25 && now >= c.t) return c.jobs;
+    const view = this.view, kids = [];
+    for (const id of view.children(ownerId)) { const v = view.vis.get(id); if (v && v.node) kids.push(v.node); }
+    const nowMs = typeof view.clock === 'function' ? view.clock() : Date.now();
+    const jobs = kids.length ? jobLinesOf(kids, nowMs) : [];
+    if (cc.size > 256) cc.clear();
+    cc.set(ownerId, c = { t: now, jobs: jobs.length ? jobs : null });
+    return c.jobs;
   }
 
   /** 최근 활동 상위 노드(TOP_ACTIVE개, 0.25초마다): 거리 무관 최소 크기·라벨 */
@@ -450,6 +468,7 @@ export class HoloLayer {
           c0.alpha = ph.alpha * fade * sy * sy; c0.swap = swp < 1 ? 1 - swp : 0;
           c0.score = (focused ? 1e6 : 0) + (isShot ? 5e5 : 0) + (isTop ? 1e5 : 0) + epx + (e.endAt == null ? 50 : 0) + (e.panel ? 25 : 0);
           c0.ink = this._ink(e.cat);
+          c0.jobs = e.jobOwner ? this._jobsFor(e.jobOwner, now) : null; // 작업을 만든 줄 표시
           ntc++;
         }
         n++;

@@ -6,6 +6,8 @@ import { BEAM, FLOW_DASH, flowDash, beamControls, beamWidth, paletteOf, beamAlph
 import { linkPackets } from '../flow-core.mjs';
 import { isGuessLink } from '../batch-core.mjs';
 import { DEG, degOf, lineGap, lineFlicker, lineJitter } from '../degrade-core.mjs';
+import { jobOf, jobCode } from '../job-core.mjs';
+import { jobBeamStyle } from './job-chip-core.mjs'; // 주인 → 작업 빔은 은은하게
 
 const SEG = BEAM.segments;
 const VPR = (SEG + 1) * 2; // 리본 하나의 정점 수
@@ -149,6 +151,15 @@ export class Beams {
       if (dashed && sk >= 0.5 && !exiting) al = Math.max(al, BEAM.idleAlpha * 1.6); // 점선은 비는 칸이 있어 조금 더 진하게
       const es = pk && sk >= 0.5 ? pk.get(pv.id + '|' + cv.id) : null;
       const dg = DEG.on ? degOf(cv.id) : 0, sd = dg > 0 ? (cv.seed * 1e6) | 0 : 0; // 그 세션 열화
+      // 작업: 주인의 하위 정보라 가늘고 옅게, 색 = 작업 칩 색(표시 상태 — chips.update 가 보관한 값, 없으면 지금 시계로), 글로우 빔 없음
+      const job = jobOf(cv.node);
+      if (job) {
+        const code = cv._jobChip ? cv._jobChip.code : jobCode(job, view.clock ? view.clock() : Date.now());
+        const js = jobBeamStyle(code);
+        if (view.chips) c = view.chips.jobColor(code);
+        this._ribbon(r++, a, b, BEAM.startW * ws * js.widthK, BEAM.endW * ws * js.widthK, c, al * js.alphaK, tEnd, dashed, es, exiting || dashed || sk < 0.5 ? null : js.dash, dg, sd);
+        continue;
+      }
       this._ribbon(r++, a, b, BEAM.startW * ws, BEAM.endW * ws, c, al * pulse, tEnd, dashed, es, exiting || dashed || sk < 0.5 ? null : flowDash(st), dg, sd);
       if (active && !dashed) this._ribbon(r++, a, b, (BEAM.startW + BEAM.glowW) * ws, (BEAM.endW + BEAM.glowW * 0.4) * ws, c, BEAM.glowAlpha * (this.isLight ? 1.5 : 1) * (exiting ? cv.exitF ?? 1 : 1), tEnd, false, null, null, dg, sd);
     }

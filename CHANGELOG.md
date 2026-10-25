@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/) (0.x until a stable 1.0).
 
+## [0.2.0] - 2026-10-25
+
+### Added
+- Job objects: work that a background command, monitor or loop runner *reports* in its output (a remote nightly run, a measurement chain, a detached wait) now gets its own small node under that stream's owner. Same job id = same node (a re-armed monitor keeps the node), states queued · running · waiting · done · failed, plus "stale" when the heartbeat stops for longer than the threshold (judged with the view clock, so replay matches live). Phase is shown as the subtitle, with progress n/total, re-check time and exit code as tags. Only the 3 most recent finished jobs per owner stay visible.
+- Line protocol: any script can print `::agent4d {"id":"nightly","state":"running","phase":"tests","progress":"96/101"}` (a relay prefix before it is fine). Fields: id, title, state, phase, progress, host, heartbeat, until, rc, staleSec, stale, note.
+- Fallback rules for output without the protocol: regular-expression rules in `<state folder>/jobs.json` or `<project>/.agent4d/jobs.json` (per project, per stream kind/label/command, or for an extra log file that is tailed read-only while live). Events start · phase · progress · wait · beat · stale · end · fail with named groups (time, phase, n, total, until, rc, …). Protocol lines win over rules on the same stream. Rules are re-read every 5 seconds.
+- Drawn in every view: Flow 3D (small hex chip with progress arc, hourglass while waiting, broken pulse when stale), Planet 3D (tiny probe with a state ring and orbit trail), Voxel Office (kanban cards on a board next to the owner's machine), and the matching 2D views. The inspector shows state, phase, progress, host, last heartbeat, re-check time, exit code, source and the last line; an owner's card lists its jobs. The owner's hologram tail panel highlights the line that produced each job.
+
 ## [0.1.3] - 2026-10-25
 
 ### Fixed

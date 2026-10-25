@@ -3,7 +3,8 @@
 import { SceneView } from './scene.js';
 import { PlanetArt3D } from './art-layer3d.js';
 import { PlanetDeco } from './planet-deco.js';
-import { bodyK } from './planet-core.mjs';
+import { bodyK, JOB_BODY_K } from './planet-core.mjs';
+import { isJob } from './job-core.mjs'; // 작업 노드 = 작은 탐사선
 const LABEL_NEAR_PX = 11;
 
 export class PlanetView extends SceneView {
@@ -33,12 +34,14 @@ export class PlanetView extends SceneView {
   _planetBody(v) {
     if (v._plR) return;
     v._plR = true;
-    v.r *= bodyK(v.kind, !!v.device);
+    v.r *= isJob(v.node) ? JOB_BODY_K : bodyK(v.kind, !!v.device); // 작업은 백그라운드 명령 위성보다 작게
     const r = v.r;
     if (v.kind === 'bash-bg' || v.kind === 'monitor') v.label.position.set(0, -r * 1.2 - 0.4, 0);
     else v.label.position.set(0, r * 1.2 + 0.5, 0);
     v.mesh.scale.setScalar(r);
   }
+  /** 작업 노드: scene 기본 색칠(종류 색·상태 흐림) 뒤에 표시 상태 색(렌더러 시계)으로 덮는다 — PlanetDeco.jobStyle */
+  _styleVis(v) { super._styleVis(v); if (this.deco && isJob(v.node)) this.deco.jobStyle(v); }
   _disposeVis(v) { if (this.deco) this.deco.detach(v); super._disposeVis(v); }
   /** 가까이서 보면 라벨이 궤도선·소행성대 위에 얹히던 것 — 본체 화면 반지름 px 가 궤도계가 다 보이는 크기(LABEL_NEAR_PX,
    *  orbitLod 2 단계와 같은 11px)를 넘으면 라벨을 궤도 쪽으로 조금 띄우고(본체 px × 0.5, 상한 34px) 라벨 뒤에 배경색 옅은 번짐(.pl-halo) */

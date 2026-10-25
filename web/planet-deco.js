@@ -14,6 +14,8 @@ import { OrbitSystem, OrbitSparks } from './planet-orbits.js';
 import { injectSubType, mkSubU, buildSubType, stepSubType, setSubTypeColors, disposeSubType } from './planet-sub.js';
 import { Escapement, tourbLod, TOURB_LOD, TOURB_GEO } from './tourbillon-core.mjs'; // 뚜르비용
 import { TourbMain, SubCages } from './planet-tourb.js';
+import { isJob, jobOf, jobCode, jobProgress } from './job-core.mjs'; // 작업 노드
+import { jobLook, jobRingFill, jobBlink, jobLod, jobTether, ringAt, JOB_RING_GEO } from './planet-core.mjs';
 
 const TAU = Math.PI * 2;
 let GEO = null;
@@ -59,7 +61,160 @@ function geo() {
     atmo: new THREE.SphereGeometry(1, 28, 18),
   };
   GEO.gearBand.rotateX(Math.PI / 2);
+  // 작업 탐사선: 상자 몸통 + 버팀대 + 태양전지 날개 둘 + 안테나 대(몸체 반지름 1 안팎 — 클릭 판정도 이 모양)
+  GEO.probe = mergeBoxes([
+    { w: 0.9, h: 0.72, d: 0.72, x: 0, y: 0, z: 0 },
+    { w: 0.34, h: 0.07, d: 0.09, x: 0.6, y: 0, z: 0 }, { w: 0.34, h: 0.07, d: 0.09, x: -0.6, y: 0, z: 0 },
+    { w: 0.56, h: 0.05, d: 0.66, x: 1.04, y: 0, z: 0 }, { w: 0.56, h: 0.05, d: 0.66, x: -1.04, y: 0, z: 0 },
+    { w: 0.06, h: 0.42, d: 0.06, x: 0, y: 0.56, z: 0 }, { w: 0.2, h: 0.06, d: 0.2, x: 0, y: 0.78, z: 0 },
+  ]);
+  GEO.probe.computeBoundingSphere();
+  GEO.jobRing = new THREE.RingGeometry(JOB_RING_GEO.R0, JOB_RING_GEO.R1, 72, 1);
+  // 주인 궤도 자취: 꼭짓점마다 w ∈ [-1, 1](각도는 셰이더가 uSpan 으로) — 위치 속성은 자리만
+  const TN = 49, tw = new Float32Array(TN);
+  for (let i = 0; i < TN; i++) tw[i] = (i / (TN - 1)) * 2 - 1;
+  GEO.tether = new THREE.BufferGeometry();
+  GEO.tether.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TN * 3), 3));
+  GEO.tether.setAttribute('w', new THREE.BufferAttribute(tw, 1));
   return GEO;
+}
+
+// ---------- 작업 탐사선 셰이더 ----------
+// 출력 색 공간 변환(colorspace_fragment)을 넣어 토큰 색(CSS sRGB)이 몸체 재질과 같은 밝기로 보이게.
+// 상태 고리(시청자를 향함): u = 둘레 위치(0 = 위, 시계 방향 — planet-core ringAt 과 같음). uMode = planet-core JOB_RING
+const JRING_V = /* glsl */`varying vec2 vP;
+void main() { vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+const JRING_F = /* glsl */`uniform vec3 uColor, uTrack; uniform float uOp, uFill, uHead, uMode, uBlink, uSeed;
+varying vec2 vP;
+float h11(float x) { return fract(sin(x * 12.9898 + 78.233) * 43758.5453); }
+void main() {
+  float u = fract(atan(vP.x, vP.y) / 6.2831853);
+  float lit = 0.0, trk = 1.0;
+  if (uMode < 0.5) { lit = 0.45 * step(fract(u * 16.0), 0.5); trk = 0.0; }                // 줄 섬: 옅은 점선 고리
+  else if (uMode < 1.5) { lit = step(u, uFill); }                                           // 진행 호
+  else if (uMode < 2.5) { float d = fract(uHead - u); lit = d < 0.3 ? pow(1.0 - d / 0.3, 1.6) : 0.0; } // 진행(비율 모름): 도는 호
+  else if (uMode < 3.5) { lit = step(u, uFill) * 0.8; trk = step(fract(u * 24.0), 0.5); }  // 대기: until 쪽으로 차오름
+  else if (uMode < 4.5) { lit = 1.0; }                                                      // 끝: 온고리
+  else if (uMode < 5.5) { float g = min(abs(u - 0.5), min(u, 1.0 - u)); lit = step(0.06, g) * step(u, uFill + 0.001); trk = 0.0; } // 실패: 위·아래가 깨진 고리
+  else { float on = step(0.3, h11(floor(u * 12.0) + uSeed * 7.0)); lit = step(u, uFill) * on * uBlink; trk = 0.5; } // 정체: 칸마다 끊기며 깜빡
+  float a = uOp * (0.2 * trk + 0.85 * lit);
+  if (a < 0.004) discard;
+  gl_FragColor = vec4(mix(uTrack, uColor, min(1.0, lit)), clamp(a, 0.0, 1.0));
+  #include <colorspace_fragment>
+}`;
+// 주인 궤도 자취: 주인 중심 원의 한 토막(basis 행렬이 반지름·방향), 작업 뒤쪽(w<0)으로 잔광, 앞쪽은 옅게, 흐르는 점선
+const JTETH_V = /* glsl */`attribute float w; uniform float uSpan; varying float vW;
+void main() { vW = w; float a = w * uSpan; gl_Position = projectionMatrix * modelViewMatrix * vec4(cos(a), 0.0, sin(a), 1.0); }`;
+const JTETH_F = /* glsl */`uniform vec3 uColor; uniform float uOp, uShift; varying float vW;
+void main() {
+  float b = vW < 0.0 ? pow(1.0 + vW, 1.4) : pow(1.0 - vW, 3.0) * 0.35;
+  float dash = 0.55 + 0.45 * step(0.5, fract(vW * 9.0 - uShift));
+  float a = uOp * b * dash;
+  if (a < 0.004) discard;
+  gl_FragColor = vec4(uColor, a);
+  #include <colorspace_fragment>
+}`;
+
+const _q = new THREE.Quaternion(), _jd = new THREE.Vector3(), _jt = new THREE.Vector3(), _jy = new THREE.Vector3();
+const _UP = new THREE.Vector3(0, 1, 0), _jc = new THREE.Color(), _ra = { x: 0, y: 0 };
+
+/** 작업 노드 하나의 탐사선 연출(몸체 = v.mesh 를 탐사선 모양으로, 상태 고리·머리 점은 v.group, 궤도 자취는 view.world) */
+class JobProbe {
+  constructor(view, v) {
+    const G = geo();
+    this.view = view; this.v = v;
+    v.mesh.geometry = G.probe;
+    v.mesh.rotation.set(0.32, hash01(v.id, 'jr') * TAU, 0); // 조금 기운 채로 — 날개가 보이게
+    this.root = new THREE.Group(); v.group.add(this.root);
+    this.bill = new THREE.Group(); this.root.add(this.bill);
+    this.U = { uColor: { value: new THREE.Color() }, uTrack: { value: new THREE.Color() }, uOp: { value: 0 }, uFill: { value: 0 }, uHead: { value: 0 }, uMode: { value: 2 }, uBlink: { value: 1 }, uSeed: { value: 0 } };
+    this.ringMat = new THREE.ShaderMaterial({ uniforms: this.U, vertexShader: JRING_V, fragmentShader: JRING_F, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+    this.ring = new THREE.Mesh(G.jobRing, this.ringMat); this.ring.raycast = () => {}; this.bill.add(this.ring);
+    this.headMat = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false });
+    this.head = new THREE.Mesh(G.moon, this.headMat); this.head.scale.setScalar(JOB_RING_GEO.HEAD_S); this.head.raycast = () => {}; this.bill.add(this.head);
+    this.TU = { uColor: { value: new THREE.Color() }, uOp: { value: 0 }, uSpan: { value: 0.3 }, uShift: { value: 0 } };
+    this.tetherMat = new THREE.ShaderMaterial({ uniforms: this.TU, vertexShader: JTETH_V, fragmentShader: JTETH_F, transparent: true, depthWrite: false });
+    this.tether = new THREE.Line(G.tether, this.tetherMat);
+    this.tether.matrixAutoUpdate = false; this.tether.frustumCulled = false; this.tether.raycast = () => {}; this.tether.visible = false;
+    view.world.add(this.tether);
+    this.seed = hash01(v.id, 'jb');
+    this.dir = hash01(v.id, 'jd') < 0.5 ? -1 : 1;
+    this.headU = hash01(v.id, 'jh');
+    this.fill = -1;
+    this.light = null;
+  }
+  /** 몸체 색이 정해질 때(_styleVis): 고리·머리 점·궤도 자취 색과 섞기 */
+  restyle(c, L) {
+    const t = this.view.tokens;
+    this.U.uColor.value.copy(c);
+    if (!L) this.U.uColor.value.lerp(_jc.set(0xffffff), 0.12);
+    this.U.uTrack.value.copy(c).lerp(t.bg, L ? 0.55 : 0.5);
+    this.headMat.color.copy(c).lerp(_jc.set(L ? 0x000000 : 0xffffff), L ? 0.15 : 0.45);
+    this.TU.uColor.value.copy(c);
+    if (this.light !== L) {
+      this.light = L;
+      const b = L ? THREE.NormalBlending : THREE.AdditiveBlending;
+      for (const m of [this.ringMat, this.tetherMat]) { m.blending = b; m.needsUpdate = true; }
+    }
+  }
+  hide() { this.tether.visible = false; }
+  /** 매 프레임. s = 몸체 반지름(세계), px = 몸체 화면 반지름, op = 몸체 투명도, nowMs = 렌더러 시계 */
+  step(now, dt, s, px, op, cam, nowMs, reduced, L) {
+    const v = this.v, job = jobOf(v.node);
+    if (!job) { this.root.visible = false; this.hide(); return; }
+    const prog = jobProgress(job);
+    const code = jobCode(job, nowMs);
+    if (code !== v._jcode) this.view._styleVis(v); // 시계로만 바뀌는 정체 → 몸체 색(이벤트 없이)
+    const look = jobLook(code, prog);
+    const lod = jobLod(px);
+    let blink = 1, bstep = 0;
+    if (look.blink) { const b = jobBlink(reduced ? 0 : now, this.seed); blink = b.k; bstep = b.step; }
+    // 탐사선 자전: 정체면 꺼진 칸마다 멈칫, 끝·실패는 멈춤
+    v.mesh.rotation.y += dt * look.spin * (reduced ? 0.2 : 1) * (blink > 0.5 ? 1 : 0);
+    this.root.scale.setScalar(s);
+    this.root.visible = lod >= 1;
+    if (lod < 1) { this.hide(); return; }
+    // 고리는 시청자를 향함(부모 묶음 회전을 걷어 냄)
+    v.group.getWorldQuaternion(_q).invert();
+    this.bill.quaternion.copy(_q).multiply(cam.quaternion);
+    this.headU = (this.headU + dt * look.orbit * (reduced ? 0.15 : 1) + 1) % 1;
+    const fill = jobRingFill(job, code, nowMs, prog);
+    this.fill = this.fill < 0 ? fill : this.fill + (fill - this.fill) * Math.min(1, dt * 4);
+    const U = this.U;
+    U.uMode.value = look.mode; U.uFill.value = this.fill; U.uHead.value = this.headU;
+    U.uBlink.value = blink; U.uSeed.value = bstep % 97;
+    U.uOp.value = op * (L ? 0.95 : 0.85);
+    // 머리 점(고리를 도는 작은 위성): 진행 호·정체는 채움 끝에 멈춤, 대기·돌림·점선은 공전, 끝·실패는 없음
+    const r = look.ring;
+    const headOn = lod >= 2 && r !== 'full' && r !== 'broken';
+    this.head.visible = headOn;
+    if (headOn) {
+      ringAt(r === 'progress' || r === 'stale' ? this.fill : this.headU, _ra);
+      this.head.position.set(_ra.x * JOB_RING_GEO.HEAD_R, _ra.y * JOB_RING_GEO.HEAD_R, 0.02);
+      this.headMat.opacity = op * (r === 'stale' ? blink : r === 'dash' ? 0.5 : 1);
+    }
+    // 주인 궤도 자취
+    const pid = v.node.parentId, ov = pid && this.view.vis.get(pid);
+    if (lod < 2 || !(look.tether > 0) || !ov || ov.hidden || ov.gone || !ov.group.visible) { this.hide(); return; }
+    const o = ov.group.position;
+    _jd.copy(v.group.position).sub(o);
+    const T = jobTether(_jd.x, _jd.y, _jd.z);
+    if (!T) { this.hide(); return; }
+    _jt.crossVectors(_UP, _jd);
+    if (_jt.lengthSq() < 1e-8) _jt.set(1, 0, 0);
+    _jt.normalize().multiplyScalar(T.R * this.dir);
+    _jy.crossVectors(_jd, _jt).normalize().multiplyScalar(T.R);
+    this.tether.matrix.makeBasis(_jd, _jy, _jt).setPosition(o);
+    this.tether.matrixWorldNeedsUpdate = true;
+    this.TU.uSpan.value = T.span;
+    this.TU.uOp.value = op * look.tether * blink * (L ? 1.1 : 1);
+    this.TU.uShift.value = (this.TU.uShift.value + dt * (reduced ? 0 : look.orbit * 3)) % 1;
+    this.tether.visible = true;
+  }
+  dispose() {
+    this.root.removeFromParent(); this.tether.removeFromParent();
+    this.ringMat.dispose(); this.headMat.dispose(); this.tetherMat.dispose();
+  }
 }
 
 // ---------- 셰이더 주입(MeshStandardMaterial onBeforeCompile) ----------
@@ -151,14 +306,14 @@ varying vec3 vN; varying vec3 vV;
 void main() { float r = 1.0 - abs(dot(vN, vV)); float a = pow(r, 2.6) * uOpacity; gl_FragColor = vec4(uColor, a); }`;
 
 const _wp = new THREE.Vector3(), _dir = new THREE.Vector3(), _p2 = new THREE.Vector3();
-const _c = new THREE.Color(), _c2 = new THREE.Color();
+const _c = new THREE.Color(), _c2 = new THREE.Color(), _jc2 = new THREE.Color();
 
 export class PlanetDeco {
   /** view = PlanetView(SceneView) */
   constructor(view) {
     this.view = view;
     this.map = new Map(); // id → deco
-    this.stats = { main: 0, sub: 0, lod: [0, 0, 0], olod: [0, 0, 0, 0], ms: 0 };
+    this.stats = { main: 0, sub: 0, job: 0, lod: [0, 0, 0], olod: [0, 0, 0, 0], ms: 0 };
     this.sparks = new OrbitSparks(view.scene);
     this.cages = new SubCages(view.scene, 256, view.renderer); // 서브 단일 케이지(장면 전체 인스턴싱)
   }
@@ -168,6 +323,13 @@ export class PlanetDeco {
     if (this.map.has(v.id)) return;
     const k = v.kind;
     let d = null;
+    if (isJob(v.node)) { // 작업 = 주인 둘레의 작은 탐사선(궤도계 대신 상태 고리·궤도 자취)
+      d = { type: 'job', job: new JobProbe(this.view, v) };
+      d.root = d.job.root;
+      this.map.set(v.id, d);
+      this.jobStyle(v);
+      return;
+    }
     if (v.device) d = { type: 'plain', root: this._root(v) };
     else if (k === 'main') d = this._mech(v);
     else if (k === 'subagent') d = this._sub(v);
@@ -184,9 +346,9 @@ export class PlanetDeco {
   }
   _root(v) { const r = new THREE.Group(); v.group.add(r); return r; }
   /** 궤도계 바깥 반지름(본체 반지름 배) — 홀로그램 자리 */
-  extentOf(id) { const d = this.map.get(id); return d ? d.orbits.spec.extent : 1; }
+  extentOf(id) { const d = this.map.get(id); return d ? (d.orbits ? d.orbits.spec.extent : JOB_RING_GEO.extent) : 1; }
   /** 홀로그램 빔 출발점: i 번째 보이는 위성(없으면 false) */
-  satWorld(id, i, out) { const d = this.map.get(id); if (!d) return false; const n = d.orbits.satCount(); return n > 0 && d.orbits.satWorld(i % n, out); }
+  satWorld(id, i, out) { const d = this.map.get(id); if (!d || !d.orbits) return false; const n = d.orbits.satCount(); return n > 0 && d.orbits.satWorld(i % n, out); }
 
   _mech(v) {
     const G = geo();
@@ -229,10 +391,31 @@ export class PlanetDeco {
     const d = this.map.get(v.id); if (!d) return;
     this.map.delete(v.id);
     d.root.removeFromParent();
+    if (d.job) { d.job.dispose(); return; }
     for (const m of [d.metal, d.light, d.atmoMat]) if (m) m.dispose();
     if (d.tb) d.tb.dispose();
     if (d.x) disposeSubType(d.x, v);
     d.orbits.dispose(); d.oroot.removeFromParent();
+  }
+
+  /**
+   * 작업 몸체 색(PlanetView._styleVis 가 scene 기본 색칠 뒤 부른다): 표시 상태(렌더러 시계 — 정체가 이김) → planet-core JOB_LOOK 의
+   * 토큰 색·섞기·흐림·발광·투명도. 끝(초록)·실패(빨강)의 흐림·오류 고리는 scene 규칙 그대로.
+   */
+  jobStyle(v) {
+    const d = this.map.get(v.id), job = jobOf(v.node);
+    if (!d || !d.job || !job) return;
+    const t = this.view.tokens || {}, L = !!t.isLight;
+    const code = jobCode(job, this.view.clock());
+    const look = jobLook(code, jobProgress(job));
+    const c = _jc2.copy(t[look.tok] || t.skill || _c.set(0xfacc15));
+    if (look.mix && t[look.mix[0]]) c.lerp(t[look.mix[0]], look.mix[1]);
+    if (look.dim && t.bg) c.lerp(t.bg, look.dim * (L ? 0.55 : 1)); // 밝은 배경에선 덜 흐리게(흰 바닥에 묻히지 않게)
+    v.mat.color.copy(c); v.mat.emissive.copy(c);
+    v.baseEmissive = look.emis * (L ? 0.45 : 1) * (v.scopeK ?? 1);
+    if (code !== 3 && code !== 4) { v.baseOpacity *= look.op; v.mat.opacity = v.baseOpacity * (v.exitF ?? 1); v.mat.depthWrite = v.baseOpacity >= 0.99; }
+    v._jcode = code;
+    d.job.restyle(c, L);
   }
 
   /** 테마: 밝은 배경에선 발광을 낮추고 대기 빛은 보통 섞기 */
@@ -258,7 +441,8 @@ export class PlanetDeco {
     const view = this.view, cam = view.camera;
     const H = view.container.clientHeight || 1, fov = cam.fov;
     const T = now % 3600;
-    const st = this.stats; st.main = st.sub = 0; st.lod[0] = st.lod[1] = st.lod[2] = 0; st.olod.fill(0);
+    const st = this.stats; st.main = st.sub = st.job = 0;
+    const clockMs = view.clock(); // 정체·대기 차오름은 렌더러 시계(재생 = 가상 시계) st.lod[0] = st.lod[1] = st.lod[2] = 0; st.olod.fill(0);
     const reduced = !!view.reduced;
     const L = !!(view.tokens && view.tokens.isLight);
     const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -266,11 +450,12 @@ export class PlanetDeco {
     this.cages.begin();
     for (const [id, d] of this.map) {
       const v = view.vis.get(id);
-      if (!v || v.hidden || v.gone || !v.group.visible) continue;
+      if (!v || v.hidden || v.gone || !v.group.visible) { if (d.job) d.job.hide(); continue; }
       const s = v.mesh.scale.x;
       v.group.getWorldPosition(_wp);
       const dist = _wp.distanceTo(cam.position);
       const px = pxRadius(s, dist, fov, H);
+      if (d.job) { st.job++; d.job.step(now, dt, s, px, v.mat.opacity, cam, clockMs, reduced, L); continue; }
       const lod = planetLod(px);
       const olod = orbitLod(px);
       st.lod[lod]++; st.olod[olod]++;

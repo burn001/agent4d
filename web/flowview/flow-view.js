@@ -13,6 +13,8 @@ import { textWidth } from '../label-place.mjs';
 import { ArtLayer3D } from './artifacts.js'; // 작업 대상 층(켤 때만 만든다)
 import { TIER, tierGap, tierY, tierDepths, tierDim, tierSpan } from './tier-core.mjs'; // 높이 계층
 import { isDetachedRoot } from '../layout.js';
+import { isJob } from '../job-core.mjs';
+import { JOB_CHIP } from './job-chip-core.mjs'; // 작업 칩
 
 const CHIP_SCALE = 1.45;
 const PANEL_TOP_PX = 96; // 맨 위 노드 위 홀로그램 패널 자리(px)
@@ -73,7 +75,8 @@ export class FlowView extends SceneView {
   // ---- 3D 도형은 숨기고(클릭 판정용 메시는 남김) 칩이 그린다 ----
   _flowNode(v) {
     // 칩은 단순 도형보다 크게(노드 축소 0.68 을 되돌린 크기 — 글자와 균형)
-    if (!v._flowR) { v.r *= v.device ? 1.6 : CHIP_SCALE_KIND[v.kind] ?? CHIP_SCALE; v._flowR = true; }
+    // 작업 노드는 백그라운드 명령 칩보다 작은 작업 칩(JOB_CHIP.SCALE)
+    if (!v._flowR) { v.r *= (v.device ? 1.6 : CHIP_SCALE_KIND[v.kind] ?? CHIP_SCALE) * (isJob(v.node) ? JOB_CHIP.SCALE : 1); v._flowR = true; }
     v.mesh.visible = false;
     for (const k of Object.keys(v.extras)) v.group.remove(v.extras[k]);
     // 라벨은 칩 아래(agent-flow 처럼 이름이 노드 밑). 화면 간격은 _labelPass 에서 칩 크기에 맞춤

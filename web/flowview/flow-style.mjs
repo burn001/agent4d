@@ -10,11 +10,14 @@ export const FLOW_PALETTE = {
     void: '#050510', grid: '#16204a', holo: '#66ccff', holoBright: '#aaeeff',
     thinking: '#66ccff', tool: '#ffbb44', done: '#66ffaa', error: '#ff5566', stopped: '#8a8aa0', idle: '#5aa8d8',
     dispatch: '#cc88ff', ret: '#66ffaa', output: '#66ccff', interior: '#0a0f28', text: '#aaeeff', textDim: '#66ccffb0',
+    // 작업 칩(job-chip-core): 대기 = 파랑 흐림 · 줄 섬 = 회색 흐림 · 정체 = 호박과 빨강 사이 주황
+    jobWait: '#5b93d6', jobQueued: '#6a6f86', jobStale: '#ff7a3a',
   },
   light: {
     void: '#eef2f8', grid: '#c9d4ea', holo: '#1f7fc4', holoBright: '#0b4f86',
     thinking: '#1f7fc4', tool: '#c27c0e', done: '#0f9e6a', error: '#d4313f', stopped: '#7a7f8c', idle: '#4a86b8',
     dispatch: '#8a3fd1', ret: '#0f9e6a', output: '#1f7fc4', interior: '#ffffff', text: '#0b2a44', textDim: '#2b5e86',
+    jobWait: '#4f86bd', jobQueued: '#8b909d', jobStale: '#d9541a',
   },
 };
 export const paletteOf = (isLight) => (isLight ? FLOW_PALETTE.light : FLOW_PALETTE.dark);

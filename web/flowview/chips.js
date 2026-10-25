@@ -7,6 +7,8 @@
 import * as THREE from 'three';
 import { nodeVisualState, stateColor, kindIcon, paletteOf, breathe, NODE_STATE } from './flow-style.mjs';
 import { bandCode, cycleProgress } from '../batch-core.mjs';
+import { jobOf } from '../job-core.mjs';
+import { JOB_CHIP, jobChipColor, jobChipModel, newJobChipMemo, jobChipAttr, jobBreathes } from './job-chip-core.mjs'; // 작업 칩
 
 const QUAD = 1.9; // 노드 반지름 대비 사각형 반폭(글로우·고리 여백)
 
@@ -23,7 +25,8 @@ void main() {
   vColor = iColor; vKind = iKind; vA = iA; vB = iB; vC = iC; vD = iD; vPart = aPart; vFace = 1.0; vShade = 1.0;
   vec3 C = instanceMatrix[3].xyz;
   float s = length(instanceMatrix[0].xyz);
-  bool dev = iC.x > 0.5;
+  float fl = floor(iC.x + 0.5);  // 0 보통 · 1 배치 장치 · 2 작업 칩(§97) — 정수는 반올림해 푼다(§80.3)
+  bool dev = fl > 0.5 && fl < 1.5;
   float H = iD.z * s;            // 기둥 두께
   float gy = iD.x;               // 바닥 높이
   vec3 w;
@@ -77,6 +80,80 @@ float devD(vec2 p) { vec2 q = abs(p) / vec2(1.45, 0.82); vec2 r = max(q - 0.78, 
 vec3 bandC(float b) { return b < 1.5 ? uWarn : b < 2.5 ? uOk : b < 3.5 ? uStop : uErr; }
 float line(float d, float at, float w) { return smoothstep(w, 0.0, abs(d - at)); }
 float seg(vec2 p, vec2 a, vec2 b, float w) { vec2 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return smoothstep(w, w * 0.35, length(pa - ba * h)); }
+// §97 정체 작업의 끊긴 맥박: 2.4초마다 한 번 뛰고 세 번째는 거른다(0.4 바탕 + 맥박)
+float jobBeat(float T) {
+  float ph = fract(T / 2.4), k = mod(floor(T / 2.4), 3.0);
+  return 0.4 + 0.6 * exp(-ph * 9.0) * step(k, 1.5);
+}
+// §97 작업 칩 윗면: 작은 육각 판 + 상태 글리프(줄 섬 점 셋 · 진행 재생 삼각 · 대기 모래시계 · 끝 체크 · 실패 엑스 · 정체 느낌표)
+// + 진행 둘레 호 / 대기 눈금 고리. jc = 표시 상태 번호(반올림해 푼 값), prog = 진행 0..1 | -1, wf = 대기 차오름 0..1 | -1
+vec4 jobTop(vec2 p, float d, float l, vec3 C, float T, bool light, float foc, float glowK, float jc, float prog, float wf) {
+  bool run = jc > 0.5 && jc < 1.5, wait = jc > 1.5 && jc < 2.5, done = jc > 2.5 && jc < 3.5, fail = jc > 3.5 && jc < 4.5, stale = jc > 4.5;
+  float beat = stale ? jobBeat(T) : 1.0;
+  vec3 hiC = light ? C * 0.85 : mix(C, vec3(1.0), 0.12);
+  float a = atan(p.x, p.y); a = a < 0.0 ? a + 6.2831853 : a; // 위에서 시계 방향 0..2π
+  float af = a / 6.2831853;
+  // 바깥 빛무리(진행·정체만 또렷, 정체는 맥박에 맞춰)
+  float glow = exp(-max(d - 1.0, 0.0) * 3.6) * step(1.0, d) * 0.3 * glowK * (foc > 0.5 ? 1.6 : 1.0) * beat;
+  vec3 col = C; float al = glow;
+  if (d < 1.0) {
+    col = mix(uInterior, C, light ? 0.08 : 0.14); al = light ? 0.95 : 0.92;
+    if (run) { float sy = -1.0 + mod(T * 0.7, 2.0); col = mix(col, C, smoothstep(0.14, 0.0, abs(p.y - sy)) * (light ? 0.12 : 0.18)); }
+    float g = 0.0;
+    if (jc < 0.5) {                     // 줄 섬: 점 셋
+      for (int i = 0; i < 3; i++) g = max(g, smoothstep(0.085, 0.045, length(p - vec2(-0.3 + 0.3 * float(i), 0.0))));
+      g *= 0.7;
+    } else if (run) {                   // 진행: 재생 삼각
+      float e = min(p.x + 0.17, (0.25 - p.x) * 0.58 - abs(p.y));
+      g = smoothstep(0.0, 0.035, e) * (0.85 + 0.15 * sin(T * 3.0));
+    } else if (wait) {                  // 대기: 모래시계 — 위 모래가 줄고 아래가 참(until 이 가까울수록)
+      float f = wf > -0.5 ? wf : fract(T * 0.06);
+      float ay = abs(p.y), e = min(ay * 0.85 - abs(p.x), 0.32 - ay);
+      float frame = smoothstep(0.035, 0.0, abs(e)) * step(-0.035, e);
+      frame = max(frame, step(abs(p.x), 0.3) * smoothstep(0.03, 0.0, abs(ay - 0.32)));
+      float inside = step(0.0, e);
+      float sandTop = inside * step(0.0, p.y) * step(p.y, 0.3 * (1.0 - f));
+      float sandBot = inside * step(p.y, 0.0) * step(p.y, -0.31 + 0.3 * f);
+      float drip = step(abs(p.x), 0.02) * step(-0.3, p.y) * step(p.y, 0.0) * step(f, 0.98);
+      g = max(frame, max(sandTop, sandBot) * 0.75); g = max(g, drip * 0.6);
+    } else if (done) {                  // 끝: 체크
+      g = max(seg(p, vec2(-0.26, 0.02), vec2(-0.07, -0.17), 0.075), seg(p, vec2(-0.07, -0.17), vec2(0.27, 0.19), 0.075)) * 0.85;
+    } else if (fail) {                  // 실패: 엑스
+      g = max(seg(p, vec2(-0.2, -0.2), vec2(0.2, 0.2), 0.075), seg(p, vec2(-0.2, 0.2), vec2(0.2, -0.2), 0.075)) * 0.9;
+    } else {                            // 정체: 느낌표(맥박에 맞춰)
+      g = max(seg(p, vec2(0.0, 0.26), vec2(0.0, -0.04), 0.08), smoothstep(0.08, 0.045, length(p - vec2(0.0, -0.2))));
+      g *= 0.55 + 0.45 * beat;
+    }
+    col = mix(col, hiC, g);
+  }
+  // 육각 테두리: 진행 또렷 · 대기/줄 섬 흐림(줄 섬은 점선) · 끝·실패 차분(맥동 없음) · 정체는 끊긴 테 + 맥박
+  float ring = line(d, 1.0, foc > 0.5 ? 0.075 : 0.06);
+  if (jc < 0.5) ring *= step(0.5, fract(af * 18.0)) * 0.5;
+  else if (wait) ring *= 0.85;
+  else if (done) ring *= 0.55;
+  else if (fail) ring *= 0.8;
+  else if (stale) ring *= step(0.24, fract(af * 6.0 + 0.12)) * beat;
+  col = mix(col, hiC, ring); al = max(al, ring);
+  // 진행 둘레 호(위에서 시계 방향) — 비율을 모르는 진행은 느리게 도는 짧은 호
+  float track = line(l, 1.3, 0.045);
+  if (prog > -0.5) {
+    float fill = track * step(af, prog);
+    col = mix(col, C, track * 0.15 * (1.0 - fill)); al = max(al, track * (light ? 0.28 : 0.24));
+    col = mix(col, hiC, fill); al = max(al, fill * 0.95 * (stale ? 0.5 + 0.5 * beat : 1.0));
+  } else if (run) {
+    float da = mod(a - mod(T * 1.6, 6.2831853) + 6.2831853, 6.2831853);
+    float arc = track * step(da, 1.2) * (0.3 + 0.7 * da / 1.2);
+    col = mix(col, C, arc); al = max(al, arc * 0.8);
+  }
+  // 대기 눈금 고리: 12칸, until 쪽으로 차오름(모르면 흐린 눈금만)
+  if (wait) {
+    float r0 = prog > -0.5 ? 1.5 : 1.3;
+    float tick = smoothstep(0.08, 0.04, abs(l - r0)) * smoothstep(0.32, 0.2, abs(fract(af * 12.0) - 0.5));
+    float lit = wf > -0.5 ? step((floor(af * 12.0) + 0.5) / 12.0, wf) : 0.0;
+    col = mix(col, lit > 0.5 ? hiC : C, tick); al = max(al, tick * (lit > 0.5 ? 0.9 : (light ? 0.3 : 0.22)));
+  }
+  return vec4(col, al);
+}
 float icon(vec2 p, float k) {
   float r = 0.0;
   if (k < 0.5) {        // 별(메인): 네 갈래 빛
@@ -97,7 +174,9 @@ void main() {
   if (alpha < 0.004) discard;
   bool light = uLight > 0.5;
   vec2 p = vP;
-  bool dev = vC.x > 0.5;
+  float flag = floor(vC.x + 0.5);  // 0 보통 · 1 배치 장치 · 2 작업 칩(§97) — 반올림해 푼다(§80.3)
+  bool dev = flag > 0.5 && flag < 1.5, job = flag > 1.5;
+  float jc = floor(vC.y + 0.5);
   float T = uTime + seed * 10.0;
   vec3 C = vColor;
   if (vPart > 2.5) {             // 기둥줄: 아래로 흐르는 점선, 가운데 진하게
@@ -127,18 +206,23 @@ void main() {
     float corner = (dev && mod(k, 3.0) < 0.5) ? 0.0 : 1.0;   // 상자는 가짜 모서리(가운데) 빼고
     float edge = smoothstep(0.05, 0.0, abs(p.x - k)) * 0.5 * corner;
     float rim = max(smoothstep(0.18, 0.0, 1.0 - h), smoothstep(0.1, 0.0, h) * 0.4);
+    if (job) {                   // §97 작업 칩 옆면: 진행 또렷 · 대기/줄 섬/끝 흐림 · 실패 차분(맥동 없음) · 정체 맥박
+      rim *= jc < 0.5 ? 0.45 : jc < 1.5 ? 1.0 : jc < 2.5 ? 0.75 : jc < 3.5 ? 0.5 : jc < 4.5 ? 0.7 : jobBeat(T);
+    } else {
     if (st > 2.5 && st < 3.5) rim *= 0.5;
     if (st > 3.5 && st < 4.5) rim *= 0.75 + 0.25 * sin(T * 6.0);
     if (st > 4.5) rim *= 0.6;
-    float sp = (st > 0.5 && st < 2.5) ? 1.3 : 0.45;
+    }
+    float sp = job ? (jc > 0.5 && jc < 1.5 ? 0.7 : 0.0) : (st > 0.5 && st < 2.5) ? 1.3 : 0.45;
     float sy = 1.0 - fract(T * sp * 0.5);
-    float scan = smoothstep(0.1, 0.0, abs(h - sy)) * (light ? 0.2 : 0.32);
+    float scan = smoothstep(0.1, 0.0, abs(h - sy)) * (light ? 0.2 : 0.32) * step(0.001, sp);
     float lit = max(max(rim, edge), scan);
     col = mix(col, light ? C * 0.9 : mix(C, vec3(1.0), 0.1), lit);
     gl_FragColor = finish(col, light ? 0.96 : 0.94);
     return;
   }
   float d = dev ? devD(p) : hexD(p), l = length(p);
+  if (job) { vec4 jt = jobTop(p, d, l, C, T, light, foc, glowK, jc, vC.z, vC.w); gl_FragColor = finish(jt.rgb, jt.a); return; }
   vec3 col = vec3(0.0); float al = 0.0;
   // 바깥 글로우(상태색)
   float ga = (foc > 0.5 ? 0.42 : st > 0.5 && st < 2.5 ? 0.24 : 0.12) * glowK;
@@ -309,6 +393,7 @@ export class NodeChips {
     scene.add(this.shadow, this.mesh, this.depth);
     this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._s = new THREE.Vector3(); this._c = new THREE.Color(); this._f = new THREE.Vector3();
     this._colCache = new Map();
+    this._jobCol = [];
     this._order = [];
     this.isLight = false;
   }
@@ -320,6 +405,13 @@ export class NodeChips {
     this.uniforms.uHolo.value.set(P.holo); this.uniforms.uWarn.value.set(P.tool); this.uniforms.uErr.value.set(P.error);
     this.uniforms.uOk.value.set(P.done); this.uniforms.uStop.value.set(P.stopped);
     this._colCache.clear();
+    this._jobCol.length = 0;
+  }
+  /** 작업 칩 색(표시 상태 번호별 THREE.Color, 테마마다 한 번 만듦) */
+  jobColor(code) {
+    let c = this._jobCol[code];
+    if (!c) { c = new THREE.Color(jobChipColor(code, this.isLight)); this._jobCol[code] = c; }
+    return c;
   }
   _col(state) {
     let c = this._colCache.get(state);
@@ -352,13 +444,16 @@ export class NodeChips {
       if (n >= this.cap) break;
       const node = v.node;
       const st = nodeVisualState(node.status, v.icons ? v.icons.size : 0);
-      // 크기: SceneView 가 매 프레임 계산한 메시 배율(등장·퇴장·오래된 완료 축소 포함) × 숨쉬기
-      const s = v.mesh.scale.x * breathe(st, now, v.seed);
+      // 작업 노드: 표시 상태(렌더러 시계 — 정체 판정)는 JOB_CHIP.REFRESH_MS 마다, 대기 차오름은 보관한 시각으로 산술만(객체 안 만듦)
+      const job = jobOf(node);
+      const jm = job ? jobChipModel(v._jobChip || (v._jobChip = newJobChipMemo()), job, nowMs) : null;
+      // 크기: SceneView 가 매 프레임 계산한 메시 배율(등장·퇴장·오래된 완료 축소 포함) × 숨쉬기(작업은 진행 중일 때만)
+      const s = v.mesh.scale.x * (jm && !jobBreathes(jm.code) ? 1 : breathe(st, now, v.seed));
       this._s.setScalar(Math.max(0.0001, s));
       this._m.compose(v.group.position, this._q, this._s);
       this.mesh.setMatrixAt(n, this._m);
       // 같은 프로젝트 live 메인이 여럿이면 메인 테두리(상태색 자리)를 그 세션 색으로 — 오류·중지·완료는 상태색 그대로
-      const c = v.sessC && v.kind === 'main' && !node.parentId && (st === NODE_STATE.idle || st === NODE_STATE.thinking || st === NODE_STATE.tool) ? v.sessC : this._col(st), kc = view.kindColor(v.kind);
+      const c = jm ? this.jobColor(jm.code) : v.sessC && v.kind === 'main' && !node.parentId && (st === NODE_STATE.idle || st === NODE_STATE.thinking || st === NODE_STATE.tool) ? v.sessC : this._col(st), kc = view.kindColor(v.kind);
       C[n * 3] = c.r; C[n * 3 + 1] = c.g; C[n * 3 + 2] = c.b;
       K[n * 3] = kc.r; K[n * 3 + 1] = kc.g; K[n * 3 + 2] = kc.b;
       const sk = v.scopeK ?? 1;
@@ -366,10 +461,11 @@ export class NodeChips {
       const near = v.nearFaded ? Math.max(0.15, v.mat.opacity / Math.max(0.01, v.baseOpacity || 1)) : 1;
       const ctx = node.meta && node.meta.ctx;
       const ctxp = ctx && ctx.limit ? Math.min(1, Math.max(0, ctx.used / ctx.limit)) : 0;
-      A[n * 4] = st; A[n * 4 + 1] = kindIcon(v.kind); A[n * 4 + 2] = (v.exitF ?? 1) * Math.min(1, sk * 1.3) * endK * near; A[n * 4 + 3] = ctxp;
+      A[n * 4] = st; A[n * 4 + 1] = kindIcon(v.kind); A[n * 4 + 2] = (v.exitF ?? 1) * Math.min(1, sk * 1.3) * (jm ? JOB_CHIP.ALPHA[jm.code] ?? 1 : endK) * near; A[n * 4 + 3] = jm ? 0 : ctxp;
       const foc = v.id === view.focusId || v.id === view.hoverId ? 1 : 0;
-      B[n * 4] = v.seed; B[n * 4 + 1] = foc; B[n * 4 + 2] = v.stale ? 0.4 : 1; B[n * 4 + 3] = 0;
-      if (v.device && v.devInfo) {
+      B[n * 4] = v.seed; B[n * 4 + 1] = foc; B[n * 4 + 2] = (v.stale ? 0.4 : 1) * (jm ? JOB_CHIP.GLOW[jm.code] ?? 1 : 1); B[n * 4 + 3] = 0;
+      if (jm) jobChipAttr(D, n * 4, jm, nowMs); // 작업 칩: (2, 표시 상태, 진행 | -1, 대기 차오름 | -1)
+      else if (v.device && v.devInfo) {
         // 배치 장치: 띠(5진수) · 칸 수 · 진행(경과/평균, 진행 중 회차가 없으면 -1)
         const info = v.devInfo;
         const cur = info.running > 0 && info.currentId ? view.vis.get(info.currentId) : null;
@@ -378,7 +474,7 @@ export class NodeChips {
         D[n * 4 + 3] = info.running > 0 ? (pr == null ? 1 : pr) : -1;
       } else { D[n * 4] = 0; D[n * 4 + 1] = 0; D[n * 4 + 2] = 0; D[n * 4 + 3] = -1; }
       // 바닥 높이 · 아래층 어둡게 · 기둥 두께
-      E[n * 4] = floorY; E[n * 4 + 1] = v.tierDim || 0; E[n * 4 + 2] = v.device ? THICK.device : v.kind === 'main' ? THICK.main : THICK.other; E[n * 4 + 3] = 0;
+      E[n * 4] = floorY; E[n * 4 + 1] = v.tierDim || 0; E[n * 4 + 2] = v.device ? THICK.device : jm ? JOB_CHIP.THICK : v.kind === 'main' ? THICK.main : THICK.other; E[n * 4 + 3] = 0;
       n++;
     }
     this.mesh.count = n; this.shadow.count = n; this.depth.count = n;

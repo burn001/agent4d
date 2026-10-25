@@ -196,3 +196,118 @@ export function settleK(t) {
   const k = t / SETTLE_S;
   return Math.sin(Math.PI * Math.min(1, k * 1.6)) * (1 - k);
 }
+
+// ---------------- 작업(Job) 노드 = 주인 둘레의 작은 탐사선 (3D planet-deco.js 가 쓴다, three 없음) ----------------
+// 작업 노드는 kind 'bash-bg' + meta.job. 백그라운드 명령 위성(BODY_K['bash-bg'])보다 훨씬 작은 몸체(탐사선 — 상자 몸통 + 태양전지 날개 둘),
+// 몸체 둘레에 시청자를 향한 상태 고리(진행 호·대기 차오름·돌림 호·점선·끊긴 고리), 고리 위를 도는 머리 점(작은 위성),
+// 주인 중심 원호 한 토막(주인 둘레를 도는 궤도 자취 — 뒤쪽으로 잔광). 색 = job-core 표시 상태(정체가 이김).
+
+/** 작업 탐사선 몸체 배율(그리는 반지름 = RADIUS['bash-bg'] × NODE_SCALE × 이 값). 백그라운드 명령(0.74)보다 작게 */
+export const JOB_BODY_K = 0.42;
+
+/** 상태 고리 그리기 방식(셰이더 uMode 와 같은 번호) */
+export const JOB_RING = { dash: 0, progress: 1, spin: 2, wait: 3, full: 4, broken: 5, stale: 6 };
+
+/**
+ * 표시 상태 번호(job-core JOB_CODE: 0 줄 섬 · 1 진행 · 2 대기 · 3 끝 · 4 실패 · 5 정체) → 모양 규칙.
+ *  tok = 색 토큰(scene readTokens 이름), mix = [둘째 토큰, 섞는 비율](정체 = 호박 → 빨강 사이 주황), dim = 배경 쪽으로 흐리게(0..1),
+ *  op = 몸체 투명도 배율(끝은 scene 이 이미 흐리게 한다), emis = 기본 발광, ring = 고리 방식, spin = 탐사선 자전(rad/s),
+ *  orbit = 머리 점 공전(바퀴/s), tether = 주인 궤도 자취 밝기(0 = 안 그림), blink = 불규칙 깜빡임(정체)
+ */
+export const JOB_LOOK = [
+  { st: 'queued',  tok: 'stopped',   mix: null,            dim: 0.45, op: 0.6,  emis: 0.08, ring: 'dash',   spin: 0.12, orbit: 0.04, tether: 0.25, blink: false },
+  { st: 'running', tok: 'skill',     mix: null,            dim: 0,    op: 1,    emis: 0.55, ring: 'spin',   spin: 1.1,  orbit: 0.55, tether: 0.85, blink: false },
+  { st: 'waiting', tok: 'flow-call', mix: null,            dim: 0.32, op: 0.78, emis: 0.2,  ring: 'wait',   spin: 0.22, orbit: 0.07, tether: 0.45, blink: false },
+  { st: 'done',    tok: 'ok',        mix: null,            dim: 0.12, op: 1,    emis: 0.05, ring: 'full',   spin: 0,    orbit: 0,    tether: 0,    blink: false },
+  { st: 'failed',  tok: 'error',     mix: null,            dim: 0,    op: 1,    emis: 0.35, ring: 'broken', spin: 0,    orbit: 0,    tether: 0,    blink: false },
+  { st: 'stale',   tok: 'skill',     mix: ['error', 0.45], dim: 0,    op: 1,    emis: 0.35, ring: 'stale',  spin: 0.05, orbit: 0,    tether: 0.55, blink: true },
+];
+
+/** 표시 상태 번호 + 진행 비율 → 모양(고리 방식 확정). 진행 중인데 비율이 있으면 진행 호, 없으면 돌림 호 */
+export function jobLook(code, progress = null) {
+  const L = JOB_LOOK[code] || JOB_LOOK[1];
+  const ring = L.ring === 'spin' && progress != null ? 'progress' : L.ring;
+  return { ...L, ring, mode: JOB_RING[ring] };
+}
+
+const tsMs = (iso) => { const t = Date.parse(iso || ''); return Number.isFinite(t) ? t : NaN; };
+
+/**
+ * 대기 고리 차오름(0..1): 기다리기 시작한 때(마지막 박동, 없으면 시작 시각) → 재확인 시각(until).
+ * until 이 가까울수록 1 에 가깝다. until 이 없으면 null(차오름 없이 천천히 도는 머리 점만).
+ */
+export function jobWaitFill(job, nowMs) {
+  if (!job || !job.until) return null;
+  const u = tsMs(job.until);
+  if (!Number.isFinite(u) || !Number.isFinite(nowMs)) return null;
+  let from = tsMs(job.beatAt);
+  if (!Number.isFinite(from)) from = tsMs(job.startedAt);
+  if (!Number.isFinite(from) || from >= u) return nowMs >= u ? 1 : 0;
+  return Math.max(0, Math.min(1, (nowMs - from) / (u - from)));
+}
+
+/**
+ * 고리 채움(0..1, 셰이더 uFill): 진행 호 = 진행 비율, 대기 = 차오름, 끝 = 1, 정체·실패 = 진행 비율(없으면 1 — 끊긴 온고리).
+ * 돌림 호·점선은 0(채움을 안 씀).
+ */
+export function jobRingFill(job, code, nowMs, progress = null) {
+  const look = jobLook(code, progress);
+  switch (look.ring) {
+    case 'progress': return progress ?? 0;
+    case 'wait': return jobWaitFill(job, nowMs) ?? 0;
+    case 'full': return 1;
+    case 'stale': case 'broken': return progress ?? 1;
+    default: return 0;
+  }
+}
+
+/** 숫자 해시 → [0,1) (프레임마다 부르는 곳용 — 문자열 해시 hash01 보다 싸다) */
+const fhash = (x) => { const s = Math.sin(x * 12.9898 + 78.233) * 43758.5453; return s - Math.floor(s); };
+
+/**
+ * 정체 깜빡임(신호가 끊긴 무전기처럼): 시각 t(초)·씨앗 seed(0..1) → 밝기 배율.
+ * 칸 길이가 칸마다 다르고(0.12～0.9초) 켜짐(0.7～1)·꺼짐(0.08～0.2)이 해시로 정해져 박자가 일정하지 않다. 결정적(같은 t·seed = 같은 값).
+ * @returns {{ k:number, step:number }} step = 지금 칸 번호(고리 끊긴 자리 무늬를 칸마다 바꾸는 씨앗)
+ */
+export function jobBlink(t, seed = 0) {
+  // 칸 경계: 주기 W 안에서 길이가 해시로 다른 칸을 차례로 쌓는다(주기 번호도 씨앗에 섞어 주기마다 무늬가 다르게)
+  const W = 4.0;
+  const cyc = Math.floor(t / W);
+  let x = t - cyc * W, i = 0;
+  for (; i < 31; i++) {
+    const len = 0.12 + 0.78 * fhash(cyc * 31.7 + i * 3.1 + seed * 97.3);
+    if (x < len) break;
+    x -= len;
+  }
+  const step = cyc * 32 + i;
+  const r = fhash(step * 1.37 + seed * 11.1);
+  const k = r < 0.38 ? 0.08 + 0.12 * fhash(step + 0.5) : 0.7 + 0.3 * r;
+  return { k, step };
+}
+
+/** 작업 LOD(탐사선 몸체 화면 반지름 px): 0 = 몸체만, 1 = 상태 고리, 2 = 고리·머리 점·주인 궤도 자취 */
+export const JOB_LOD = { RING_PX: 1.6, DETAIL_PX: 4 };
+export function jobLod(px) {
+  if (!(px >= JOB_LOD.RING_PX)) return 0;
+  return px < JOB_LOD.DETAIL_PX ? 1 : 2;
+}
+
+/** 상태 고리 치수(몸체 반지름 = 1): 안·바깥 반지름, 머리 점 궤도 반지름·크기. extent = 작업 겉 반지름(홀로그램·맞춤) */
+export const JOB_RING_GEO = { R0: 1.5, R1: 1.9, HEAD_R: 1.7, HEAD_S: 0.3, extent: 2.0 };
+
+/**
+ * 주인 궤도 자취(주인 중심, 작업을 지나는 원의 한 토막): 주인→작업 벡터 (dx,dy,dz) → { R 반지름, span 반각(rad) }.
+ * 토막의 세계 길이를 대략 일정하게(반지름이 크면 각을 줄임, 상한 0.55rad). 너무 가까우면 null.
+ */
+export function jobTether(dx, dy, dz, len = 2.2) {
+  const R = Math.hypot(dx, dy, dz);
+  if (!(R > 0.4)) return null;
+  return { R, span: Math.min(0.55, len / R) };
+}
+
+/** 고리 위 둘레 위치 u(0 = 위, 시계 방향) → 고리 평면 (x, y) 단위 좌표. out 을 채워 돌려준다(셰이더 각도 규칙과 같음) */
+export function ringAt(u, out = { x: 0, y: 0 }) {
+  const a = u * Math.PI * 2;
+  out.x = Math.sin(a); out.y = Math.cos(a);
+  return out;
+}

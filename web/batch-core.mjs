@@ -8,6 +8,7 @@
 // 진행 중 회차와 그 하위만 펼친다. 재무장 Monitor 사슬은 마지막 하나만 그리고 앞 것의 자리를 이어받는다.
 
 import { t as tr } from './i18n.mjs';
+import { isJob, jobOf, jobTags, jobFold } from './job-core.mjs'; // 작업 노드
 
 export const BATCH = {
   KEEP_ENDED: 2,        // 장치에 작게 붙여 둘 끝난 회차 수(서버 BATCH_KEEP_ENDED 와 같은 값)
@@ -153,9 +154,10 @@ export function deviceSummary(info) {
  *  기동기: '이어받음'(meta.adopted) · 회차: '회차 #k'·'연결 추정'(medium/low) · 재무장 Monitor: '재무장 ×N'
  *  독립 루트: 추정 소속이 있으면 '추정 소속', 없으면 '외부 작업' · /clear 승계 작업(meta.inheritedFrom): '승계'
  */
-export function nodeTags(n, byId = null) {
+export function nodeTags(n, byId = null, nowMs = Date.now()) {
   const m = metaOf(n);
   const t = [];
+  if (isJob(n)) return jobTags(jobOf(n), nowMs); // 작업: 상태·진행·재확인·정체·rc
   if (isLauncher(n)) { if (m.adopted) t.push(tr('cards.tag.adopted')); }
   if (isRunner(n) && Number.isFinite(m.runner.instance)) t.push(tr('cards.tag.run', { n: m.runner.instance }));
   if (isCycle(n, byId)) {
@@ -213,6 +215,9 @@ export function batchFold(nodes, opts = {}) {
       if (isEndedSt(r.status) && !open) out.hidden.add(r.id);
     }
   }
+
+  // 작업 노드: 주인마다 끝난 작업은 최근 몇 개만(나머지 접음)
+  for (const id of jobFold(byId, opts.jobKeep != null ? { keepEnded: opts.jobKeep } : undefined).hidden) out.hidden.add(id);
 
   // 재무장 사슬: rearmOf 로 이어진 Monitor 중 뒤 것이 있는 노드는 숨기고 대표(마지막)가 자리를 잇는다
   const next = new Map();

@@ -21,7 +21,8 @@ import { drawMechPlanet, drawSubPlanet, drawTourb2D } from './planet-deco2d.js';
 import { TOURB_GEO } from '../tourbillon-core.mjs'; // 코어 축소 몫
 import { stepOrbits, drawOrbits, drawBursts, emitTool, nearestSat, orbitExtent } from './planet-orbits2d.js'; // 궤도계
 import { bodyK } from '../planet-core.mjs';
-import { FLAT } from './flat-core.mjs';
+import { FLAT, JOB2D } from './flat-core.mjs';
+import { isJobVis, drawJobMoon, jobLevel } from './job2d.js'; // 작업 = 주인 둘레 작은 위성
 
 const TOP_ACTIVE = 6;
 const ENDED_OK = (st) => st === 'done' || st === 'stopped';
@@ -45,7 +46,11 @@ export class Planet2DView extends FlatView {
   }
 
   /** 노드 그린 반지름(세계): scene.js 와 같음 — RADIUS × 0.68, 배치 장치는 2배, 본체 축소 bodyK(둘레는 궤도계) */
-  _nodeR(node, kind) { const dev = isLauncher(node); return RADIUS[kind] * NODE_SCALE * (dev ? 2 : 1) * bodyK(kind, dev); }
+  _nodeR(node, kind) {
+    const dev = isLauncher(node);
+    const r = RADIUS[kind] * NODE_SCALE * (dev ? 2 : 1) * bodyK(kind, dev);
+    return node && node.meta && node.meta.job ? r * JOB2D.PLANET_R_K : r; // 작업 = 아주 작은 위성
+  }
   /** 라벨 거리: scene.js CSS2D 라벨 자리(반지름 × 1.2 + 0.5, 아래 붙는 종류는 + 0.4) */
   _labelGap(v, s, k) {
     // 가까이(본체 11px 이상 — 궤도계가 다 보이는 크기)면 라벨 뒤 배경색 옅은 번짐(.pl-halo, 3D 와 같은 규칙)
@@ -120,8 +125,9 @@ export class Planet2DView extends FlatView {
     // 도구 입자가 날면 30fps. 일하는 노드가 없어도 궤도가 아주 느리게 돌도록 쉬는 동안 약 7fps 로 다시 그림(_schedule)
     this._idleOrbit = !this.reduced && !this._frozen && this.vis.size > 0;
     if (this._idleOrbit) this.dirty = true;
+    const jl = jobLevel(this, now); // 작업 표시 상태(시계) — 진행·정체 15fps
     if (this._pb && this._pb.length) return 2;
-    let level = this.pool.active.length ? 2 : 0;
+    let level = Math.max(jl, this.pool.active.length ? 2 : 0);
     if (this.pArt) level = Math.max(level, this.pArt.level(now));
     if (this.scope.mode === 'all' && !this.reduced) for (const c of this._clusterV.values()) if (c.busy) { level = Math.max(level, 1); break; }
     return level;
@@ -175,7 +181,8 @@ export class Planet2DView extends FlatView {
       if (cv.gone || pv.gone || cv.hidden || pv.hidden) continue;
       if (!cv._on && !pv._on) continue;
       const st = cv.node.status;
-      let col = ENDED_OK(st) || (st === 'error' && cv.stale) ? dim.c : st === 'error' ? t.error : cv.sessC || t.link; // 세션 색
+      // 실패한 작업 연결은 차분하게(위성이 빨강)
+      let col = ENDED_OK(st) || (st === 'error' && (cv.stale || isJobVis(cv))) ? dim.c : st === 'error' ? t.error : cv.sessC || t.link; // 세션 색
       const sk = cv.scopeK ?? 1;
       const sD = cv.scopeD ?? sk; // 고정 희미(recent)만 바닥 0.2, 프로젝트 페이드는 그대로 곱함
       let al = (sD < 1 ? 0.2 + 0.8 * sD : 1) * (cv.projA ?? 1);
@@ -251,6 +258,7 @@ export class Planet2DView extends FlatView {
     const pulse = active && !this.reduced ? 0.5 - 0.5 * Math.cos((2 * Math.PI * (now + v.seed)) / 1.2) : 0;
     const R = v._R * (1 + 0.08 * pulse);
     const { x, y } = v._sp;
+    if (isJobVis(v)) { drawJobMoon(this, ctx, v, x, y, v._R, (v.scopeK ?? 1) * (v.exitF ?? 1), now, this.vis.get(this.parentOf.get(v.id) || v.node.parentId)); return; }
     const alpha = (v.baseOpacity ?? 1) * (v.exitF ?? 1);
     if (alpha < 0.01) return;
     const col = this._colorOf(v);

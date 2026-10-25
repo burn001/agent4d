@@ -14,6 +14,8 @@ const DG_DASH = [0, 0, 0, 0]; // 끊긴 선 무늬(재사용)
 
 import { toScreen, camScale, hexPath, bezPrefix, bezSuffix, ctxRingTone } from './flat-core.mjs';
 import { MONO, rrect, setFont, drawCards, drawRings, drawDeviceFace, drawIslands, BubbleLayer } from './flat-draw.js';
+import { JOB2D } from './flat-core.mjs';
+import { isJobVis, drawJobPill, jobLevel } from './job2d.js'; // 작업 칩(알약)
 
 const TOP_ACTIVE = 6;
 
@@ -104,8 +106,12 @@ export class Flow2DView extends FlatView {
   setArtSelected(t) { if (this.art) { this.art.st.sel = t || null; this.invalidate(); } }
   fitExtra(pts, scope) { if (this.art) this.art.fitPoints(pts, scope); }
 
+  /** 작업 노드는 백그라운드 명령 칩보다 작은 알약(JOB2D.R_K) — 배치·집기·라벨 거리도 이 반지름 */
+  _nodeR(node, kind) { const r = super._nodeR(node, kind); return node && node.meta && node.meta.job ? r * JOB2D.R_K : r; }
+
   _updateExtra(now) {
     let level = this.art ? this.art.level(now) : 0;
+    level = Math.max(level, jobLevel(this, now)); // 작업: 진행·정체 15fps, 대기 고리 1초마다
     if (this.pool.active.length) level = 2;
     level = Math.max(level, this.bubbles.level(now));
     if (this.scope.mode === 'all' && !this.reduced) for (const c of this._clusterV.values()) if (c.busy) { level = Math.max(level, 1); break; }
@@ -152,7 +158,7 @@ export class Flow2DView extends FlatView {
       const st = cv.node.status;
       let col = cv.sessC || P.holo, al = beamAlpha(st, L, cv.stale), active = false; // 세션 색, 은은하게
       if (st === 'active') { active = true; if (cv.icons.size && !cv.sessC) col = P.tool; }
-      else if (st === 'error') col = P.error;
+      else if (st === 'error') { col = P.error; if (isJobVis(cv)) al *= 0.45; } // 실패한 작업 빔은 차분하게(칩이 빨강)
       else if (st === 'stopped') col = P.stopped;
       const sk = Math.min(cv.scopeK ?? 1, pv.scopeK ?? 1);
       const exiting = cv.exiting != null;
@@ -243,6 +249,7 @@ export class Flow2DView extends FlatView {
   }
 
   _drawChip(ctx, v, now) {
+    if (isJobVis(v)) { drawJobPill(this, ctx, v, v._sp.x, v._sp.y, v._R, (v.exitF ?? 1) * Math.min(1, (v.scopeK ?? 1) * 1.3), now); return; }
     const P = this.P, L = this.tokens.isLight;
     const st = nodeVisualState(v.node.status, v.icons.size);
     const R = v._R * (this.reduced ? 1 : breathe(st, now, v.seed));

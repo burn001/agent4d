@@ -23,6 +23,9 @@ const DETACHED_GAP = 6;
 // 러너(재기동기 → 러너 → 회차)도 회차를 거느리므로 위성이 아니라 보통 자식(장치 바깥으로 사슬)
 const isRunnerNode = (n) => !!(n && n.meta && n.meta.runner);
 const isSatellite = (n) => (n.kind === 'bash-bg' || n.kind === 'monitor') && !isLauncherNode(n) && !isRunnerNode(n);
+// 작업 노드(kind bash-bg + meta.job): 러너·기동기·메인 아래면 보통 위성, 위성 아래면 바깥쪽 사슬(place 참고)
+export const isJobNode = (n) => !!(n && n.meta && n.meta.job);
+export const JOB_FIRST = 2.4, JOB_STEP = 2.0, JOB_SIDE = 0.7;
 
 /** 노드가 평면에서 차지하는 반지름(배치 단위, Flow 칩 기준 상한). 배치 장치는 넓은 상자 + 옆에 붙는 끝난 회차 자리 */
 export const DEVICE_EXTENT = 2.6;
@@ -79,8 +82,22 @@ export function computeLayout(nodes, rootId, opts = {}) {
     pos.set(id, p);
     const node = nodes.get(id);
     const ch = kids.get(id) || [];
-    const sats = ch.filter((c) => isSatellite(c));
+    let sats = ch.filter((c) => isSatellite(c));
     let normal = ch.filter((c) => !isSatellite(c));
+    // 위성(백그라운드 명령·Monitor) 아래 작업 노드: 위성 고리를 또 만들면 부모의 다른 위성과 겹친다 →
+    // 주인 바깥쪽(부모 반대 방향)으로 짧은 사슬(JOB_STEP 간격, 좌우로 조금씩 엇갈림), 높이는 주인보다 조금 아래
+    if (depth > 0 && isSatellite(node)) {
+      const jobs = sats.filter(isJobNode);
+      if (jobs.length) {
+        sats = sats.filter((c) => !isJobNode(c));
+        const L = Math.hypot(outX, outZ) || 1, ux = outX / L, uz = outZ / L;
+        jobs.forEach((c, i) => {
+          const d = JOB_FIRST + i * JOB_STEP, side = (i % 2 ? -1 : 1) * JOB_SIDE;
+          const cp = { x: p.x + ux * d - uz * side, y: p.y - 1.2, z: p.z + uz * d + ux * side };
+          place(c.id, cp, depth + 1, ux, uz);
+        });
+      }
+    }
 
     // workflow: 자식(workflow-agent)을 고리 둘레에, phase 별 각도 구간
     if (node.kind === 'workflow' && normal.length) {
