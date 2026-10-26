@@ -4,7 +4,7 @@
 
 > 영문 README가 정본입니다(English is canonical). 이 문서는 [README.md](README.md)의 한국어 번역본이며, 내용이 다르면 영문을 따릅니다.
 
-[![version](https://img.shields.io/github/v/release/burn001/agent4d?label=version)](CHANGELOG.md) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/burn001/agent4d?style=social)](https://github.com/burn001/agent4d/stargazers) [![version](https://img.shields.io/github/v/release/burn001/agent4d?label=version)](CHANGELOG.md) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 [English](README.md) · **한국어**
 
@@ -13,6 +13,25 @@ Claude Code 에이전트가 지금 무엇을 하는지 브라우저 3D 화면으
 [![Planet 표현: 일하는 메인 에이전트의 뚜르비용](docs/media/planet.gif)](https://github.com/burn001/agent4d/releases/download/v0.1.0/agent4d-intro-v0.1.0.mp4)
 
 ▶ **[24초 소개 영상 보기(MP4)](https://github.com/burn001/agent4d/releases/download/v0.1.0/agent4d-intro-v0.1.0.mp4)**
+
+## 빠른 시작
+
+**Node.js 22.18 이상**과 Claude Code 를 쓰는 PC 면 됩니다(`~/.claude/projects/` 아래 세션 기록을 읽습니다). `npm install` 할 것은 없습니다.
+
+```bash
+git clone https://github.com/burn001/agent4d
+node agent4d/bin/agent4d.mjs start    # 로컬 링크 출력: http://127.0.0.1:7788/?t=<토큰>
+```
+
+출력된 링크를 브라우저로 여세요. Claude Code 에게 "agent4d 열어" 라고 시키려면 함께 든 스킬을 설치합니다: [Claude Code 에서 쓰기(스킬)](#claude-code-에서-쓰기스킬). 아직 Claude Code 기록이 없으면 클론 안에서 `npm run demo` 로 먼저 볼 수 있습니다([실행](#실행)).
+
+## 왜 쓰나
+
+- **모든 에이전트가 지금 하는 일** — 메인 에이전트·서브에이전트·워크플로 에이전트·안에서 띄운 `claude -p` 실행을 하나의 살아 있는 트리로, 각자 옆에 지금 쓰는 도구까지.
+- **재생** — 지난 세션·진행 중인 세션을 0.5～32배속으로, 쉬는 구간은 줄여서.
+- **로컬·읽기 전용** — Claude Code 가 이미 쓰는 기록을 읽기만 하고, 선택 기능인 원격 링크를 켜지 않는 한 아무것도 올리지 않습니다.
+- **의존성 거의 없음** — 서버·CLI 는 Node 내장 모듈만 씁니다.
+- **세 가지 표현** — 흐름·Planet·복셀 오피스, 각각 3D 와 저사양 PC 용 가벼운 2D.
 
 <!-- 소개 영상(20～30초, H.264): agent4d-intro.mp4 를 GitHub 댓글·릴리스 편집 창에 끌어다 놓은 뒤, 나온 user-attachments 주소를 이 자리에 한 줄로 붙이면 플레이어로 보입니다. -->
 
@@ -52,6 +71,8 @@ _스크린샷과 움직이는 화면은 모두 내장 가짜 데이터(`?mock=1&
 
 ## 목차
 
+- [빠른 시작](#빠른-시작)
+- [왜 쓰나](#왜-쓰나)
 - [표현](#표현)
 - [기능](#기능)
 - [요구 사항](#요구-사항)
@@ -105,7 +126,7 @@ cd agent4d
 gh release download v0.1.0 --pattern "*.mp3" --dir web/assets
 ```
 
-이것으로 끝입니다. `bin/agent4d`(sh)·`bin/agent4d.cmd`(Windows)는 `node bin/agent4d.mjs` 를 부르는 얇은 래퍼라, `bin/` 을 `PATH` 에 넣으면 `agent4d` 로 바로 쓸 수 있습니다. 예전 이름 `ccviz`(`bin/ccviz`·`bin/ccviz.cmd`·`bin/ccviz.mjs`)도 별칭으로 그대로 동작합니다.
+실행만 하려면 [빠른 시작](#빠른-시작)으로 충분하고, 음악 내려받기는 선택입니다. `bin/agent4d`(sh)·`bin/agent4d.cmd`(Windows)는 `node bin/agent4d.mjs` 를 부르는 얇은 래퍼라, `bin/` 을 `PATH` 에 넣으면 `agent4d` 로 바로 쓸 수 있습니다. 예전 이름 `ccviz`(`bin/ccviz`·`bin/ccviz.cmd`·`bin/ccviz.mjs`)도 별칭으로 그대로 동작합니다.
 
 ## 실행
 

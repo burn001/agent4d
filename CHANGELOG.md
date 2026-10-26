@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-10-26
+
+### Fixed
+- Narrow screens (under 720px): the top bar now uses two rows — logo, connection dot, project picker, Replay and ⚙ on the first, the context pill, usage-limit gauge and sound buttons on the second. On a 360px phone the usage-limit gauge used to be pushed off the right edge, and on phones the project picker was squeezed under the Replay button where it could not be tapped. Wider screens keep the single row.
+
+### Changed
+- README: GitHub stars badge, a Quick start right under the intro loop and a short "Why" list (English and Korean).
+
 ## [0.3.5] - 2026-10-26
 
 ### Fixed

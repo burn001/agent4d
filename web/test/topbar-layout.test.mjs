@@ -85,3 +85,25 @@ test('프로젝트 선택기: 내용은 버튼 안에서 잘리고(overflow hidd
   }
   assert.equal(computed(projects, '.psel-btn .psel-meta', 'min-width', 1440), '0');
 });
+
+// 좁은 화면(720 미만) ui-tidy 상단 바: 한 줄(nowrap)이면 360px 에서 한도 게이지가 화면 밖(294～386px)으로 밀리고
+// 프로젝트 선택기가 6px 로 눌려 '재생' 밑에 깔렸다. 두 줄로 고정 — 첫 줄 로고·연결·프로젝트·재생·⚙, 둘째 줄 ctx·한도·소리·♪
+test('§77.5 좁은 화면 ui-tidy 상단 바: 두 줄(::after 줄바꿈), ⚙ 는 첫 줄, 프로젝트 선택기 최소 72px', () => {
+  const tidy = parseCss(read('ui-tidy.css'));
+  const T = (s) => 'body.ui-tidy #topbar' + s;
+  for (const w of [390, 360, 320]) {
+    assert.equal(computed(tidy, T(''), 'flex-wrap', w), 'wrap', `${w}px 줄바꿈`);
+    assert.equal(computed(tidy, T('::after'), 'order', w), '1');
+    assert.match(computed(tidy, T('::after'), 'flex', w) || '', /100%/, '::after 가 한 줄을 다 차지해 줄을 나눔');
+    assert.equal(computed(tidy, T(' > *'), 'order', w), '2', '나머지(ctx·한도·소리·♪)는 둘째 줄');
+    assert.equal(computed(tidy, T(' > #btn-settings'), 'order', w), '1', '⚙ 는 첫 줄 끝(::after 앞)');
+    for (const s of [' > .brand', ' > #conn', ' > #proj-sel', ' > #btn-replay']) {
+      const r = tidy.find((x) => x.media && w <= x.media.max && x.selectors.includes(T(s)) && 'order' in x.decl);
+      assert.equal(r && r.decl.order, '0', `${s} 첫 줄`);
+    }
+    const mw = computed(tidy, T(' > #proj-sel'), 'min-width', w);
+    assert.ok(/^\d+px$/.test(mw) && parseInt(mw, 10) >= 72, `#proj-sel min-width @${w}px = ${mw}`);
+  }
+  // 넓은 화면은 그대로 한 줄(nowrap)
+  for (const w of [844, 1440]) assert.equal(computed(tidy, T(''), 'flex-wrap', w), 'nowrap', `${w}px`);
+});

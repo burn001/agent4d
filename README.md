@@ -2,7 +2,7 @@
 
 **Agent4D — your coding agents in 3D space + time**
 
-[![version](https://img.shields.io/github/v/release/burn001/agent4d?label=version)](CHANGELOG.md) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/burn001/agent4d?style=social)](https://github.com/burn001/agent4d/stargazers) [![version](https://img.shields.io/github/v/release/burn001/agent4d?label=version)](CHANGELOG.md) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 **English** (canonical) · [한국어](README.ko.md)
 
@@ -11,6 +11,25 @@ See what your Claude Code agents are doing, live, in 3D — and play it back lat
 [![Planet view: the main agent's tourbillon at work](docs/media/planet.gif)](https://github.com/burn001/agent4d/releases/download/v0.1.0/agent4d-intro-v0.1.0.mp4)
 
 ▶ **[Watch the 24-second intro video (MP4)](https://github.com/burn001/agent4d/releases/download/v0.1.0/agent4d-intro-v0.1.0.mp4)**
+
+## Quick start
+
+You need **Node.js 22.18 or newer** on a PC where you use Claude Code (it reads the session files under `~/.claude/projects/`). Nothing to `npm install`.
+
+```bash
+git clone https://github.com/burn001/agent4d
+node agent4d/bin/agent4d.mjs start    # prints a local link: http://127.0.0.1:7788/?t=<token>
+```
+
+Open the printed link in your browser. To let Claude Code open it for you ("open agent4d"), install the bundled skill: [Use with Claude Code (skill)](#use-with-claude-code-skill). No Claude Code history yet? Try `npm run demo` inside the clone ([Run](#run)).
+
+## Why
+
+- **See what every agent is doing right now** — the main agent, subagents, workflow agents and nested `claude -p` runs in one live tree, with the current tool next to each one.
+- **Replay** past or running sessions at 0.5×–32×, with idle gaps compressed.
+- **Local and read-only.** It only reads the transcripts Claude Code already writes; nothing is uploaded unless you turn on the optional remote link.
+- **Almost no dependencies.** The server and CLI use only Node built-in modules.
+- **Three views** — Flow, Planet and Voxel Office — each in 3D or a lighter 2D mode for slow machines.
 
 > **Unofficial project.** Agent4D is an independent tool. Anthropic did not make it, does not endorse it and does not support it. "Claude" and "Claude Code" are trademarks of Anthropic, PBC, used here only to say what this tool works with.
 
@@ -48,6 +67,8 @@ _All screenshots and loops use the built-in mock data (`?mock=1&lang=en`). Proje
 
 ## Contents
 
+- [Quick start](#quick-start)
+- [Why](#why)
 - [Views](#views)
 - [Features](#features)
 - [Supported harnesses](#supported-harnesses)
@@ -110,7 +131,7 @@ cd agent4d
 gh release download v0.1.0 --pattern "*.mp3" --dir web/assets
 ```
 
-That is all. `bin/agent4d` (sh) and `bin/agent4d.cmd` (Windows) are thin wrappers around `node bin/agent4d.mjs`; put `bin/` on your `PATH` if you want to type `agent4d`. The old name still works: `ccviz` (`bin/ccviz`, `bin/ccviz.cmd`, `bin/ccviz.mjs`) is an alias.
+[Quick start](#quick-start) is enough to run it; the music download is optional. `bin/agent4d` (sh) and `bin/agent4d.cmd` (Windows) are thin wrappers around `node bin/agent4d.mjs`; put `bin/` on your `PATH` if you want to type `agent4d`. The old name still works: `ccviz` (`bin/ccviz`, `bin/ccviz.cmd`, `bin/ccviz.mjs`) is an alias.
 
 ## Run
 
