@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-26
+
 ### Added
 - `agent4d update`: `update --check [--json] [--force]` asks GitHub for the latest release (one unauthenticated request, cached for 24 hours in `update-check.json`; offline or API errors never fail). `update [--yes]` updates a git clone with `git pull --ff-only` after checking that it is clean, on `main` and can fast-forward, refreshes a copied skill in `~/.claude/skills/agent4d` (a linked skill is left alone; replaced files are kept as `*.bak`) and restarts a running server with the same options. Clones whose `origin` is not this repository are left untouched.
 - The server checks for a new release at start and once a day; the ⚙ menu then shows a small dot and "vX.Y.Z available" next to the version, linking to the release page. Turn the check off with `"updateCheck": false` in `config.json` or `AGENT4D_NO_UPDATE_CHECK=1` (no network request at all).
