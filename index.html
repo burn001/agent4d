@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent4D — your coding agents in 3D space + time</title>
+<meta name="description" content="A local, read-only live 3D viewer and replayer for Claude Code sessions. Watch the main agent, subagents, background commands and tool calls as they happen.">
+<link rel="canonical" href="https://burn001.github.io/agent4d/">
+
+<meta property="og:type" content="video.other">
+<meta property="og:site_name" content="Agent4D">
+<meta property="og:title" content="Agent4D — your coding agents in 3D space + time">
+<meta property="og:description" content="A local, read-only live 3D viewer and replayer for Claude Code sessions. Open source (Apache-2.0).">
+<meta property="og:url" content="https://burn001.github.io/agent4d/">
+<meta property="og:image" content="https://burn001.github.io/agent4d/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Agent4D Planet view: the main agent as a tourbillon with tool panels around it">
+<meta property="og:video" content="https://burn001.github.io/agent4d/intro.mp4">
+<meta property="og:video:secure_url" content="https://burn001.github.io/agent4d/intro.mp4">
+<meta property="og:video:type" content="video/mp4">
+<meta property="og:video:width" content="1280">
+<meta property="og:video:height" content="720">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Agent4D — your coding agents in 3D space + time">
+<meta name="twitter:description" content="A local, read-only live 3D viewer and replayer for Claude Code sessions. Open source.">
+<meta name="twitter:image" content="https://burn001.github.io/agent4d/og.png">
+
+<style>
+:root { --bg: #080a16; --fg: #e8ecf8; --mute: #9aa4c4; --line: #23284a; --accent: #7aa2ff; }
+@media (prefers-color-scheme: light) {
+  :root { --bg: #f5f6fb; --fg: #141830; --mute: #4c5677; --line: #d4d8ea; --accent: #2f5bd8; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 960px; margin: 0 auto; padding: 32px 16px 48px; }
+h1 { font-size: clamp(28px, 5vw, 44px); margin: 0 0 4px; letter-spacing: -0.01em; }
+.sub { color: var(--mute); margin: 0 0 24px; font-size: 18px; }
+video { width: 100%; aspect-ratio: 16 / 9; border-radius: 12px; border: 1px solid var(--line); background: #000; display: block; }
+.cta { display: flex; flex-wrap: wrap; gap: 12px; margin: 24px 0; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 10px; text-decoration: none; font-weight: 600; border: 1px solid var(--line); color: var(--fg); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+ul { padding-left: 20px; color: var(--mute); }
+li { margin: 4px 0; }
+footer { margin-top: 32px; color: var(--mute); font-size: 13px; }
+footer a { color: var(--mute); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Agent4D</h1>
+  <p class="sub">Your coding agents in 3D space + time — a live viewer and replayer for Claude Code sessions.</p>
+  <video src="intro.mp4" poster="og.png" controls autoplay muted loop playsinline></video>
+  <div class="cta">
+    <a class="btn primary" href="https://github.com/burn001/agent4d">★ View on GitHub</a>
+    <a class="btn" href="https://github.com/burn001/agent4d/releases/latest">Latest release</a>
+  </div>
+  <ul>
+    <li>Main agent, subagents, workflows, <code>claude -p</code> sessions and background commands, streamed live from local transcripts (read-only).</li>
+    <li>Three views — Flow, Planet and Voxel Office — in 3D or lightweight 2D.</li>
+    <li>Replay past sessions, see context usage and plan limits, and follow every project on your machine at once.</li>
+  </ul>
+  <footer>Apache-2.0 · © burn001 (Dr. Cho, Sangkyu) · Not affiliated with Anthropic. <a href="https://github.com/burn001/agent4d">github.com/burn001/agent4d</a></footer>
+</main>
+</body>
+</html>
