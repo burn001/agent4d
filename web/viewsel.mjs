@@ -34,12 +34,26 @@ export function menuKey(key, i, n) {
   }
 }
 
+/**
+ * 펼침 창의 세로 자리: 화면 안에 들게. 보통은 단추 아래 6px, 아래 자리가 모자라고 위가 더 넓으면 단추 위로,
+ * 그래도 모자라면(가로 모드 휴대폰처럼 낮은 화면) 높이를 줄이고 안에서 스크롤. r = 단추 사각형, vh = 화면 높이, need = 창 전체 높이
+ */
+export function popVertical(r, vh, need) {
+  const below = vh - r.bottom - 6 - 8, above = r.top - 6 - 8;
+  const up = below < need && above > below;
+  const maxHeight = Math.max(120, Math.floor(up ? above : below));
+  const top = up ? Math.max(8, r.top - 6 - Math.min(need, maxHeight)) : r.bottom + 6;
+  return { top, maxHeight };
+}
+
 const CSS = `
 .vsel { position: relative; display: inline-flex; }
 #btn-view { display: inline-flex; align-items: center; gap: 6px; }
 #btn-view svg { width: 12px; height: 12px; flex: none; color: var(--muted); }
 #btn-view[aria-expanded="true"] { border-color: var(--accent); }
-.vsel-pop { position: fixed; z-index: 46; min-width: 220px; padding: 6px; border-radius: 10px;
+/* z-index 61: ⚙ 설정 메뉴(§77, 60) 안의 단추로 여는 창이라 그 위에 떠야 한다. 펼침은 body 에 붙어 '#settings-menu .vsel-pop' 규칙이 닿지 않으므로
+   여기서 정한다(예전 46 은 ⚙ 메뉴가 열린 채면 그 뒤에 가려졌음 — 모바일 Safari 처럼 탭으로 단추에 초점이 가지 않는 브라우저, §67.6) */
+.vsel-pop { position: fixed; z-index: 61; min-width: 220px; padding: 6px; border-radius: 10px; overflow-y: auto; overscroll-behavior: contain;
   background: var(--panel-bg); border: 1px solid var(--border); box-shadow: var(--shadow);
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
 .vsel-pop[hidden] { display: none; }
@@ -117,7 +131,9 @@ export function mountViewSelector({ button, get, onView, onDim }) {
 
   function place() {
     const r = button.getBoundingClientRect();
-    pop.style.top = r.bottom + 6 + 'px';
+    const v = popVertical(r, innerHeight, pop.scrollHeight || 260);
+    pop.style.top = v.top + 'px';
+    pop.style.maxHeight = v.maxHeight + 'px';
     if (innerWidth >= 720) pop.style.left = Math.max(8, Math.min(innerWidth - 8 - Math.max(220, pop.offsetWidth || 240), r.left)) + 'px';
     else pop.style.left = '';
   }

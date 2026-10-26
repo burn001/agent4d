@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-10-26
+
+### Fixed
+- On phones (Safari and other WebKit browsers), the view picker (⚙ → "View: … ▾") seemed not to open: its window opened behind the still-open ⚙ menu. It now always appears above the ⚙ menu and stays inside the screen (it moves above the button or scrolls inside when the screen is short, e.g. a phone in landscape). The ⚙ menu's "Background" card had the same layering problem on all browsers and is fixed too.
+
 ## [0.3.4] - 2026-10-26
 
 ### Changed

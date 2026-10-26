@@ -40,7 +40,7 @@ body.ui-tidy #topbar > #btn-sound { flex: none; }
 #settings-menu .sm-lang > .tb { height: 28px; }
 #settings-menu .sm-note { color: var(--muted); font-size: 11.5px; }
 #settings-menu .sm-hint { margin: 6px 0 0; color: var(--muted); font-size: 11px; }
-#settings-menu .vsel-pop { z-index: 61; }
+/* 표현 고르기 펼침(.vsel-pop)은 body 에 붙어 이 메뉴 밖이다 — z-index 61 은 viewsel.mjs 가 정한다 */
 @media (max-width: 719px) {
   #settings-menu { left: 8px; right: 8px !important; width: auto; }
 }
