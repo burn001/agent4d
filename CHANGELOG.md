@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-10-26
+
+### Fixed
+- `agent4d start` no longer keeps an old server running after the install was updated without `agent4d update` (for example with `git pull`). It compares the running server's version (`/healthz`) with the installed `package.json`; if they differ, it restarts the server, the relay and the watcher on the new code (the tunnel is reused). Before, the viewer kept showing the old version and server-side fixes did not take effect until a manual `stop`.
+
 ## [0.3.6] - 2026-10-26
 
 ### Fixed

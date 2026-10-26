@@ -82,6 +82,7 @@ const en = {
   // 서버·릴레이·터널
   'srv.reuse': '· Reusing server (PID {pid}, port {port})',
   'srv.killHung': '· Stopping unresponsive server (PID {pid})',
+  'srv.stale': '· Running server is v{running} but v{current} is installed — restarting (PID {pid})',
   'srv.portBusy': 'Port {port} is already in use by another process. Choose another port with --port.',
   'srv.noEntry': 'Server entry point not found: {file}',
   'srv.started': '· Server started (PID {pid}, port {port}) — waiting for /healthz',
@@ -356,6 +357,7 @@ const ko = {
 
   'srv.reuse': '· 서버 재사용 (PID {pid}, 포트 {port})',
   'srv.killHung': '· 응답 없는 서버 종료 (PID {pid})',
+  'srv.stale': '· 떠 있는 서버는 v{running}, 설치본은 v{current} — 다시 띄웁니다 (PID {pid})',
   'srv.portBusy': '포트 {port} 를 이미 다른 프로세스가 쓰고 있습니다. --port 로 다른 포트를 지정하십시오.',
   'srv.noEntry': '서버 진입점이 없습니다: {file}',
   'srv.started': '· 서버 기동 (PID {pid}, 포트 {port}) — /healthz 대기',

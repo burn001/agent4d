@@ -286,8 +286,20 @@ function startWaitMs(opts, cfg) {
 
 async function startServer(cfg, st, port, project, waitMs = 60000) {
   if (st.serverPid && ownedAlive(st.serverPid, "node") && st.port === port) {
-    const s = await httpStatus(`http://127.0.0.1:${port}/healthz`);
-    if (s === 200) {
+    const h = await httpJson(`http://127.0.0.1:${port}/healthz`, { timeout: 5000 });
+    const running = h.json?.version;
+    if (h.status === 200 && running && running !== readVersion()) {
+      // 설치본이 바뀌었는데(git pull 등) 옛 코드가 계속 도는 경우 — 서버·릴레이·감시를 내리고 새 코드로 띄운다
+      log(t("srv.stale", { pid: st.serverPid, running, current: readVersion() }));
+      killTree(st.serverPid);
+      if (st.relayPid && ownedAlive(st.relayPid, "node")) killTree(st.relayPid);
+      if (st.watchPid && st.watchPid !== process.pid && ownedAlive(st.watchPid, "node")) killTree(st.watchPid);
+      delete st.serverPid;
+      delete st.relayPid;
+      delete st.watchPid;
+      saveState(st);
+      await sleep(500);
+    } else if (h.status === 200) {
       log(t("srv.reuse", { pid: st.serverPid, port }));
       return st.serverPid;
     }
@@ -455,7 +467,9 @@ async function cmdStart(opts) {
   const st = loadState();
   const port = Number(opts.port || cfg.port || 7788);
   const project = typeof opts.project === "string" ? opts.project : cfg.project;
+  const hadWatch = !opts._inWatch && st.watchPid && ownedAlive(st.watchPid, "node");
   const serverPid = await startServer(cfg, st, port, project, startWaitMs(opts, cfg));
+  if (hadWatch && !st.watchPid) opts.watch = true; // 옛 버전이라 내린 감시는 새 코드로 다시 띄운다
   const next = { ...st, serverPid, port, mode: remote ? "remote" : "local", startedAt: st.serverPid === serverPid ? st.startedAt : new Date().toISOString() };
   // update 가 같은 옵션으로 다시 띄울 수 있게 명시한 --project 만 기억(config.project 는 다시 읽힘)
   if (typeof opts.project === "string") next.project = opts.project;
