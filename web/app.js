@@ -40,6 +40,9 @@ import { userBook, consoleLines } from './user-core.mjs'; // 사용자 콘솔(�
 import { mountArtifacts } from './art-ui.js'; // 작업 대상 층(⚙ 켬/끔)
 import { mountPlans } from './plan-ui.js'; // 계획 보드(⚙ 켬/끔)
 import { t as tr, applyDom, fmtNum } from './i18n.mjs'; // 다국어
+import { setLangPref, lang as curLang } from './i18n.mjs'; // 원격 조작 lang 명령
+import { mountControl } from './control.js'; // 화면 원격 조작(받는 쪽)
+import { MODES as BGM_MODES } from './bgm-core.mjs'; // bgm 명령
 import { localizeEvent, localizeSnapshot, localizeProjects } from './i18n-server.mjs'; // 서버가 조합한 문구 → 지금 언어(ko 면 그대로)
 
 // index.html 정적 문구(data-i18n*)·문서 제목을 지금 언어로 — 가능한 한 일찍
@@ -858,6 +861,7 @@ function updateMacro() { if (macro) macro.setContext(macroContext()); }
 // ---------------- 연결(실시간) ----------------
 let es = null, mockSrc = null, ovMock = null, retryTimer = 0;
 let connSaved = null;
+let ctl = null; // 화면 원격 조작: 데이터 SSE 에 화면 id 를 붙여 명령도 받는다(mountControl, 아래)
 function setConn(state, text) {
   if (pauseBuf.paused) { connSaved = [state, text]; return; } // 정지 중엔 정지 문구 유지(재개 때 복원)
   const c = $('conn'); c.className = 'conn ' + state; c.querySelector('b').textContent = text; c.title = text;
@@ -866,7 +870,7 @@ function setConn(state, text) {
 function disconnect() {
   clearTimeout(retryTimer);
   setLoading('');
-  if (es) { es.close(); es = null; }
+  if (es) { if (ctl) ctl.unbind(es); es.close(); es = null; }
   if (mockSrc) { mockSrc.close(); mockSrc = null; }
   if (ovMock) { ovMock.stop(); ovMock = null; }
 }
@@ -959,7 +963,8 @@ function connect() {
   const q = all ? { scope: 'all' } : { session: sel.scope === 'session' ? sel.sessionId : 'auto' };
   if (!all) streamAll = false;
   refreshScopeUi();
-  const src = (es = new EventSource(relApi('events', q)));
+  const src = (es = new EventSource(relApi('events', ctl ? { ...q, ...ctl.query() } : q)));
+  if (ctl) ctl.bind(src); // control·ctl-hello 이벤트
   src.addEventListener('snapshot', (e) => {
     if (src !== es) return;
     setLoading('');
@@ -1418,6 +1423,127 @@ plans = mountPlans({
   replay: () => replaying, onEvent: (ev) => onEvent(ev), clock: () => clockFn(),
 });
 window.__ccviz.plans = plans;
+
+// ---------------- 화면 원격 조작 ----------------
+// `agent4d ctl <명령>` → 서버 → 이 화면. 메뉴에서 고른 것과 같은 함수·같은 저장(—temp 는 control.js 가 저장값을 되돌림)
+const ctlNodeFind = (q) => {
+  const k = String(q).toLowerCase();
+  if (store.nodes.has(q)) return q;
+  if (store.nodes.has('s:' + q)) return 's:' + q;
+  const all = [...store.nodes.values()];
+  const bySid = all.filter((n) => String(n.sessionId || '').toLowerCase().startsWith(k) || String(n.id).toLowerCase().startsWith(k));
+  const main = bySid.find((n) => n.id.startsWith('s:'));
+  if (main || bySid.length) return (main || bySid[0]).id;
+  const byLabel = all.filter((n) => String(n.label || '').toLowerCase().includes(k));
+  return byLabel.length ? byLabel[0].id : null;
+};
+const ctlHooks = {
+  theme: ({ value }) => { themePref = value; lsSet('ccviz.theme', value); applyTheme(); return { detail: resolveTheme() }; },
+  view: async ({ value }) => (value === viewMode ? { detail: 'already' } : (await switchView(value)) ? {} : { ok: false, error: 'not_applied' }),
+  dim: async ({ value }) => ((await setDim(value)) && dim === value ? {} : { ok: false, error: 'not_applied' }),
+  scope: (a) => {
+    if (!CAN_ALL) return { ok: false, error: 'no_scope' };
+    const next = a.scope === 'all' ? { scope: 'all' } : a.scope === 'project' ? { scope: 'project', projectId: a.projectId }
+      : { scope: 'session', sessionId: a.sessionId, ...(a.projectId ? { projectId: a.projectId } : {}) };
+    director.resumeAuto();
+    selectScope(next);
+    return { detail: a.name || null };
+  },
+  visible: (a) => {
+    if (!CAN_ALL) return { ok: false, error: 'no_scope' };
+    if (a.action === 'all') { setVisModel(emptyVis()); return {}; }
+    const hp = new Set(visModel.hp), hs = new Set(visModel.hs);
+    if (a.action === 'only') { hp.clear(); for (const p of store.projects) if (p.projectId !== a.projectId) hp.add(p.projectId); }
+    else if (a.sessionId) { if (a.action === 'hide') hs.add(a.sessionId); else { hs.delete(a.sessionId); if (a.projectId) hp.delete(a.projectId); } }
+    else if (a.action === 'hide') hp.add(a.projectId); else hp.delete(a.projectId);
+    setVisModel({ hp, hs });
+    return { detail: a.name || null };
+  },
+  sound: ({ value }) => {
+    const on = value === 'toggle' ? !sound.on : value === 'on';
+    if (on !== sound.on) sound.setOn(on);
+    // 자동재생 정책: 이 화면에서 사용자 동작이 한 번도 없었으면 켜짐 상태로 두고 첫 클릭 때 난다
+    const ua = navigator.userActivation;
+    const pending = on && (sound.status() === 'waiting' || !(ua && ua.hasBeenActive));
+    return { detail: on ? 'on' : 'off', pendingGesture: pending || undefined };
+  },
+  music: ({ value }) => { const el = $('vol'); if (!el) return { ok: false, error: 'not_ready' }; el.value = String(value / 100); el.dispatchEvent(new Event('input')); return {}; },
+  sfx: ({ value }) => { const el = $('sfx-vol'); sfx.setVolume(value / 100); if (el) el.value = String(sfx.volume); return {}; },
+  bgm: ({ value }) => {
+    const v = value.toLowerCase();
+    let pick = BGM_MODES.includes(v) ? v : null;
+    if (!pick) {
+      const ts = music.tracks || [];
+      const t = ts.find((x) => x.id.toLowerCase() === v) || ts.find((x) => x.id.toLowerCase().includes(v) || String(x.label || '').toLowerCase().includes(v));
+      if (!t) return { ok: false, error: 'not_found', detail: ts.map((x) => x.id).join(', ') };
+      pick = t.id;
+    }
+    music.select(pick);
+    return { detail: pick };
+  },
+  lang: ({ value }, { temp }) => {
+    if (temp) { const u = new URL(location.href); u.searchParams.set('lang', value); return { after: () => location.replace(u.href) }; }
+    return { detail: value, after: () => setLangPref(value) }; // 저장 후 새로고침(같은 언어면 저장만)
+  },
+  camera: ({ value }) => {
+    if (value === 'auto' || value === 'manual') setAutoCam(value === 'auto');
+    else { setCamMode(value); if (!autoCam) setAutoCam(true); }
+    return {};
+  },
+  focus: ({ value }) => {
+    if (/^(off|none|clear)$/i.test(value)) { if (panel.filter) panel.setFilter(null); else if (focusId) { focusId = null; view.setFocus(null); } director.resumeAuto(); return {}; }
+    const id = ctlNodeFind(value);
+    if (!id) return { ok: false, error: 'not_found' };
+    focusId = id; view.setFocus(id); director.focusNode(id); origSetFilter(id);
+    const n = store.nodes.get(id);
+    return { detail: (n && n.label) || id };
+  },
+  pause: async () => { if (replaying && eng) { eng.pause(); return { detail: 'replay' }; } await setPaused(true); return pauseBuf.paused ? {} : { ok: false, error: 'not_applied' }; },
+  resume: async () => { if (replaying && eng) { eng.play(); return { detail: 'replay' }; } await setPaused(false); return {}; },
+  replay: ({ session, at, speed }) => {
+    const sid = session === 'current' ? (currentSessionId() || liveSessionId) : session;
+    if (!sid) return { ok: false, error: 'not_found' };
+    startReplay(sid, { at, speed }); // 빌드가 길 수 있어 기다리지 않는다(상태는 화면 재생 막대)
+    return { detail: String(sid).slice(0, 8) };
+  },
+  live: () => { if (!replaying) return { detail: 'already' }; stopReplay(); return {}; },
+  artifacts: ({ value }) => { if (!art) return { ok: false, error: 'not_ready' }; art.setOn(value === 'on', { save: true }); return art.on === (value === 'on') ? {} : { ok: false, error: 'not_ready' }; },
+  plans: ({ value }) => { if (!plans) return { ok: false, error: 'not_ready' }; if (plans.on !== (value === 'on')) { const b = $('btn-plans'); if (b) b.click(); else plans.setOn(value === 'on'); } return {}; },
+  weather: ({ value }) => { if (weather) { weather.setMode(value); return {}; } lsSet('ccviz.weather', value); return { detail: 'saved (3D only)' }; },
+  grid: ({ value }) => { env.setGrid(value === 'on'); return {}; },
+  noise: ({ on, amount }) => {
+    const b = $('btn-noise'), amt = $('noise-amt');
+    if (!b) return { ok: false, error: 'not_ready' };
+    const cur = () => lsGet('ccviz.noise') !== 'off';
+    if (amount != null) { if (amt) { amt.value = String(amount / 100); amt.dispatchEvent(new Event('input')); } if (amount > 0 && !cur()) b.click(); return {}; }
+    if (cur() !== on) b.click();
+    return {};
+  },
+  panel: ({ value }) => { panel.setCollapsed(value === 'close'); return {}; },
+  timeline: ({ value }) => { document.body.classList.toggle('tl-show', value === 'show'); return {}; },
+  done: ({ value }) => { setShowDone(value === 'on'); return {}; },
+  close: () => {
+    try { if (inspector.target) inspector.close('remote'); } catch (e) { /* 무시 */ }
+    for (const m of [window.__ccvizSettings, window.__ccvizSoundPop, pl]) if (m && m.close) m.close();
+    env.openCard(false);
+    return {};
+  },
+  reload: () => ({ after: () => location.reload() }),
+  toast: ({ text, sec }) => { flash(`<b>${escapeAttr(text)}</b>`, sec * 1000); return {}; },
+};
+ctl = mountControl({
+  hooks: ctlHooks, relApi, live: MODE === 'live',
+  onIdChange: () => { if (!replaying && es) connect(); }, // 복제 탭이라 id 를 바꿨으면 새 id 로 다시 등록
+  getState: () => ({
+    view: viewMode, dim, theme: themePref, themeResolved: resolveTheme(), scope: serializeSelection(sel),
+    scopeLabel: CAN_ALL ? selectionLabel(sel, store.projects, archive) : null,
+    sound: sound.on ? 'on' : 'off', soundStatus: sound.status(), paused: pauseBuf.paused, replaying,
+    replaySession: replaying && eng ? eng.sessionId : null, lang: curLang(), panel: panel.collapsed ? 'closed' : 'open',
+    artifacts: !!(art && art.on), plans: !!(plans && plans.on), grid: env.gridOn, weather: weather ? weather.mode : null,
+    camera: autoCam ? 'auto' : 'manual', camMode: director.camMode, mode: MODE, size: `${innerWidth}×${innerHeight}`,
+  }),
+});
+window.__ccviz.ctl = ctl; window.__ccviz.ctlHooks = ctlHooks;
 if (SHOW_FPS) document.body.classList.add('show-stats'); // 노드 수 칩은 ?fps=1 일 때만
 
 refreshScopeUi();

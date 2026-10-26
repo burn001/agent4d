@@ -9,16 +9,16 @@ import { isCtxDrop } from '../ctx-core.mjs';
 
 const C = (used, limit = 1e6, base) => ({ used, limit, pct: Math.round((used / limit) * 1000) / 10, ...(base != null ? { base } : {}) });
 
-test('열화 수준 = 창 대비 %: 단계 경계 20/40/58/75, 단계표도 %', () => {
-  assert.equal(levelOf(C(200e3, 1e6, 60e3)), 20);   // opus 1M 창 200k = 20% → 그레인 시작
-  assert.equal(levelOf(C(150e3, 200e3)), 75);
+test('열화 수준 = 창 대비 %: 단계 경계 30/50/70/90, 단계표도 %', () => {
+  assert.equal(levelOf(C(300e3, 1e6, 60e3)), 30);   // opus 1M 창 300k = 30% → 그레인 시작
+  assert.equal(levelOf(C(180e3, 200e3)), 90);
   assert.equal(levelOf({ pct: 140 }), 100);
   assert.equal(levelOf({ pct: NaN }), 0);
   assert.equal(levelOf(null), 0);
-  assert.deepEqual([19.9, 20, 39.9, 40, 57.9, 58, 74.9, 75, 100].map((p) => stageOfCtx({ pct: p })), [0, 1, 1, 2, 2, 3, 3, 4, 4]);
+  assert.deepEqual([29.9, 30, 49.9, 50, 69.9, 70, 89.9, 90, 100].map((p) => stageOfCtx({ pct: p })), [0, 1, 1, 2, 2, 3, 3, 4, 4]);
   // 기준선(base)이 있어도 열화 수준은 늘어난 양과 무관(절대량 기준 폐지)
   assert.equal(levelOf(C(560e3, 1e6, 60e3)), levelOf(C(560e3, 1e6)));
-  assert.deepEqual(stageTable().map((s) => s.at), ['0%', '20%', '40%', '58%', '75%']);
+  assert.deepEqual(stageTable().map((s) => s.at), ['0%', '30%', '50%', '70%', '90%']);
 });
 
 test('기준선(카드 표시용): 서버 base → 화면에서 본 최솟값 → min(지금, 60k)', () => {
@@ -30,13 +30,13 @@ test('기준선(카드 표시용): 서버 base → 화면에서 본 최솟값 �
   assert.equal(grownOf(C(260e3, 1e6, 110e3)), 150e3);
 });
 
-test('세션 세기 D: 문턱 20 에서 0, 95 에서 1, 세기 슬라이더 배율', () => {
-  assert.equal(degD(19), 0);
-  assert.equal(degD(95), 1);
-  assert.ok(Math.abs(degD(57.5) - 0.5) < 1e-9);
-  assert.equal(degScaled(57.5, 0), 0);
-  assert.equal(degScaled(57.5, 1), 1);
-  assert.ok(Math.abs(degScaled(57.5, 0.5) - 0.5) < 1e-9);
+test('세션 세기 D: 문턱 30 에서 0, 98 에서 1, 세기 슬라이더 배율', () => {
+  assert.equal(degD(29), 0);
+  assert.equal(degD(98), 1);
+  assert.ok(Math.abs(degD(64) - 0.5) < 1e-9);
+  assert.equal(degScaled(64, 0), 0);
+  assert.equal(degScaled(64, 1), 1);
+  assert.ok(Math.abs(degScaled(64, 0.5) - 0.5) < 1e-9);
 });
 
 test('정화(급락) 판정도 열화 수준(창 대비)으로: 1M 창 180k→40k 는 급락 아님, 200k 창 180k→40k 는 급락', () => {
@@ -45,17 +45,17 @@ test('정화(급락) 판정도 열화 수준(창 대비)으로: 1M 창 180k→40
 });
 
 test('단계 넘김·버스트 판정: 오를 때만, 처음 값·quiet·움직임 줄이기·꺼짐은 생략', () => {
-  assert.deepEqual(stageCross(19, 21), { dir: 'up', from: 0, to: 1 });
-  assert.deepEqual(stageCross(60, 30), { dir: 'down', from: 3, to: 1 });
-  assert.equal(stageCross(41, 50).dir, null);
+  assert.deepEqual(stageCross(29, 31), { dir: 'up', from: 0, to: 1 });
+  assert.deepEqual(stageCross(75, 35), { dir: 'down', from: 3, to: 1 });
+  assert.equal(stageCross(51, 60).dir, null);
   assert.equal(stageCross(null, 80).dir, null);
-  const up = stageCross(57, 59);
+  const up = stageCross(69, 71);
   assert.equal(burstWanted(up), true);
   assert.equal(burstWanted(up, { quiet: true }), false);
   assert.equal(burstWanted(up, { reduced: true }), false);
   assert.equal(burstWanted(up, { enabled: false }), false);
   assert.equal(burstWanted(up, { strength: 0 }), false);
-  assert.equal(burstWanted(stageCross(60, 30)), false);
+  assert.equal(burstWanted(stageCross(75, 35)), false);
 });
 
 test('버스트 곡선·장부: 0.5초, 같은 세션은 2.5초에 한 번', () => {
@@ -128,9 +128,10 @@ test('DEG: 꺼져 있으면 0, 버스트는 세션 키로 더해짐', () => {
   assert.equal(seedOf('abc'), seedOf('abc'));
 });
 
-test('그레인 진폭(§76.8): 시작 ±10/255 · 58% ±20 · 최대 ±30, 문턱 아래 0', () => {
+test('그레인 진폭(§76.8): 시작 ±10/255 · 70% ±20 · 최대 ±30, 문턱 아래 0', () => {
   assert.equal(grainAmp(0.1), 0);
-  assert.ok(Math.abs(grainAmp(0.22) - 10.1) < 0.6);
-  assert.ok(Math.abs(grainAmp(0.58) - 20) < 0.01);
-  assert.ok(Math.abs(grainAmp(0.95) - 30) < 0.01);
+  assert.equal(grainAmp(0.279), 0);
+  assert.ok(Math.abs(grainAmp(0.32) - 10.1) < 0.6);
+  assert.ok(Math.abs(grainAmp(0.70) - 20) < 0.01);
+  assert.ok(Math.abs(grainAmp(0.98) - 30) < 0.01);
 });

@@ -5,9 +5,9 @@
 import {
   INSPECT, kindInfo, statusInfo, elapsedMs, fmtElapsed, fmtMs, fmtAgo, parentIdOf, childrenOf, childStats, childLine, nowDoing,
   InspectBook, ixLoose, deviceModel, barHeights, islandModel, limitsLine, sheetMode, placeCard, autoCloseReason, targetKey, easeToward,
-  jobCardModel, ownerJobsModel,
+  jobCardModel, ownerJobsModel, laneTableModel, procCardModel,
 } from './inspector-core.mjs';
-import { isJob } from './job-core.mjs';
+import { isJob, isProc, jobOf } from './job-core.mjs';
 import { isLauncher, isRunner } from './batch-core.mjs';
 import { ctxShort, gaugeLevel } from './ctx-core.mjs';
 import { branchOf } from './session-core.mjs';
@@ -297,11 +297,34 @@ export function mountInspector(h) {
       return `<dt>${esc(r.label)}</dt><dd class="k-${esc(r.key)}">${v}</dd>`;
     }).join('');
     parts.push(`<section class="ins-sec"><h4>${esc(tr('cards.job.h.job'))}</h4><dl class="ins-jrows">${rows}</dl></section>`);
+    const lh = laneTableHtml(laneTableModel(jobOf(n), nowMs)); // 자동 진행 작업: 레인 표
+    if (lh) parts.push(lh);
     if (m.line) parts.push(`<section class="ins-sec"><h4>${esc(tr('cards.job.h.line'))}</h4><p class="ins-mono ins-jline" title="${esc(m.line)}">${esc(m.line)}</p></section>`);
     const pid = parentIdOf(n);
     const pn = pid ? h.nodes.get(pid) : null;
     if (pn) parts.push(`<section class="ins-sec"><h4>${esc(tr('cards.ins.h.rel'))}</h4><p>${esc(tr('cards.ins.parent'))} <button type="button" class="ins-link" data-goto="${esc(pn.id)}">${esc(kindInfo(pn).icon)} ${esc(pn.label || pn.id)}</button></p></section>`);
     setBody(parts.join(''));
+  }
+
+  /** 진행 레인 표(세 표현 공용): 레인마다 열쇠·값(보간)·처리율·최장·과열 막대, 아래 한 줄 = 처리율·과열 단계·남은 시간 */
+  function laneTableHtml(lm) {
+    if (!lm) return '';
+    const tr2 = lm.rows.map((r) => `<tr class="hl-${esc(r.level)}"><th scope="row" title="${esc(r.key)}">${esc(r.key)}${r.pass ? ` <small>${esc(r.pass)}</small>` : ''}</th>`
+      + `<td class="ins-ln">${esc(r.value)}${r.unit ? ` <small>${esc(r.unit)}</small>` : ''}${r.ratio != null ? `<span class="ins-jbar"><i style="width:${Math.round(r.ratio * 1000) / 10}%"></i></span>` : ''}</td>`
+      + `<td>${esc(r.rate)}</td><td>${esc(r.last)}</td>`
+      + `<td><span class="ins-heat" title="${esc(String(r.heat))}"><i style="width:${Math.round(r.heat * 100)}%"></i></span></td></tr>`).join('');
+    const foot = [lm.rate ? tr('cards.lane.rate', { v: lm.rate }) : '', tr('cards.lane.heat', { v: lm.heat.toFixed(2), lv: tr('cards.heat.' + lm.level) }), lm.etaText].filter(Boolean).join(' · ');
+    return `<section class="ins-sec"><h4>${esc(tr('cards.lane.h'))} <small>${lm.rows.length}</small></h4><table class="ins-lanes"><thead><tr><th>${esc(tr('cards.lane.c.key'))}</th><th>${esc(tr('cards.lane.c.n'))}</th><th>${esc(tr('cards.lane.c.rate'))}</th><th>${esc(tr('cards.lane.c.last'))}</th><th>${esc(tr('cards.lane.c.heat'))}</th></tr></thead><tbody>${tr2}</tbody></table><p class="ins-dim ins-lfoot hl-${esc(lm.level)}">${esc(foot)}</p></section>`;
+  }
+  /** 분리 프로세스 노드 구역: 상태·프로그램·떼어 띄움·로그 경로(마스킹 그대로)·들여다봄·끝난 까닭 + 레인 표 + 마지막 진행 줄 */
+  function procHtml(n, nowMs) {
+    const pm = procCardModel(n, h.nodes, nowMs);
+    if (!pm) return '';
+    const rows = pm.rows.map((r) => `<dt>${esc(r.label)}</dt><dd class="k-${esc(r.key)}${r.mono ? ' ins-mono' : ''}"${r.title ? ` title="${esc(r.title)}"` : ''}>${esc(r.value)}</dd>`).join('');
+    let out = `<section class="ins-sec"><h4>${esc(tr('cards.proc.h'))}</h4><dl class="ins-jrows">${rows}</dl></section>`;
+    out += laneTableHtml(pm.lanes);
+    if (pm.line) out += `<section class="ins-sec"><h4>${esc(tr('cards.job.h.line'))}</h4><p class="ins-mono ins-jline" title="${esc(pm.line)}">${esc(pm.line)}</p></section>`;
+    return out;
   }
 
   /** 주인 노드 아래 작업 목록(작업마다 한 줄: 상태 점 · 제목 · 단계 · 진행) + 접혀 숨은 끝난 작업 수 */
@@ -360,7 +383,9 @@ export function mountInspector(h) {
       parts.push(`<section class="ins-sec"><h4>${esc(tr('cards.ins.h.cycles'))}</h4><p>${esc(dm.summary)}</p>${dm.current ? `<p class="ins-dim">${esc(tr('cards.ins.current'))} <button type="button" class="ins-link" data-goto="${esc(dm.current.id)}">${esc(dm.current.label)}</button>${dm.current.ms != null ? ' · ' + esc(fmtElapsed(dm.current.ms)) : ''}</p>` : ''}${dm.lastEnd ? `<p class="ins-dim">${esc(tr('cards.ins.lastEnd', { x: dm.lastEnd.label }))}</p>` : ''}${bars}</section>`);
     }
     // 백그라운드 명령·Monitor: 명령
-    if ((n.kind === 'bash-bg' || n.kind === 'monitor') && !isLauncher(n) && !isRunner(n)) {
+    const prh = isProc(n) ? procHtml(n, nowMs) : ''; // 분리 프로세스(명령은 프로그램 행 툴팁)
+    if (prh) parts.push(prh);
+    else if ((n.kind === 'bash-bg' || n.kind === 'monitor') && !isLauncher(n) && !isRunner(n)) {
       const cmd = (n.meta && (n.meta.command || n.meta.title)) || '';
       if (cmd) parts.push(`<section class="ins-sec"><h4>${esc(tr('cards.ins.h.cmd'))}</h4><p class="ins-mono">${esc(String(cmd).slice(0, 200))}</p></section>`);
     }

@@ -30,11 +30,11 @@ export class MockCtx {
   }
   _start(node) {
     if (node.kind === 'main' || (node.kind === 'claude-p' && !node.parentId)) {
-      // 전체 보기: 메인마다 10/40/65/85% 중 하나 → 섬마다 열화 정도가 달라 국소 효과가 보인다
+      // 전체 보기: 메인마다 10/42/80/94% 중 하나(선명·그레인·색수차·데이터모시 — 단계 30/50/70/90) → 섬마다 열화 정도가 달라 국소 효과가 보인다
       const k = Math.floor(hash01(node.id) * 4);
       // ?ctx= 고정이면 전체 보기도 그 값 둘레(±10%p)로 — README·영상 촬영 화면에 경고(85%↑ 빨강)가 뜨지 않게
       if (this.roots && this.mainStep === 0) return Math.max(0.02, Math.min(0.97, this.mainStart + [-0.1, -0.04, 0.04, 0.1][k]));
-      return this.roots ? [0.1, 0.4, 0.65, 0.85][k] : this.mainStart;
+      return this.roots ? [0.1, 0.42, 0.8, 0.94][k] : this.mainStart;
     }
     return 0.03 + hash01(node.id) * 0.12;
   }

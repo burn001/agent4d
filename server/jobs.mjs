@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { redact } from './redact.mjs';
 import { truncate } from './parse.mjs';
+import { ProgressLanes } from './progress.mjs'; // 진행 줄 자동 인식(레인)
 
 export const JOB = {
   STALE_SEC: 600,        // 박동이 이만큼 끊기면 정체(설정·규약 staleSec 로 바꿈)
@@ -17,6 +18,8 @@ export const JOB = {
   ID_MAX: 80, TITLE_MAX: 80, PHASE_MAX: 120, LINE_MAX: 160, HOST_MAX: 60,
   BEAT_EMIT_MS: 30_000,  // 박동만 바뀐 갱신은 이 간격에 한 번만 낸다
   PARTIAL_MAX: 4000,     // 줄 끝을 기다리는 미완성 조각 상한
+  AUTO_ID: 'progress',   // 자동 진행 작업 id(스트림 주인마다 하나)
+  LANE_EMIT_MS: 2000,    // 레인 값만 바뀐 갱신은 이 간격에 한 번만 낸다(상태가 바뀌면 바로)
 };
 
 export const JOB_STATES = ['queued', 'running', 'waiting', 'done', 'failed'];
@@ -285,7 +288,7 @@ export class JobBook {
 
   _stream(key) {
     let s = this.streams.get(key);
-    if (!s) { s = { partial: '', protocol: false }; this.streams.set(key, s); }
+    if (!s) { s = { partial: '', protocol: false, ruled: false, lanes: null, lastLine: null }; this.streams.set(key, s); }
     return s;
   }
 
@@ -294,9 +297,10 @@ export class JobBook {
    * @param streamKey 스트림 이름(출력 노드 id 또는 file:<경로>)
    * @param ownerKey 작업이 붙는 주인 열쇠(재무장 Monitor 사슬은 머리 id)
    * @param owner 주인 노드(스트림 조건 판정용, 없어도 됨)
+   * @param auto 규약·규칙이 맞지 않은 줄에서 진행 모양을 알아보고 자동 작업(JOB.AUTO_ID)에 레인을 싣는다
    * @returns 바뀐 작업 [{ jobId, job, isNew, beatOnly }]
    */
-  feed(streamKey, ownerKey, text, tsIso, { owner = null, file = false, final = false } = {}) {
+  feed(streamKey, ownerKey, text, tsIso, { owner = null, file = false, final = false, auto = false, autoTitle = null, staleSec = null, endAs = null } = {}) {
     const s = this._stream(streamKey);
     let buf = s.partial + String(text ?? '').replace(/\r\n?/g, '\n');
     const lines = buf.split('\n');
@@ -306,6 +310,7 @@ export class JobBook {
     const sets = this._setsFor(owner, file, streamKey);
     const tsMs = Date.parse(tsIso);
     const changed = new Map();
+    const autoLines = [];
     for (const raw of lines) {
       const line = raw.replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '').trimEnd();
       if (!line.trim()) continue;
@@ -316,15 +321,97 @@ export class JobBook {
         s.protocol = true;
         ev = { ...p, on: 'protocol', src: 'protocol' };
       } else if (!s.protocol) {
-        for (const set of sets) { ev = matchRules(line, set); if (ev) { ev.src = 'rule:' + set.name; ev.setStale = set.staleSec; break; } }
+        for (const set of sets) { ev = matchRules(line, set); if (ev) { ev.src = 'rule:' + set.name; ev.setStale = set.staleSec; s.ruled = true; break; } }
       }
-      if (!ev) continue;
+      if (!ev) { if (auto) autoLines.push(line); continue; }
       const r = this._apply(ownerKey, ev, line, tsIso, tsMs);
       if (!r) continue;
       const prev = changed.get(r.jobId);
       changed.set(r.jobId, prev ? { ...r, isNew: prev.isNew || r.isNew, beatOnly: prev.beatOnly && r.beatOnly } : r);
     }
+    if (autoLines.length) {
+      const r = this.observe(streamKey, ownerKey, autoLines, tsIso, { autoTitle, staleSec, endAs });
+      if (r) changed.set(r.jobId, r);
+    }
     return [...changed.values()];
+  }
+
+  /**
+   * 진행 줄 자동 인식: 줄들을 스트림의 레인에 넣고, 인정된 레인이 있으면 주인 아래 자동 작업(JOB.AUTO_ID)을 만들거나 고친다.
+   * 규약 줄·대체 규칙이 한 번이라도 맞은 스트림은 하지 않는다(그쪽 우선, 원칙). 들여다본 결과(watch)도 이 길로 넣는다.
+   * @param lines 줄 배열 또는 글 조각
+   * @returns 바뀐 작업 하나({jobId, job, isNew, beatOnly}) 또는 null
+   */
+  observe(streamKey, ownerKey, lines, tsIso, { autoTitle = null, staleSec = null, endAs = null } = {}) {
+    const s = this._stream(streamKey);
+    if (s.protocol || s.ruled) return null;
+    const arr = Array.isArray(lines) ? lines : String(lines ?? '').replace(/\r\n?/g, '\n').split('\n');
+    const tsMs = Date.parse(tsIso);
+    if (!s.lanes) s.lanes = new ProgressLanes();
+    let moved = false;
+    for (const raw of arr) {
+      const line = String(raw).replace(/\u001b\[[0-9;?]*[ -/]*[@-~]/g, '').trimEnd();
+      if (!line.trim() || line.includes('::agent4d')) continue;
+      if (s.lanes.feedLine(line, tsMs)) { moved = true; s.lastLine = line; }
+    }
+    if (!moved) return null;
+    const sum = s.lanes.summary();
+    if (!sum) return null;
+    const map = this.jobsOf(ownerKey);
+    let job = map.get(JOB.AUTO_ID);
+    const isNew = !job;
+    if (isNew) {
+      if (map.size >= JOB.MAX_PER_OWNER) return null;
+      job = { v: 1, id: JOB.AUTO_ID, title: autoTitle ? clean(autoTitle, JOB.TITLE_MAX) : null, state: 'running', phase: null, progress: null, host: null, until: null, rc: null,
+        beatAt: null, staleSec: null, stale: false, line: null, src: 'auto', startedAt: tsIso, endedAt: null,
+        lanes: [], primary: null, rate: null, eta: null, heat: 0, _beatEmit: 0, _laneEmit: 0 };
+      map.set(JOB.AUTO_ID, job);
+    }
+    if (job.src !== 'auto') return null; // 같은 id 를 규약이 이미 쓰고 있으면 건드리지 않는다
+    let stateChanged = false;
+    // endAs: 스트림 주인이 이미 끝났다(라이브 첫 적재에서 끝 알림·EXIT 를 로그 꼬리보다 먼저 읽은 경우) → 끝난 작업으로 싣는다
+    if (endAs) { if (!isJobEnded(job.state)) { job.state = endAs.state === 'failed' ? 'failed' : 'done'; job.endedAt = endAs.ts || tsIso; if (endAs.rc != null) job.rc = endAs.rc; stateChanged = true; } }
+    else if (isJobEnded(job.state)) { job.state = 'running'; job.rc = null; job.endedAt = null; stateChanged = true; } // 끝난 뒤 다시 늘면 되살림
+    job.lanes = sum.lanes; job.primary = sum.primary; job.rate = sum.rate; job.eta = sum.eta; job.heat = sum.heat;
+    job.progress = sum.progress;
+    job.phase = this.privacy === 'minimal' ? null : clean(sum.primary, JOB.PHASE_MAX);
+    if (staleSec) job.staleSec = staleSec;
+    job.beatAt = tsIso;
+    if (this.privacy !== 'minimal') job.line = clean(s.lastLine, JOB.LINE_MAX);
+    if (!isNew && !stateChanged && Number.isFinite(tsMs) && tsMs - (job._laneEmit || 0) < JOB.LANE_EMIT_MS) { job._dirty = true; return null; }
+    if (Number.isFinite(tsMs)) job._laneEmit = tsMs;
+    job._dirty = false;
+    return { jobId: job.id, job: publicJob(job), isNew, beatOnly: false };
+  }
+
+  /** 자동 작업(지금 값, 솎아 낸 갱신 포함). 없으면 null */
+  autoJob(ownerKey) {
+    const job = this.jobs.get(ownerKey)?.get(JOB.AUTO_ID);
+    return job && job.src === 'auto' ? job : null;
+  }
+
+  /** 솎아 내느라 못 낸 레인 값이 있으면 그 갱신(라이브 sweep 이 부름). 없으면 null */
+  flushAuto(ownerKey, tsIso) {
+    const job = this.autoJob(ownerKey);
+    if (!job || !job._dirty) return null;
+    job._dirty = false;
+    const t = Date.parse(tsIso);
+    if (Number.isFinite(t)) job._laneEmit = t;
+    return { jobId: job.id, job: publicJob(job), isNew: false, beatOnly: false };
+  }
+
+  /**
+   * 자동 작업을 끝낸다(스트림 주인 노드가 끝났을 때). state done|failed, rc 선택. 바뀌면 갱신 하나, 아니면 null.
+   * 솎아 내느라 못 낸 마지막 레인 값도 이때 함께 나간다.
+   */
+  endAuto(ownerKey, state, tsIso, rc = null) {
+    const job = this.autoJob(ownerKey);
+    if (!job || isJobEnded(job.state)) return null;
+    job.state = state === 'failed' ? 'failed' : 'done';
+    if (rc != null) job.rc = rc;
+    job.endedAt = tsIso;
+    job._dirty = false;
+    return { jobId: job.id, job: publicJob(job), isNew: false, beatOnly: false };
   }
 
   _setsFor(owner, file, streamKey) {
@@ -408,7 +495,8 @@ export class JobBook {
 
 /** 노드 meta.job 에 싣는 모양(내부 필드 뺌) */
 export function publicJob(j) {
-  const { _beatEmit, ...rest } = j;
+  const { _beatEmit, _laneEmit, _dirty, ...rest } = j;
+  if (rest.lanes) rest.lanes = rest.lanes.map((l) => ({ ...l, last: l.last ? { ...l.last } : null }));
   return rest;
 }
 

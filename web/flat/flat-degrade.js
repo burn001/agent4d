@@ -6,7 +6,8 @@
 // 무늬·그라데이션은 한 번 만들어 재사용(프레임마다 객체 생성 없음). 대상이 없으면 level 0 → 2D 루프가 예전처럼 쉰다(비용 0).
 import { toScreen, camScale } from './flat-core.mjs';
 import { DEG, hash2, ghostOffsets, seedOf, grainAmp } from '../degrade-core.mjs';
-import { smoothstep } from '../ctx-core.mjs';
+import { smoothstep, GRAIN_PCT, SCAN_PCT, CHROMA_PCT, MOSH_PCT, TOP_PCT } from '../ctx-core.mjs';
+const G = GRAIN_PCT / 100, S = SCAN_PCT / 100, C = CHROMA_PCT / 100, M = MOSH_PCT / 100, T = TOP_PCT / 100; // 단계 경계(셰이더와 같음)
 
 let grainCv = null, scanCv = null;
 // 부호 있는 잡음: 양수 = 흰 점, 음수 = 검은 점, 크기 = 알파 → 어두운 화소엔 흰 점이, 밝은 화소엔 검은 점이 보인다(밝기 의존)
@@ -77,8 +78,8 @@ export class FlatDegrade {
       let L = R.L;
       if (R.purge) L = R.purge.oldL; // 정화 중: 앞머리 오른쪽은 이전 값(앞머리 왼쪽은 아래에서 새 값으로 덮지 않고 빛 띠만)
       const bu = this.getBurst(R.burstKey, nowMs);
-      const g = smoothstep(0.20, 0.40, L) * this.ampG, sc = smoothstep(0.40, 0.58, L) * this.amp;
-      const ch = Math.max(smoothstep(0.58, 0.75, L) * this.amp, bu * 1.6), mo = Math.max(smoothstep(0.75, 0.95, L) * Math.min(this.amp, 1.5), bu * 0.9);
+      const g = smoothstep(G, S, L) * this.ampG, sc = smoothstep(S, C, L) * this.amp;
+      const ch = Math.max(smoothstep(C, M, L) * this.amp, bu * 1.6), mo = Math.max(smoothstep(M, T, L) * Math.min(this.amp, 1.5), bu * 0.9);
       if (grainAmp(L) / 30 + sc + ch + mo < 0.01 && !R.purge) continue;
       ctx.save();
       if (!this.full) { ctx.beginPath(); ctx.arc(cx, cy, rad, 0, Math.PI * 2); ctx.clip(); }

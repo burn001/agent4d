@@ -300,6 +300,12 @@ export class Panel {
           : `<span class="tag conflict">${t('app.panel.tag.sameFile')}</span><b>${escapeHtml(ev.file || '')}</b> <span class="dim">↔ ${pn} · ${ev.level === 'strong' ? t('app.panel.bothEdit') : t('app.panel.oneEdit')}${ev.path ? ' · ' + escapeHtml(ev.path) : ''}</span>`;
         break;
       }
+      case 'watch': { // 분리 프로세스 들여다보기 — 시작만 한 줄(끝은 숨김)
+        if (ev.phase === 'end') return null;
+        const peer = this.getNode(ev.peer);
+        msg = `<span class="tag">${ev.kind === 'wait' ? t('app.panel.tag.waitOn') : t('app.panel.tag.peek')}</span>→ <b>${escapeHtml(trunc((peer && peer.label) || ev.peer || '', 40))}</b>`;
+        break;
+      }
       case 'session-msg': { // 세션 간 메시지
         const peer = this.getNode(ev.peer);
         msg = `<span class="tag">${t('app.panel.tag.crossSession')}</span>→ <b>${escapeHtml(trunc((peer && peer.label) || ev.peer || '', 30))}</b>${ev.text ? ' ' + escapeHtml(ev.text) : ''}`;

@@ -8,7 +8,7 @@ import { t } from '../i18n.mjs';
 import { FlatArt } from './art2d.js'; // 작업 대상 층(켤 때만 만든다)
 import { paletteOf, nodeVisualState, stateColor, kindIcon, breathe, NODE_STATE, BEAM, beamControls, beamPoint, beamAlpha, flowDash, FLOW_DASH, packetWobble } from '../flowview/flow-style.mjs';
 import { FLOW, PacketPool, planFlow, easeInOut, linkPackets } from '../flow-core.mjs';
-import { isGuessLink } from '../batch-core.mjs';
+import { isGuessLink, isLauncher } from '../batch-core.mjs';
 import { DEG, degOf, degOfLink, packetGone, lineFlicker, brokenDash } from '../degrade-core.mjs';
 const DG_DASH = [0, 0, 0, 0]; // 끊긴 선 무늬(재사용)
 
@@ -16,6 +16,9 @@ import { toScreen, camScale, hexPath, bezPrefix, bezSuffix, ctxRingTone } from '
 import { MONO, rrect, setFont, drawCards, drawRings, drawDeviceFace, drawIslands, BubbleLayer } from './flat-draw.js';
 import { JOB2D } from './flat-core.mjs';
 import { isJobVis, drawJobPill, jobLevel } from './job2d.js'; // 작업 칩(알약)
+import { isProcVis, procLevel, drawProcRig, drawProcFx, procTip } from './proc2d.js'; // 분리 프로세스 장치
+import { RIG, RigWatch, RigTicks, superviseText, supervisorSets } from '../flowview/proc-rig-core.mjs';
+import { escapeHtml } from '../html-util.mjs';
 
 const TOP_ACTIVE = 6;
 
@@ -32,12 +35,25 @@ export class Flow2DView extends FlatView {
     this._topActive = new Set();
     this._labelFontPx = 11; // 라벨 글자 크기(이름만 모드 폭 추정)
     this.overviewFacing = true; // Flow 3D 와 같은 섬 안 배치(마주 보기·파이)
+    // 분리 프로세스 장치: 들여다보기 기억·진행 줄 눈금 패킷·감독 관계
+    this.rigWatch = new RigWatch();
+    this.rigTicks = new RigTicks();
+    this._ticks = [];
+    this._supIds = new Set(); this._watchIds = new Set();
+    for (const v of this.vis.values()) if (isProcVis(v)) v.procRig = true;
     this.applyTheme();
   }
 
   // ---------- 흐름·말풍선 ----------
   flowEvent(ev, opts = {}) {
     super.flowEvent(ev, opts);
+    if (this.rigWatch) {
+      if (ev.type === 'watch') { this.rigWatch.event(ev); this.invalidate(); }
+      else if (ev.type === 'node-update' && !this.reduced) {
+        const tk = this.rigTicks.fromEvent(ev, (id) => { const x = this.vis.get(id); return x ? x.node : null; });
+        if (tk) { const t0 = performance.now() / 1000; for (let i = 0; i < Math.min(2, tk.n); i++) { if (this._ticks.length >= RIG.TICK_MAX) this._ticks.shift(); this._ticks.push({ from: tk.procId, t0: t0 + i * 0.18 }); } this.invalidate(); }
+      }
+    }
     const now = performance.now() / 1000, speed = opts.speed || 1;
     const plans = planFlow(ev, {
       has: (id) => { const v = this.vis.get(id); return !!v && !v.hidden; },
@@ -63,8 +79,29 @@ export class Flow2DView extends FlatView {
     if (this.bubbles.push(id, role, text)) this.invalidate();
   }
   _dropped(id) { this.bubbles.drop(id); }
-  reset() { super.reset(); if (this.pool) { this.pool.clear(); this.flowState.lastUp.clear(); this.flowState.lastOut.clear(); this.bubbles.clear(); } }
+  reset() {
+    super.reset();
+    if (this.pool) { this.pool.clear(); this.flowState.lastUp.clear(); this.flowState.lastOut.clear(); this.bubbles.clear(); }
+    if (this.rigWatch) { this.rigWatch.reset(); this.rigTicks.clear(); this._ticks.length = 0; }
+  }
+  addNode(node, spawn = true) {
+    const had = this.vis.has(node.id);
+    super.addNode(node, spawn);
+    const v = !had && this.vis.get(node.id);
+    if (v && isProcVis(v)) { v.procRig = true; if (this.rigWatch) this.rigWatch.seed(node); }
+  }
+  updateNode(id, patch = {}, opts = {}) {
+    super.updateNode(id, patch, opts);
+    const v = this.vis.get(id); // meta.proc 이 나중에 붙은 노드
+    if (v && !v.procRig && !v.device && isProcVis(v)) { v.procRig = true; v.r = this._nodeR(v.node, v.kind); this.layoutDirty = true; }
+  }
   _actHtml(v) {
+    // 감독 한 줄(흐름 3D 와 같은 규칙): 도구가 없을 때·들여다보기 도구만 열린 동안
+    if (this._supIds && this._supIds.has(v.id) && (!v.icons.size || (v.icons.size === 1 && this._watchIds.has(v.id)))) {
+      const sup = superviseText(v.id, this._nodeMap(), this.clock());
+      const i = sup.indexOf(' · ');
+      if (sup) return `<span class="act sup"><i>${escapeHtml(i > 0 ? sup.slice(0, i) : sup)}</i>${escapeHtml(i > 0 ? sup.slice(i) : '')}</span>`;
+    }
     if (this.bubbles && this.bubbles.shown.has(v.id) && !v.icons.size) return '';
     return super._actHtml(v);
   }
@@ -107,11 +144,25 @@ export class Flow2DView extends FlatView {
   fitExtra(pts, scope) { if (this.art) this.art.fitPoints(pts, scope); }
 
   /** 작업 노드는 백그라운드 명령 칩보다 작은 알약(JOB2D.R_K) — 배치·집기·라벨 거리도 이 반지름 */
-  _nodeR(node, kind) { const r = super._nodeR(node, kind); return node && node.meta && node.meta.job ? r * JOB2D.R_K : r; }
+  _nodeR(node, kind) {
+    const r = super._nodeR(node, kind);
+    if (node && node.meta && node.meta.proc && !isLauncher(node)) return (r / 1.45) * RIG.SCALE; // 분리 프로세스 장치(백그라운드 명령 칩 대비 RIG.SCALE)
+    return node && node.meta && node.meta.job ? r * JOB2D.R_K : r;
+  }
 
   _updateExtra(now) {
     let level = this.art ? this.art.level(now) : 0;
     level = Math.max(level, jobLevel(this, now)); // 작업: 진행·정체 15fps, 대기 고리 1초마다
+    // 분리 프로세스 장치: 로터·숫자(15fps), 감독 펄스·눈금 패킷이 있으면 꽉 찬 빠르기
+    if (procLevel(this, now)) level = Math.max(level, 1);
+    this._pulses = this.rigWatch.pulses(this.clock(), (id) => { const x = this.vis.get(id); return x && !x.gone && !x.hidden ? x.node : null; });
+    if (this._pulses.length || this._ticks.length) level = 2;
+    if (now - (this._supAt || 0) > 1) { // 감독 한 줄 숫자(1초마다, 감독 관계가 바뀐 노드 포함)
+      this._supAt = now;
+      const prev = [...this._supIds];
+      supervisorSets(this._nodeMap().values(), this._supIds, this._watchIds);
+      for (const id of new Set([...prev, ...this._supIds])) { const v = this.vis.get(id); if (v) this._labelText(v); }
+    }
     if (this.pool.active.length) level = 2;
     level = Math.max(level, this.bubbles.level(now));
     if (this.scope.mode === 'all' && !this.reduced) for (const c of this._clusterV.values()) if (c.busy) { level = Math.max(level, 1); break; }
@@ -137,13 +188,15 @@ export class Flow2DView extends FlatView {
     }
     this._drawSpawnLinks(ctx); // 띄움 점선 — 빔 아래
     this._drawBeams(ctx, now, s);
+    drawProcFx(this, ctx, now, this._pulses, this._ticks); // 감독 스캔·기다림 고리·진행 줄 눈금 패킷(빔 위, 칩 아래)
     this._drawPackets(ctx, now);
     this.sess.drawUnder(ctx, now); // 충돌 곡선·세션 간 메시지
     for (const v of this.vis.values()) if (v._on) this._drawChip(ctx, v, now);
     this.sess.drawOver(ctx, now); // 파일명 칩
     drawRings(this, ctx, now, s);
-    drawCards(this, ctx, now, s);
+    drawCards(this, ctx, now, s, this._cardAnchorFn || (this._cardAnchorFn = (v) => (v.procRig && v._sp ? { x: v._sp.x, y: v._sp.y, R: v._R * 1.5 } : null))); // 넓은 장치 상자는 카드를 그만큼 더 띄움
     this.bubbles.place(now);
+    procTip(this); // 장치 마우스 올림 작은 카드
     if (t && this.pendingMode) { /* 배지는 DOM */ }
   }
 
@@ -166,7 +219,7 @@ export class Flow2DView extends FlatView {
       if (exiting) al = Math.max(al, BEAM.idleAlpha * (L ? 1.6 : 1.2));
       al *= Math.min(1, sk * 1.2) * (exiting ? 0.35 + 0.65 * (cv.exitF ?? 1) : Math.min(cv.exitF ?? 1, 1));
       if (al < 0.01 || tEnd < 0.02) continue;
-      const dashed = isGuessLink(cv.node);
+      const dashed = isGuessLink(cv.node) || !!cv.procRig; // 띄운 노드 → 분리 프로세스 장치는 띄움 점선
       if (dashed && sk >= 0.5 && !exiting) al = Math.max(al, BEAM.idleAlpha * 1.6);
       const cp = beamControls(pv.pos, cv.pos);
       toScreen(this.cam, this.W, this.H, pv.pos.x, pv.pos.z, a);
@@ -250,6 +303,7 @@ export class Flow2DView extends FlatView {
 
   _drawChip(ctx, v, now) {
     if (isJobVis(v)) { drawJobPill(this, ctx, v, v._sp.x, v._sp.y, v._R, (v.exitF ?? 1) * Math.min(1, (v.scopeK ?? 1) * 1.3), now); return; }
+    if (v.procRig) { drawProcRig(this, ctx, v, v._sp.x, v._sp.y, v._R, (v.exitF ?? 1) * Math.min(1, (v.scopeK ?? 1) * 1.3), now); return; }
     const P = this.P, L = this.tokens.isLight;
     const st = nodeVisualState(v.node.status, v.icons.size);
     const R = v._R * (this.reduced ? 1 : breathe(st, now, v.seed));

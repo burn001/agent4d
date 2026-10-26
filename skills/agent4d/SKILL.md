@@ -1,6 +1,6 @@
 ---
 name: agent4d
-description: Open Agent4D, a local read-only viewer that shows your Claude Code agents (main agent, subagents, workflows, nested claude -p runs, background shells) live in 3D space and lets you replay past sessions. Finds the Agent4D install (or explains how to get it), checks for a newer release, starts the local server if it is not running, and prints the viewer link. Use when the user says "open agent4d", "agent4d", "Agent4D", "show my agents in 3D", "visualize my Claude Code session", "show subagents", "replay my session", "stop agent4d", "update agent4d", "agent4d 열어줘", "agent4d 업데이트", "에이전트 3D로 보여줘".
+description: Open Agent4D, a local read-only viewer that shows your Claude Code agents (main agent, subagents, workflows, nested claude -p runs, background shells) live in 3D space and lets you replay past sessions. Finds the Agent4D install (or explains how to get it), checks for a newer release, starts the local server if it is not running, and prints the viewer link. Use when the user says "open agent4d", "agent4d", "Agent4D", "show my agents in 3D", "visualize my Claude Code session", "show subagents", "replay my session", "stop agent4d", "update agent4d", "agent4d 열어줘", "agent4d 업데이트", "에이전트 3D로 보여줘". Also controls the open viewer by voice-style requests ("switch to light theme", "change the view to voxel", "go 2D", "only show project X", "mute the sound", "pause the screen", "화면 조작", "테마 바꿔", "라이트 테마로", "표현 바꿔", "복셀로 바꿔", "2D 로", "~만 보여줘", "소리 꺼", "소리 켜").
 allowed-tools: Bash
 ---
 
@@ -68,6 +68,32 @@ Show the link from `url` (or from `start`) to the user and suggest opening it in
 - **Views:** Flow (default), Planet and Voxel Office, chosen from the view menu in the top bar (or `&view=planet`, `&view=voxel`).
 - **Replay:** pick a past or running session in the viewer and play it from the start at 0.5×–32×, with a scrubbable timeline.
 - **Try without real data:** `npm run demo` inside the clone shows a synthetic session tree.
+
+## 5. Control the open viewer by talking
+
+When the user asks to change what the open viewer shows, run `$A4D ctl <command>` and pass on its short result (how many viewers applied it, and why any did not). Every open viewer changes exactly as if the user had picked it in the menus, and the choice is saved (add `--temp` to change it for this visit only).
+
+| The user says (examples) | Run |
+|---|---|
+| "switch to light theme" / "dark mode" / "라이트 테마로" | `$A4D ctl theme light` / `$A4D ctl theme dark` |
+| "change to voxel" / "Planet view" / "flow view" / "복셀로 바꿔" | `$A4D ctl view voxel` / `$A4D ctl view planet` / `$A4D ctl view flow` |
+| "go 2D" / "back to 3D" / "2D 로" | `$A4D ctl dim 2d` / `$A4D ctl dim 3d` |
+| "only show atlas" / "show everything" / "atlas 만 보여줘" | `$A4D ctl scope project:atlas` / `$A4D ctl scope all` |
+| "hide beta" / "keep only atlas visible" / "show all again" | `$A4D ctl visible hide project:beta` / `$A4D ctl visible only project:atlas` / `$A4D ctl visible all` |
+| "mute" / "sound on" / "소리 꺼" | `$A4D ctl sound off` / `$A4D ctl sound on` |
+| "music quieter" / "no sound effects" | `$A4D ctl music 30` / `$A4D ctl sfx 0` |
+| "pause the screen" / "back to live" | `$A4D ctl pause` / `$A4D ctl resume` |
+| "replay this session at 8x" / "go live" | `$A4D ctl replay current --speed 8` / `$A4D ctl live` |
+| "Korean UI" / "English UI" | `$A4D ctl lang ko` / `$A4D ctl lang en` |
+| "close the popups" / "reload the viewer" / "show 'meeting starts' on screen" | `$A4D ctl close` / `$A4D ctl reload` / `$A4D ctl toast "meeting starts"` |
+
+More: camera (`auto|manual|fit|follow`), `focus <node or session>`, `bgm auto|<track>`, `artifacts on|off`, `plans on|off`, `weather auto|off|fog|rain|snow`, `grid on|off`, `noise on|off|0-100`, `panel open|close`, `timeline show|hide`, `done on|off`. Full list: `$A4D ctl help`.
+
+- If more than one viewer is open and the user means only one ("just the meeting-room TV"), run `$A4D ctl clients` first and add `--client <id prefix or part of its name>`. Viewers can be named in their ⚙ menu.
+- If a project or session name matches several, the command prints the candidates and changes nothing. **Ask the user which one** instead of guessing, then send it again with the exact name or id.
+- If no viewer is open, say so and offer the link from `$A4D url`.
+- After `sound on`, the output may say the page needs one click before it can play (browser autoplay rules). Pass that on; do not try to work around it.
+- Commands can only be sent from the PC running the server; viewers opened through the fixed link only receive them, and a viewer can switch "Remote control" to "Ignore" in its ⚙ menu. If the server is not on port 7788, add `--port N`.
 
 ## Rules
 

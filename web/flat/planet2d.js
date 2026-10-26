@@ -23,6 +23,10 @@ import { stepOrbits, drawOrbits, drawBursts, emitTool, nearestSat, orbitExtent }
 import { bodyK } from '../planet-core.mjs';
 import { FLAT, JOB2D } from './flat-core.mjs';
 import { isJobVis, drawJobMoon, jobLevel } from './job2d.js'; // 작업 = 주인 둘레 작은 위성
+import { ProcFlat, isProc, isAutoJob } from './planet-proc2d.js'; // 분리 프로세스 = 채굴 드릴 플랫폼 · 계기 · 컨베이어 · 들여다보기
+import { PROC, superviseLine } from '../planet-proc-core.mjs';
+import { procJobId, procState, jobOf } from '../job-core.mjs';
+import { escapeHtml } from '../html-util.mjs';
 
 const TOP_ACTIVE = 6;
 const ENDED_OK = (st) => st === 'done' || st === 'stopped';
@@ -42,13 +46,15 @@ export class Planet2DView extends FlatView {
     this.pool = new PacketPool(FLOW.MAX_PACKETS, FLOW.PER_NODE);
     this.flowState = { lastUp: new Map(), lastOut: new Map() };
     this._topActive = new Set();
+    this.proc2d = new ProcFlat(this);
+    this._supSet = new Set(); this._supAt = 0;
     this.applyTheme();
   }
 
   /** 노드 그린 반지름(세계): scene.js 와 같음 — RADIUS × 0.68, 배치 장치는 2배, 본체 축소 bodyK(둘레는 궤도계) */
   _nodeR(node, kind) {
     const dev = isLauncher(node);
-    const r = RADIUS[kind] * NODE_SCALE * (dev ? 2 : 1) * bodyK(kind, dev);
+    const r = RADIUS[kind] * NODE_SCALE * (dev ? 2 : 1) * (isProc(node) ? PROC.BODY_K : bodyK(kind, dev)); // 분리 프로세스는 조금 크게
     return node && node.meta && node.meta.job ? r * JOB2D.PLANET_R_K : r; // 작업 = 아주 작은 위성
   }
   /** 라벨 거리: scene.js CSS2D 라벨 자리(반지름 × 1.2 + 0.5, 아래 붙는 종류는 + 0.4) */
@@ -76,6 +82,7 @@ export class Planet2DView extends FlatView {
   // ---------- 흐름 패킷(flow.js FlowLayer 의 2D판: 직선 위 머리 + 잔광 2) ----------
   flowEvent(ev, opts = {}) {
     super.flowEvent(ev, opts);
+    if (ev.type === 'watch' && this.proc2d) { this.proc2d.event(ev); const wv = this.vis.get(ev.nodeId); if (wv) this._labelText(wv); }
     const now = performance.now() / 1000, speed = opts.speed || 1;
     const plans = planFlow(ev, {
       has: (id) => { const v = this.vis.get(id); return !!v && !v.hidden; },
@@ -94,7 +101,33 @@ export class Planet2DView extends FlatView {
       s.kind = pl.kind; s.from = pl.from; s.to = pl.to; s.color = pl.color; s.size = pl.size || 1; s.dur = dur;
     }
   }
-  reset() { super.reset(); if (this.pool) { this.pool.clear(); this.flowState.lastUp.clear(); this.flowState.lastOut.clear(); } }
+  // ---- 분리 프로세스: meta.proc 의 열린 들여다보기 맞추기 · 감독 줄 · 계기 집기 ----
+  addNode(node, spawn = true) { super.addNode(node, spawn); if (this.proc2d) this.proc2d.node(node); }
+  updateNode(id, patch = {}, opts = {}) { super.updateNode(id, patch, opts); const v = this.vis.get(id); if (v && patch.meta && patch.meta.proc && this.proc2d) this.proc2d.node(v.node); }
+  _actHtml(v) {
+    const pid = this._supOf(v);
+    if (pid) {
+      const pv = this.vis.get(pid), jv = pv && this.vis.get(procJobId(pv.node));
+      const [head, ...rest] = superviseLine(pv.node, jv ? jobOf(jv.node) : null, this.clock()).split(' · ');
+      return `<span class="act sup" style="--hc:var(--skill)"><i>${escapeHtml(head)}</i>${rest.length ? ' · ' + escapeHtml(rest.join(' · ')) : ''}</span>`;
+    }
+    return super._actHtml(v);
+  }
+  _supOf(v) {
+    if (!this.proc2d || !this.proc2d.any) return null;
+    const w = this.proc2d.supervising(v.id);
+    if (w && this.vis.has(w)) return w;
+    if (v.icons && v.icons.size) return null;
+    for (const cid of this.childrenOf.get(v.id) || []) { const cv = this.vis.get(cid); if (cv && isProc(cv.node) && !cv.hidden && (procState(cv.node) === 'running' || procState(cv.node) === 'stale')) return cid; }
+    return null;
+  }
+  pick(clientX, clientY) {
+    const id = super.pick(clientX, clientY);
+    if (id || !this.proc2d || !this.proc2d.meters.size) return id;
+    const r = this.canvas.getBoundingClientRect();
+    return this.proc2d.pickMeter(clientX - r.left, clientY - r.top);
+  }
+  reset() { super.reset(); if (this.proc2d) this.proc2d.clear(); if (this.pool) { this.pool.clear(); this.flowState.lastUp.clear(); this.flowState.lastOut.clear(); } }
 
   _labelPass(now) {
     super._labelPass(now);
@@ -125,7 +158,14 @@ export class Planet2DView extends FlatView {
     // 도구 입자가 날면 30fps. 일하는 노드가 없어도 궤도가 아주 느리게 돌도록 쉬는 동안 약 7fps 로 다시 그림(_schedule)
     this._idleOrbit = !this.reduced && !this._frozen && this.vis.size > 0;
     if (this._idleOrbit) this.dirty = true;
-    const jl = jobLevel(this, now); // 작업 표시 상태(시계) — 진행·정체 15fps
+    const jl = Math.max(jobLevel(this, now), this.proc2d ? this.proc2d.level() : 0); // 작업 표시 상태(시계) — 진행·정체 15fps · 분리 프로세스
+    if (this.proc2d && this.proc2d.any && now - this._supAt >= 0.5) { // 감독 줄 숫자가 오르게 0.5초마다 띄운 노드 라벨만 다시
+      this._supAt = now;
+      const cur = new Set();
+      for (const v of this.vis.values()) if (v.node && isProc(v.node) && v.node.parentId) cur.add(v.node.parentId);
+      for (const id of new Set([...cur, ...this._supSet])) { const v = this.vis.get(id); if (v) this._labelText(v); }
+      this._supSet = cur;
+    }
     if (this._pb && this._pb.length) return 2;
     let level = Math.max(jl, this.pool.active.length ? 2 : 0);
     if (this.pArt) level = Math.max(level, this.pArt.level(now));
@@ -160,6 +200,7 @@ export class Planet2DView extends FlatView {
     }
     this._drawSpawnLinks(ctx); // 띄움 점선
     this._drawLinks(ctx, now, s);
+    this.proc2d.step(now); this.proc2d.beginFrame(); this.proc2d.drawFlows(ctx, now, s); // 컨베이어·광석·화물·들여다보기
     this._drawPackets(ctx, now, s);
     this.sess.drawUnder(ctx, now); // 충돌 곡선·세션 간 메시지
     // 큰 것(메인·장치)이 아래로 깔리지 않게 작은 것부터가 아니라 들어온 순서대로 — 3D 도 깊이로만 가림
@@ -258,6 +299,14 @@ export class Planet2DView extends FlatView {
     const pulse = active && !this.reduced ? 0.5 - 0.5 * Math.cos((2 * Math.PI * (now + v.seed)) / 1.2) : 0;
     const R = v._R * (1 + 0.08 * pulse);
     const { x, y } = v._sp;
+    if (isProc(v.node)) { // 분리 프로세스 = 채굴 드릴 플랫폼
+      const a = (v.baseOpacity ?? 1) * (v.exitF ?? 1);
+      if (a < 0.01) return;
+      this.proc2d.drawRig(ctx, v, x, y, v._R, a, now, this._colorOf(v));
+      if (v.id === this.focusId || v.id === this.hoverId) { ctx.globalAlpha = 0.85; ctx.strokeStyle = t.text; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(x, y - v._R * 0.6, v._R * 1.6 + 2, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1; }
+      return;
+    }
+    if (isAutoJob(v.node)) { this.proc2d.drawMeter(ctx, v, x, y, v._R, (v.scopeK ?? 1) * (v.exitF ?? 1) * (v.projA ?? 1), now, this._s); return; } // 계기 판
     if (isJobVis(v)) { drawJobMoon(this, ctx, v, x, y, v._R, (v.scopeK ?? 1) * (v.exitF ?? 1), now, this.vis.get(this.parentOf.get(v.id) || v.node.parentId)); return; }
     const alpha = (v.baseOpacity ?? 1) * (v.exitF ?? 1);
     if (alpha < 0.01) return;

@@ -21,6 +21,9 @@ export const DARK = {
   lampOff: '#262b33', plant2: '#2f7a4e', plantPot: '#3a3f4b', lampShade: '#e9d8b0',
   // 작업 카드: 대기 = 파랑 흐림 · 줄 섬 = 회색 흐림(진행·끝·실패·정체는 테마 토큰 skill·ok·error)
   jobWait: '#5b8fd6', jobQueue: '#7b8494',
+  // 생산 라인(분리 프로세스): 기계·안전 표시·상자·팔레트·지게차·김·과열(차가움 청록 → 따뜻 호박 → 뜨거움 주황빨강)
+  lineBody: '#3c4a5e', lineTrim: '#55657c', hazard: '#e3b341', crate: '#b98b52', crateBand: '#7a5a34', crateBig: '#8f6a3e', crateWrap: '#cfd8e3',
+  pallet: '#8a6a44', forklift: '#e8a33a', steam: '#9aa6b6', ledBoard: '#0a0e14', heatCool: '#2dd4bf', heatWarm: '#f5a524', heatHot: '#f2552c',
   dimFactor: 0.55,
 };
 export const LIGHT = {
@@ -42,6 +45,9 @@ export const LIGHT = {
   pad: '#b7c2d2', drone: '#eef1f6', rotor: '#7d8899', parcel: '#c9934f', vault: '#8a96a8', vaultDoor: '#a7b2c2', belt: '#7d8899', bin: '#9aa5b5', booth: '#a3aec0',
   lampOff: '#b9c2cf', plant2: '#3f9a62', plantPot: '#8a8f9b', lampShade: '#fff4d6',
   jobWait: '#3f74c8', jobQueue: '#8d96a4',
+  // 생산 라인 — 라이트는 곱하기 잉크(밝은 바닥 위에서 진하게 읽히는 색)
+  lineBody: '#7d8ba0', lineTrim: '#5d6b80', hazard: '#d49a0b', crate: '#c08a4a', crateBand: '#8a5f2c', crateBig: '#9c6c35', crateWrap: '#eef2f7',
+  pallet: '#a07c52', forklift: '#e09a1a', steam: '#8e99a8', ledBoard: '#141a22', heatCool: '#0f8f80', heatWarm: '#c27a06', heatHot: '#cf3f16',
   dimFactor: 0.75,
 };
 export const SKIN = ['#e8c4a0', '#c99a72', '#a8754f', '#f1d3b5'];

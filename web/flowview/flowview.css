@@ -35,3 +35,26 @@
 .flow-bubble[data-role="error"] { border-color: color-mix(in srgb, var(--error) 50%, transparent); }
 .flow-bubble[data-role="error"] b { color: var(--error); }
 @media (max-width: 720px) { .flow-bubble { max-width: 160px; font-size: 9.5px; } .flow-mode .node-label .act { max-width: 180px; } }
+
+/* 감독 한 줄(분리 프로세스를 띄웠거나 들여다보는 노드): "감독 · probe_branches.py · 48,000 바퀴" — 머리 낱말은 장치 과열 색 대신 차분한 호박 */
+.flow-mode .node-label .act.sup { border-color: color-mix(in srgb, var(--flow-tool) 40%, transparent); border-style: dashed; }
+.flow-mode .node-label .act.sup i { font-style: normal; color: var(--flow-tool); }
+/* 분리 프로세스 장치 마우스 올림 작은 카드(장치 옆, 흐름 3D·2D 공용) */
+.proc-tip {
+  position: absolute; left: 0; top: 0; z-index: 6; pointer-events: none; min-width: 168px; max-width: 250px;
+  padding: 5px 9px 6px; border-radius: 7px; font: 500 10.5px/1.4 ui-monospace, "Cascadia Mono", Consolas, "D2Coding", monospace;
+  color: var(--flow-text, var(--text)); background: var(--flow-bg, var(--chip-bg));
+  border: 1px solid color-mix(in srgb, var(--hc, var(--flow-holo)) 55%, transparent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--hc, var(--flow-holo)) 22%, transparent);
+}
+.proc-tip[hidden] { display: none; }
+.proc-tip .pt-h { display: flex; align-items: center; gap: 6px; font-weight: 700; }
+.proc-tip .pt-h small { margin-left: auto; font-weight: 500; color: var(--flow-dim, var(--muted)); }
+.proc-tip .pt-led { width: 8px; height: 8px; border-radius: 50%; background: var(--hc); flex: none; }
+.proc-tip ul { list-style: none; margin: 3px 0 2px; padding: 0; }
+.proc-tip li { display: grid; grid-template-columns: 1fr auto; column-gap: 8px; }
+.proc-tip li b { font-weight: 500; color: var(--flow-dim, var(--muted)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proc-tip li span { font-weight: 700; text-align: right; font-variant-numeric: tabular-nums; }
+.proc-tip li small { grid-column: 2; text-align: right; color: var(--flow-dim, var(--muted)); font-size: 9.5px; }
+.proc-tip p { margin: 2px 0 0; font-size: 10px; }
+.proc-tip .pt-dim { color: var(--flow-dim, var(--muted)); }

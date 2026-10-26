@@ -4,7 +4,7 @@
 //   ?demo=1            : demo-events.jsonl(녹화된 이벤트)을 시각 간격대로 재생, 끝나면 처음부터
 // 이벤트 형식은 과 같다. DOM·three 에 의존하지 않아 Node 에서도 import 가능(tools/gen-demo.mjs).
 import { ixMockScript } from './ix-mock.mjs';
-import { jobMockScript } from './job-mock.mjs'; // 작업 노드
+import { jobMockScript, procMockScript } from './job-mock.mjs'; // 작업 노드 · 분리 프로세스
 import { t as tr } from './i18n.mjs';
 
 const TOOLS = [
@@ -76,7 +76,7 @@ function rng(seed) { // mulberry32
 }
 
 export class MockGenerator {
-  constructor({ seed = 2026, startMs = Date.now(), stress = 0, launcher = false, ix = false, jobs = false } = {}) {
+  constructor({ seed = 2026, startMs = Date.now(), stress = 0, launcher = false, ix = false, jobs = false, procs = false } = {}) {
     this.r = rng(seed);
     this.t0 = startMs;
     this.t = 0;              // 가상 시각(ms)
@@ -93,6 +93,7 @@ export class MockGenerator {
     if (this.launcher) this._launcherScript();
     if (ix) ixMockScript(this); // 특별 상호작용 시나리오(따로 난수열 — 기존 순서 그대로)
     if (jobs && this.launcher) jobMockScript(this); // 작업 노드(난수 없음, 기동기·재무장 Monitor 를 주인으로 씀)
+    if (procs) procMockScript(this); // 분리 프로세스·진행 레인·들여다보기(난수 없음)
   }
 
   // ---------- 도우미 ----------
@@ -528,7 +529,7 @@ export function createMockSource(handlers, { mode = 'mock', stress = 0, url = 'd
 
   // 실시간 시뮬레이터: 25초 미리 돌려 snapshot, 이후 실시간
   const PRE = 25000;
-  const gen = new MockGenerator({ seed: 2026, startMs: Date.now() - PRE, stress, launcher: !stress, ix: !stress, jobs: !stress });
+  const gen = new MockGenerator({ seed: 2026, startMs: Date.now() - PRE, stress, launcher: !stress, ix: !stress, jobs: !stress, procs: !stress });
   while (true) {
     const peekAt = Math.min(...gen.q.map((x) => x.at));
     if (peekAt > PRE) break;

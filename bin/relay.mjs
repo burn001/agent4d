@@ -26,10 +26,27 @@ const TARGET = Number(arg("--target", 7788));
 
 const HOP = new Set(["connection", "keep-alive", "proxy-connection", "transfer-encoding", "te", "trailer", "upgrade"]);
 
+// 화면 원격 조작: 명령 보내기·화면 목록은 로컬 CLI 전용 — 터널 쪽에서 온 요청은 여기서 끊는다(서버도 표지를 보고 한 번 더 거부)
+const ADMIN_PATHS = new Set(["/control", "/control/clients"]);
+const pathOf = (u) => {
+  try {
+    return decodeURIComponent(new URL(u, "http://x").pathname).toLowerCase().replace(/\/+$/, "") || "/";
+  } catch {
+    return null;
+  }
+};
+
 const server = http.createServer((req, res) => {
+  const p = pathOf(req.url);
+  if (p == null || ADMIN_PATHS.has(p)) {
+    res.writeHead(404, { "content-type": "application/json" });
+    res.end('{"error":"not_found"}');
+    return;
+  }
   const headers = {};
   for (const [k, v] of Object.entries(req.headers)) if (!HOP.has(k)) headers[k] = v;
   headers.host = `127.0.0.1:${TARGET}`;
+  headers["x-agent4d-relay"] = "1"; // 릴레이 경유 표지(들어온 같은 이름 헤더는 덮어씀) — 서버는 이 표지가 있으면 원격으로 본다
   const up = http.request({ host: "127.0.0.1", port: TARGET, method: req.method, path: req.url, headers }, (ur) => {
     const out = {};
     for (const [k, v] of Object.entries(ur.headers)) if (!HOP.has(k)) out[k] = v;
@@ -74,9 +91,10 @@ server.on("upgrade", (req, sock, head) => {
     let raw = `${req.method} ${req.url} HTTP/1.1\r\n`;
     for (let i = 0; i < req.rawHeaders.length; i += 2) {
       const k = req.rawHeaders[i];
+      if (k.toLowerCase() === "x-agent4d-relay") continue;
       raw += `${k}: ${k.toLowerCase() === "host" ? `127.0.0.1:${TARGET}` : req.rawHeaders[i + 1]}\r\n`;
     }
-    up.write(raw + "\r\n");
+    up.write(raw + "x-agent4d-relay: 1\r\n\r\n");
     if (head?.length) up.write(head);
     up.pipe(sock);
     sock.pipe(up);

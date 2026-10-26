@@ -9,8 +9,8 @@ import { MockCtx, MOCK_LIMIT } from '../ctx-mock.mjs';
 
 const C = (pct, extra = {}) => ({ used: pct * 2000, limit: 200000, pct, estimated: false, basis: 'family', ...extra });
 
-test('단계 매핑: ～20 선명 → 그레인 → 40 주사선 → 58 색수차 → 75%↑ 데이터모시', () => {
-  assert.deepEqual([0, 14.9, 19.9, 20, 39.9, 40, 57.9, 58, 74.9, 75, 100].map(stageOf), [0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4]);
+test('단계 매핑: ～30 선명 → 그레인 → 50 주사선 → 70 색수차 → 90%↑ 데이터모시', () => {
+  assert.deepEqual([0, 14.9, 29.9, 30, 49.9, 50, 69.9, 70, 89.9, 90, 100].map(stageOf), [0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4]);
   assert.equal(stageOf(null), 0);
   assert.equal(STAGES[4].key, 'mosh');
 });
@@ -20,24 +20,24 @@ test('게이지 색: 한도 게이지와 같은 70/90 경계', () => {
 });
 
 test('효과 세기: 단계별로 켜지고 세기 배율·로우패스·험', () => {
-  const a = noiseParams(18), b = noiseParams(30), c = noiseParams(50), d = noiseParams(70), e = noiseParams(95);
+  const a = noiseParams(28), b = noiseParams(40), c = noiseParams(60), d = noiseParams(80), e = noiseParams(98);
   assert.equal(a.grain + a.scan + a.chroma + a.mosh, 0);
   assert.ok(b.grain > 0 && b.scan === 0);
   assert.ok(c.scan > 0 && c.chroma === 0);
   assert.ok(d.chroma > 0 && d.glitch > 0 && d.mosh === 0 && d.lowpassHz < 20000);
   assert.ok(e.mosh > 0 && e.hum > 0 && e.lowpassHz < 1500);
-  assert.equal(noiseParams(57).lowpassHz, 20000);
-  // 그레인은 천천히 시작: 기본 세기 25% 는 40% 의 1/5 미만, 18% 는 0
-  assert.ok(noiseParams(25).grain < noiseParams(40).grain / 5);
-  assert.equal(noiseParams(19.9).grain, 0);
-  assert.ok(noiseParams(70, 1).chroma > noiseParams(70, 0.25).chroma);
+  assert.equal(noiseParams(69).lowpassHz, 20000);
+  // 그레인은 천천히 시작: 기본 세기 35% 는 50% 의 1/5 미만, 30% 미만은 0
+  assert.ok(noiseParams(35).grain < noiseParams(50).grain / 5);
+  assert.equal(noiseParams(29.9).grain, 0);
+  assert.ok(noiseParams(80, 1).chroma > noiseParams(80, 0.25).chroma);
   assert.equal(noiseParams(95, 0).grain, 0);
   assert.equal(noiseParams(95, 0).lowpassHz, 20000);
 });
 
-test('후처리 필요 여부: 꺼짐·세기 0·15% 미만이면 건너뜀(비용 0), 정화 중이면 필요', () => {
-  assert.equal(noiseNeeded([10, 19.9]), false);
-  assert.equal(noiseNeeded([10, 20]), true);
+test('후처리 필요 여부: 꺼짐·세기 0·30% 미만이면 건너뜀(비용 0), 정화 중이면 필요', () => {
+  assert.equal(noiseNeeded([10, 29.9]), false);
+  assert.equal(noiseNeeded([10, 30]), true);
   assert.equal(noiseNeeded([90], { enabled: false }), false);
   assert.equal(noiseNeeded([90], { strength: 0 }), false);
   assert.equal(noiseNeeded([5], { purging: true }), true);
@@ -47,7 +47,7 @@ test('급락 감지: compact 같은 큰 하락만, 작은 흔들림·낮은 구�
   assert.equal(isCtxDrop(C(85), C(12)), true);
   assert.equal(isCtxDrop(C(40), C(22)), true);
   assert.equal(isCtxDrop(C(60), C(50)), false);   // 10%p
-  assert.equal(isCtxDrop(C(19.9), C(2)), false);  // 이전이 20% 미만
+  assert.equal(isCtxDrop(C(29.9), C(2)), false);  // 이전이 30% 미만
   assert.equal(isCtxDrop(C(50), C(36)), false);   // 15%p 미만
   assert.equal(isCtxDrop(null, C(5)), false);
 });
@@ -102,8 +102,8 @@ test('§39.9 게이지 대상: /clear 앞 세션(지난 메인)의 큰 값은 �
   assert.deepEqual(pickGaugeNode({ nodes, streamAll: true, sel: { scope: 'all' }, roots: past }), { id: 's:new', why: 'max' });
 });
 
-test('국소 대상: 20% 이상·정화 중만, 정화 먼저·높은 순, 최대 개수', () => {
-  const r = rankRegions([{ id: 1, pct: 19 }, { id: 2, pct: 50 }, { id: 3, pct: 90 }, { id: 4, pct: 5, purging: 1 }, { id: 5, pct: 20 }], 3);
+test('국소 대상: 30% 이상·정화 중만, 정화 먼저·높은 순, 최대 개수', () => {
+  const r = rankRegions([{ id: 1, pct: 29 }, { id: 2, pct: 50 }, { id: 3, pct: 90 }, { id: 4, pct: 5, purging: 1 }, { id: 5, pct: 30 }], 3);
   assert.deepEqual(r.map((x) => x.id), [4, 3, 2]);
 });
 
@@ -119,7 +119,8 @@ test('표시 문구: 토큰 줄임·추정 표시·툴팁', () => {
   assert.equal(fmtTokens(1_000_000), '1M');
   assert.equal(fmtTokens(1_250_000), '1.3M');
   assert.equal(ctxShort({ used: 84_000, limit: 200_000, pct: 42, estimated: true }), '42% · 84k/200k?');
-  assert.match(ctxTitle(C(80)), /세션 정리 권장/);
+  assert.match(ctxTitle(C(92)), /세션 정리 권장/);
+  assert.doesNotMatch(ctxTitle(C(89)), /세션 정리 권장/);
   assert.match(ctxTitle({ ...C(20), basis: 'default', estimated: true }), /추정/);
 });
 
@@ -153,8 +154,8 @@ test('영어 화면(§86): 툴팁·단계 이름·창 근거·천 단위(Intl)',
   const { STAGES } = await import('../ctx-core.mjs');
   _setLangForTest('en');
   try {
-    const t = ctxTitle({ used: 160_000, limit: 200_000, pct: 80, basis: 'default', estimated: true });
-    assert.match(t, /^Context 80% used \(160,000 \/ 200,000 tokens\)\nWindow size: no evidence → default 200k \(estimated\)\nDegradation: Datamosh · hum · consider wrapping up the session\n/);
+    const t = ctxTitle({ used: 184_000, limit: 200_000, pct: 92, basis: 'default', estimated: true });
+    assert.match(t, /^Context 92% used \(184,000 \/ 200,000 tokens\)\nWindow size: no evidence → default 200k \(estimated\)\nDegradation: Datamosh · hum · consider wrapping up the session\n/);
     assert.equal(STAGES[1].name, 'Film grain');
     assert.equal(ctxTitle(null), 'No context data');
   } finally { _setLangForTest('ko'); }

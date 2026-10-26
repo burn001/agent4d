@@ -16,6 +16,7 @@ import { Escapement, tourbLod, TOURB_LOD, TOURB_GEO } from './tourbillon-core.mj
 import { TourbMain, SubCages } from './planet-tourb.js';
 import { isJob, jobOf, jobCode, jobProgress } from './job-core.mjs'; // 작업 노드
 import { jobLook, jobRingFill, jobBlink, jobLod, jobTether, ringAt, JOB_RING_GEO } from './planet-core.mjs';
+import { ProcFx } from './planet-proc.js'; // 분리 프로세스 = 채굴 드릴 플랫폼 · 자동 진행 = 계기 홀로그램 · 컨베이어 · 들여다보기
 
 const TAU = Math.PI * 2;
 let GEO = null;
@@ -316,13 +317,15 @@ export class PlanetDeco {
     this.stats = { main: 0, sub: 0, job: 0, lod: [0, 0, 0], olod: [0, 0, 0, 0], ms: 0 };
     this.sparks = new OrbitSparks(view.scene);
     this.cages = new SubCages(view.scene, 256, view.renderer); // 서브 단일 케이지(장면 전체 인스턴싱)
+    this.proc = new ProcFx(view, this.sparks);
   }
 
   /** 노드 v 에 연출을 붙인다(메인·서브·워크플로 에이전트·claude -p, 배치 장치·백그라운드·모니터·워크플로 제외) */
   attach(v) {
     if (this.map.has(v.id)) return;
     const k = v.kind;
-    let d = null;
+    let d = this.proc.attach(v); // 분리 프로세스(플랫폼)·자동 진행 작업(계기) — 작업 탐사선보다 먼저
+    if (d) { this.map.set(v.id, d); return; }
     if (isJob(v.node)) { // 작업 = 주인 둘레의 작은 탐사선(궤도계 대신 상태 고리·궤도 자취)
       d = { type: 'job', job: new JobProbe(this.view, v) };
       d.root = d.job.root;
@@ -346,7 +349,7 @@ export class PlanetDeco {
   }
   _root(v) { const r = new THREE.Group(); v.group.add(r); return r; }
   /** 궤도계 바깥 반지름(본체 반지름 배) — 홀로그램 자리 */
-  extentOf(id) { const d = this.map.get(id); return d ? (d.orbits ? d.orbits.spec.extent : JOB_RING_GEO.extent) : 1; }
+  extentOf(id) { const d = this.map.get(id); return d ? (d.orbits ? d.orbits.spec.extent : d.proc ? 2.6 : d.meter ? 1.6 : JOB_RING_GEO.extent) : 1; }
   /** 홀로그램 빔 출발점: i 번째 보이는 위성(없으면 false) */
   satWorld(id, i, out) { const d = this.map.get(id); if (!d || !d.orbits) return false; const n = d.orbits.satCount(); return n > 0 && d.orbits.satWorld(i % n, out); }
 
@@ -390,6 +393,7 @@ export class PlanetDeco {
   detach(v) {
     const d = this.map.get(v.id); if (!d) return;
     this.map.delete(v.id);
+    if (d.proc || d.meter) { this.proc.detach(v); return; }
     d.root.removeFromParent();
     if (d.job) { d.job.dispose(); return; }
     for (const m of [d.metal, d.light, d.atmoMat]) if (m) m.dispose();
@@ -448,14 +452,17 @@ export class PlanetDeco {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const pxK = H / (2 * Math.tan((fov * Math.PI) / 360)); // 세계 1 이 거리 1 에서 몇 px
     this.cages.begin();
+    const pctx = { L, reduced, clockMs, cam, pxK, W: view.container.clientWidth || 1, H };
     for (const [id, d] of this.map) {
       const v = view.vis.get(id);
-      if (!v || v.hidden || v.gone || !v.group.visible) { if (d.job) d.job.hide(); continue; }
+      if (!v || v.hidden || v.gone || !v.group.visible) { if (d.job) d.job.hide(); if (d.meter) d.meter.hide(); continue; }
       const s = v.mesh.scale.x;
       v.group.getWorldPosition(_wp);
       const dist = _wp.distanceTo(cam.position);
       const px = pxRadius(s, dist, fov, H);
       if (d.job) { st.job++; d.job.step(now, dt, s, px, v.mat.opacity, cam, clockMs, reduced, L); continue; }
+      if (d.proc) { d.proc.step(now, dt, s, px, v.mat.opacity, pctx); continue; }
+      if (d.meter) { d.meter.step(now, dt, s, px, v.mat.opacity, pctx); continue; }
       const lod = planetLod(px);
       const olod = orbitLod(px);
       st.lod[lod]++; st.olod[olod]++;
@@ -526,6 +533,7 @@ export class PlanetDeco {
       }
     }
     this.cages.end();
+    this.proc.update(now, dt, pctx);
     this.sparks.update(dt, pxK * 0.12 * dpr);
     st.ms = performance.now() - t0;
   }
@@ -555,5 +563,5 @@ export class PlanetDeco {
     this.sparks.emit(_p2, _dir, reach * 1.6, 0.12, 0.85, _c.copy(v.mat.color).lerp(_c2.set(0xffffff), 0.45), 1.6);
   }
 
-  dispose() { for (const id of [...this.map.keys()]) { const v = this.view.vis.get(id); if (v) this.detach(v); } this.map.clear(); if (this.sparks) { this.sparks.dispose(); this.sparks = null; } if (this.cages) { this.cages.dispose(); this.cages = null; } }
+  dispose() { for (const id of [...this.map.keys()]) { const v = this.view.vis.get(id); if (v) this.detach(v); } this.map.clear(); if (this.sparks) { this.sparks.dispose(); this.sparks = null; } if (this.cages) { this.cages.dispose(); this.cages = null; } if (this.proc) { this.proc.dispose(); this.proc = null; } }
 }

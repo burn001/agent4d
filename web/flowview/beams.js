@@ -88,15 +88,15 @@ export class Beams {
     // 신호 열화(dg>0): 조각마다 끊김(거의 투명)·밝기 잡음·옆으로 흔들림. 움직임 줄이기면 고정 무늬(시각 0)
     const dt = DEG.reduced ? 0 : DEG.t, fk = dg > 0 ? lineFlicker(seed, dt, dg) : 1;
     // 높이 계층: 위층(부모) → 아래층(자식)으로 떨어지는 3D 곡선(beamY). 굵기 방향은 카메라를 향하게(접선 × 시선) — 수직 구간도 납작해지지 않게
-    const cam = this.view.camera.position, dist = cp.dist;
+    const cam = this.view.camera.position, lift = a.noLift ? 0 : cp.dist; // 세운 배치 장치 아래 변에서는 떠오르지 않고 곧장 내려감
     for (let i = 0; i <= SEG; i++) {
       const t = (i / SEG) * tEnd;
-      const x = bez(t, a.x, cp.c1x, cp.c2x, b.x), z = bez(t, a.z, cp.c1z, cp.c2z, b.z), y = beamY(t, a.y, b.y, dist);
+      const x = bez(t, a.x, cp.c1x, cp.c2x, b.x), z = bez(t, a.z, cp.c1z, cp.c2z, b.z), y = beamY(t, a.y, b.y, lift);
       sLen += Math.hypot(x - px, y - py, z - pz); px = x; py = y; pz = z;
       S[so++] = sLen; S[so++] = sLen;
       const t2 = Math.min(1, t + 0.02), t1 = Math.max(0, t - 0.02);
       const tx = bez(t2, a.x, cp.c1x, cp.c2x, b.x) - bez(t1, a.x, cp.c1x, cp.c2x, b.x);
-      const ty = beamY(t2, a.y, b.y, dist) - beamY(t1, a.y, b.y, dist);
+      const ty = beamY(t2, a.y, b.y, lift) - beamY(t1, a.y, b.y, lift);
       const tz = bez(t2, a.z, cp.c1z, cp.c2z, b.z) - bez(t1, a.z, cp.c1z, cp.c2z, b.z);
       // n = 접선 × (점 → 카메라), 정규화. 접선이 시선과 거의 나란하면 수평 법선으로
       const vx = cam.x - x, vy = cam.y - y, vz = cam.z - z;
@@ -133,7 +133,7 @@ export class Beams {
       const [cv, pv] = L[i];
       if (cv.gone || pv.gone) continue;
       const st = cv.node.status;
-      const a = pv.group.position, b = cv.group.position;
+      const a = view.linkEnd ? view.linkEnd(pv, true) : pv.group.position, b = view.linkEnd ? view.linkEnd(cv, false) : cv.group.position; // 세운 장치 변
       let c = this._c.holo, al = beamAlpha(st, this.isLight, cv.stale), active = false; // 은은하게
       if (cv.sessC) c = cv.sessC; // 그 메인 서브트리 빔은 세션 색
       if (st === 'active') { active = true; if (cv.icons && cv.icons.size && !cv.sessC) c = this._c.tool; }
@@ -147,7 +147,7 @@ export class Beams {
       al *= Math.min(1, sk * 1.2) * (exiting ? 0.35 + 0.65 * (cv.exitF ?? 1) : Math.min(cv.exitF ?? 1, 1));
       if (al < 0.01 || tEnd < 0.02) continue;
       const pulse = 1; // 맥동 없음(정보는 패킷 움직임으로)
-      const dashed = isGuessLink(cv.node);
+      const dashed = isGuessLink(cv.node) || !!cv.procRig; // 띄운 노드 → 분리 프로세스 장치는 띄움 점선(떼어 띄운 관계)
       if (dashed && sk >= 0.5 && !exiting) al = Math.max(al, BEAM.idleAlpha * 1.6); // 점선은 비는 칸이 있어 조금 더 진하게
       const es = pk && sk >= 0.5 ? pk.get(pv.id + '|' + cv.id) : null;
       const dg = DEG.on ? degOf(cv.id) : 0, sd = dg > 0 ? (cv.seed * 1e6) | 0 : 0; // 그 세션 열화

@@ -4,7 +4,7 @@
 //  · 세션 열화 세기 D(0～1) — 메인 잔상·글자 깨짐·흐름선 끊김의 공통 입력.
 //  · 문턱 버스트(단계가 오르는 순간 0.5초), 글자 깨짐·패킷 소실·선 끊김의 결정적 해시.
 //  · 렌더러가 읽는 실행 상태 DEG(ctx-ui 가 채움). 꺼져 있으면 degOf() 가 바로 0 — 렌더러 비용 0.
-import { stageOf, STAGES } from './ctx-core.mjs';
+import { stageOf, STAGES, GRAIN_PCT, CHROMA_PCT, TOP_PCT, GRAIN_FADE } from './ctx-core.mjs';
 
 // 기준선(base) = 노드별 첫 유효 응답 usage. 열화 판정에는 쓰지 않고 카드·툴팁의 '시작 63k · 늘어난 양 +152k' 표시에만 쓴다.
 // compact 뒤에도 원래 기준선을 유지하되 그보다 작아지면 낮춘다(= 지금까지 본 최솟값).
@@ -30,10 +30,10 @@ export const stageOfCtx = (c) => stageOf(levelOf(c));
 /** 카드 단계표 문구: 단계마다 시작 % */
 export const stageTable = () => STAGES.map((s) => ({ key: s.key, name: s.name, at: s.min + '%' }));
 
-/** 열화 수준 → 세션 열화 세기 D(0～1). 20(그레인 시작)에서 0, 95 에서 1 */
+/** 열화 수준 → 세션 열화 세기 D(0～1). GRAIN_PCT(30, 그레인 시작)에서 0, TOP_PCT(98)에서 1 */
 export function degD(level) {
   const L = Number(level) || 0;
-  return Math.max(0, Math.min(1, (L - 20) / 75));
+  return Math.max(0, Math.min(1, (L - GRAIN_PCT) / (TOP_PCT - GRAIN_PCT)));
 }
 /** 세기 슬라이더(0～1, 기본 0.5 = 배율 1)를 곱한 D */
 export const degScaled = (level, strength) => Math.min(1, degD(level) * Math.max(0, Math.min(1, strength)) * 2);
@@ -211,10 +211,11 @@ export function brokenDash(seed, t, D, unit, out) {
 
 /**
  * 필름 그레인 진폭(화면 값 /255 단위, 세기 배율 1 기준). L = 열화 수준/100.
- * 그레인 시작(수준 20 = +50k)부터 ±10, 58(150k) ±20, 95(500k) ±30. 셰이더(noise.js)·2D(flat-degrade.js)가 같은 식
+ * 그레인 시작(30%, 28～32% 에서 켜짐)부터 ±10, 색수차 단계(70%)에서 ±20, 98% 에서 ±30. 셰이더(noise.js)·2D(flat-degrade.js)가 같은 식
+ * (경계는 ctx-core 상수 GRAIN_FADE·GRAIN_PCT·CHROMA_PCT·TOP_PCT)
  */
 export function grainAmp(L) {
   const x = Number(L) || 0;
-  const ss = (a, b) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-  return ss(0.18, 0.22) * (10 + 10 * ss(0.20, 0.58) + 10 * ss(0.58, 0.95));
+  const ss = (a, b) => { const t = Math.max(0, Math.min(1, (x - a / 100) / ((b - a) / 100))); return t * t * (3 - 2 * t); };
+  return ss(GRAIN_FADE[0], GRAIN_FADE[1]) * (10 + 10 * ss(GRAIN_PCT, CHROMA_PCT) + 10 * ss(CHROMA_PCT, TOP_PCT));
 }

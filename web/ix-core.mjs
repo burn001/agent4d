@@ -275,6 +275,13 @@ export class IxModel {
 
 // ───────────────────────── 도형 목록 ─────────────────────────
 export const IXGEO = { LINES: 3000, QUADS: 900, LABELS: 10, CLABELS: 24 };
+/** 흐름 3D 입체 사용자 단말: 화면 반폭·반높이·뒤로 기운 각(rad)·베젤 두께·글줄을 화면 면 앞으로 띄우는 거리·빔 출발점 */
+export const CON3D = { W: 1.2, H: 0.72, TILT: 0.3, BEZEL: 0.13, TEXT_OUT: 0.05, FACE_OUT: 0.16 };
+/** 방위 yaw(0 = 앞이 +z) → 기운 화면 기저 {r 오른쪽, v 화면 위(뒤로 기울어짐), n 화면 법선(앞·약간 위)} */
+export function conBasis(yaw, tilt = CON3D.TILT) {
+  const sy = Math.sin(yaw), cy = Math.cos(yaw), st = Math.sin(tilt), ct = Math.cos(tilt);
+  return { r: [cy, 0, -sy], v: [-sy * st, ct, -cy * st], n: [sy * ct, st, cy * ct] };
+}
 const CONSOLE_IDLE = { lastAt: 0, replyAt: null, promptAt: null, asking: 0, failAt: null }; // 사용자 이벤트 전 콘솔(처음부터 보임)
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const ease = (x) => { x = clamp01(x); return x * x * (3 - 2 * x); };
@@ -375,7 +382,17 @@ export function ixGeometry(model, now, env, geo = new IxGeo()) {
     const rp = rootId != null ? env.pos(rootId) : null;
     let c = null;
     if (rp) {
-      if (flow) c = { x: rp.x - 4.6, y: rp.y + 5.2, z: rp.z - 3.4 };
+      if (flow) {
+        c = { x: rp.x - 4.6, y: rp.y + 5.2, z: rp.z - 3.4 };
+        // 흐름 3D 입체 단말(env.solid): 화면이 카메라 쪽 방위(env.conYaw)로 서서 뒤로 CON3D.TILT 기울어짐.
+        // 화면 가운데 S = 예전 자리, 기저 r(오른쪽)·v(화면 위)·n(화면 법선). 빔·리본·패킷은 화면 앞(n × FACE_OUT)에서 출발
+        if (env.solid) {
+          const S = { x: c.x, y: c.y, z: c.z };
+          const yaw = env.conYaw ? env.conYaw(rootId, S) : 0;
+          const B = conBasis(yaw);
+          c = { x: S.x + B.n[0] * CON3D.FACE_OUT, y: S.y + B.n[1] * CON3D.FACE_OUT, z: S.z + B.n[2] * CON3D.FACE_OUT, S, yaw, ...B };
+        }
+      }
       else { const rr = R(rootId); c = { x: rp.x - rr * 0.55, y: rp.y + rr * 0.95, z: rp.z, mast: { x: rp.x - rr * 0.45, y: rp.y + rr * 0.7, z: rp.z }, rr }; }
     }
     consolePos.set(rootId, c);
@@ -396,9 +413,11 @@ export function ixGeometry(model, now, env, geo = new IxGeo()) {
     const fail = cs.failAt != null && now - cs.failAt < 1.5 ? 1 - (now - cs.failAt) / 1.5 : 0;
     const key = fail > 0.05 ? 'err' : 'user';
     const a = (((flow ? 0.26 : 0.34) + waitPulse + (asking ? 0.2 + 0.15 * Math.sin(now * 5) : 0)) * dim + fail * 0.6) * (env.light ? 1.7 : 1); // 라이트는 배경 쪽 섞임이라 진하게
-    // 화면(가운데 sx,sy,sz · 반폭 w · 반높이 h)
+    // 화면(가운데 sx,sy,sz · 반폭 w · 반높이 h). 화면 위 점 = P(u, v): 기본은 xy 평면, 입체 단말은 기운 화면 면(앞으로 조금 띄워 면과 겹치지 않게)
     let sx, sy, sz, w, h;
-    if (flow) {
+    const B = c.S ? c : null;
+    if (B) { sx = B.S.x; sy = B.S.y; sz = B.S.z; w = CON3D.W; h = CON3D.H; } // 틀·받침·기둥·상태등은 3D 단말 메시(flowview/console3d.js)가 그림
+    else if (flow) {
       w = 1.2; h = 0.72; sx = c.x; sy = c.y; sz = c.z;
       geo.line(sx - 0.25, sy - h - 0.2, sz, sx + 0.25, sy - h - 0.2, sz, key, a * 0.7); // 받침
       geo.line(sx, sy - h, sz, sx, sy - h - 0.2, sz, key, a * 0.5);
@@ -409,20 +428,24 @@ export function ixGeometry(model, now, env, geo = new IxGeo()) {
       w = 0.6; h = 0.36; sx = c.x - (c.rr || 1) * 0.8 - 1.3; sy = c.y + (c.rr || 1) * 0.45 + 0.45; sz = c.z; // 관제소 옆 작은 화면(행성 고리 밖으로)
       geo.line(sx + w, sy - h * 0.4, sz, c.x - 0.1, c.y, c.z, key, a * 0.45);
     }
-    geo.line(sx - w, sy - h, sz, sx + w, sy - h, sz, key, a); geo.line(sx + w, sy - h, sz, sx + w, sy + h, sz, key, a);
-    geo.line(sx + w, sy + h, sz, sx - w, sy + h, sz, key, a); geo.line(sx - w, sy + h, sz, sx - w, sy - h, sz, key, a);
+    const P = B ? (u, v, o = CON3D.TEXT_OUT) => [sx + B.r[0] * u + B.v[0] * v + B.n[0] * o, sy + B.v[1] * v + B.n[1] * o, sz + B.r[2] * u + B.v[2] * v + B.n[2] * o] : (u, v) => [sx + u, sy + v, sz];
+    const ln = (u1, v1, u2, v2, k, al) => { const p = P(u1, v1), q = P(u2, v2); geo.line(p[0], p[1], p[2], q[0], q[1], q[2], k, al); };
+    if (!B) { ln(-w, -h, w, -h, key, a); ln(w, -h, w, h, key, a); ln(w, h, -w, h, key, a); ln(-w, h, -w, -h, key, a); }
     // 화면 안 글줄(비어 보이지 않게): 첫 줄 = 마지막 입력 길이, 둘째 줄 = 상태 막대(작업 중이면 그 위를 점이 흐름)
     const st = info ? info.state : 'idle';
     const l1 = info && info.text ? 0.35 + 0.55 * Math.min(1, info.text.length / 22) : 0.18;
-    const x0 = sx - w * 0.78, lw = w * 1.56;
-    geo.line(x0, sy + h * 0.32, sz, x0 + lw * l1, sy + h * 0.32, sz, key, a * 0.85);
-    if (info && info.text) geo.line(x0, sy - h * 0.02, sz, x0 + lw * l1 * 0.62, sy - h * 0.02, sz, key, a * 0.55);
+    const x0 = -w * 0.78, lw = w * 1.56;
+    const ta = B ? Math.min(1, a * 1.6) : a; // 입체 단말은 화면 바탕이 어두운 유리라 글줄을 조금 진하게
+    ln(x0, h * 0.32, x0 + lw * l1, h * 0.32, key, ta * 0.85);
+    if (info && info.text) ln(x0, -h * 0.02, x0 + lw * l1 * 0.62, -h * 0.02, key, ta * 0.55);
     const l2 = st === 'idle' ? 0.3 : 0.55;
-    geo.line(x0, sy - h * 0.4, sz, x0 + lw * l2, sy - h * 0.4, sz, st === 'asking' ? 'user' : key, a * 0.5);
-    if (st === 'working' && !env.reduced) geo.quad(x0 + lw * l2 * ((now * 0.45) % 1), sy - h * 0.4, sz, 0.09, key, Math.min(1, a * 2));
-    if (flow) geo.quad(sx + w * 0.78, sy + h * 0.62, sz, 0.14 + waitPulse * 0.4 + (asking ? 0.08 : 0), key, Math.min(1, a * 2.2)); // 빛나는 별(상태 등)
-    geo.cons.push({ root: rootId, x: sx, y: sy, z: sz, w, h, a, state: st });
-    if (info) geo.conLabel(sx, sy + h + 0.12, sz, info, rootId, key, Math.min(1, 0.55 + a));
+    ln(x0, -h * 0.4, x0 + lw * l2, -h * 0.4, st === 'asking' ? 'user' : key, ta * 0.5);
+    if (st === 'working' && !env.reduced) { const q = P(x0 + lw * l2 * ((now * 0.45) % 1), -h * 0.4); geo.quad(q[0], q[1], q[2], 0.09, key, Math.min(1, ta * 2)); }
+    if (flow && !B) geo.quad(sx + w * 0.78, sy + h * 0.62, sz, 0.14 + waitPulse * 0.4 + (asking ? 0.08 : 0), key, Math.min(1, a * 2.2)); // 빛나는 별(상태 등) — 입체 단말은 베젤 표시등
+    const con = { root: rootId, x: sx, y: sy, z: sz, w, h, a, state: st };
+    if (B) { con.r = B.r; con.v = B.v; con.n = B.n; con.yaw = B.yaw; con.fade = geo.ka; con.key = key; con.pulse = waitPulse; con.asking = asking; con.dim = dim; con.fail = fail; }
+    geo.cons.push(con);
+    if (info) { const L = B ? P(0, h + CON3D.BEZEL, 0) : [sx, sy + h + 0.12, sz]; geo.conLabel(L[0], L[1] + (B ? 0.14 : 0), L[2], info, rootId, key, Math.min(1, 0.55 + a)); }
   }
   // ---- 효과 ----
   for (const f of model.fx.values()) {

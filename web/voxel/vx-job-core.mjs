@@ -8,6 +8,7 @@
 //   · 색 = job-core jobCode(job, nowMs) — 진행 호박 · 대기 파랑 흐림 · 줄 섬 회색 흐림 · 끝 초록 · 실패 빨강 · 정체 주황
 //   · 2D 평면도는 같은 판을 위에서 본 모양: 판 앞쪽(카드가 보는 쪽)으로 칩이 한 줄로 늘어선다.
 import { isJob, jobOf, jobCode, jobProgress, JOB_CODE } from '../job-core.mjs';
+import { isProcAutoJob, boardPos } from './vx-proc-core.mjs';
 
 const PI = Math.PI;
 
@@ -39,6 +40,7 @@ export function jobAnchor(owner) {
     }
     case 'batch': return { x: owner.x + 1.2, y0: 0.95, z: owner.z + 0.1, face: 0, pole: 0, d2: -0.3 };
     case 'board': return { x: owner.x + 2.0, y0: 1.0, z: owner.z + 0.3, face: 0, pole: 0, d2: 0.2 };
+    case 'proc': return { x: owner.x + 4.75, y0: 0.95, z: owner.z, face: 0, pole: 0, d2: -0.3 }; // 생산 라인 끝(팔레트 오른쪽) — 자동 진행 작업은 전광판으로 가고 그 밖 작업만
     case 'lead': return { x: owner.x - 1.75, y0: 0.95, z: owner.z + 0.15, face: 0, pole: 0, d2: -0.3 };
     default: return { x: owner.x - 0.95, y0: 0.95, z: owner.z, face: 0, pole: 0, d2: -0.3 }; // 그 밖 책상 주인
   }
@@ -87,12 +89,22 @@ export function placeJobs(jobs, out, prevMach = null) {
     if (!groups.has(o)) groups.set(o, []);
     groups.get(o).push(n);
   }
-  for (const [ownerId, arr] of groups) {
+  for (let [ownerId, arr] of groups) {
     const om = out.machine.get(ownerId), os = out.seat.get(ownerId);
     let owner = null, roomId = null;
     if (om && om.type !== 'job') { owner = om; roomId = om.roomId; }
     else if (os) { owner = { type: os.kind === 'lead' ? 'lead' : 'desk', x: os.deskX, z: os.deskZ }; roomId = os.roomId; }
     if (!owner) continue;
+    if (owner.type === 'proc') { // 자동 진행 작업 = 라인 기계 위 전광판(카드 없음 — vx-procs.js 가 판을 그리고 이 자리로 집기·이름표·카메라)
+      const auto = arr.find((n) => isProcAutoJob(n, ownerId));
+      if (auto) {
+        const p = boardPos(owner);
+        out.machine.set(auto.id, { roomId, x: p.x, y: p.y, z: p.z, type: 'job', procBoard: true, slot: 0, face: owner.face || 0, owner: ownerId, ownerType: 'proc', rows: 1, lo: true, hi: true, pole: null, d2: 0 });
+        out.roomOf.set(auto.id, roomId);
+        arr = arr.filter((n) => n !== auto);
+        if (!arr.length) continue;
+      }
+    }
     const a = jobAnchor(owner);
     if (!a) continue;
     const slots = jobSlots(arr, prevMach);

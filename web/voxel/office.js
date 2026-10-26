@@ -33,6 +33,7 @@ import { BATCH, batchFold, deviceInfo, deviceSummary, nodeTags, isLauncher, isCy
 import { isJob, jobOf } from '../job-core.mjs'; // 작업 노드
 import { jobCardModel, jobLabelAlways, jobBoardYaw, JOBCARD } from './vx-job-core.mjs';
 import { drawJobCard } from './vx-jobs.js';
+import { VxProcs } from './vx-procs.js'; // 분리 프로세스 = 생산 라인 · 들여다보기 심부름
 
 const MACHINE_KIND = { 'bash-bg': 'rack', monitor: 'screen', workflow: 'board' };
 const KNOWN = new Set(['main', 'subagent', 'workflow', 'workflow-agent', 'claude-p', 'bash-bg', 'monitor']);
@@ -150,6 +151,7 @@ export class VoxelView {
     this.flow = new VxFlow(this);
     this.ix = new VxIx(this);
     this.client = new VxClient(this);
+    this.procs = new VxProcs(this);
     this.raycaster = new THREE.Raycaster();
     this._ndc = new THREE.Vector2();
     this._tmpV = new THREE.Vector3();
@@ -209,7 +211,7 @@ export class VoxelView {
     this.effects = [];
     this.stationUse.clear();
     this.bubbles.clear();
-    this.holo.clear(); this.flow.clear(); this.ix.clear(); this.client.clear();
+    this.holo.clear(); this.flow.clear(); this.ix.clear(); this.client.clear(); this.procs.clear();
     this._lblUsed = null;
     this.focusId = null; this.hoverId = null;
     this.layoutDirty = true;
@@ -235,6 +237,7 @@ export class VoxelView {
       const m = { id: node.id, node, type: job ? 'job' : isLauncher(node) ? 'batch' : MACHINE_KIND[kind], flashUntil: 0, endWall: null, heldUntil: 0, released: false, seed: (hashStr(node.id) % 100) / 37, appearT0: spawn && !rearm ? now : null, info: null };
       if (isEnded(node) && !job) { m.endWall = now; m.heldUntil = now + (recent ? this._hold() : 0); if (!recent && !spawn) m.released = true; }
       this.machines.set(node.id, m);
+      this.procs.seedNode(node); // 열린 들여다보기(스냅샷)
     } else {
       // 기동기 회차는 자기 사무실 없이 메인 사무실 직원(배치 장치 앞)
       const lead = kind === 'main' || (kind === 'claude-p' && !isCycle(node, this.nodes)) || node.id === this.rootId || (!node.parentId && !this.rootId);
@@ -311,7 +314,7 @@ export class VoxelView {
     if (ch) this._releaseStation(ch);
     this._removing.delete(id);
     this.nodes.delete(id); this.chars.delete(id); this.machines.delete(id); this.vis.delete(id);
-    this.holo.removeNode(id); this.ix.dropNode(id); this.client.desks.delete(id);
+    this.holo.removeNode(id); this.ix.dropNode(id); this.client.desks.delete(id); this.procs.dropNode(id);
     this.layoutDirty = true; this._kidsDirty = true;
     this._settleUntil = (this._now || 0) + 0.7;
   }
@@ -347,6 +350,7 @@ export class VoxelView {
     this.flow.event(ev, opts);
     this.ix.event(ev, opts);
     this.client.event(ev);
+    this.procs.event(ev); // 들여다보기(watch)
   }
   /** 탕비실 자리 번호(같은 방 안에서 겹치지 않게 해시 + 이미 쉬는 사람 수) */
   _breakIdx(ch) {
@@ -355,7 +359,7 @@ export class VoxelView {
     return (ch.hash + k) % BREAK_N;
   }
   /** 측정용(확인 스크립트): 홀로그램·흐름·상호작용 수 */
-  vxStats() { return { holo: { ...this.holo.stats }, flow: { ...this.flow.stats }, ix: { ...this.ix.stats, on: this.ix.on }, dyn: this.dLit.n + this.dGlow.n, stat: this.sLit.n + this.sGlow.n + this.sGlass.n }; }
+  vxStats() { return { holo: { ...this.holo.stats }, flow: { ...this.flow.stats }, ix: { ...this.ix.stats, on: this.ix.on }, procs: { ...this.procs.stats }, dyn: this.dLit.n + this.dGlow.n, stat: this.sLit.n + this.sGlow.n + this.sGlass.n }; }
 
   /** 말풍선. type = tool|text|user|result. tool 이면 cat 동사를 앞에 붙인다(예: "읽기 · SKILL.md") */
   say(nodeId, text, { type = 'text', cat = null, ok = null } = {}) {
@@ -455,7 +459,7 @@ export class VoxelView {
     if (this._ro) this._ro.disconnect();
     this.bubbles.dispose();
     if (this.sess) this.sess.dispose();
-    this.holo.dispose(); this.ix.dispose(); this.client.dispose();
+    this.holo.dispose(); this.ix.dispose(); this.client.dispose(); this.procs.dispose();
     if (this.vArt) { this.vArt.dispose(); this.vArt = null; }
     for (const sg of this._signs) { sg.o.removeFromParent(); sg.el.remove(); }
     this._signs = [];
@@ -886,6 +890,7 @@ export class VoxelView {
     if (this.layoutDirty && now - this.lastLayout > 0.15) this._relayout(now);
     if (this.sess.stepMoves(now)) this._layoutVer++; // 이사 보간(정적 서명이 바뀌면 다시 그림) — 바닥 라인도 다시
     this.client.step(now); // 의뢰인 창구: 팀장 심부름·카드 읽기
+    this.procs.step(now, dt); // 들여다보기 → 직원 심부름 · 생산 라인 장부(상자·팔레트·지게차)
     this.pf.step(dt); this._syncFade(); // 프로젝트 페이드
     this._rebuildStatic();
     this.sess.stepConflicts(now); // 충돌 → 직원 캐비닛 방문
@@ -1019,6 +1024,7 @@ export class VoxelView {
     for (const m of this.machines.values()) {
       if (m.released || !m.pos) continue;
       if (m.type === 'job') { this._drawJob(m, now, clockMs, B); continue; } // 현황판 카드
+      if (m.pos.type === 'proc') continue; // 생산 라인은 아래 procs.drawAll
       const st = this._mst || (this._mst = { status: '', flash: 0, t: 0, seed: 0, id: null, appear: 1, members: 0, doneMembers: 0 });
       st.status = m.node.status; st.t = t; st.seed = m.seed; st.id = m.id;
       st.flash = Math.max(0, Math.min(1, (m.flashUntil - now) / 0.35));
@@ -1070,6 +1076,7 @@ export class VoxelView {
       fx.catColor = ch.workCat === 'skill' ? tok.skill : this.kindColor('main');
       drawCharacter(ch, this._look(ch), fx, L, G);
     }
+    this.procs.drawAll(B, now);    // 분리 프로세스 생산 라인·전광판·들여다보기 빛줄
     this.sess.drawDynamic(B, now); // 캐비닛 경고등·창·서류 더미·종이비행기
     this.ix.draw(B, now);          // 특별 상호작용 은유(발송대·문서고·부스·컨베이어·신호등)
     this.client.draw(B, now);      // 의뢰인 창구
@@ -1091,6 +1098,7 @@ export class VoxelView {
 
   /** 작업 카드 한 장(주인 기계 옆 현황판) — 색·정체는 렌더러 시계(재생 = 가상 시계) */
   _drawJob(m, now, clockMs, B) {
+    if (m.pos.procBoard) return; // 자동 진행 작업 = 생산 라인 전광판(vx-procs.js)
     if (this.scope.mode === 'all' && this._isDim(m.id)) return;
     const st = this._jst || (this._jst = { id: null, model: null, flash: 0, appear: 1, focus: false, ownerColor: null, seed: 0 });
     st.id = m.id; st.seed = hashStr(m.id) % 97;
@@ -1121,7 +1129,7 @@ export class VoxelView {
   _jobLabel(m, put, fid, hid, clockMs) {
     if (m.released || !m.pos || this._isDim(m.id) || (this._farAll && m.id !== fid && m.id !== hid)) return;
     const n0 = m.node, isF = m.id === fid || m.id === hid;
-    if (!isF && !jobLabelAlways(n0, clockMs)) return;
+    if (!isF && (m.pos.procBoard || !jobLabelAlways(n0, clockMs))) return; // 전광판은 판 자체가 이름표
     const job = jobOf(n0);
     const md = jobCardModel(n0, clockMs, 0);
     const key = md ? md.key : 'running';
@@ -1130,6 +1138,18 @@ export class VoxelView {
     const ph = isF && job && job.phase ? `<span class="ntitle">${esc(trunc(job.phase, 40))}</span>` : '';
     const y = m.pos.y - m.pos.slot * JOBCARD.PITCH - JOBCARD.PITCH / 2 - 0.04; // 판 맨 아래 바로 밑
     put(m.id, `<span class="jrow"><b class="jdot"></b>${esc(trunc(n0.label || n0.id, 22))}${tg}</span>${ph}`, `machine job j-${key}` + (isF ? ' focus' : ''), m.pos.x, y, m.pos.z, null, true);
+  }
+
+  /** 생산 라인 이름표: 라인 앞 바닥(이름 · 꼬리표 정체·rc·들여다봄 N), 포커스·호버면 종류·상태 */
+  _procLabel(m, put, fid, hid) {
+    if (this._isDim(m.id) || (this._farAll && m.id !== fid && m.id !== hid)) return;
+    const n0 = m.node, isF = m.id === fid || m.id === hid;
+    const tags = nodeTags(n0, this.nodes, this.clock());
+    const tg = tags.length ? `<span class="ntags">${tags.map((x) => `<i>${esc(x)}</i>`).join('')}</span>` : '';
+    const sub = isF ? `<small>${esc((KIND_LABEL[n0.kind] || n0.kind) + ' · ' + (STATUS_LABEL[n0.status] || ''))}</small>` : '';
+    const room = this.roomsById && this.roomsById.get(m.pos.roomId);
+    const a = xfAngle(room && room.xf && room.local ? room.xf : null);
+    put(m.id, esc(trunc(n0.label || n0.id, 26)) + tg + sub, 'machine proc' + (isF ? ' focus' : ''), m.pos.x + Math.sin(a) * 0.95, 0.02, m.pos.z + Math.cos(a) * 0.95, null, true);
   }
 
   _deskState(ch, now) {
@@ -1220,6 +1240,7 @@ export class VoxelView {
     for (const m of this.machines.values()) {
       const batch = m.type === 'batch';
       if (m.type === 'job') continue;
+      if (m.pos && m.pos.type === 'proc' && !m.released) { this._procLabel(m, put, fid, hid); continue; } // 생산 라인 이름표(늘)
       if (m.released || !m.pos || (m.id !== fid && m.id !== hid && !batch)) continue;
       if (batch && (this._isDim(m.id) || (this._farAll && m.id !== fid && m.id !== hid))) continue;
       const n0 = m.node;

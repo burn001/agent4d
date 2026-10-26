@@ -108,7 +108,7 @@ export function beamPoint(out, a, b, u, wobble = 0, drop = false) {
   if (!c) { out.x = a.x; out.y = a.y; out.z = a.z; return out; }
   out.x = bez(t, a.x, c.c1x, c.c2x, b.x);
   out.z = bez(t, a.z, c.c1z, c.c2z, b.z);
-  out.y = drop ? beamY(t, a.y, b.y, c.dist) : a.y + (b.y - a.y) * t;
+  out.y = drop ? beamY(t, a.y, b.y, a.noLift ? 0 : c.dist) : a.y + (b.y - a.y) * t; // a.noLift: 세운 배치 장치 아래 변
   if (wobble) {
     const w = wobble * Math.sin(Math.PI * t);
     out.x += (-(b.z - a.z) / c.dist) * w;

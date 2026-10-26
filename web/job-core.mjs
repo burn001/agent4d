@@ -164,5 +164,171 @@ export function jobInspect(n, nowMs) {
   if (job.rc != null) rows.push(['rc', String(job.rc)]);
   if (job.src) rows.push(['src', job.src]);
   return { title: job.title || job.id, id: job.id, state: job.state, display: disp, stale: s.stale, summary: jobSummary(job, nowMs),
-    rows, line: job.line || '', progress: jobProgress(job), startedAt: job.startedAt || n.startedAt, endedAt: job.endedAt || n.endedAt || null };
+    rows, line: job.line || '', progress: jobProgress(job), startedAt: job.startedAt || n.startedAt, endedAt: job.endedAt || n.endedAt || null,
+    // 자동 진행 작업: 레인 보간 값·과열·처리율·남은 시간(없으면 빈 배열·0·null)
+    lanes: jobLaneValues(job, nowMs), heat: jobHeat(job), rate: job.rate ?? null, etaMs: jobEtaMs(job, nowMs) };
+}
+
+// ───────────── 분리 프로세스 · 진행 레인 · 과열(heat) · 들여다보기(watch) ─────────────
+// 서버(server/procs.mjs·progress.mjs)가 보내는 것:
+//  · 분리 프로세스 노드: kind 'bash-bg', id `b:<띄운 호출 id>`, parentId = 띄운 노드, meta.proc = { v, cmd, prog, script, via, log,
+//    pidHint, spawnedBy, watch:[{nodeId, kind, via, since, toolUseId}], watchCount, lastWatchAt, endReason, rc }, meta.procStaleSec,
+//    status active(로그가 자람) · idle(정체 — 적응 문턱) · done · error · stopped
+//  · 자동 진행 작업: 그 아래 `j:<프로세스 id>:progress`(meta.job.src 'auto'), meta.job 에 lanes·primary·rate·eta·heat
+//  · 이벤트 { type:'watch', nodeId: 읽는 노드, peer: 프로세스 노드, kind:'peek'|'wait', via:'shell'|'bg'|'monitor', phase:'start'|'end', toolUseId, progress? }
+// 세 표현·2D·인스펙터가 같은 값을 쓰도록 보간·과열 단계·펄스는 여기서만 계산한다.
+
+export const LANEW = {
+  AHEAD_SEC: 300,  // 보간 상한: 마지막 관측 뒤 이만큼(또는 작업 staleSec)까지만 처리율로 늘린다
+  PULSE_MS: 2400,  // 끝난 들여다보기 펄스가 사라지는 시간
+  PULSE_MAX: 64,   // 기억하는 펄스 수
+  HEAT_WARM: 0.33, HEAT_HOT: 0.66,
+};
+
+/** 분리 프로세스 노드인가 · meta.proc */
+export const isProc = (n) => !!(n && n.meta && n.meta.proc && typeof n.meta.proc === 'object');
+export const procOf = (n) => (isProc(n) ? n.meta.proc : null);
+/** 프로세스의 자동 진행 작업 노드 id(진행 줄이 두 번 넘게 단조 증가해야 생기므로 없을 수 있다) */
+export const procJobId = (n) => (n ? `j:${n.id}:progress` : null);
+/** 자동 진행 작업(진행 줄 자동 인식)인가 */
+export const isAutoJob = (n) => isJob(n) && jobOf(n).src === 'auto';
+/** 작업의 레인 배열(없으면 []) */
+export const jobLanes = (job) => (job && Array.isArray(job.lanes) ? job.lanes : []);
+
+/** 프로세스 표시 상태: running(로그가 자람) · stale(정체 — 서버가 적응 문턱으로 idle) · done · failed · stopped */
+export function procState(n) {
+  if (!isProc(n)) return null;
+  if (n.status === 'error') return 'failed';
+  if (n.status === 'done' || n.status === 'stopped') return n.status;
+  return n.status === 'idle' ? 'stale' : 'running';
+}
+/** 정체 문턱(초) — meta.procStaleSec, 없으면 300 */
+export const procStaleSec = (n) => (n && n.meta && Number(n.meta.procStaleSec) > 0 ? Number(n.meta.procStaleSec) : 300);
+
+/** 꼬리표: [정체] [rc N] [들여다봄 N] */
+export function procTags(n) {
+  const p = procOf(n);
+  if (!p) return [];
+  const out = [];
+  if (procState(n) === 'stale') out.push(tr('cards.proc.stale'));
+  if (p.rc != null) out.push(tr('cards.job.rc', { n: p.rc }));
+  if (p.watchCount > 0) out.push(tr('cards.proc.watched', { n: p.watchCount }));
+  return out;
+}
+
+/**
+ * 보간된 레인 카운터: 마지막 관측 n + rate × (지금 − at), 최대 aheadSec(기본 300초 — 작업 staleSec 를 넘기면 그것)만큼 앞으로,
+ * total 을 넘지 않음. 끝난 작업(ended)·처리율 모름이면 n 그대로.
+ */
+export function laneValue(lane, nowMs, { ended = false, aheadSec = null } = {}) {
+  if (!lane || !Number.isFinite(lane.n)) return 0;
+  const at = tsOf(lane.at);
+  if (ended || !(lane.rate > 0) || !Number.isFinite(at) || !Number.isFinite(nowMs)) return lane.n;
+  const lim = Number(aheadSec) > 0 ? Number(aheadSec) : LANEW.AHEAD_SEC;
+  const dt = Math.max(0, Math.min(lim, (nowMs - at) / 1000));
+  let v = lane.n + lane.rate * dt;
+  if (Number(lane.total) > 0) v = Math.min(v, lane.total);
+  return v;
+}
+/** 레인 진행 비율 0..1(total 이 있을 때만), 없으면 null */
+export function laneRatio(lane, nowMs, opts) {
+  if (!lane || !(Number(lane.total) > 0)) return null;
+  return Math.max(0, Math.min(1, laneValue(lane, nowMs, opts) / lane.total));
+}
+/** 작업 전체 레인 보간 값 [{key, value, ratio, rate, heat, unit, total, pass, last}] — 세 표현이 같은 숫자를 그리게 */
+export function jobLaneValues(job, nowMs) {
+  const ended = !!job && isJobEndedState(job.state);
+  const ahead = job && Number(job.staleSec) > 0 ? Number(job.staleSec) : null;
+  return jobLanes(job).map((l) => ({ key: l.key, value: laneValue(l, nowMs, { ended, aheadSec: ahead }), ratio: laneRatio(l, nowMs, { ended, aheadSec: ahead }),
+    rate: l.rate ?? null, heat: Number(l.heat) || 0, unit: l.unit || null, total: l.total ?? null, pass: l.pass || 1, last: l.last || null }));
+}
+
+/** 과열 0..1(처리율이 처음보다 떨어지거나 한 단위 최장 시간이 오를수록 큼) */
+export const jobHeat = (job) => Math.max(0, Math.min(1, Number(job && job.heat) || 0));
+/** 과열 단계: cool(< 0.33) · warm(< 0.66) · hot */
+export const heatLevel = (h) => (h >= LANEW.HEAT_HOT ? 'hot' : h >= LANEW.HEAT_WARM ? 'warm' : 'cool');
+/** 남은 시간(ms, eta 가 있을 때), 지났으면 0, 없으면 null */
+export function jobEtaMs(job, nowMs) {
+  const e = tsOf(job && job.eta);
+  return Number.isFinite(e) && Number.isFinite(nowMs) ? Math.max(0, e - nowMs) : null;
+}
+
+const numText = (v) => {
+  if (!Number.isFinite(v)) return '';
+  const a = Math.abs(v);
+  if (a >= 100) return Math.round(v).toLocaleString('en-US');
+  return String(Number(v.toPrecision(a >= 10 ? 3 : 2)));
+};
+/** 처리율 글자: 초당 1 이상이면 '/s', 아니면 '/min' */
+export function fmtRate(rate) {
+  if (!(rate > 0)) return '';
+  return rate >= 1 ? tr('cards.lane.perSec', { v: numText(rate) }) : tr('cards.lane.perMin', { v: numText(rate * 60) });
+}
+/** 레인 한 줄: "iter_pairs 46,000 바퀴 · 8.6/s" */
+export function laneText(lane, nowMs, opts) {
+  if (!lane) return '';
+  const v = Math.floor(laneValue(lane, nowMs, opts));
+  const n = v.toLocaleString('en-US') + (Number(lane.total) > 0 ? '/' + Number(lane.total).toLocaleString('en-US') : '');
+  return [`${lane.key} ${n}${lane.unit ? ' ' + lane.unit : ''}`, fmtRate(lane.rate)].filter(Boolean).join(' · ');
+}
+
+/**
+ * 들여다보기 기억(세 표현 공용). 이벤트 시각(ev.ts)과 시계(nowMs — 라이브 = 지금, 재생 = 가상 시계)로 판정하므로 라이브·재생이 같다.
+ * 재생에서 뒤로 감거나 스냅샷을 새로 받으면 clear() 뒤 seed(노드들)로 다시 채운다.
+ */
+export class WatchTracker {
+  constructor({ pulseMs = LANEW.PULSE_MS, max = LANEW.PULSE_MAX } = {}) {
+    this.pulseMs = pulseMs;
+    this.max = max;
+    this.open = new Map(); // `${toolUseId}|${nodeId}|${peer}` → {from, to, kind, via, since}
+    this.done = [];        // [{from, to, kind, via, since, at, progress}]
+  }
+  clear() { this.open.clear(); this.done = []; }
+  /** 스냅샷: 프로세스 노드 meta.proc.watch(열린 들여다보기)로 채움 */
+  seed(nodes) {
+    for (const n of (nodes instanceof Map ? nodes.values() : nodes || [])) {
+      const p = procOf(n);
+      if (!p || !Array.isArray(p.watch)) continue;
+      for (const x of p.watch) this.open.set(`${x.toolUseId}|${x.nodeId}|${n.id}`, { from: x.nodeId, to: n.id, kind: x.kind || 'peek', via: x.via || 'shell', since: tsOf(x.since) });
+    }
+  }
+  /** watch 이벤트 하나(아니면 무시) */
+  push(ev) {
+    if (!ev || ev.type !== 'watch' || !ev.nodeId || !ev.peer) return;
+    const key = `${ev.toolUseId}|${ev.nodeId}|${ev.peer}`;
+    const t = tsOf(ev.ts);
+    if (ev.phase === 'end') {
+      const o = this.open.get(key);
+      this.open.delete(key);
+      this.done.push({ from: ev.nodeId, to: ev.peer, kind: ev.kind || (o && o.kind) || 'peek', via: ev.via || (o && o.via) || 'shell', since: o ? o.since : t, at: t, progress: !!ev.progress });
+      if (this.done.length > this.max) this.done.splice(0, this.done.length - this.max);
+    } else {
+      this.open.set(key, { from: ev.nodeId, to: ev.peer, kind: ev.kind || 'peek', via: ev.via || 'shell', since: t });
+    }
+  }
+  /**
+   * 지금 그릴 것: 열린 들여다보기(open:true, strength 1 — wait 는 계속 흐르는 선, peek 는 짧은 빛) + 끝난 지 pulseMs 안의 펄스
+   * (strength 1 → 0, progress = 결과에 진행 줄이 보였음). 시각이 시계보다 1초 넘게 뒤(되감기)인 것은 뺀다.
+   * @returns [{from, to, kind, via, open, ageMs, strength, progress}]
+   */
+  pulses(nowMs) {
+    const out = [];
+    for (const o of this.open.values()) {
+      if (Number.isFinite(o.since) && o.since > nowMs + 1000) continue;
+      out.push({ from: o.from, to: o.to, kind: o.kind, via: o.via, open: true, ageMs: Number.isFinite(o.since) ? Math.max(0, nowMs - o.since) : 0, strength: 1, progress: false });
+    }
+    for (const d of this.done) {
+      const age = nowMs - d.at;
+      if (!(age >= -1000 && age < this.pulseMs)) continue;
+      out.push({ from: d.from, to: d.to, kind: d.kind, via: d.via, open: false, ageMs: Math.max(0, age), strength: Math.max(0, 1 - Math.max(0, age) / this.pulseMs), progress: d.progress });
+    }
+    return out;
+  }
+}
+
+/** 순수 함수 꼴: watch 이벤트 배열 → 지금 펄스 목록(WatchTracker 와 같은 규칙) */
+export function watchPulses(events, nowMs, opts) {
+  const w = new WatchTracker(opts);
+  for (const ev of events || []) w.push(ev);
+  return w.pulses(nowMs);
 }

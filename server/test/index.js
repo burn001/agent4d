@@ -28,3 +28,7 @@ import './artifacts.test.mjs';
 import './plans.test.mjs';
 import './version.test.mjs';
 import './update.test.mjs';
+import './procs.test.mjs';
+import './jobs.test.mjs'; // (목록에서 빠져 있던 것)
+import './home.test.mjs';
+import './control.test.mjs'; // 화면 원격 조작

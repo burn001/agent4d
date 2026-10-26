@@ -10,6 +10,7 @@ import * as THREE from 'three';
 import { partBox } from './props.js';
 import { Character } from './character-core.mjs';
 import { idleAct } from './office-core.mjs';
+import { watchPhase } from './vx-proc-core.mjs';
 
 export { Character };
 
@@ -48,6 +49,7 @@ function pose(ch, fx, t) {
     const s = Math.sin(ch.phase);
     P.legL = 0.55 * s; P.legR = -0.55 * s; P.armL = -0.45 * s; P.armR = 0.45 * s;
     if (ch.state === 'leave') { P.bag = true; P.armR = -0.12; }               // 퇴근: 가방
+    else if (tt === 'errand' && ch.errand && ch.errand.kind === 'watch') { P.clip = true; P.armL = -0.95; P.rollL = 0.25; } // 클립보드 들고 기계로
     else if (tt === 'desk' && ch._fromBreak) { P.mug = true; P.armR = -1.0; } // 커피 들고 자리로
     return P;
   }
@@ -60,6 +62,23 @@ function pose(ch, fx, t) {
     P.armL = ch.lead ? -0.55 + 0.25 * Math.sin(t * 2.3 + ch.phase) : -0.08;
     P.rollL = ch.lead ? -0.25 + 0.2 * Math.sin(t * 1.7) : 0;
     P.headY = 0.25 * Math.sin(t * 0.45 + ch.phase);
+    return P;
+  }
+  // 들여다보기: 생산 라인 앞 — 전광판 보기(클립보드) · 기다림(팔짱) · 끝나기 직전 체크
+  if (tt === 'errand' && ch.errand && ch.errand.kind === 'watch') {
+    const w = ch.errand.w, ph = watchPhase(w, t, !!(w && w.arrivedAt != null));
+    if (ph === 'wait') {
+      // 팔짱: 두 팔을 앞으로 접어 안쪽으로 감고, 고개는 전광판 쪽으로 조금 들고, 가끔 발끝 까딱
+      P.armL = -1.32; P.rollL = 1.0; P.armR = -1.12; P.rollR = -1.05; P.headP = -0.16 + 0.04 * Math.sin(t * 0.7 + ch.phase);
+      P.headY = 0.1 * Math.sin(t * 0.45 + ch.phase); P.lean = -0.03;
+      const tap = (t + ch.phase) % 5.5; if (tap < 0.9) P.legR = -0.14 * Math.abs(Math.sin(tap * PI * 3.3));
+    } else if (ph === 'check') {
+      // 체크: 고개를 숙여 클립보드에 펜으로 ✓
+      P.clip = true; P.armL = -1.1; P.rollL = 0.35; P.armR = -1.2 + 0.16 * Math.sin(t * 15); P.rollR = -0.55; P.headP = 0.3;
+    } else {
+      // 전광판 보기: 클립보드는 가슴 앞, 펜 든 오른손, 고개를 들어 숫자를 훑음
+      P.clip = true; P.armL = -1.1; P.rollL = 0.35; P.armR = -0.95; P.rollR = -0.42; P.headP = -0.32; P.headY = 0.14 * Math.sin(t * 1.3 + ch.phase);
+    }
     return P;
   }
   // 의뢰인 스크린 앞: 질문 = 손 들기, 보고 = 두 손으로 설명
@@ -215,6 +234,11 @@ export function drawCharacter(ch, look, fx, lit, glow) {
   }
   if (P.card) partBox(glow, _B, 0, shY - 0.2, shZ + 0.45, -0.6, 0, 0, 0, 0, 0, 0.36, 0.26, 0.012, fx.cardC || fx.mugC);
   if (P.bag) partBox(lit, _B, 0.36, shY, shZ, P.armR, 0, P.rollR * 0.9, 0, -0.78, 0, 0.12, 0.26, 0.34, fx.bagC, id);
+  if (P.clip) { // 클립보드(왼손): 판·종이·집게 — 손끝에서 얼굴 쪽을 보는 판
+    partBox(lit, _B, -0.36, shY, shZ, P.armL, 0, -P.rollL, 0.02, -0.64, 0.1, 0.27, 0.025, 0.34, fx.bagC, id);
+    partBox(lit, _B, -0.36, shY, shZ, P.armL, 0, -P.rollL, 0.02, -0.625, 0.08, 0.23, 0.012, 0.26, fx.cardC || fx.mugC, id);
+    partBox(lit, _B, -0.36, shY, shZ, P.armL, 0, -P.rollL, 0.02, -0.615, 0.25, 0.1, 0.03, 0.04, fx.shoeC, id);
+  }
   // 머리
   const nY = HIP + (NECK - HIP) * cl, nZ = (NECK - HIP) * sl;
   const hp = P.headP + P.lean * 0.5;

@@ -24,6 +24,8 @@ import { PlanTracker, planStart } from './plans.mjs'; // 계획 보드
 import { classifyStart, classifyEnd, outputProgress, IxTracker, classifyUserMessage, USER_DENY_RE, ixSnip } from './interactions.mjs'; // 특별 상호작용
 import { JobBook, loadJobRules, jobNodeId, jobNodeStatus, jobLabel, isJobEnded, setMatchesProject } from './jobs.mjs'; // 작업 오브젝트
 import { ccvizHome } from './home.mjs';
+import { parseProgressLine } from './progress.mjs';
+import { detectProcLaunch, commandPathRefs, isWaitCommand, scanEnd, adaptiveStaleSec, quietEndSec, killTargets, pidHintOf, normFile, PROC } from './procs.mjs'; // 분리 프로세스
 
 const SHELL = new Set(['Bash', 'PowerShell']);
 const SESSION_KINDS = new Set(['main', 'claude-p']);
@@ -258,6 +260,13 @@ export class RootRuntime {
     this.launchNodes = new Map(); // 기동기: 기동 tool_use id(인계는 adopt:<id>) → {nodeId, tsMs, key, script, cwd, watcher, owner, projectDir, cycles}
     this.launcherByNode = new Map(); // 기동기 노드 id → 위 레코드
     this.runnerByNode = new Map(); // 러너 노드 id → {nodeId, k, sig, L, cycles:Set<sid>}
+    // 분리 프로세스: 노드 id → 기록 · 로그 파일·출력 폴더(정규화) → 노드 id 들 · 띄운 호출 id → 노드 id 들
+    this.procs = new Map();
+    this.procByPath = new Map();
+    this.procByTu = new Map();
+    this._watchTu = new Map(); // 백그라운드 셸·Monitor 들여다보기: 호출 id → {peers, kind, via} (결과에서 노드가 정해지면 묶음)
+    this._watchFg = new Map(); // 포그라운드 들여다보기: 호출 id → [프로세스 노드 id]
+    this.watchStream = new Map(); // 프로세스 로그를 비추는 백그라운드 셸·Monitor 노드 id → 프로세스 노드 id
     // claude -p 프로젝트 해석용: sid → { cwd, projectDir } (색인에 head 가 읽혀 있는 것만)
     this.lookupSession = (sid) => { const x = this.index.findSession?.(sid); return x ? { cwd: x.head?.cwd ?? null, projectDir: x.projectDir ?? null } : null; };
     this.watchers = new Map(); // sessionId → SessionWatcher
@@ -575,6 +584,7 @@ export class RootRuntime {
     this.graph.updateNode(id, patch, ts);
     this._closeOpenTools(n, ts);
     if (n.kind === 'workflow' && this._planT) this._planT.workflowEnd(id, ok, ts); // 끝난 워크플로 단계
+    if (this._jobs && !n.meta?.job) this._autoJobEnd(id, ok ? 'done' : 'failed', ts); // 자동 진행 작업도 끝
   }
 
   /**
@@ -589,6 +599,7 @@ export class RootRuntime {
     this.graph.updateNode(id, patch, ts);
     this._closeOpenTools(n, ts);
     this._failed.delete(id);
+    if (this._jobs && !n.meta?.job) this._autoJobEnd(id, 'done', ts);
     if (n.kind === 'bash-bg') {
       // 백그라운드로 돌던 claude -p 도 같이 중지됨
       for (const c of this.children) if (c.bgTaskId === id.slice(2)) { c.stopped = true; c.isError = false; if (!c.endTsMs) c.endTsMs = Date.parse(ts); }
@@ -1014,12 +1025,16 @@ export class RootRuntime {
         // 보관함: 보관 때 정한 사슬 판정(스크립트가 없는 PC·바뀐 스크립트에서도 같은 답)이 있으면 그것
         const a = L && ((id && this.index.launchPin?.(id)) || analyzeLaunch(L, resolveCwdGuess(this._recCwd || w.cwd || node.meta.cwd, L.cdGuess)));
         if (a && id) this._addLauncher(id, node, w, ts, input, a, L);
+        // 분리 프로세스: 기동기가 아닌 프로그램·스크립트를 포그라운드 셸이 떼어 띄움
+        else if (id && !input.run_in_background) this._procLaunch(id, node, w, ts, input, name);
       }
       // 포그라운드 셸: 실행 중 tasks/<무작위 id>.output 을 이 호출에 잇기 위해 열린 목록에 둔다(라이브만, 보관함 제외)
       if (!input.run_in_background && id && !this.offline && !this.index.taskRoots) this._fg.open.add(id);
       // 포그라운드에서 프로세스를 끄는 명령(taskkill·Stop-Process·kill …) → 곧 올 failed 알림을 '중지됨'으로
-      if (!input.run_in_background && isKillCommand(input.command)) this._noteKill(Date.parse(ts));
+      if (!input.run_in_background && isKillCommand(input.command)) { this._noteKill(Date.parse(ts)); this._procKill(input.command, ts); }
     }
+    // 들여다보기: 셸·Monitor 명령이 분리 프로세스의 로그(또는 산출 폴더)를 읽거나 기다림
+    if (id && (SHELL.has(name) || name === 'Monitor') && typeof input.command === 'string' && this.procs.size) this._watchStart(id, node, w, ts, name, input);
     if (name === 'TaskStop' || name === 'KillShell') {
       const tid = input.task_id || input.shell_id;
       const target = tid && (this.taskMap.get(tid) || [`m:${tid}`, `b:${tid}`, `a:${tid}`].find((x) => g.has(x)));
@@ -1129,6 +1144,9 @@ export class RootRuntime {
       if (tu && tu.plan && tu.plan.src === 'workflow') { this._plans().workflowDefine(wid, tu.plan.phases, tu.ts || ts); tu.plan = null; } // meta.phases
     } else if (SHELL.has(name)) {
       if (tur && tur.backgroundTaskId) this.ensureBg(tur.backgroundTaskId, owner, w, tu, ts, bodyText, tur);
+      if (tur && tur.backgroundTaskId) this._watchBind(tuid, `b:${tur.backgroundTaskId}`, ts);
+      if (this.procByTu.has(tuid)) this._procLaunchResult(tuid, tu, tur, bodyText); // PID 힌트
+      if (this._watchFg.has(tuid)) this._watchEnd(tuid, tur, bodyText, ts); // 들여다본 결과
       const child = this.children.find((c) => c.toolUseId === tuid);
       if (child) {
         child.endTsMs = Date.parse(ts);
@@ -1139,6 +1157,7 @@ export class RootRuntime {
       }
     } else if (name === 'Monitor' && tur && tur.taskId) {
       this.ensureMonitor(tur.taskId, owner, w, tu, ts, tur);
+      this._watchBind(tuid, `m:${tur.taskId}`, ts);
     }
   }
 
@@ -1581,7 +1600,7 @@ export class RootRuntime {
     const panel = this._outputPanel(o.nodeId, text);
     const ix = this.outputIx(o.nodeId, text);
     this.graph.emit({ ts, type: 'output', nodeId: o.nodeId, text, ...(panel ? { panel } : {}), ...(ix ? { ix } : {}) });
-    this.jobFeed(o.nodeId, text, ts);
+    this.jobFeed(o.nodeId, text, ts, { backlog: !!(backlog || this.graph.loading) });
   }
 
   /** 사용자 메시지 분류(메인만). 턴 열림·마지막 답변 시각으로 mid-turn·대기 시간을 판단 */
@@ -2116,6 +2135,7 @@ export class RootRuntime {
         }
         }
       }
+      if (n.meta?.proc && this._sweepProc(n, now, off)) continue; // 분리 프로세스(적응 정체 문턱·끝 판정)
       if (n.meta?.job) continue; // 작업 노드 상태는 작업 상태가 정한다(활동 공백으로 대기 전환하지 않음)
       if (n.status !== 'active') continue;
       const last = Date.parse(n.lastActivityAt) || 0;
@@ -2135,7 +2155,286 @@ export class RootRuntime {
     pass([...g.nodes.values()], false);
     pass(launchers, true);
     pass(runners, true);
-    if (!off) this._jobFiles();
+    this._sweepWatches(); // 끝난 백그라운드 셸·Monitor 의 들여다보기 닫기
+    if (!off) { this._jobFiles(); this._flushAutoJobs(nowIso); }
+  }
+
+  // ───────────── 분리 프로세스 · 들여다보기 ─────────────
+
+  /**
+   * 포그라운드 셸이 claude -p·기동기가 아닌 프로그램을 떼어 띄웠으면(nohup·& 등) 띄운 노드 아래 kind 'bash-bg' 노드 `b:<호출 id>`
+   * (한 명령에 둘 이상이면 `b:<호출 id>~2` …)와 meta.proc. 로그(리다이렉트 대상)가 있으면 그 파일을 기존 출력 스트림으로 꼬리 읽기.
+   */
+  _procLaunch(tuid, node, w, ts, input, tool) {
+    const cwd = this._recCwd || w.cwd || node.meta.cwd || null;
+    let list;
+    try { list = detectProcLaunch(input.command, { tool, cwd }); } catch (e) { log('proc', e?.message || e); return; }
+    if (!list.length) return;
+    const g = this.graph;
+    const rootCwd = g.get(`s:${this.sessionId}`)?.meta?.cwd || null;
+    const avoid = new Set([cwd, rootCwd].filter(Boolean).map(normFile)); // 이 폴더 파일을 읽는 것은 들여다보기로 보지 않음
+    const ids = [];
+    list.forEach((p, k) => {
+      const id = k ? `b:${tuid}~${k + 1}` : `b:${tuid}`;
+      if (g.has(id)) return;
+      ids.push(id);
+      if (this.offline && !this.spawnHints.has(id)) this.spawnHints.set(id, ts);
+      const minimal = g.privacy === 'minimal';
+      const rec = {
+        id, tuid, owner: node.id, prog: p.prog, script: p.script, log: p.log, startMs: Date.parse(ts), lastGrowMs: Date.parse(ts), gaps: [],
+        staleSec: PROC.STALE_DEFAULT_SEC, end: { trace: false, failAt: null, exc: null, end: null, lastLine: null }, killAt: null, pidHint: null,
+        watch: new Map(), watchCount: 0, lastWatchAt: null, endReason: null, rc: null, logTailed: false,
+        pub: { cmd: minimal ? '' : p.cmd, via: p.via, log: p.log ? (minimal ? path.basename(p.log) : redact(p.log.replace(/\\/g, '/'))) : null },
+      };
+      const keys = new Set(p.logs.map(normFile));
+      for (const d of [...p.logs.map((f) => path.dirname(f)), ...p.outDirs]) { const nd = normFile(d); if (!avoid.has(nd)) keys.add(nd); }
+      rec.keys = [...keys];
+      for (const k2 of rec.keys) { if (!this.procByPath.has(k2)) this.procByPath.set(k2, new Set()); this.procByPath.get(k2).add(id); }
+      this.procs.set(id, rec);
+      g.addNode({ id, parentId: node.id, kind: 'bash-bg', label: `분리 실행 · ${p.script || p.prog}`, sessionId: w.sessionId, startedAt: ts, lastActivityAt: ts,
+        meta: { toolUseId: tuid, command: minimal ? null : p.cmd, background: true, detached: true, spawnedBy: node.id,
+          title: input.description ? String(input.description).slice(0, 120) : null, proc: this._procMeta(rec) } }, ts);
+      // 출력 꼬리: 로그 파일을 기존 출력 스트림으로(홀로그램 꼬리·작업·재생 4단계 배분). 보관함은 기록 밖 파일을 읽지 않는다
+      if (p.log && !this.index.taskRoots) {
+        const o = this.startOutput(id, null, w, p.log);
+        o.proc = true;
+        rec.logTailed = true;
+        if (!this.offline && !g.loading && o.tail) {
+          // 라이브로 막 띄운 것: 아직 없는 파일은 생기면 처음부터(백로그 아님), 띄우기 전부터 있던 옛 내용(>> 덧붙임)은 건너뜀
+          let st = null;
+          try { st = fs.statSync(p.log); } catch {}
+          if (!st) o.tail.polls = 1;
+          else if (st.mtimeMs < Date.parse(ts) - 1000) { o.tail.offset = st.size; o.tail.polls = 1; }
+        }
+      }
+    });
+    if (ids.length) this.procByTu.set(tuid, ids);
+  }
+
+  /** meta.proc(공개 모양) */
+  _procMeta(rec) {
+    return {
+      v: 1, cmd: rec.pub.cmd, prog: rec.prog, script: rec.script, via: rec.pub.via, log: rec.pub.log, pidHint: rec.pidHint,
+      spawnedBy: rec.owner,
+      watch: [...rec.watch.values()].map((x) => ({ nodeId: x.nodeId, kind: x.kind, via: x.via, since: x.since, toolUseId: x.toolUseId })),
+      watchCount: rec.watchCount, lastWatchAt: rec.lastWatchAt, endReason: rec.endReason, rc: rec.rc,
+    };
+  }
+
+  _procUpdate(rec, ts) {
+    if (this.graph.has(rec.id)) this.graph.updateNode(rec.id, { meta: { proc: this._procMeta(rec) } }, ts);
+  }
+
+  /** 띄운 명령의 결과: `echo $!`·`-PassThru` 가 찍은 PID 힌트(Git Bash 의 $! 는 MSYS PID 라 Windows pidAlive 로 못 봄 — 끄는 명령 대조에만) */
+  _procLaunchResult(tuid, tu, tur, bodyText) {
+    const cmd = tu?.input?.command || '';
+    const hint = pidHintOf(cmd, tur?.stdout ?? stripTags(bodyText), tu?.name);
+    if (!hint) return;
+    for (const id of this.procByTu.get(tuid) || []) {
+      const rec = this.procs.get(id);
+      if (rec && !rec.pidHint) { rec.pidHint = hint; this._procUpdate(rec, tu?.ts || this.nowIso()); }
+    }
+  }
+
+  /** 줄 간격(초) 하나 → 적응 정체 문턱. 바뀌면(20% 넘게) meta.procStaleSec — meta.proc 과 따로 둬 재생 적재 순서에 덮이지 않게 */
+  _procGap(rec, tms, ts, backlog) {
+    if (!Number.isFinite(tms) || tms <= rec.lastGrowMs) return;
+    // 첫 적재·밀린 줄은 시각이 파일 수정 시각 하나라 간격이 아니다
+    if (!backlog) { rec.gaps.push((tms - rec.lastGrowMs) / 1000); if (rec.gaps.length > PROC.GAPS) rec.gaps.shift(); }
+    rec.lastGrowMs = tms;
+    const ss = adaptiveStaleSec(rec.gaps);
+    if (Math.abs(ss - rec.staleSec) > rec.staleSec * 0.2) { rec.staleSec = ss; if (this.graph.has(rec.id)) this.graph.updateNode(rec.id, { meta: { procStaleSec: ss } }, ts); }
+  }
+
+  /** 로그 꼬리 조각(jobFeed 가 부름, 정체 문턱은 jobFeed 가 먼저 _procGap): 끝 표지(EXIT n·rc=n·Killed·Traceback) */
+  _procFeed(rec, text, ts) {
+    const n = this.graph.get(rec.id);
+    if (!n) return;
+    scanEnd(rec.end, String(text).replace(/\r/g, ''), ts);
+    const e = rec.end.end;
+    rec.end.end = null;
+    if (e && !isEnded(n.status)) this._procEnd(rec, e.state, ts, e.reason, e.rc);
+  }
+
+  /** 프로세스 끝: done·failed(error)·stopped. 자동 작업도 같은 rc 로 끝 */
+  _procEnd(rec, state, ts, reason, rc = null) {
+    const n = this.graph.get(rec.id);
+    if (!n || isEnded(n.status)) return;
+    rec.endReason = reason; rec.rc = rc ?? null; rec.end.failAt = null;
+    this._autoJobEnd(rec.id, state === 'failed' ? 'failed' : 'done', ts, rc ?? null);
+    if (state === 'stopped') this.stop(rec.id, ts, reason === 'kill-cmd' ? 'kill-cmd' : 'signal');
+    else this.finish(rec.id, state === 'done', ts);
+    this._procUpdate(rec, ts);
+    for (const x of [...rec.watch.values()]) if (x.via !== 'shell') this._watchClose(rec, x.toolUseId, ts, false);
+  }
+
+  /** 끄는 명령(taskkill·pkill·Stop-Process·kill …)이 프로그램·스크립트 이름·PID 힌트로 이 프로세스를 겨누면 표시(판정은 sweep) */
+  _procKill(cmd, ts) {
+    for (const rec of this.procs.values()) {
+      const n = this.graph.get(rec.id);
+      if (!n || isEnded(n.status) || Date.parse(ts) < rec.startMs) continue;
+      if (killTargets(cmd, rec)) rec.killAt = Date.parse(ts);
+    }
+  }
+
+  /**
+   * 상태(sweep): 끄는 명령 뒤 무성장 → stopped · Traceback 뒤 조용 → failed · 장시간 무성장 → done(quiet) · 띄운 노드가 끝나고 조용 →
+   * done(spawner-ended) · 적응 문턱 넘게 조용 → idle(정체). 재생(offline)은 로그 줄을 아직 배분하기 전이라 파일 전체에서 끝 표지를 미리 보고,
+   * 끝 시각은 파일 수정 시각(수리 2 와 같은 방식), 조용함은 벽시계 기준(라이브 지금과 같은 답).
+   */
+  _sweepProc(n, now, off) {
+    const rec = this.procs.get(n.id);
+    if (!rec) return false;
+    if (isEnded(n.status)) return true;
+    const g = this.graph;
+    const iso = (ms) => new Date(Math.max(rec.startMs, ms)).toISOString();
+    let grow = rec.lastGrowMs;
+    if (off) {
+      const o = this.outputs.get(n.id);
+      let mt = NaN;
+      try { if (rec.log && o?.chunks?.length) mt = fs.statSync(rec.log).mtimeMs; } catch {}
+      // 마지막 성장 = 파일 수정 시각(rec 에는 넣지 않는다 — 4단계 배분이 줄 간격을 다시 센다)
+      if (Number.isFinite(mt)) grow = Math.max(grow, mt);
+      if (o?.chunks?.length) {
+        const st = scanEnd({ trace: false, failAt: null, exc: null, end: null, lastLine: null }, o.chunks.join('').replace(/\r/g, ''), iso(grow));
+        if (st.end) { this._procEnd(rec, st.end.state, iso(grow), st.end.reason, st.end.rc); return true; }
+        if (st.failAt && rec.killAt == null) { this._procEnd(rec, 'failed', iso(grow), 'traceback'); return true; }
+      }
+    }
+    if (rec.killAt != null && (off || (grow <= rec.killAt + 2000 && now - rec.killAt > PROC.KILL_GRACE_MS))) {
+      this._procEnd(rec, 'stopped', iso(rec.killAt), 'kill-cmd'); return true;
+    }
+    if (rec.killAt != null && grow > rec.killAt + 2000) rec.killAt = null; // 끈 뒤에도 자랐다 — 다른 것을 껐다
+    if (rec.end.failAt && (off || now - grow > PROC.FAIL_QUIET_MS)) { this._procEnd(rec, 'failed', rec.end.failAt, 'traceback'); return true; }
+    const clock = off ? Math.max(now, Date.now()) : now;
+    const quiet = (clock - grow) / 1000;
+    const sp = g.get(rec.owner);
+    const spEnded = !sp || isEnded(sp.status);
+    if (quiet > quietEndSec(rec.staleSec)) { this._procEnd(rec, 'done', iso(grow), 'quiet'); return true; }
+    if (spEnded && quiet > Math.max(PROC.SPAWNER_QUIET_SEC, rec.staleSec)) {
+      this._procEnd(rec, 'done', iso(Math.max(grow, Date.parse(sp?.endedAt) || 0)), 'spawner-ended'); return true;
+    }
+    // 정체(대기). 재생은 4단계 배분 뒤 5단계가 같은 문턱으로 합성하므로 여기서는 라이브만
+    if (!off && n.status === 'active' && quiet > rec.staleSec) g.updateNode(n.id, { status: 'idle' }, new Date(now).toISOString());
+    return true;
+  }
+
+  /** 들여다보기 시작: 명령이 가리키는 경로가 프로세스 로그·그 폴더·출력 폴더(두 단계 위까지)면 */
+  _watchStart(tuid, node, w, ts, name, input) {
+    const cwd = this._recCwd || w.cwd || node.meta.cwd || null;
+    let refs;
+    try { refs = commandPathRefs(input.command, { tool: name === 'PowerShell' ? 'PowerShell' : 'Bash', cwd }); } catch { return; }
+    const peers = new Set();
+    for (const r of refs) {
+      let cur = r;
+      for (let up = 0; up < 3 && cur; up++) {
+        for (const id of this.procByPath.get(cur) || []) {
+          const rec = this.procs.get(id);
+          if (rec && rec.tuid !== tuid) peers.add(id);
+        }
+        const nx = cur.replace(/\/[^/]*$/, '');
+        cur = nx !== cur && nx.includes('/') ? nx : null;
+      }
+    }
+    if (!peers.size) return;
+    const bg = name === 'Monitor' || !!input.run_in_background;
+    const kind = bg || isWaitCommand(input.command) ? 'wait' : 'peek';
+    if (bg) { this._watchTu.set(tuid, { peers: [...peers], kind, via: name === 'Monitor' ? 'monitor' : 'bg' }); return; }
+    for (const id of peers) this._watchOpen(this.procs.get(id), node.id, tuid, kind, 'shell', ts);
+    this._watchFg.set(tuid, [...peers]);
+  }
+
+  /** 백그라운드 셸·Monitor 결과로 노드가 정해지면 그 노드가 읽는 쪽 */
+  _watchBind(tuid, nodeId, ts) {
+    const wt = this._watchTu.get(tuid);
+    if (!wt || !this.graph.has(nodeId)) return;
+    this._watchTu.delete(tuid);
+    for (const id of wt.peers) this._watchOpen(this.procs.get(id), nodeId, tuid, wt.kind, wt.via, ts);
+    if (wt.peers.length) this.watchStream.set(nodeId, wt.peers[0]);
+  }
+
+  _watchOpen(rec, readerId, tuid, kind, via, ts) {
+    if (!rec) return;
+    const key = `${tuid}|${readerId}`;
+    if (rec.watch.has(key)) return;
+    rec.watch.set(key, { nodeId: readerId, kind, via, since: ts, toolUseId: tuid });
+    rec.watchCount++;
+    rec.lastWatchAt = ts;
+    this.graph.emit({ ts, type: 'watch', nodeId: readerId, peer: rec.id, kind, via, phase: 'start', toolUseId: tuid });
+    this._procUpdate(rec, ts);
+  }
+
+  _watchClose(rec, tuid, ts, progress) {
+    let closed = false;
+    for (const [key, x] of [...rec.watch]) {
+      if (x.toolUseId !== tuid) continue;
+      rec.watch.delete(key);
+      closed = true;
+      this.graph.emit({ ts, type: 'watch', nodeId: x.nodeId, peer: rec.id, kind: x.kind, via: x.via, phase: 'end', toolUseId: tuid, progress: !!progress });
+    }
+    if (closed) this._procUpdate(rec, ts);
+  }
+
+  /** 포그라운드 들여다보기 끝: 결과(stdout)의 진행 줄·끝 표지를 그 프로세스에 반영 */
+  _watchEnd(tuid, tur, bodyText, ts) {
+    const ids = this._watchFg.get(tuid) || [];
+    this._watchFg.delete(tuid);
+    const text = tur && tur.stdout != null ? `${tur.stdout}\n${tur.stderr || ''}` : stripTags(bodyText || '');
+    for (const id of ids) {
+      const rec = this.procs.get(id);
+      if (!rec) continue;
+      this._procObserve(id, text, ts);
+      // progress = 결과에 진행 줄이 보였는가(레인에 넣었는지와 무관 — 로그 꼬리가 있으면 거기서 이미 반영)
+      const shown = String(text).split('\n').some((l) => parseProgressLine(l.replace(/\r/g, '')));
+      this._watchClose(rec, tuid, ts, shown);
+    }
+  }
+
+  /** 재생 4단계: 분리 프로세스 로그 배분의 시각 닻 [{line, t}] (들여다본 결과에 보인 줄과 그 시각). 없으면 null */
+  procAnchors(id) { return this.procs.get(id)?.anchors || null; }
+
+  /** 끝난 백그라운드 셸·Monitor 의 들여다보기 닫기(그 노드가 끝난 시각) */
+  _sweepWatches() {
+    for (const rec of this.procs.values()) {
+      for (const x of [...rec.watch.values()]) {
+        if (x.via === 'shell') continue;
+        const r = this.graph.get(x.nodeId);
+        if (!r || isEnded(r.status)) this._watchClose(rec, x.toolUseId, r?.endedAt || this.nowIso(), false);
+      }
+    }
+  }
+
+  /**
+   * 들여다본 결과(또는 로그를 비추는 백그라운드 셸·Monitor 출력) → 그 프로세스. 끝 표지는 늘 반영. 진행 줄은 로그 꼬리가 없을 때만
+   * 레인에 넣는다(꼬리가 있으면 같은 줄이 이미 들어와 있고, 결과는 지난 줄을 다시 보여 주므로 순서가 섞인다). 레인이 움직였으면 true.
+   */
+  _procObserve(id, text, ts) {
+    const rec = this.procs.get(id);
+    const n = this.graph.get(id);
+    if (!rec || !n || !text) return false;
+    let moved = false;
+    // 로그 꼬리가 진행의 근거: 파일이 있으면(한 번 보이면 계속) 결과 줄은 레인에 넣지 않는다
+    if (rec.logTailed && !rec.logSeen) { try { rec.logSeen = fs.existsSync(rec.log); } catch {} }
+    const tailed = rec.logTailed && rec.logSeen;
+    if (tailed && this.offline) {
+      // 재생: 들여다본 결과 줄 = 그 시각까지 로그에 있던 줄 → 4단계 로그 배분의 시각 닻(replay.mjs procAnchors)
+      const A = rec.anchors || (rec.anchors = []);
+      const tms = Date.parse(ts);
+      for (const raw of String(text).split('\n')) { const l = raw.replace(/\r/g, '').trim(); if (l.length >= 6 && A.length < 4000) A.push({ line: l, t: tms }); }
+    }
+    if (!tailed && !isEnded(n.status)) {
+      const key = this._jobOwnerKey(id);
+      const book = this._jobBook();
+      const sig = () => JSON.stringify(book.autoJob(key)?.lanes?.map((l) => [l.key, l.n]) || null);
+      const before = sig();
+      const u = book.observe(id, key, text, ts, { autoTitle: '진행', staleSec: rec.staleSec });
+      if (u) this._jobEmit(n, key, u, ts);
+      moved = sig() !== before;
+      if (moved) { this._procGap(rec, Date.parse(ts), ts, false); this.touch(id, ts, false); }
+    }
+    const st = scanEnd({ trace: false, failAt: null, exc: null, end: null, lastLine: null }, String(text).replace(/\r/g, ''), ts);
+    if (st.end && !isEnded(n.status)) this._procEnd(rec, st.end.state, ts, st.end.reason, st.end.rc);
+    return moved;
   }
 
   // ───────────── 작업(Job) 오브젝트 ─────────────
@@ -2180,14 +2479,53 @@ export class RootRuntime {
    * 출력 조각 → 작업 노드(라이브 _flushOutput · Monitor 알림 · 재생 4단계 · 설정 파일 꼬리가 부름).
    * streamId = 출력을 낸 노드(파일이면 'file:<경로>'), ownerId = 작업을 붙일 노드(기본 streamId).
    */
-  jobFeed(streamId, text, ts, { ownerId = null, file = false, final = false } = {}) {
+  jobFeed(streamId, text, ts, { ownerId = null, file = false, final = false, backlog = false } = {}) {
     if (!text) return;
     const oid = ownerId || streamId;
     const owner = this.graph.get(oid);
     if (!owner || owner.meta?.job) return;
     const key = this._jobOwnerKey(oid);
-    const ups = this._jobBook().feed(streamId, key, text, ts, { owner, file, final });
+    // 자동 진행 인식: 백그라운드 셸·분리 프로세스 출력(기동기·러너·Monitor·설정 파일 꼬리는 아님). 프로세스 로그를 비추는
+    // 백그라운드 셸·Monitor 의 출력은 그 프로세스 쪽으로 넘긴다
+    const peer = file ? null : this.watchStream.get(streamId) || null;
+    const rec = owner.meta?.proc ? this.procs.get(oid) : null;
+    const auto = !file && !peer && (!!rec || (owner.kind === 'bash-bg' && !owner.meta?.launcher && !owner.meta?.runner));
+    if (rec) this._procGap(rec, Date.parse(ts), ts, backlog); // 정체 문턱을 먼저(자동 작업 staleSec 에 실림)
+    // 라이브에서 주인이 이미 끝났으면(첫 적재에서 끝을 먼저 읽음) 자동 작업도 끝난 채로. 재생 4단계는 배분 뒤 jobFeedEnd 가 끝낸다
+    const endAs = !this.offline && isEnded(owner.status) ? { state: owner.status === 'error' ? 'failed' : 'done', ts: owner.endedAt || ts, rc: rec ? rec.rc : null } : null;
+    const ups = this._jobBook().feed(streamId, key, text, ts, { owner, file, final, auto, autoTitle: '진행', staleSec: rec ? rec.staleSec : null, endAs });
     for (const u of ups) this._jobEmit(owner, key, u, ts);
+    if (rec) this._procFeed(rec, text, ts);
+    if (peer) this._procObserve(peer, text, ts);
+  }
+
+  /** 스트림 주인 노드가 끝나면 그 자동 진행 작업도 끝(솎아 낸 마지막 레인 값 포함) */
+  _autoJobEnd(id, state, ts, rc = null) {
+    const owner = this.graph.get(id);
+    if (!owner || !this._jobs) return;
+    const key = this._jobOwnerKey(id);
+    const u = this._jobs.endAuto(key, state, ts, rc);
+    if (u) this._jobEmit(owner, key, u, ts);
+  }
+
+  /** 재생 4단계 끝: 출력 배분을 마친 스트림의 자동 작업을 노드 상태에 맞춰 마무리(끝났으면 끝, 아니면 솎아 낸 값) */
+  jobFeedEnd(streamId, ts) {
+    const n = this.graph.get(streamId);
+    if (!n || !this._jobs) return;
+    const key = this._jobOwnerKey(streamId);
+    if (isEnded(n.status)) { this._autoJobEnd(streamId, n.status === 'error' ? 'failed' : 'done', n.endedAt || ts, n.meta?.proc?.rc ?? null); return; }
+    const u = this._jobs.flushAuto(key, ts);
+    if (u) this._jobEmit(n, key, u, ts);
+  }
+
+  /** 라이브: 솎아 내느라 못 낸 자동 작업 레인 값을 sweep 마다 낸다 */
+  _flushAutoJobs(nowIso) {
+    if (!this._jobs) return;
+    for (const key of this._jobs.jobs.keys()) {
+      const u = this._jobs.flushAuto(key, nowIso);
+      const owner = u && this.graph.get(key);
+      if (owner) this._jobEmit(owner, key, u, nowIso);
+    }
   }
 
   _jobEmit(owner, key, u, ts) {

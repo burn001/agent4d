@@ -213,8 +213,11 @@ for (const offline of [false, true]) {
       assert.equal(c1.endedAt, T(200));
       assert.equal(g.get(`s:${C3}`), undefined, '인계 뒤 회차는 M2 의 것');
       assert.equal(g.get(`s:${STRAY}`), undefined);
-      assert.equal(g.get('b:toolu_srv'), undefined, 'claude -p 사슬 없는 nohup 은 기동기 아님');
-      assert.equal(g.get('b:toolu_no'), undefined);
+      // claude -p 사슬 없는 nohup 은 기동기 아님 — 부터는 분리 프로세스 노드(meta.proc, meta.launcher 없음)
+      const srv = g.get('b:toolu_srv');
+      assert.ok(srv && srv.meta.proc && !srv.meta.launcher, 'claude -p 사슬 없는 nohup 은 기동기 아님(분리 프로세스)');
+      assert.equal(srv.parentId, `s:${M}`);
+      assert.ok(g.get('b:toolu_no')?.meta.proc && !g.get('b:toolu_no').meta.launcher, 'claude -p 없는 스크립트 = 분리 프로세스(§103)');
       assert.equal(ln.status, 'done', '같은 기동기를 나중에 다시 띄움');
       assert.equal(ln.meta.endReason, 'superseded');
       assert.equal(ln.endedAt, T(900), '끝 = 마지막 회차 활동');

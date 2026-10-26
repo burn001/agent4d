@@ -158,6 +158,18 @@ async function streamTest(request, env) {
   return new Response(readable, { headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform" } });
 }
 
+/** /control 과 /control/ 아래 전부 — 단 화면이 쓰는 두 경로(/control/events·/control/ack)는 뺀다 */
+function isControlAdminPath(pathname) {
+  let p;
+  try {
+    p = decodeURIComponent(pathname).toLowerCase().replace(/\/+$/, "");
+  } catch {
+    return true;
+  }
+  if (p !== "/control" && !p.startsWith("/control/")) return false;
+  return p !== "/control/events" && p !== "/control/ack";
+}
+
 const HOP_HEADERS =["connection", "keep-alive", "proxy-connection", "transfer-encoding", "te", "trailer", "host"];
 
 async function proxy(request, env, url, token) {
@@ -231,6 +243,8 @@ export default {
       return handleHealth(env);
     }
     if (url.pathname === "/_stream-test") return streamTest(request, env);
+    // 화면 원격 조작: 명령 보내기(control)·화면 목록 등 관리용 경로는 프록시하지 않는다. 원격 화면은 받기만(control/events·/control/ack)
+    if (isControlAdminPath(url.pathname)) return json(404, { error: "not_found" });
     if (url.pathname === "/favicon.ico"&& !readCookie(request, COOKIE)) return new Response(null, { status: 204 });
 
     const token = env.VIEW_TOKEN;

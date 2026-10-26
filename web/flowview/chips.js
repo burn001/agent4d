@@ -8,7 +8,10 @@ import * as THREE from 'three';
 import { nodeVisualState, stateColor, kindIcon, paletteOf, breathe, NODE_STATE } from './flow-style.mjs';
 import { bandCode, cycleProgress } from '../batch-core.mjs';
 import { jobOf } from '../job-core.mjs';
+import { STAND, standYawStep, yawToward } from './tier-core.mjs'; // 세운 배치 장치
 import { JOB_CHIP, jobChipColor, jobChipModel, newJobChipMemo, jobChipAttr, jobBreathes } from './job-chip-core.mjs'; // 작업 칩
+import { RIG, heatRgb, rigCode } from './proc-rig-core.mjs'; // 분리 프로세스 장치
+import { procState, procJobId, jobHeat } from '../job-core.mjs';
 
 const QUAD = 1.9; // 노드 반지름 대비 사각형 반폭(글로우·고리 여백)
 
@@ -25,30 +28,38 @@ void main() {
   vColor = iColor; vKind = iKind; vA = iA; vB = iB; vC = iC; vD = iD; vPart = aPart; vFace = 1.0; vShade = 1.0;
   vec3 C = instanceMatrix[3].xyz;
   float s = length(instanceMatrix[0].xyz);
-  float fl = floor(iC.x + 0.5);  // 0 보통 · 1 배치 장치 · 2 작업 칩(§97) — 정수는 반올림해 푼다(§80.3)
-  bool dev = fl > 0.5 && fl < 1.5;
-  float H = iD.z * s;            // 기둥 두께
+  float fl = floor(iC.x + 0.5);  // 0 보통 · 1 배치 장치 · 2 작업 칩(§97) · 3 분리 프로세스 장치(§103.14) — 정수는 반올림해 푼다(§80.3)
+  bool dev = (fl > 0.5 && fl < 1.5) || fl > 2.5; // 분리 프로세스 장치도 세운 상자(기동기와 같은 틀)
+  float H = iD.z * s;            // 기둥 두께(세운 배치 장치는 앞뒤 깊이)
   float gy = iD.x;               // 바닥 높이
+  // 세운 배치 장치(§51·§80.7): 앞면이 카메라 쪽(iD.w = 방위 yaw, standYawStep). 앞 = fw, 오른쪽 = rt, 위 = +y
+  vec3 fw = vec3(sin(iD.w), 0.0, cos(iD.w)), rt = vec3(cos(iD.w), 0.0, -sin(iD.w));
   vec3 w;
-  if (aPart < 0.5) {             // 윗면: 예전 칩 그림을 바닥과 나란히 눕힘(그림의 위 = -z)
-    vP = aHex * ${QUAD.toFixed(2)};
-    w = C + vec3(vP.x * s, H * 0.5, -vP.y * s);
-  } else if (aPart < 1.5) {      // 옆면: 육각(배치 장치는 넓은 상자) 모서리, 바깥 법선으로 앞뒤·음영
+  if (aPart < 0.5) {             // 윗면: 예전 칩 그림을 바닥과 나란히 눕힘(그림의 위 = -z) — 배치 장치는 세운 앞면(그림의 위 = 위)
+    vP = aHex * (dev ? vec2(1.85, 1.1) : vec2(${QUAD.toFixed(2)})); // 세운 장치는 빛무리 판을 상자 둘레만큼만(옆에서 큰 옅은 판이 보이지 않게)
+    w = dev ? C + rt * (vP.x * s) + vec3(0.0, vP.y * s, 0.0) + fw * (H * 0.5) : C + vec3(vP.x * s, H * 0.5, -vP.y * s);
+  } else if (aPart < 1.5) {      // 옆면: 육각(배치 장치는 세운 상자의 위·아래·양옆) 모서리, 바깥 법선으로 앞뒤·음영
     vec2 q = dev ? aBox : aHex;
     vec2 nn = dev ? aNBox : aNHex;
-    w = C + vec3(q.x * s, (position.z - 0.5) * H, -q.y * s);
-    vec3 n = normalize(vec3(nn.x, 0.0, -nn.y));
+    vec3 n;
+    if (dev) {
+      w = C + rt * (q.x * s) + vec3(0.0, q.y * s, 0.0) + fw * ((position.z - 0.5) * H);
+      n = normalize(rt * nn.x + vec3(0.0, nn.y, 0.0));
+    } else {
+      w = C + vec3(q.x * s, (position.z - 0.5) * H, -q.y * s);
+      n = normalize(vec3(nn.x, 0.0, -nn.y));
+    }
     vFace = dot(n, normalize(cameraPosition - w));
     vShade = 0.45 + 0.55 * max(0.0, dot(n, normalize(vec3(-0.45, 0.6, 0.66))));
     vP = vec2(aU, position.z);
-  } else if (aPart < 2.5) {      // 그림자 원반(바닥): 높을수록 넓고 옅게
+  } else if (aPart < 2.5) {      // 그림자 원반(바닥): 높을수록 넓고 옅게 — 세운 장치는 앞뒤로 납작한 타원
     float hg = max(0.0, C.y - gy);
-    float R = s * (dev ? 1.9 : 1.35) * (1.0 + hg * 0.035);
+    float R = s * (dev ? 1.6 : 1.35) * (1.0 + hg * 0.035);
     vP = aHex;
-    w = vec3(C.x + aHex.x * R, gy + 0.05, C.z - aHex.y * R);
+    w = dev ? vec3(C.x, gy + 0.05, C.z) + rt * (aHex.x * R) - fw * (aHex.y * R * 0.5) : vec3(C.x + aHex.x * R, gy + 0.05, C.z - aHex.y * R);
     vShade = hg;
   } else {                       // 바닥 → 기둥 밑면 점선 기둥줄(세로축 빌보드)
-    float hg = max(0.0, C.y - H * 0.5 - gy);
+    float hg = max(0.0, C.y - (dev ? ${STAND.DEV_HY.toFixed(2)} * s : H * 0.5) - gy);
     vec3 b = vec3(C.x, gy + position.z * hg, C.z);
     vec3 tc = cameraPosition - b;
     vec3 r = normalize(vec3(tc.z, 0.0, -tc.x) + vec3(1e-4, 0.0, 0.0));
@@ -174,8 +185,8 @@ void main() {
   if (alpha < 0.004) discard;
   bool light = uLight > 0.5;
   vec2 p = vP;
-  float flag = floor(vC.x + 0.5);  // 0 보통 · 1 배치 장치 · 2 작업 칩(§97) — 반올림해 푼다(§80.3)
-  bool dev = flag > 0.5 && flag < 1.5, job = flag > 1.5;
+  float flag = floor(vC.x + 0.5);  // 0 보통 · 1 배치 장치 · 2 작업 칩(§97) · 3 분리 프로세스 장치(§103.14) — 반올림해 푼다(§80.3)
+  bool rig = flag > 2.5, dev = (flag > 0.5 && flag < 1.5) || rig, job = flag > 1.5 && flag < 2.5;
   float jc = floor(vC.y + 0.5);
   float T = uTime + seed * 10.0;
   vec3 C = vColor;
@@ -208,12 +219,19 @@ void main() {
     float rim = max(smoothstep(0.18, 0.0, 1.0 - h), smoothstep(0.1, 0.0, h) * 0.4);
     if (job) {                   // §97 작업 칩 옆면: 진행 또렷 · 대기/줄 섬/끝 흐림 · 실패 차분(맥동 없음) · 정체 맥박
       rim *= jc < 0.5 ? 0.45 : jc < 1.5 ? 1.0 : jc < 2.5 ? 0.75 : jc < 3.5 ? 0.5 : jc < 4.5 ? 0.7 : jobBeat(T);
+    } else if (rig) {            // §103.14 분리 프로세스 장치 옆면: 과열만큼 몸이 달아오름(다크 발광 · 라이트 진한 잉크), 정체는 끊긴 맥박, 끝은 차분
+      float rc = floor(vC.y + 0.5), hh = vC.z;
+      rim *= rc < 0.5 ? 1.0 : rc < 1.5 ? jobBeat(T) : rc < 2.5 ? 0.55 : rc < 3.5 ? 0.8 : 0.45;
+      if (rc < 0.5) col = mix(col, light ? C * 0.55 : C, hh * (light ? 0.3 : 0.16) * (0.4 + 0.6 * h));
+      // 옆면 환기 틈(가로 줄 셋) — 돌아가는 기계로 읽히게
+      float vent = step(0.5, fract(h * 9.0)) * step(0.3, h) * step(h, 0.72) * step(0.18, abs(fract(p.x) - 0.5));
+      col = mix(col, light ? C * 0.6 : C * (0.35 + 0.65 * hh), vent * (rc < 0.5 ? 0.22 + 0.3 * hh : 0.1));
     } else {
     if (st > 2.5 && st < 3.5) rim *= 0.5;
     if (st > 3.5 && st < 4.5) rim *= 0.75 + 0.25 * sin(T * 6.0);
     if (st > 4.5) rim *= 0.6;
     }
-    float sp = job ? (jc > 0.5 && jc < 1.5 ? 0.7 : 0.0) : (st > 0.5 && st < 2.5) ? 1.3 : 0.45;
+    float sp = job ? (jc > 0.5 && jc < 1.5 ? 0.7 : 0.0) : rig ? (floor(vC.y + 0.5) < 0.5 ? 1.0 : 0.0) : (st > 0.5 && st < 2.5) ? 1.3 : 0.45;
     float sy = 1.0 - fract(T * sp * 0.5);
     float scan = smoothstep(0.1, 0.0, abs(h - sy)) * (light ? 0.2 : 0.32) * step(0.001, sp);
     float lit = max(max(rim, edge), scan);
@@ -240,7 +258,19 @@ void main() {
     float sy = -1.0 + mod(T * sp, 2.0);
     float scan = smoothstep(0.16, 0.0, abs(p.y - sy)) * (light ? 0.16 : 0.22);
     col = mix(col, C, scan);
-    if (dev) {
+    if (rig) {
+      // §103.14 분리 프로세스 장치 앞면: 어두운 계기 유리 + 위 가장자리 과열 띠 + 계기 줄 두 개의 흐린 바탕(숫자·그래프는 procrig.js 계기판 캔버스가 덮어 그림 —
+      // 멀어서 계기판이 없을 때도 '계기가 달린 기계'로 읽히게). 과열만큼 유리가 물듦(다크 발광 · 라이트 진한 잉크)
+      float rc = floor(vC.y + 0.5), hh = vC.z;
+      col = mix(col, C, (light ? 0.05 : 0.05) + hh * (rc < 0.5 ? (light ? 0.08 : 0.07) : 0.0));
+      float band = smoothstep(0.06, 0.0, abs(p.y - 0.68)) * step(abs(p.x), 1.3);
+      col = mix(col, C, band * (rc < 0.5 ? 0.35 + 0.5 * hh : 0.25));
+      for (int i = 0; i < 2; i++) {
+        vec2 q = p - vec2(0.12, 0.26 - 0.4 * float(i));
+        float row = step(abs(q.x), 1.05) * step(abs(q.y), 0.13);
+        col = mix(col, C, row * (light ? 0.07 : 0.1));
+      }
+    } else if (dev) {
       // 장치 앞면: 위 = 회차 진행 막대(경과/평균), 오른쪽 위 = 진행 표시등, 아래 = 최근 회차 상태 띠(오래된 → 최근)
       // 인스턴스 속성도 varying 으로 오면 보간 오차(±1e-4 안팎, 기기·각도·크기마다 다름)가 붙는다. 정수 값은 반올림해 쓰고 경계 비교는 여유를 둔다
       // (예전엔 칸 수 nb 가 4.9999 가 되면 맨 왼쪽 칸 slot 이 -0.0001 → 빈 칸, code 가 936.9998 이면 끝자리가 바뀌어 화소마다 색이 튀었다 = '지지직')
@@ -282,8 +312,9 @@ void main() {
   if (st > 3.5 && st < 4.5) ring *= 0.75 + 0.25 * sin(T * 6.0);
   if (st > 4.5) ring *= 0.6;
   col = mix(col, light ? C * 0.9 : mix(C, vec3(1.0), 0.1), ring); al = max(al, ring);
-  // 생각 중: 도는 입자 4개 / 도구 사용 중: 도는 호(스피너)
-  if (st > 0.5 && st < 1.5) {
+  // 생각 중: 도는 입자 4개 / 도구 사용 중: 도는 호(스피너) — 분리 프로세스 장치는 로터가 대신함
+  if (rig) {}
+  else if (st > 0.5 && st < 1.5) {
     float best = 0.0;
     for (int i = 0; i < 4; i++) { float a = T * 1.5 + float(i) * 1.5707963; vec2 q = vec2(cos(a), sin(a)) * 1.36; best = max(best, smoothstep(0.075, 0.03, length(p - q))); }
     col = mix(col, C, best); al = max(al, best * 0.8);
@@ -358,7 +389,7 @@ function frame(P, part, hex, box, nh, nb, u, idx) {
 const FS_DEPTH = FS.replace('void main() {', 'void mainColor() {') + `
 void main() { mainColor(); if (gl_FragColor.a < 0.35) discard; }
 `;
-const THICK = { main: 1.0, device: 0.62, other: 0.85 };
+const THICK = { main: 1.0, device: 0.7, other: 0.85 }; // 배치 장치(세움)는 앞뒤 깊이
 
 export class NodeChips {
   constructor(scene, view, cap = 1024) {
@@ -413,6 +444,19 @@ export class NodeChips {
     if (!c) { c = new THREE.Color(jobChipColor(code, this.isLight)); this._jobCol[code] = c; }
     return c;
   }
+  /** 분리 프로세스 장치 칩 값: 상태 번호(0 돎·1 정체·2 끝·3 실패·4 중지) · 과열(자동 진행 작업의 heat) · 색(돎 = 과열 색, 그 밖 상태색) */
+  _rigAttr(v, nowMs) {
+    const st = procState(v.node);
+    const jv = this.view.vis.get(procJobId(v.node));
+    const heat = jv ? jobHeat(jv.node.meta.job) : 0;
+    const m = v._rigC || (v._rigC = { col: new THREE.Color(), rgb: [0, 0, 0], code: 0, heat: 0 });
+    m.code = rigCode(st); m.heat = heat;
+    const P = paletteOf(this.isLight);
+    if (m.code === 0) { heatRgb(heat, this.isLight, m.rgb); m.col.setRGB(m.rgb[0], m.rgb[1], m.rgb[2]); } // 과열 표는 화면 값 그대로(셰이더가 색 변환 없이 씀)
+    else m.col.set(m.code === 1 ? P.jobStale : m.code === 2 ? P.done : m.code === 3 ? P.error : P.stopped);
+    void nowMs;
+    return m;
+  }
   _col(state) {
     let c = this._colCache.get(state);
     if (!c) { c = new THREE.Color(stateColor(state, this.isLight)); this._colCache.set(state, c); }
@@ -421,6 +465,7 @@ export class NodeChips {
   update(now) {
     const view = this.view;
     this.uniforms.uTime.value = now % 1000;
+    const dt = this._t0 != null ? Math.min(0.25, Math.max(0, now - this._t0)) : 0; this._t0 = now;
     const C = this.aColor.array, K = this.aKind.array, A = this.aA.array, B = this.aB.array, D = this.aC.array;
     const nowMs = view.clock ? view.clock() : Date.now();
     // 뒤 → 앞으로(카메라 시선 깊이) 정렬: 깊이 쓰기 없이 겹친 기둥이 바르게 덮이게(300개 정렬 ≈ 0.05ms)
@@ -453,7 +498,8 @@ export class NodeChips {
       this._m.compose(v.group.position, this._q, this._s);
       this.mesh.setMatrixAt(n, this._m);
       // 같은 프로젝트 live 메인이 여럿이면 메인 테두리(상태색 자리)를 그 세션 색으로 — 오류·중지·완료는 상태색 그대로
-      const c = jm ? this.jobColor(jm.code) : v.sessC && v.kind === 'main' && !node.parentId && (st === NODE_STATE.idle || st === NODE_STATE.thinking || st === NODE_STATE.tool) ? v.sessC : this._col(st), kc = view.kindColor(v.kind);
+      const rg = !jm && v.procRig ? this._rigAttr(v, nowMs) : null; // 분리 프로세스 장치: 상태 번호·과열·색
+      const c = rg ? rg.col : jm ? this.jobColor(jm.code) : v.sessC && v.kind === 'main' && !node.parentId && (st === NODE_STATE.idle || st === NODE_STATE.thinking || st === NODE_STATE.tool) ? v.sessC : this._col(st), kc = view.kindColor(v.kind);
       C[n * 3] = c.r; C[n * 3 + 1] = c.g; C[n * 3 + 2] = c.b;
       K[n * 3] = kc.r; K[n * 3 + 1] = kc.g; K[n * 3 + 2] = kc.b;
       const sk = v.scopeK ?? 1;
@@ -465,6 +511,7 @@ export class NodeChips {
       const foc = v.id === view.focusId || v.id === view.hoverId ? 1 : 0;
       B[n * 4] = v.seed; B[n * 4 + 1] = foc; B[n * 4 + 2] = (v.stale ? 0.4 : 1) * (jm ? JOB_CHIP.GLOW[jm.code] ?? 1 : 1); B[n * 4 + 3] = 0;
       if (jm) jobChipAttr(D, n * 4, jm, nowMs); // 작업 칩: (2, 표시 상태, 진행 | -1, 대기 차오름 | -1)
+      else if (rg) { D[n * 4] = RIG.FLAG; D[n * 4 + 1] = rg.code; D[n * 4 + 2] = rg.heat; D[n * 4 + 3] = -1; A[n * 4 + 3] = 0; }
       else if (v.device && v.devInfo) {
         // 배치 장치: 띠(5진수) · 칸 수 · 진행(경과/평균, 진행 중 회차가 없으면 -1)
         const info = v.devInfo;
@@ -474,7 +521,9 @@ export class NodeChips {
         D[n * 4 + 3] = info.running > 0 ? (pr == null ? 1 : pr) : -1;
       } else { D[n * 4] = 0; D[n * 4 + 1] = 0; D[n * 4 + 2] = 0; D[n * 4 + 3] = -1; }
       // 바닥 높이 · 아래층 어둡게 · 기둥 두께
-      E[n * 4] = floorY; E[n * 4 + 1] = v.tierDim || 0; E[n * 4 + 2] = v.device ? THICK.device : jm ? JOB_CHIP.THICK : v.kind === 'main' ? THICK.main : THICK.other; E[n * 4 + 3] = 0;
+      E[n * 4] = floorY; E[n * 4 + 1] = v.tierDim || 0; E[n * 4 + 2] = v.device ? THICK.device : rg ? RIG.THICK : jm ? JOB_CHIP.THICK : v.kind === 'main' ? THICK.main : THICK.other;
+      // 세운 배치 장치: 앞면 방위(카메라 쪽, 크게 벗어날 때만 돎). FlowView 가 집기 상자도 같은 방위로 돌린다
+      E[n * 4 + 3] = v.device || rg ? standYawStep(v._stand || (v._stand = {}), yawToward(v.group.position.x, v.group.position.z, cp.x, cp.z) + STAND.OFFSET, dt, !!view.reduced) : 0;
       n++;
     }
     this.mesh.count = n; this.shadow.count = n; this.depth.count = n;

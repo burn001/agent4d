@@ -4,18 +4,28 @@ import { t as tr, fmtNum } from './i18n.mjs';
 
 export { WARN_PCT, DANGER_PCT };
 
-/** 열화 단계(사용률 하한 %). 셰이더의 smoothstep 구간과 같다 */
+/**
+ * 열화 단계 경계(창 대비 %) — 셰이더(noise.js)·2D(flat-degrade.js)·세기 D·그레인 진폭(degrade-core)·로우패스·험·권장 문구가
+ * 모두 여기서 가져다 쓴다. 2026-10-26 "30% 넘으면 필름 그레인부터"로 20/40/58/75/95 → 30/50/70/90/98
+ */
+export const GRAIN_PCT = 30;      // 필름 그레인 시작
+export const SCAN_PCT = 50;       // 주사선·색 바램
+export const CHROMA_PCT = 70;     // 색수차·비네팅·글리치·배경음악 로우패스 시작
+export const MOSH_PCT = 90;       // 데이터모시·험·"세션 정리 권장"
+export const TOP_PCT = 98;        // 데이터모시·세기 D 가 꽉 차는 곳
+export const GRAIN_FADE = [28, 32]; // 그레인이 0 에서 첫 진폭으로 켜지는 전이 구간
+
 // name 은 지금 언어(사전 sound.ctx.stage.<key>): 선명·필름 그레인·주사선·색 바램·색수차·비네팅·글리치·데이터모시·험
 const stage = (min, key) => ({ min, key, get name() { return tr(`sound.ctx.stage.${key}`); } });
 export const STAGES = [
   stage(0, 'clean'),
-  stage(20, 'grain'),
-  stage(40, 'scan'),
-  stage(58, 'chroma'),
-  stage(75, 'mosh'),
+  stage(GRAIN_PCT, 'grain'),
+  stage(SCAN_PCT, 'scan'),
+  stage(CHROMA_PCT, 'chroma'),
+  stage(MOSH_PCT, 'mosh'),
 ];
-export const NOISE_MIN_PCT = 20;   // 이보다 낮으면 후처리 자체를 건너뛴다(비용 0)
-export const RECOMMEND_PCT = 75;   // "세션 정리 권장" 문구
+export const NOISE_MIN_PCT = GRAIN_PCT;   // 이보다 낮으면 후처리 자체를 건너뛴다(비용 0)
+export const RECOMMEND_PCT = MOSH_PCT;    // "세션 정리 권장" 문구
 export const DEFAULT_STRENGTH = 0.5;
 
 /** 사용률 → 단계 번호(0～4) */
@@ -39,9 +49,10 @@ export function smoothstep(a, b, x) { const t = clamp01((x - a) / (b - a)); retu
 export function noiseParams(pct, strength = DEFAULT_STRENGTH) {
   const L = clamp01((pct || 0) / 100);
   const amp = Math.max(0, Math.min(1, strength)) * 2;
-  const g0 = smoothstep(0.20, 0.40, L), g = g0 * Math.sqrt(g0), s = smoothstep(0.40, 0.58, L), c = smoothstep(0.58, 0.75, L), m = smoothstep(0.75, 0.95, L);
-  // 배경음악 로우패스: 58% 부터 20kHz → 100% 에서 약 700Hz(세기가 셀수록 더 많이 깎음)
-  const lp = smoothstep(0.58, 1.0, L) * Math.min(1, amp);
+  const G = GRAIN_PCT / 100, S = SCAN_PCT / 100, C = CHROMA_PCT / 100, M = MOSH_PCT / 100, T = TOP_PCT / 100;
+  const g0 = smoothstep(G, S, L), g = g0 * Math.sqrt(g0), s = smoothstep(S, C, L), c = smoothstep(C, M, L), m = smoothstep(M, T, L);
+  // 배경음악 로우패스: CHROMA_PCT(70%) 부터 20kHz → 100% 에서 약 700Hz(세기가 셀수록 더 많이 깎음)
+  const lp = smoothstep(C, 1.0, L) * Math.min(1, amp);
   return {
     L, amp,
     grain: g * amp, scan: s * amp, fade: s * amp, chroma: c * amp, vignette: c * amp, glitch: c * amp, mosh: m * Math.min(amp, 1.5),
@@ -50,7 +61,7 @@ export function noiseParams(pct, strength = DEFAULT_STRENGTH) {
   };
 }
 
-/** 후처리가 필요한가(하나라도 20% 이상이거나 정화 연출 중) */
+/** 후처리가 필요한가(하나라도 NOISE_MIN_PCT(30%) 이상이거나 정화 연출 중) */
 export function noiseNeeded(levels, { enabled = true, strength = DEFAULT_STRENGTH, purging = false } = {}) {
   if (!enabled || !(strength > 0)) return false;
   if (purging) return true;
@@ -59,7 +70,7 @@ export function noiseNeeded(levels, { enabled = true, strength = DEFAULT_STRENGT
 
 /**
  * 급락(= /compact·자동 compact, 같은 세션에서 컨텍스트가 크게 줄어듦) 판정.
- * 이전 20%(NOISE_MIN_PCT) 이상에서 15%p 넘게, 그리고 이전의 70% 이하로 떨어졌을 때.
+ * 이전 30%(NOISE_MIN_PCT) 이상에서 15%p 넘게, 그리고 이전의 70% 이하로 떨어졌을 때.
  */
 export function isCtxDrop(prev, next) {
   if (!prev || !next || !isFinite(prev.pct) || !isFinite(next.pct)) return false;

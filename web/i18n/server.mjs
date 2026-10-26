@@ -48,6 +48,7 @@ export default {
     'server.main': 'Main',
     'server.launcher': 'Launcher',
     'server.runner': 'Runner',
+    'server.detached': 'Detached',
     'server.temp': '(temp) ',
     // 계획 보드(server/plans.mjs)
     'server.plan.todo': 'To-dos',
@@ -103,6 +104,7 @@ export default {
     'server.main': '메인',
     'server.launcher': '기동기',
     'server.runner': '러너',
+    'server.detached': '분리 실행',
     'server.temp': '(임시) ',
     'server.plan.todo': '할 일',
     'server.plan.tasks': '작업 목록',

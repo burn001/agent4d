@@ -8,7 +8,7 @@
 // 진행 중 회차와 그 하위만 펼친다. 재무장 Monitor 사슬은 마지막 하나만 그리고 앞 것의 자리를 이어받는다.
 
 import { t as tr } from './i18n.mjs';
-import { isJob, jobOf, jobTags, jobFold } from './job-core.mjs'; // 작업 노드
+import { isJob, jobOf, jobTags, jobFold, isProc, procTags } from './job-core.mjs'; // 작업 노드 · 분리 프로세스
 
 export const BATCH = {
   KEEP_ENDED: 2,        // 장치에 작게 붙여 둘 끝난 회차 수(서버 BATCH_KEEP_ENDED 와 같은 값)
@@ -167,6 +167,7 @@ export function nodeTags(n, byId = null, nowMs = Date.now()) {
   if (n && n.kind === 'monitor' && (m.rearmCount || m.rearmOf)) t.push(tr('cards.tag.rearm', { n: m.rearmCount || 1 }));
   if (isOrphanRoot(n)) t.push(tr(m.likelyMain ? 'cards.tag.likely' : 'cards.tag.external'));
   if (m.inheritedFrom) t.push(tr('cards.tag.inherited')); // /clear 앞 세션에서 이어받은 작업
+  if (isProc(n)) t.push(...procTags(n)); // 정체·rc·들여다봄 N
   return t;
 }
 

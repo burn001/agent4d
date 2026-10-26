@@ -22,6 +22,8 @@ import { timelineOf, pageOf, snapshotAt, PAGE_DEFAULT, PAGE_MAX } from './replay
 import { ArtifactStore, setServiceScripts, isExternalReq, externalEv, externalSnap, externalPayload } from './artifacts.mjs'; // 작업 대상 층
 import { ArchiveSource, isArchiveId, archiveKey, resolveArchiveDir } from './archive.mjs';
 import { t } from './cli-i18n.mjs'; // 콘솔 문구(영어 기본, 한국어 로케일이면 한국어)
+import { ControlHub, handleControlAdmin, readBody } from './control.mjs'; // 화면 원격 조작
+import { sseHeaders } from './sse.mjs';
 
 export const VERSION = readVersion(); // package.json 이 근거
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -260,9 +262,10 @@ function scopeOf(url) {
   return s === 'all' ? 'all' : 'bad';
 }
 
-export function createServer({ token, manager, webRoot = WEB_ROOT, project = null, limits = null, update = null }) {
+export function createServer({ token, manager, webRoot = WEB_ROOT, project = null, limits = null, update = null, adminSecret = null }) {
   const SEC = { 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
-  return http.createServer(async (req, res) => {
+  const control = new ControlHub({ manager }); // 화면 등록·명령 전달·ack
+  const srv = http.createServer(async (req, res) => {
     let url;
     try { url = new URL(req.url, 'http://127.0.0.1'); } catch { res.writeHead(400); res.end(); return; }
     const p = url.pathname;
@@ -272,7 +275,9 @@ export function createServer({ token, manager, webRoot = WEB_ROOT, project = nul
         const u = update ? update.get() : null;
         return sendJson(res, 200, u ? { ok: true, version: VERSION, update: u } : { ok: true, version: VERSION }, SEC);
       }
-      if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, SEC); res.end(); return; }
+      // 명령 보내기·화면 목록: 로컬 관리자만(루프백 + 프록시 표지 없음 + adminSecret). 보기 토큰과 무관하게 먼저 판정
+      if (p === '/control' || p === '/control/clients') { await handleControlAdmin(req, res, url, control, { adminSecret, sendJson, SEC }); return; }
+      if (req.method !== 'GET' && req.method !== 'HEAD' && !(req.method === 'POST' && p === '/control/ack')) { res.writeHead(405, SEC); res.end(); return; }
 
       const auth = checkAuth(req, url, token);
       if (!auth.ok) {
@@ -287,6 +292,23 @@ export function createServer({ token, manager, webRoot = WEB_ROOT, project = nul
       const headers = { ...SEC };
       if (auth.setCookie) headers['Set-Cookie'] = auth.setCookie;
       if (auth.redirect) { res.writeHead(302, { ...headers, Location: auth.redirect, 'Cache-Control': 'no-store' }); res.end(); return; }
+      // 화면 쪽(보기 토큰): 명령 적용 결과·상태 알림, 데이터 SSE 가 없을 때(재생 중 등)의 명령 전용 SSE
+      if (p === '/control/ack') {
+        if (req.method !== 'POST') return sendJson(res, 405, { error: 'method' }, headers);
+        let body;
+        try { body = await readBody(req); } catch { return sendJson(res, 400, { error: 'bad_json' }, headers); }
+        return sendJson(res, control.ack(body) ? 200 : 404, { ok: true }, headers);
+      }
+      if (p === '/control/events') {
+        req.socket.setNoDelay?.(true);
+        req.socket.setTimeout?.(0);
+        res.writeHead(200, sseHeaders(headers));
+        res.write('retry: 3000\n\n');
+        const off = control.attach(req, res, url);
+        const ping = setInterval(() => { if (!res.writableEnded) res.write(': ping\n\n'); }, 15_000);
+        req.on('close', () => { clearInterval(ping); off(); });
+        return;
+      }
 
       if (p === '/sessions') {
         // 프로젝트를 좁히면(매크로 타임라인) 500개까지, sort=start|recent, since=epoch ms|ISO
@@ -326,7 +348,7 @@ export function createServer({ token, manager, webRoot = WEB_ROOT, project = nul
         const sc = scopeOf(url);
         if (sc === 'bad' || !manager.overview) return sendJson(res, sc === 'bad' ? 400 : 404, { error: sc === 'bad' ? 'bad_scope' : 'not_found' }, headers);
         const hub = manager.overview();
-        if (p === '/events') return handleOverviewEvents(req, res, url, hub, { headers, limits, external: isExternalReq(req) });
+        if (p === '/events') { await handleOverviewEvents(req, res, url, hub, { headers, limits, external: isExternalReq(req) }); control.attach(req, res, url); return; }
         await hub.wake();
         const hs = hub.snapshot();
         return sendJsonZ(req, res, 200, isExternalReq(req) ? externalSnap(hs) : hs, headers);
@@ -344,7 +366,9 @@ export function createServer({ token, manager, webRoot = WEB_ROOT, project = nul
           const sid = await manager.resolve(url.searchParams.get('session') || 'auto');
           if (!sid || !(await inProject(manager, project, sid))) return sendJson(res, 404, { error: 'not_found' }, headers);
         }
-        return handleEvents(req, res, url, manager, { headers, limits, external: isExternalReq(req) });
+        await handleEvents(req, res, url, manager, { headers, limits, external: isExternalReq(req) });
+        control.attach(req, res, url); // client= 가 있으면 이 SSE 로 명령도 받는다(SSE 가 열렸을 때만)
+        return;
       }
       return serveStatic(req, res, url, path.resolve(webRoot), headers);
     } catch (e) {
@@ -353,6 +377,8 @@ export function createServer({ token, manager, webRoot = WEB_ROOT, project = nul
       else res.end();
     }
   });
+  srv.control = control;
+  return srv;
 }
 
 /** 실제 파일 기반 매니저(list 포함) */
@@ -383,6 +409,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const cfg = loadConfig(args.config || defaultConfigPath());
   addSecretLiteral(cfg.viewToken);
+  if (cfg.adminSecret) addSecretLiteral(cfg.adminSecret);
   setServiceScripts(cfg.serviceScripts); // 작업 대상 서비스 이름(사용자 설정, 기본 없음)
   const port = args.port || cfg.port || 7788;
   const host = args.host || '127.0.0.1';
@@ -404,7 +431,7 @@ async function main() {
   // 업데이트 확인: 기동 시 + 1시간마다 캐시를 보고 24시간 지났을 때만 네트워크, 꺼짐이면 네트워크 0. --demo 는 AGENT4D_FAKE_UPDATE 가짜 값만
   const update = new UpdateChecker({ home: path.dirname(args.config || defaultConfigPath()), current: VERSION, slug: repoSlugOf(),
     cfg: { updateCheck: cfg.updateCheck }, offline: !!args.demo }).start();
-  const server = createServer({ token: cfg.viewToken, manager, webRoot: args.webRoot || WEB_ROOT, project, limits, update });
+  const server = createServer({ token: cfg.viewToken, manager, webRoot: args.webRoot || WEB_ROOT, project, limits, update, adminSecret: cfg.adminSecret });
   server.keepAliveTimeout = 65_000;
   server.headersTimeout = 70_000;
   server.requestTimeout = 0;

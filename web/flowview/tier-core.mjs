@@ -61,3 +61,32 @@ export const tierDim = (depth) => Math.min(0.42, Math.max(0, depth) * 0.14);
 
 /** 섬 팩 배치(packView hy)에 넘길 높이 범위: 메인 높이 − 바닥 */
 export const tierSpan = (gap, o = TIER) => tierY(0, gap, o) - o.FLOOR;
+
+// ───── 세워 둔 장치(배치 장치 · 사용자 콘솔)의 방향 — 앞면이 카메라 쪽 ─────
+// 카메라를 늘 따라 도는 빌보드가 아니라 '놓인 물건': 카메라 방위가 HYST 넘게 벗어날 때만 그 방위로 부드럽게 돈다
+// (쉬는 동안 궤도 ±16° 안에서는 그대로 서 있어 옆면·시차가 보이고, 손으로 크게 돌리면 다시 앞면을 보인다).
+// OFFSET 만큼 비켜 서서 한쪽 옆면(두께)이 보이게 한다. yaw 0 = 앞면이 +z, 양수면 +x 쪽으로 돈다.
+export const STAND = {
+  HYST: 0.52,     // 이만큼(rad, ≈30°) 벗어나면 돌기 시작
+  RATE: 4.2,      // 지수 속도(1/s) — 0.7초에 거의 다
+  OFFSET: 0.3,    // 비켜 선 각(rad, ≈17°)
+  DEV_HY: 0.82,   // 배치 장치 반높이(칩 배율 단위, 셰이더 devD 세로 0.82 와 같음)
+  DEV_HX: 1.45,   // 배치 장치 반폭
+};
+const wrapPi = (a) => { a = (a + Math.PI) % (Math.PI * 2); if (a < 0) a += Math.PI * 2; return a - Math.PI; };
+/** 점 (px, pz) 에서 카메라 (cx, cz) 를 보는 방위(yaw) */
+export const yawToward = (px, pz, cx, cz) => Math.atan2(cx - px, cz - pz);
+/**
+ * 방향 한 걸음(st 를 고쳐 씀): st = {yaw, turning} | 빈 객체(처음이면 바로 목표). target = 카메라 방위 + OFFSET.
+ * reduced(움직임 줄이기)면 벗어날 때 바로 맞춤. 반환 st.yaw
+ */
+export function standYawStep(st, target, dt, reduced = false, o = STAND) {
+  if (st.yaw == null || !Number.isFinite(st.yaw)) { st.yaw = target; st.turning = false; return st.yaw; }
+  const d = wrapPi(target - st.yaw);
+  if (!st.turning && Math.abs(d) > o.HYST) st.turning = true;
+  if (st.turning) {
+    if (reduced || Math.abs(d) < 0.01) { st.yaw = target; st.turning = false; }
+    else st.yaw = wrapPi(st.yaw + d * (1 - Math.exp(-Math.max(0, dt) * o.RATE)));
+  }
+  return st.yaw;
+}

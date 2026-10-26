@@ -3,7 +3,8 @@
 //  ③ 자식 집계·섬 요약, ④ 화면 배치(placeCard·sheetMode), ⑤ 자동 닫힘 판정(autoCloseReason).
 import { isLauncher, isRunner, isCycle, isOrphanRoot, deviceInfo, deviceSummary, fmtDur } from './batch-core.mjs';
 import { t as tr, fmtTime, fmtDateTime } from './i18n.mjs';
-import { isJob, jobOf, jobInspect, jobStale, jobTags, jobFold, jobDisplayState, jobProgress, jobProgressText, isJobEndedState } from './job-core.mjs';
+import { isJob, jobOf, jobInspect, jobStale, jobTags, jobFold, jobDisplayState, jobProgress, jobProgressText, isJobEndedState,
+  procOf, procState, procJobId, jobLaneValues, jobHeat, heatLevel, jobEtaMs, fmtRate } from './job-core.mjs';
 
 export const INSPECT = {
   TOOLS: 8,          // 노드당 최근 도구 호출
@@ -308,6 +309,7 @@ export const JOB_DISP = ['queued', 'running', 'waiting', 'done', 'failed', 'stal
 export function jobSrcText(src) {
   if (!src) return '';
   if (src === 'protocol') return tr('cards.job.src.protocol');
+  if (src === 'auto') return tr('cards.job.src.auto'); // 진행 줄 자동 인식
   if (String(src).startsWith('rule:')) return tr('cards.job.src.rule', { name: String(src).slice(5) });
   return String(src);
 }
@@ -414,4 +416,52 @@ export const targetKey = (t) => (!t ? '' : t.type === 'cluster' ? 'c:' + t.pid :
 export function easeToward(cur, want, dt, rate = 14) {
   const k = 1 - Math.exp(-rate * Math.max(0, dt));
   return cur + (want - cur) * k;
+}
+
+// ---------- 분리 프로세스 · 진행 레인 표(세 표현 공용 카드 — 숫자는 job-core 공용 함수 그대로) ----------
+const cnt = (v) => Math.floor(Math.max(0, Number(v) || 0)).toLocaleString('en-US');
+/**
+ * 진행 레인 표: 레인마다 [열쇠 · 값(보간, /total, 단위) · 처리율 · 최장 · 과열] + 작업 전체 처리율·과열 단계·남은 시간.
+ * 레인이 없으면 null.
+ * @returns {{rows:[{key, value, unit, total, ratio, rate, last, heat, level, pass}], rate, heat, level, etaMs, etaText}|null}
+ */
+export function laneTableModel(job, nowMs) {
+  const lanes = jobLaneValues(job, nowMs);
+  if (!lanes.length) return null;
+  const rows = lanes.map((l) => ({
+    key: String(l.key), value: cnt(l.value) + (Number(l.total) > 0 ? '/' + cnt(l.total) : ''), unit: l.unit || '', total: l.total ?? null,
+    ratio: l.ratio, rate: fmtRate(l.rate), last: l.last ? `${l.last.v}${l.last.u || ''}` : '', heat: Math.round((l.heat || 0) * 100) / 100, level: heatLevel(l.heat || 0),
+    pass: l.pass > 1 ? tr('cards.lane.pass', { n: l.pass }) : '',
+  }));
+  const heat = jobHeat(job), etaMs = jobEtaMs(job, nowMs);
+  return { rows, rate: job && job.rate > 0 ? fmtRate(job.rate) : '', heat: Math.round(heat * 100) / 100, level: heatLevel(heat), etaMs,
+    etaText: etaMs != null && !isJobEndedState(job.state) ? tr('cards.lane.eta', { t: fmtDur(Math.max(1000, etaMs)) }) : '' };
+}
+
+/**
+ * 분리 프로세스 노드 카드: 상태 · 프로그램(스크립트) · 떼어 띄운 방식 · 로그 경로(서버가 마스킹한 그대로) · 들여다봄 횟수(마지막 상대 시간) · 끝난 까닭·rc
+ * + 그 자동 진행 작업의 레인 표·마지막 진행 줄. 프로세스가 아니면 null.
+ * @param nodes Map id → node
+ */
+export function procCardModel(n, nodes, nowMs) {
+  const p = procOf(n);
+  if (!p) return null;
+  const st = procState(n);
+  const rows = [];
+  rows.push({ key: 'state', label: tr('cards.proc.r.state'), value: tr('cards.proc.st.' + st), title: '' });
+  const prog = [p.prog, p.script].filter(Boolean).join(' · ');
+  if (prog) rows.push({ key: 'prog', label: tr('cards.proc.r.prog'), value: prog, title: p.cmd || '' });
+  if (p.via) rows.push({ key: 'via', label: tr('cards.proc.r.via'), value: String(p.via), title: '' });
+  if (p.log) rows.push({ key: 'log', label: tr('cards.proc.r.log'), value: String(p.log), title: String(p.log), mono: true });
+  if (p.watchCount > 0) {
+    const lw = tsOf(p.lastWatchAt);
+    rows.push({ key: 'watch', label: tr('cards.proc.r.watch'), value: tr('cards.proc.watchN', { n: p.watchCount, t: lw ? fmtAgo(Math.max(0, nowMs - lw)) : '' }), title: lw ? fmtDateTime(lw, { seconds: true }) : '' });
+  }
+  if (p.endReason || p.rc != null) {
+    const why = p.endReason ? tr('cards.proc.end.' + p.endReason) : '';
+    rows.push({ key: 'end', label: tr('cards.proc.r.end'), value: [why, p.rc != null ? `rc ${p.rc}` : ''].filter(Boolean).join(' · '), title: '' });
+  }
+  const jn = nodes && nodes.get ? nodes.get(procJobId(n)) : null;
+  const job = jn ? jobOf(jn) : null;
+  return { state: st, rows, lanes: job ? laneTableModel(job, nowMs) : null, line: job && job.line ? job.line : '', jobId: jn ? jn.id : null };
 }

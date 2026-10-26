@@ -17,6 +17,7 @@ const IDLE_MS = 60_000;
 const GAP_MS = 60_000;
 const OUTPUT_PIECE = 600;
 const OUTPUT_PIECES_MAX = 60;
+const PROC_PIECE = 0, PROC_PIECES_MAX = 400; // 분리 프로세스 로그: 한 줄씩(줄이 많으면 400 조각으로 고르게 묶음)
 const SESSION_KINDS = new Set(['main', 'claude-p']);
 const RANK = { 'node-add': 0, 'node-update': 1, 'tool-start': 2, 'tool-end': 4 };
 const rankOf = (type) => RANK[type] ?? 3;
@@ -231,19 +232,22 @@ export async function normalize(rt, { now = Date.now() } = {}) {
     const lines = text.split('\n');
     if (lines.length && lines[lines.length - 1] === '') lines.pop();
     if (!lines.length) continue;
+    // 분리 프로세스 로그는 진행 레인이 줄마다 움직이게 잘게(조각 수 상한도 넉넉히)
+    const isProc = !!node.meta?.proc;
+    const pieceMax = isProc ? PROC_PIECE : OUTPUT_PIECE, piecesMax = isProc ? PROC_PIECES_MAX : OUTPUT_PIECES_MAX;
     let pieces = [];
     let cur = '', curEnd = 0;
     for (let i = 0; i < lines.length; i++) {
       const ln = lines[i];
-      if (cur && cur.length + 1 + ln.length > OUTPUT_PIECE) { pieces.push({ text: cur, end: curEnd }); cur = ''; }
+      if (cur && cur.length + 1 + ln.length > pieceMax) { pieces.push({ text: cur, end: curEnd }); cur = ''; }
       cur = cur ? `${cur}\n${ln}` : ln;
       curEnd = i + 1;
     }
     if (cur) pieces.push({ text: cur, end: curEnd });
-    if (pieces.length > OUTPUT_PIECES_MAX) {
+    if (pieces.length > piecesMax) {
       const P = pieces.length, merged = [];
-      for (let k = 0; k < OUTPUT_PIECES_MAX; k++) {
-        const a = Math.floor((k * P) / OUTPUT_PIECES_MAX), b = Math.floor(((k + 1) * P) / OUTPUT_PIECES_MAX);
+      for (let k = 0; k < piecesMax; k++) {
+        const a = Math.floor((k * P) / piecesMax), b = Math.floor(((k + 1) * P) / piecesMax);
         const grp = pieces.slice(a, b);
         if (grp.length) merged.push({ text: grp.map((x) => x.text).join('\n'), end: grp[grp.length - 1].end });
       }
@@ -258,10 +262,10 @@ export async function normalize(rt, { now = Date.now() } = {}) {
       end = Number.isFinite(mt) && mt >= start ? Math.min(sessionEnd, mt) : sessionEnd;
     }
     if (end < start) end = start;
-    const L = lines.length;
+    const timeAt = lineTimer(lines, isProc && rt.procAnchors ? rt.procAnchors(o.nodeId) : null, start, end);
     for (const p of pieces) {
       if (!p.text.trim()) continue;
-      const t = Math.min(end, start + Math.round(((end - start) * p.end) / L));
+      const t = timeAt(p.end);
       const panel = rt.replayOutputPanel ? rt.replayOutputPanel(o.nodeId, lines, p.end) : null; // 출력 꼬리(라이브와 같은 규칙)
       const ix = rt.outputIx ? rt.outputIx(o.nodeId, p.text + '\n') : null; // 진행(라이브와 같은 누적 규칙)
       const ev = g.emit({ ts: iso(t), type: 'output', nodeId: o.nodeId, text: p.text, synth: true, ...(panel ? { panel } : {}), ...(ix ? { ix } : {}) });
@@ -272,6 +276,12 @@ export async function normalize(rt, { now = Date.now() } = {}) {
         rt.jobFeed(o.nodeId, p.text + '\n', iso(t));
         for (let k = r0; k < ring.length; k++) { ring[k].synth = true; items.push({ e: ring[k], t, o: (oSeq += 4), moved: false }); }
       }
+    }
+    // 배분을 마친 스트림의 자동 진행 작업 마무리(노드가 끝났으면 끝, 아니면 솎아 낸 마지막 레인 값)
+    if (rt.jobFeedEnd) {
+      const r0 = ring.length;
+      rt.jobFeedEnd(o.nodeId, iso(end));
+      for (let k = r0; k < ring.length; k++) { ring[k].synth = true; items.push({ e: ring[k], t: end, o: (oSeq += 4), moved: false }); }
     }
   }
   await nextTick();
@@ -332,6 +342,8 @@ export async function normalize(rt, { now = Date.now() } = {}) {
   for (const node of g.nodes.values()) {
     const id = node.id;
     if (node.meta?.job) continue; // 작업 노드 상태는 작업 상태가 정한다(대기 합성 없음 — 라이브 sweep 과 같음)
+    // 분리 프로세스는 적응 정체 문턱(meta.proc.staleSec, 최소 60초)으로 대기 합성(라이브 _sweepProc 와 같은 생각)
+    const idleMs = node.meta?.proc ? Math.max(IDLE_MS, (Number(rt.procs?.get(id)?.staleSec ?? node.meta.procStaleSec) || 300) * 1000) : IDLE_MS;
     let list = per.get(id) || [];
     if (node.kind === 'workflow') {
       const extra = (childrenOf.get(id) || []).flatMap((c) => per.get(c) || []);
@@ -343,8 +355,8 @@ export async function normalize(rt, { now = Date.now() } = {}) {
       const own = it.e.nodeId === id;
       if (own && it.e.type === 'node-add') { status = it.e.node.status || 'active'; last = it.t; lastO = it.o; continue; }
       if (status == null) continue;
-      if (last != null && status === 'active' && it.t - last > IDLE_MS && !(isSession && open > 0)) {
-        mkUpdate(id, last + IDLE_MS, 'idle', lastO + 1);
+      if (last != null && status === 'active' && it.t - last > idleMs && !(isSession && open > 0)) {
+        mkUpdate(id, last + idleMs, 'idle', lastO + 1);
         status = 'idle'; pendingActive = true;
       }
       const isStatusUpdate = own && it.e.type === 'node-update' && it.e.patch && 'status' in it.e.patch;
@@ -368,8 +380,8 @@ export async function normalize(rt, { now = Date.now() } = {}) {
     const busy = isSession && node.sessionId && rt.index?.liveStatus?.(node.sessionId) === 'busy';
     // 끝 구간은 라이브 sweep 과 같은 규칙: 세션 노드는 프로세스가 busy 일 때만 active 유지. 닫히지 않은 도구(중단·강제 종료로
     // tool_result 가 없는 호출)가 남아 있어도 대기로 바꾼다(예전: open > 0 이면 영영 '작업 중'으로 남아 라이브 /state 와 달랐다).
-    if (status === 'active' && last != null && tailRef - last > IDLE_MS && !busy) {
-      mkUpdate(id, last + IDLE_MS, 'idle', lastO + 1);
+    if (status === 'active' && last != null && tailRef - last > idleMs && !busy) {
+      mkUpdate(id, last + idleMs, 'idle', lastO + 1);
     }
   }
   for (const s of synthItems) items.push(s);
@@ -655,4 +667,40 @@ export class ReplayCache {
     if (r === TIMEOUT) return { building: true, progress: this.progressOf(key) || { bytesRead: 0, bytesTotal: 0, files: 0 } };
     return r;
   }
+}
+
+/**
+ * 출력 줄 배분 시각. 기본은 시작 → 끝 사이 줄 수에 비례. 분리 프로세스는 들여다본 결과에 보인 줄(그 시각까지 로그에
+ * 있던 줄)을 닻으로 삼아 닻 사이를 나눈다 — 첫 1만 줄이 1초에 쏟아지고 나머지가 몇 시간 걸린 로그도 실제 흐름에 가깝게.
+ * @param lines 로그 전체 줄 · anchors [{line(앞뒤 공백 뺀 줄), t(ms)}] | null
+ * @returns (k) => 앞 k 줄까지 쓰인 시각(ms)
+ */
+export function lineTimer(lines, anchors, start, end) {
+  const L = lines.length;
+  const lin = (k) => Math.min(end, start + Math.round(((end - start) * k) / Math.max(1, L)));
+  if (!anchors || !anchors.length || !L) return lin;
+  const at = new Map();
+  lines.forEach((l, i) => { const k = l.trim(); if (!k) return; if (!at.has(k)) at.set(k, []); at.get(k).push(i); });
+  const pts = [[0, start]];
+  let from = 0;
+  for (const a of [...anchors].sort((x, y) => x.t - y.t)) {
+    const list = at.get(a.line);
+    const i = list && list.find((x) => x >= from);
+    if (i == null || !Number.isFinite(a.t)) continue;
+    const prev = pts[pts.length - 1];
+    const t = Math.min(end, Math.max(prev[1], a.t));
+    if (i + 1 <= prev[0]) continue;
+    pts.push([i + 1, t]);
+    from = i;
+  }
+  if (pts.length === 1) return lin;
+  const last = pts[pts.length - 1];
+  if (last[0] < L) pts.push([L, Math.max(last[1], end)]);
+  return (k) => {
+    for (let j = 1; j < pts.length; j++) {
+      const [k1, t1] = pts[j], [k0, t0] = pts[j - 1];
+      if (k <= k1) return Math.round(t0 + ((t1 - t0) * (k - k0)) / Math.max(1, k1 - k0));
+    }
+    return pts[pts.length - 1][1];
+  };
 }

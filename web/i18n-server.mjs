@@ -55,6 +55,7 @@ const SEG = [
   [/^메인$/, () => t('server.main')],
   [/^기동기$/, () => t('server.launcher')],
   [/^러너$/, () => t('server.runner')],
+  [/^분리 실행$/, () => t('server.detached')], // 분리 프로세스 라벨 '분리 실행 · <스크립트>'
   [/^이벤트: ([\s\S]*)$/, (m) => t('server.event', { x: m[1] })],
   [/^완료$/, () => t('server.done')],
   [/^실패$/, () => t('server.failed')],

@@ -108,7 +108,7 @@ export class FlowLayer {
       const e = easeInOut(Math.max(0, u));
       // 신호 열화: 그 세션 흐름선 위 패킷이 중간 구간에서 사라졌다 다시 나타남(소실)
       if (DEG.on && !DEG.reduced && packetGone((s.t0 * 1000) | 0, u, degOfLink(s.from, s.to))) continue;
-      const a = fv.group.position, b = tv.group.position;
+      const a = view.linkEnd ? view.linkEnd(fv, true) : fv.group.position, b = view.linkEnd ? view.linkEnd(tv, false) : tv.group.position; // 흐름 3D 세운 장치 변
       const col = this._colorOf(s);
       const lp = view.linkPath || linkPoint; // 흐름 표현은 곡선 빔 위로
       lp(pt, a, b, e, s.arc);

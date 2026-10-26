@@ -3,9 +3,12 @@
 // 필요 없을 때(꺼짐·세기 0·모든 대상 문턱 미만·정화·버스트 없음)는 원래 render 를 그대로 불러 비용 0.
 // 메인 노드 잔상·윤곽 이중화·끊김과 문턱 버스트도 같은 1패스에서(uMain·uMOff·uBurst).
 import * as THREE from 'three';
-import { MAX_REGIONS, PurgeBook } from './ctx-core.mjs';
+import { MAX_REGIONS, PurgeBook, GRAIN_PCT, SCAN_PCT, CHROMA_PCT, MOSH_PCT, TOP_PCT, GRAIN_FADE } from './ctx-core.mjs';
 // PurgeBook·MAX_REGIONS 는 순수 모듈(ctx-core.mjs)로 옮겼다 — 2D 화면이 three 없이 쓰게. 예전 이름으로 다시 내보냄
 export { MAX_REGIONS, PurgeBook };
+
+// 단계 경계(ctx-core 상수, %)를 GLSL 실수 문자열로 — FRAG 템플릿에 끼워 넣는다(MAX_REGIONS 와 같은 방식)
+const F = (pct) => (pct / 100).toFixed(2);
 
 const VERT = /* glsl */`
 varying vec2 vUv;
@@ -63,12 +66,12 @@ void main() {
     bu = max(bu, uBurst[i] * f);
   }
   float t = uTime * uMotion;   // uTime 은 JS 에서 600초 주기로 감아 보낸다(정밀도)
-  // 단계 경계(ctx-core STAGES 와 같음): 20 그레인 · 40 주사선·색 바램 · 58 색수차·비네팅·글리치 · 75 데이터모시
+  // 단계 경계(ctx-core 상수에서 끼워 넣음): 30 그레인 · 50 주사선·색 바램 · 70 색수차·비네팅·글리치 · 90 데이터모시(98 에서 꽉 참)
   // §76 진폭 재조정: 그레인은 시작부터 보이게(1.5제곱 → 1제곱, 0.022 → 0.034), 주사선 0.22 → 0.34, 색수차 6 → 9px, 글리치 칸 1할 → 2할
-  float g = smoothstep(0.20, 0.40, L) * uAmpG;
-  float sc = smoothstep(0.40, 0.58, L) * uAmp;
-  float ch = max(smoothstep(0.58, 0.75, L) * uAmp, bu * 1.6);
-  float mo = max(smoothstep(0.75, 0.95, L) * min(uAmp, 1.5), bu * 0.9);
+  float g = smoothstep(${F(GRAIN_PCT)}, ${F(SCAN_PCT)}, L) * uAmpG;
+  float sc = smoothstep(${F(SCAN_PCT)}, ${F(CHROMA_PCT)}, L) * uAmp;
+  float ch = max(smoothstep(${F(CHROMA_PCT)}, ${F(MOSH_PCT)}, L) * uAmp, bu * 1.6);
+  float mo = max(smoothstep(${F(MOSH_PCT)}, ${F(TOP_PCT)}, L) * min(uAmp, 1.5), bu * 0.9);
 
   vec2 uv = vUv;
   // 메인 노드 잔상·윤곽 이중화·끊김(§76): 노드 둘레 원 안에서 본체는 흔들리며 가끔 튀고(uMOff.xy), 0.2초 늦은 사본이 겹친다(uMOff.zw)
@@ -128,8 +131,8 @@ void main() {
     col *= 1.0 + clamp(sc * 0.2, 0.0, 0.35) * sin(px.y * 2.094 + t * 3.0);
   }
   // 필름 그레인(§76.8): 입자 uGrainPx(장치 px = max(2, round(dpr×1.5)) — CSS 1.5～2px), 24fps 로 바뀜(움직임 줄이기면 고정).
-  // 진폭(degrade-core grainAmp 와 같은 식) 시작(+50k) ±10/255 → +150k ±20 → 최대 ±30. 밝기 의존: 어두운 화소는 더하기, 밝은 화소는 빼기 쪽 + 옅은 색 입자
-  float gA = smoothstep(0.18, 0.22, L) * (10.0 + 10.0 * smoothstep(0.20, 0.58, L) + 10.0 * smoothstep(0.58, 0.95, L)) / 255.0 * uAmpG;
+  // 진폭(degrade-core grainAmp 와 같은 식) 시작(30%) ±10/255 → 70% ±20 → 98% ±30. 밝기 의존: 어두운 화소는 더하기, 밝은 화소는 빼기 쪽 + 옅은 색 입자
+  float gA = smoothstep(${F(GRAIN_FADE[0])}, ${F(GRAIN_FADE[1])}, L) * (10.0 + 10.0 * smoothstep(${F(GRAIN_PCT)}, ${F(CHROMA_PCT)}, L) + 10.0 * smoothstep(${F(CHROMA_PCT)}, ${F(TOP_PCT)}, L)) / 255.0 * uAmpG;
   float ga = gA + mo * 0.03 + bu * 0.08;
   if (ga > 0.0005) {
     vec2 cell = floor(px / uGrainPx);

@@ -14,6 +14,7 @@ import { toolFileRefs } from '../web/conflict-core.mjs';
 import { ixDemoStep } from './ix-demo.mjs'; // 특별 상호작용 시나리오
 import { artDemoStep, artDemoHistory } from './art-demo.mjs'; // 작업 대상 시나리오
 import { MemoryArtifactSource } from './artifacts.mjs';
+import { procDemoStart } from './proc-demo.mjs'; // 분리 프로세스 시나리오
 
 // 데모 패널 결과 본문(가짜 값)
 const DEMO_BODY = {
@@ -65,7 +66,7 @@ class DemoRuntime {
     this.ready = Promise.resolve(this);
     this._build();
     this.graph.finishLoad();
-    if (autoplay) this._schedule();
+    if (autoplay) { this._schedule(); if (!px) this._procDemo = procDemoStart(this); } // 단일 세션 데모만(전체 보기 메인들은 그대로)
   }
 
   /** 노드 id 에 앞붙이(px)를 넣는다: 'a:demo-sub-1' → 'a:<px>demo-sub-1' */
@@ -102,7 +103,7 @@ class DemoRuntime {
     const g = this.graph;
     const ts = new Date().toISOString();
     const ids = [...g.nodes.keys()];
-    const agentIds = ids.filter((id) => !id.startsWith('b:') && !id.startsWith('m:') && !id.startsWith('w:'));
+    const agentIds = ids.filter((id) => !id.startsWith('b:') && !id.startsWith('m:') && !id.startsWith('w:') && !id.startsWith('j:'));
     const N = (id) => this.N(id);
     const M = `s:${this.sessionId}`;
     const k = this.tick++;
@@ -196,7 +197,7 @@ class DemoRuntime {
     }
   }
 
-  close() { clearTimeout(this.timer); }
+  close() { clearTimeout(this.timer); this._procDemo?.close(); }
 }
 
 export class DemoManager {

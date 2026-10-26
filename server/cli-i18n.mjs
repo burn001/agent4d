@@ -291,6 +291,8 @@ const en = {
   archive add <session ID…> [--dir D] [--why reason]
                                                 copy source sessions into the archive (timestamps kept, SHA-256 checked, skips existing), update the index
   archive list [--dir D] [--json]               list archived sessions (archive: --dir > CCVIZ_ARCHIVE > config archiveDir)
+  ctl <command> [value] [--client id|name] [--temp] [--json] | ctl clients | ctl state | ctl help
+                                                control open viewers from this PC (theme, view, scope, sound, pause…)
   update [--check [--json] [--force]] [--yes]   check GitHub for a newer release (cached 24h) / update this git clone (fast-forward), the copied skill and the running server
   help                                          show this help
 Language: --lang en|ko > CCVIZ_LANG > LC_ALL/LC_MESSAGES/LANG > system locale (default English)`,
@@ -556,6 +558,8 @@ const ko = {
   statusline uninstall | status                 설치 전으로 되돌림 / 설치·기록 상태
   archive add <세션ID…> [--dir D] [--why 사유]  원본 세션을 보관함에 복사(시각 보존·SHA-256 대조, 있으면 건너뜀)·index 갱신
   archive list [--dir D] [--json]               보관된 세션 목록 (보관함: --dir > CCVIZ_ARCHIVE > config archiveDir)
+  ctl <명령> [값] [--client id|이름] [--temp] [--json] | ctl clients | ctl state | ctl help
+                                                열린 화면을 이 PC 에서 조작(테마·표현·범위·소리·일시정지…)
   update [--check [--json] [--force]] [--yes]   새 릴리스 확인(24시간 캐시) / 이 git 클론(fast-forward)·복사한 스킬·실행 중 서버 갱신
   help                                          이 도움말
 언어: --lang en|ko > CCVIZ_LANG > LC_ALL/LC_MESSAGES/LANG > 시스템 로케일 (기본 영어)`,

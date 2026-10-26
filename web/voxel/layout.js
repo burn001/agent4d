@@ -7,8 +7,9 @@
 
 import { isLauncher, isCycle, isEndedSt, isRunner } from '../batch-core.mjs';
 import { mapSeatLike, quarter } from './xf.mjs';
-import { isJob } from '../job-core.mjs';
+import { isJob, isProc } from '../job-core.mjs';
 import { placeJobs } from './vx-job-core.mjs';
+import { assignBays, bayLocal } from './vx-proc-core.mjs';
 
 const PI = Math.PI;
 export const OFFICE = { w: 24, d: 18 };
@@ -294,8 +295,13 @@ export function computeOffice(nodesIn, rootId, prev) {
     // 기계: 서버랙(bash-bg)·모니터 벽(monitor)
     const slots = { rack: new Set(), screen: new Set() };
     const mrest = [];
+    // 분리 프로세스 = 생산 라인(서버랙 줄 앞, 사무실마다 2줄) — 넘치거나 서버랙이 많으면 예전처럼 서버랙
+    const isBg = (n) => !isBatch(n) && kindOf(n) === 'bash-bg';
+    const procs = off.machines.filter((n) => isBg(n) && isProc(n));
+    const bays = assignBays(procs, (id) => { const pm = prevMach.get(id); return pm && pm.roomId === off.id ? pm : null; }, off.machines.filter((n) => isBg(n) && !isProc(n)).length);
     for (const n of off.machines) {
       if (isBatch(n)) { localSeat.set(n.id, { room: off, kind: 'batch', slot: bslot.get(n.id) }); continue; }
+      if (bays.kind.get(n.id) === 'proc') { localSeat.set(n.id, { room: off, kind: 'proc', slot: bays.slot.get(n.id) }); continue; }
       const type = kindOf(n) === 'bash-bg' ? 'rack' : 'screen';
       // 재무장 Monitor는 앞 것의 화면 자리를 그대로 잇는다
       const pm = prevMach.get(n.id) || (n.meta && n.meta.rearmOf ? prevMach.get(n.meta.rearmOf) : null);
@@ -423,6 +429,11 @@ export function computeOffice(nodesIn, rootId, prev) {
       const x = o.x + sp.x, z = o.z + sp.z;
       room.batches.push({ x, z, nodeId: id });
       out.machine.set(id, { roomId: room.id, x, y: 0, z, type: 'batch', slot: s.slot, face: 0 });
+      continue;
+    }
+    if (s.kind === 'proc') { // 생산 라인: 기계 중심(전광판·컨베이어·팔레트는 그리는 쪽이 BAY 치수로)
+      const b = bayLocal(s.slot);
+      out.machine.set(id, { roomId: room.id, x: o.x + b.x, y: 0, z: o.z + b.z, type: 'proc', slot: s.slot, face: 0 });
       continue;
     }
     if (s.kind === 'rack' || s.kind === 'screen') {

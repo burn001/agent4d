@@ -27,7 +27,9 @@ import { spawnLinks } from '../spawn-link.mjs';
 import { VxSessCore, PLANE_DUR, ease } from '../voxel/vx-sess-core.mjs';
 import { quarter, windowWall } from '../voxel/xf.mjs';
 import { Vx2DExtra } from './vx2d-extra.js';
+import { Vx2DProcs } from './vx2d-proc.js'; // 분리 프로세스 = 생산 라인 · 들여다보기 심부름
 import { roleOf, overseeSpot } from '../voxel/office-core.mjs';
+import { watchPhase } from '../voxel/vx-proc-core.mjs';
 import { DEG, degOf, glitchAt, seedOf } from '../degrade-core.mjs';
 import { t as tr } from '../i18n.mjs';
 
@@ -74,13 +76,14 @@ export class Voxel2DView extends FlatView {
     this.vsess = new VxSessCore(this); // 라운지·이사·충돌·메시지(3D 복셀과 같은 규칙)
     this._layoutVer = 0;
     this.vx = new Vx2DExtra(this); // 바닥 조명 라인·패킷·홀로그램 모니터·특별 상호작용·의뢰인 창구
+    this.vxp = new Vx2DProcs(this); // 생산 라인
     this.applyTheme();
   }
 
   // ---------------- 여러 live 세션 ----------------
   setSessions({ book } = {}) { this.vsess.setBook(book || null); this.invalidate(); }
   /** 흐름 연출: 바탕(말 한 줄) + 바닥 패킷·특별 상호작용·의뢰인 창구 */
-  flowEvent(ev, opts = {}) { super.flowEvent(ev, opts); this.vx.event(ev, opts); }
+  flowEvent(ev, opts = {}) { super.flowEvent(ev, opts); this.vx.event(ev, opts); this.vxp.event(ev); }
   sessionMsg(ev) { const ok = this.vsess.message(ev, this._now); if (ok) this.invalidate(); return ok; }
   setScope(scope = {}) {
     super.setScope(scope);
@@ -130,6 +133,7 @@ export class Voxel2DView extends FlatView {
       const m = { id: node.id, node, type: job ? 'job' : isLauncher(node) ? 'batch' : MACHINE_KIND[kind], flashUntil: 0, endWall: null, heldUntil: 0, released: false, appearT0: spawn && !rearm ? now : null, pos: null };
       if (isEnded(node) && !job) { m.endWall = now; m.heldUntil = now + (recent ? this._hold() : 0); if (!recent && !spawn) m.released = true; }
       this.machines.set(node.id, m);
+      this.vxp.seedNode(node); // 열린 들여다보기(스냅샷)
     } else {
       const lead = kind === 'main' || (kind === 'claude-p' && !isCycle(node, nm)) || node.id === this.rootId || (!node.parentId && !this.rootId);
       const ch = new Character(node.id, node, { lead });
@@ -194,6 +198,7 @@ export class Voxel2DView extends FlatView {
     if (ch) this._releaseStation(ch);
     this._removing.delete(id);
     this.chars.delete(id); this.machines.delete(id);
+    if (this.vxp) this.vxp.dropNode(id);
     super._dropNode(id);
     this._settleUntil = this.animT + 0.7;
   }
@@ -203,6 +208,7 @@ export class Voxel2DView extends FlatView {
     this.layout = null; this.rooms = []; this.roomsById.clear();
     if (this.bubbles) this.bubbles.clear();
     if (this.vx) this.vx.clear();
+    if (this.vxp) this.vxp.clear();
     super.reset();
   }
   // 퇴장은 캐릭터 걷기(바탕의 흐려짐 퇴장 안 씀)
@@ -541,6 +547,8 @@ export class Voxel2DView extends FlatView {
     // 이사 보간·충돌 방문
     if (this.vsess.stepMoves(now)) { this._staticVer = (this._staticVer || 0) + 1; this._layoutVer++; level = 2; }
     this.vx.step(now, dt); // 팀장 심부름·모니터 열림
+    this.vxp.step(now, dt); // 들여다보기 → 심부름 · 생산 라인 장부
+    if (!this.reduced) level = Math.max(level, this.vxp.animating(now));
     this.vsess.stepConflicts(now);
     if (this.vsess.pairs.length && !this.reduced) level = Math.max(level, 1);
     if (this.vsess.livePlanes(now).length) level = 2;
@@ -681,6 +689,7 @@ export class Voxel2DView extends FlatView {
       if (ch && v._on) this._drawChar(ctx, ch, v, s, now);
     }
     drawRings(this, ctx, now, s);
+    this.vxp.drawPulses(ctx, now, s); // 자리에서 보기·백그라운드 들여다보기 빛줄
     this.vx.drawIx(ctx, now, s);        // 특별 상호작용 은유
     this.vx.drawClient(ctx, now, s);    // 의뢰인 창구
     this._drawPlanes(ctx, s, now); // 종이비행기
@@ -1040,6 +1049,8 @@ export class Voxel2DView extends FlatView {
     v._sp = v._sp || {}; v._sp.x = x; v._sp.y = y;
     ctx.globalAlpha = A * Math.min(1, sk * 1.3) * (m.removing ? 0.4 + 0.6 * flash : 1);
     const foc = m.id === this.focusId || m.id === this.hoverId;
+    if (m.type === 'job' && m.pos.procBoard) { ctx.globalAlpha = 1; return; } // 자동 진행 작업 = 라인 전광판(vxp.drawBay)
+    if (m.pos.type === 'proc') { this.vxp.drawBay(ctx, m, v, s, now); ctx.globalAlpha = 1; return; } // 생산 라인
     if (m.type === 'job') { this._drawJob(ctx, m, v, s, now, foc); ctx.globalAlpha = 1; return; }
     const led = st === 'active' ? (this.reduced || Math.sin(now * 6 + m.id.length) > 0 ? pal.led : pal.ledIdle) : st === 'error' ? t.error : isEnded(m.node) ? pal.ledOff : pal.ledIdle;
     if (m.type === 'rack') {
@@ -1183,6 +1194,11 @@ export class Voxel2DView extends FlatView {
       ctx.fillStyle = sc; ctx.fillRect(x - dv.z * R * 0.1 - R * 0.13, y + dv.x * R * 0.1 - R * 0.13, R * 0.26, R * 0.26);
       const brk = ch.target && ch.target.type === 'break';
       if (brk || (ch.state === 'seated' && ch.readUntil > now)) { ctx.fillStyle = brk ? pal.mug : pal.paper; ctx.beginPath(); ctx.arc(x + dv.x * R * 0.9 - dv.z * R * 0.6, y + dv.z * R * 0.9 + dv.x * R * 0.6, R * 0.22, 0, Math.PI * 2); ctx.fill(); }
+      if (ch.errand && ch.errand.kind === 'watch' && ch.target && ch.target.type === 'errand') { // 클립보드(기다림이면 …, 끝나기 직전 ✓)
+        const ph = watchPhase(ch.errand.w, now, !!(ch.errand.w && ch.errand.w.arrivedAt != null));
+        if (ph !== 'wait') { ctx.fillStyle = pal.bag; ctx.fillRect(x + dv.x * R * 0.95 - R * 0.28, y + dv.z * R * 0.95 - R * 0.34, R * 0.56, R * 0.68); ctx.fillStyle = pal.paper; ctx.fillRect(x + dv.x * R * 0.95 - R * 0.2, y + dv.z * R * 0.95 - R * 0.24, R * 0.4, R * 0.5); }
+        if (ph === 'check' || ph === 'wait') { ctx.fillStyle = ph === 'check' ? t.ok : t.muted; ctx.font = `700 ${Math.round(R * 1.1)}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(ph === 'check' ? '✓' : '…', x, y - R * 1.5); }
+      }
       if (ch.errand && ch.target && ch.target.type === 'errand' && ch.errand.kind === 'ask') { ctx.fillStyle = t.skill; ctx.font = `700 ${Math.round(R * 1.1)}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('?', x, y - R * 1.5); }
     }
     // 표식: 팀장 금색 배지, claude -p 네모(왕관), 워크플로 에이전트 목걸이 점

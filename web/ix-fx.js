@@ -222,7 +222,8 @@ export class IxLayer {
     for (const c of g.cons) {
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, behind = false;
       for (const [dx, dy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
-        p.set(c.x + dx * c.w, c.y + dy * c.h, c.z).project(cam);
+        if (c.r) p.set(c.x + c.r[0] * dx * c.w + c.v[0] * dy * c.h, c.y + c.v[1] * dy * c.h, c.z + c.r[2] * dx * c.w + c.v[2] * dy * c.h).project(cam); // 입체 단말: 기운 화면 네 모서리
+        else p.set(c.x + dx * c.w, c.y + dy * c.h, c.z).project(cam);
         if (p.z > 1) { behind = true; break; }
         const sx = (p.x * 0.5 + 0.5) * W, sy = (-p.y * 0.5 + 0.5) * H;
         x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy);
@@ -233,6 +234,7 @@ export class IxLayer {
       const hit = { root: c.root, x0: cx - hw, y0: cy - hh, x1: cx + hw, y1: cy + hh, cx, cy };
       this.conHits.push(hit);
       sized.push({ root: c.root, px: x1 - x0 });
+      c.px = x1 - x0; // 화면 폭(px) — 흐름 3D 단말 LOD(console3d.js)
     }
     sized.sort((a, b) => b.px - a.px);
     const show = new Set(sized.filter((x) => x.px >= IxLayer.CON_MIN_PX).slice(0, IxLayer.CON_SHOW).map((x) => x.root));

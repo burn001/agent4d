@@ -183,3 +183,20 @@
 .ins-user-msgs li.op-interrupt > i, .ins-user-msgs li.op-deny > i { color: var(--error); }
 .ins-user-msgs .ins-um-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .ins-user-msgs small { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* 진행 레인 표(분리 프로세스·자동 진행 작업 — 세 표현 공용): 숫자는 고정폭·오른쪽 정렬, 과열 = 청록 → 호박 → 주홍 막대 */
+.ins-lanes { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.ins-lanes th, .ins-lanes td { padding: 2px 4px; text-align: right; white-space: nowrap; }
+.ins-lanes thead th { color: var(--muted); font-weight: 500; font-size: 10.5px; border-bottom: 1px solid var(--border); }
+.ins-lanes tbody th { text-align: left; font-weight: 600; max-width: 110px; overflow: hidden; text-overflow: ellipsis; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.ins-lanes tbody th small, .ins-lanes td small { color: var(--muted); font-weight: 400; }
+.ins-lanes td { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; }
+.ins-lanes td.ins-ln { font-weight: 700; }
+.ins-lanes .ins-jbar { display: block; margin-top: 2px; max-width: none; height: 4px; --jc: var(--accent); }
+.ins-lanes thead th:first-child { text-align: left; }
+.ins-heat { display: inline-block; width: 44px; height: 6px; border-radius: 3px; background: var(--chip-bg); border: 1px solid var(--border); overflow: hidden; vertical-align: middle; }
+.ins-heat i { display: block; height: 100%; background: #2dd4bf; }
+.hl-warm .ins-heat i { background: #f59e0b; }
+.hl-hot .ins-heat i { background: #f4511e; }
+.ins-lfoot { margin-top: 4px; }
+.ins-lfoot.hl-hot { color: color-mix(in srgb, #f4511e 70%, var(--text)); }

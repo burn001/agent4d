@@ -11,12 +11,19 @@ import { Bubbles } from './bubbles.js';
 import { paletteOf, beamPoint, packetWobble } from './flow-style.mjs';
 import { textWidth } from '../label-place.mjs';
 import { ArtLayer3D } from './artifacts.js'; // 작업 대상 층(켤 때만 만든다)
-import { TIER, tierGap, tierY, tierDepths, tierDim, tierSpan } from './tier-core.mjs'; // 높이 계층
+import { TIER, tierGap, tierY, tierDepths, tierDim, tierSpan, STAND, standYawStep, yawToward } from './tier-core.mjs'; // 높이 계층
+import { FlowConsoles } from './console3d.js'; // 입체 사용자 단말
+import * as THREE from 'three';
 import { isDetachedRoot } from '../layout.js';
-import { isJob } from '../job-core.mjs';
+import { isJob, isProc } from '../job-core.mjs';
 import { JOB_CHIP } from './job-chip-core.mjs'; // 작업 칩
+import { RIG, RigWatch, RigTicks, superviseText, supervisorSets } from './proc-rig-core.mjs'; // 분리 프로세스 장치
+import { ProcRigs } from './procrig.js';
+import { escapeHtml } from '../html-util.mjs';
 
 const CHIP_SCALE = 1.45;
+// 세운 배치 장치의 집기 상자(칩 배율 단위: 폭 2×1.45 · 높이 2×0.82 · 깊이 = 장치 두께 0.7) — 메시는 숨긴 채 raycast 에만 쓰고, 방위는 칩과 같게
+let DEV_PICK = null;
 const PANEL_TOP_PX = 96; // 맨 위 노드 위 홀로그램 패널 자리(px)
 // 메인은 배치 반경(RADIUS 3.0)이 커서 같은 배율이면 서브에이전트의 1.9배 — 칩만 1.2배 정도로 줄인다
 const CHIP_SCALE_KIND = { main: 0.95, 'claude-p': 1.25, workflow: 1.1 };
@@ -62,12 +69,32 @@ export class FlowView extends SceneView {
     this.linkLines.visible = false;
     this.dashLines.visible = false;
     this.dots.visible = false;
+    // 움직임 줄이기(빔 대시·패킷 흔들림·세운 장치/단말 돌기·단말 깜빡임). 예전엔 SceneView 에 없어 늘 undefined 였다(평면·복셀 표현과 같은 식으로 읽음)
+    this.reduced = !!(typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches);
     this.chips = new NodeChips(this.scene, this);
     this.beams = new Beams(this.scene, this);
     if (this.spawnLines) this.spawnLines.renderOrder = 2; // 칩 깊이 패스(1.5) 다음
     if (this.spawnMat) this.spawnMat.opacity = 0.22; // 위계: 충돌 곡선 > 패킷 > 일반 연결선 > 띄움 점선
     this.backdrop = new Backdrop(this.scene, this);
     this.bubbles = new Bubbles(this.scene, this);
+    // 사용자 단말 입체: ix 도형을 입체 모드로(틀·받침 선 대신 메시, 화면은 카메라 쪽 방위로 서서 뒤로 기울어짐)
+    this.consoles = new FlowConsoles(this.scene, this);
+    // 분리 프로세스 장치(로터·계기판·감독 스캔)와 들여다보기 기억
+    this.procRigs = new ProcRigs(this.scene, this);
+    this.rigWatch = new RigWatch();
+    this.rigTicks = new RigTicks(); // 진행 줄 눈금 패킷 판정
+    this._supIds = new Set(); this._watchIds = new Set(); // 감독하는 노드 · 들여다보기를 연 노드
+    this._conYaw = new Map();
+    if (this.ix && this.ix._env) {
+      this.ix._env.solid = true;
+      this.ix._env.conYaw = (root, S) => {
+        let st = this._conYaw.get(root);
+        if (!st) { st = {}; this._conYaw.set(root, st); }
+        const t = performance.now() / 1000, dt = st.t != null ? Math.min(0.25, t - st.t) : 0; st.t = t;
+        const cp = this.camera.position;
+        return standYawStep(st, yawToward(S.x, S.z, cp.x, cp.z) + STAND.OFFSET, dt, !!this.reduced);
+      };
+    }
     for (const v of this.vis.values()) this._flowNode(v);
     this.applyTheme();
   }
@@ -76,8 +103,10 @@ export class FlowView extends SceneView {
   _flowNode(v) {
     // 칩은 단순 도형보다 크게(노드 축소 0.68 을 되돌린 크기 — 글자와 균형)
     // 작업 노드는 백그라운드 명령 칩보다 작은 작업 칩(JOB_CHIP.SCALE)
-    if (!v._flowR) { v.r *= (v.device ? 1.6 : CHIP_SCALE_KIND[v.kind] ?? CHIP_SCALE) * (isJob(v.node) ? JOB_CHIP.SCALE : 1); v._flowR = true; }
+    // 분리 프로세스(meta.proc)는 세운 장치(기동기와 같은 상자 틀 + 로터·계기판)
+    if (!v._flowR) { v.procRig = !v.device && isProc(v.node); v.r *= (v.device ? 1.6 : v.procRig ? RIG.SCALE : CHIP_SCALE_KIND[v.kind] ?? CHIP_SCALE) * (isJob(v.node) ? JOB_CHIP.SCALE : 1); v._flowR = true; }
     v.mesh.visible = false;
+    if (v.device || v.procRig) { v.mesh.geometry = DEV_PICK || (DEV_PICK = new THREE.BoxGeometry(STAND.DEV_HX * 2, STAND.DEV_HY * 2, 0.7)); v.mesh.rotation.set(0, 0, 0); }
     for (const k of Object.keys(v.extras)) v.group.remove(v.extras[k]);
     // 라벨은 칩 아래(agent-flow 처럼 이름이 노드 밑). 화면 간격은 _labelPass 에서 칩 크기에 맞춤
     v.label.center.set(0.5, 0);
@@ -88,6 +117,23 @@ export class FlowView extends SceneView {
     super.addNode(node, spawn);
     const v = !had && this.vis.get(node.id);
     if (v) this._flowNode(v);
+    if (isProc(node)) this.rigWatch.seed(node); // 스냅샷·재생 키프레임: 열린 들여다보기
+  }
+  updateNode(id, patch = {}, opts = {}) {
+    super.updateNode(id, patch, opts);
+    // meta.proc 이 나중에 붙은 노드(node-update)도 장치로 — 반지름을 다시 잡고 배치를 새로
+    const v = this.vis.get(id);
+    if (v && !v.procRig && !v.device && isProc(v.node)) { v.procRig = true; v.r *= RIG.SCALE; this._flowNode(v); this.layoutDirty = true; }
+  }
+  flowEvent(ev, opts = {}) {
+    super.flowEvent(ev, opts);
+    if (ev.type === 'watch') this.rigWatch.event(ev);
+    // 자동 진행 작업 갱신 = 새 진행 줄 → 장치에서 눈금 패킷(조용한 이벤트·스크럽은 여기 안 옴)
+    else if (ev.type === 'node-update' && this.procRigs) {
+      const tk = this.rigTicks.fromEvent(ev, (id) => { const x = this.vis.get(id); return x ? x.node : null; });
+      const pv = tk && this.vis.get(tk.procId);
+      if (pv && pv.procRig) this.procRigs.emitTicks(pv, tk.n);
+    }
   }
   _syncSkill(v) {
     super._syncSkill(v);
@@ -98,10 +144,16 @@ export class FlowView extends SceneView {
     super.setScope(scope);
   }
   removeNode(id) { super.removeNode(id); if (this.bubbles) this.bubbles.drop(id); }
-  reset() { super.reset(); if (this.bubbles) this.bubbles.clear(); }
+  reset() { super.reset(); if (this.bubbles) this.bubbles.clear(); if (this.rigWatch) this.rigWatch.reset(); if (this.procRigs) this.procRigs.clear(); if (this.rigTicks) this.rigTicks.clear(); }
   say(id, text, opts = {}) { if (this.bubbles) this.bubbles.say(id, text, opts); }
   /** 작업 줄: 말풍선이 떠 있으면 말 한 줄은 빼고 도구만(같은 말을 두 번 보이지 않게) */
   _actHtml(v) {
+    // 감독 한 줄: 분리 프로세스를 띄웠거나 들여다보는 노드는 도구가 없을 때(대기)·들여다보기 도구가 열린 동안 '감독 · 스크립트 · 레인 값'
+    if (this._supIds && this._supIds.has(v.id) && (!v.icons.size || (v.icons.size === 1 && this._watchIds.has(v.id)))) {
+      const sup = superviseText(v.id, this._nodeMap(), this.clock());
+      const i = sup.indexOf(' · ');
+      if (sup) return `<span class="act sup"><i>${escapeHtml(i > 0 ? sup.slice(0, i) : sup)}</i>${escapeHtml(i > 0 ? sup.slice(i) : '')}</span>`;
+    }
     if (this.bubbles && this.bubbles.shown.has(v.id) && !v.icons.size) return '';
     return super._actHtml(v);
   }
@@ -143,6 +195,8 @@ export class FlowView extends SceneView {
     if (this.flow) this.flow.applyTheme(t);
     if (this.holo) this.holo.applyTheme(t);
     this.chips.applyTheme(t.isLight);
+    if (this.consoles) this.consoles.applyTheme(t.isLight);
+    if (this.procRigs) this.procRigs.applyTheme(t.isLight);
     this.beams.applyTheme(t.isLight, t.bg);
     this.backdrop.applyTheme(t.isLight);
     const ls = this.labelContainer.style;
@@ -223,21 +277,61 @@ export class FlowView extends SceneView {
     }
   }
 
+  /** 홀로그램 패널 거리 기준 반지름(holo.js): 분리 프로세스 장치는 넓은 상자(반폭 1.45 × 칩 배율)라 패널이 계기판을 덮지 않게 더 띄움 */
+  holoR(v) { return v.r * v.size * (v.procRig ? 1.5 : 1); }
+
+  /** 빔·패킷 끝점: 세운 배치 장치는 아래 변에서 나가고(떠오름 없이 곧장 내려감) 위 변으로 들어온다. 그 밖 노드는 중심 */
+  linkEnd(v, asParent) {
+    if (!v.device && !v.procRig) return v.group.position;
+    const k = asParent ? '_endFrom' : '_endTo';
+    const o = v[k] || (v[k] = new THREE.Vector3());
+    const hy = STAND.DEV_HY * v.mesh.scale.x * 0.96;
+    o.copy(v.group.position); o.y += asParent ? -hy : hy;
+    o.noLift = !!asParent;
+    return o;
+  }
+
   _preRender(now, dt) {
     this.chips.update(now);
+    // 세운 배치 장치: 집기 상자를 칩과 같은 방위로(SceneView 가 프레임마다 돌리는 회전을 덮어씀)
+    let pn = 0;
+    for (const v of this.vis.values()) {
+      if ((v.device || v.procRig) && v._stand) { v.mesh.rotation.set(0, v._stand.yaw, 0); v.mesh.updateMatrixWorld(); }
+      if (v.procRig) pn++;
+    }
+    this._procN = pn;
+    // 분리 프로세스 장치: 로터·계기판·감독 펄스(시계 = 렌더러 시계, 재생이면 가상 시계)
+    if (this.procRigs) {
+      const nowMs = this.clock();
+      const pulses = pn ? this.rigWatch.pulses(nowMs, (id) => { const x = this.vis.get(id); return x && !x.gone && !x.hidden ? x.node : null; }) : null;
+      this.procRigs.update(now, pulses);
+      // 감독 한 줄의 숫자는 시계로 오르므로 1초마다 다시(감독하는 노드만, 감독 관계가 바뀌면 그 노드들도)
+      if ((pn || this._supIds.size) && now - (this._supAt || 0) > 1) {
+        this._supAt = now;
+        const prev = [...this._supIds];
+        supervisorSets(this._nodeMap().values(), this._supIds, this._watchIds);
+        for (const id of new Set([...prev, ...this._supIds])) { const v = this.vis.get(id); if (v) this._labelText(v); }
+      }
+    }
     const camDist = this.focusDist || this.camera.position.length();
     // 시선 대상 ≈ 카메라 앞 focusDist 지점(격자 페이드 중심)
     const ctl = this._ctl || (this._ctl = this.camera.position.clone());
     this.camera.getWorldDirection(ctl); ctl.multiplyScalar(camDist).add(this.camera.position);
     this.backdrop.update(now, dt, ctl, camDist);
     this.bubbles.update(now, this.camera, this.container.clientHeight || 1);
+    // 입체 사용자 단말: ix 가 이번 프레임에 계산한 콘솔 자리·상태 그대로(ix 가 꺼졌거나 숨으면 cons 가 비어 함께 사라짐)
+    if (this.consoles) {
+      const cons = this.ix && this.ix.enabled ? this.ix.geo.cons : null;
+      this.consoles.update(now, cons);
+      if (this._conYaw.size > 64 && cons) { const keep = new Set(cons.map((c) => c.root)); for (const k of this._conYaw.keys()) if (!keep.has(k)) this._conYaw.delete(k); }
+    }
     if (this.art) this.art.update(now);
   }
 
   dispose() {
     if (this._disposed) return;
     if (this.labelContainer) this.labelContainer.classList.remove('flow-mode');
-    for (const k of ['chips', 'beams', 'backdrop', 'bubbles', 'art']) { if (this[k]) { this[k].dispose(); this[k] = null; } }
+    for (const k of ['chips', 'consoles', 'beams', 'backdrop', 'bubbles', 'art', 'procRigs']) { if (this[k]) { this[k].dispose(); this[k] = null; } }
     super.dispose();
   }
 }

@@ -79,6 +79,7 @@ export function loadConfig(file = defaultConfigPath()) {
   }
   return {
     viewToken: cfg.viewToken,
+    adminSecret: cfg.adminSecret, // 화면 원격 조작 명령(로컬 CLI)의 Bearer — 로그·출력에 내지 않는다
     port: Number(cfg.port) || 7788,
     privacy: cfg.privacy === 'minimal' ? 'minimal' : 'summary',
     project: cfg.project || null,

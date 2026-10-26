@@ -177,6 +177,7 @@ export async function collectExtras({ from, sid, index = null }) {
   let missOut = 0;
   for (const o of rt.outputs.values()) {
     // 기록에 적힌 경로를 그대로 연 출력(startOutput)은 파일이 이미 지워졌을 수 있다 — 있는 것만
+    if (o.proc) continue; // 분리 프로세스 로그는 기록 밖 파일(임시 폴더 tasks 아님) — 보관하지 않는다
     const rel = o.file && fs.existsSync(o.file) ? taskRelOf(o.file) : null;
     if (!rel) { missOut++; continue; }
     if (seen.has(rel)) continue;
