@@ -27,3 +27,4 @@ import './succession.test.mjs';
 import './artifacts.test.mjs';
 import './plans.test.mjs';
 import './version.test.mjs';
+import './update.test.mjs';

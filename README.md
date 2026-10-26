@@ -55,6 +55,7 @@ _All screenshots and loops use the built-in mock data (`?mock=1&lang=en`). Proje
 - [Install](#install)
 - [Run](#run)
 - [Use with Claude Code (skill)](#use-with-claude-code-skill)
+- [Updating](#updating)
 - [Background music](#background-music)
 - [Remote access (optional)](#remote-access-optional)
 - [Usage-limit gauge (opt-in)](#usage-limit-gauge-opt-in)
@@ -135,20 +136,38 @@ Then open `http://127.0.0.1:7788/?t=<viewToken>` (the token is `viewToken` in th
 
 ## Use with Claude Code (skill)
 
-The repository ships a Claude Code skill in `skills/agent4d/`. Copy it into your personal skills folder and you can ask Claude Code things like "open agent4d", "show my agents in 3D" or "stop agent4d". The skill finds your install (`AGENT4D_HOME`, then `~/agent4d`, then `agent4d` on `PATH`), starts the local server if needed and shows you the link. It never starts a public tunnel unless you ask for one.
+The repository ships a Claude Code skill in `skills/agent4d/`. Put it in your personal skills folder and you can ask Claude Code things like "open agent4d", "show my agents in 3D", "update agent4d" or "stop agent4d". The skill finds your install (`AGENT4D_HOME`, then `~/agent4d`, then `agent4d` on `PATH`), starts the local server if needed and shows you the link. It never starts a public tunnel unless you ask for one.
+
+Link the folder rather than copying it, so the skill always matches your clone:
 
 ```bash
-# inside the clone (macOS / Linux / Git Bash)
-mkdir -p ~/.claude/skills && cp -r skills/agent4d ~/.claude/skills/
+# macOS / Linux (clone at ~/agent4d)
+mkdir -p ~/.claude/skills && ln -s ~/agent4d/skills/agent4d ~/.claude/skills/agent4d
 ```
 
-```powershell
-# Windows PowerShell, inside the clone
-New-Item -ItemType Directory -Force "$HOME\.claude\skills" | Out-Null
-Copy-Item -Recurse -Force skills\agent4d "$HOME\.claude\skills\"
+```bat
+:: Windows (cmd), clone at %USERPROFILE%\agent4d — a junction needs no admin rights
+mkdir "%USERPROFILE%\.claude\skills" 2>nul
+mklink /J "%USERPROFILE%\.claude\skills\agent4d" "%USERPROFILE%\agent4d\skills\agent4d"
 ```
 
-If your clone is not at `~/agent4d`, set `AGENT4D_HOME` to its folder. Start a new Claude Code session after copying so the skill is picked up.
+A plain copy (`cp -r skills/agent4d ~/.claude/skills/`, or `Copy-Item -Recurse` in PowerShell) works too: `agent4d update` refreshes a copied skill when it differs from the clone, keeping the old files as `*.bak`.
+
+If your clone is not at `~/agent4d`, set `AGENT4D_HOME` to its folder. Start a new Claude Code session after installing so the skill is picked up.
+
+## Updating
+
+```bash
+node bin/agent4d.mjs update --check   # is there a newer release? (cached for 24 hours)
+node bin/agent4d.mjs update           # show the plan, ask, then update
+node bin/agent4d.mjs update --yes     # update without asking
+```
+
+`update` works on a git clone. It stops and explains why if the clone has local changes, is not on `main`, or cannot fast-forward to `origin/main`. Otherwise it runs `git pull --ff-only` (with tags), refreshes a copied skill (a linked skill needs nothing), and restarts the server with the same options if it was running. An install that is not a git clone only gets a pointer to the Releases page. Clones whose `origin` is not this repository (forks, development clones) are left alone.
+
+The server checks for a new release when it starts and then once a day (the result is cached in `update-check.json`). When one is out, the ⚙ menu shows a small dot and "vX.Y.Z available" next to the version, linking to the release. With the skill installed, Claude Code also mentions a new version when you open Agent4D and asks before updating (set `AGENT4D_AUTO_UPDATE=1` to let it update without asking).
+
+To turn the check off, set `"updateCheck": false` in `config.json` or the environment variable `AGENT4D_NO_UPDATE_CHECK=1`. Then no network request is made.
 
 ## Background music
 
@@ -213,6 +232,7 @@ Read this before you share any link.
 - **Read-only.** The server only reads transcripts and task output. The archive feature writes only to the archive folder you choose, and only when you run `agent4d archive add`.
 - **Redaction is best-effort.** All text passes through `server/redact.mjs`, which masks API keys, bearer tokens, JWTs, PEM blocks, credentials in URLs, `password=`-style pairs, emails, phone and ID numbers, and long opaque strings. Thinking content and full tool inputs are never sent. `"privacy": "minimal"` sends even less. Redaction cannot catch everything, so don't rely on it for sensitive work.
 - **Tokens stay out of log files.** The CLI prints the tokenized link to the console only.
+- **Update check.** The server and `agent4d update --check` make one unauthenticated request to the GitHub API (`api.github.com/repos/burn001/agent4d/releases/latest`) at most once a day. Nothing else is sent: no session data, paths, tokens or identifiers beyond the usual HTTP headers (`User-Agent: agent4d/<version>`). Turn it off with `"updateCheck": false` or `AGENT4D_NO_UPDATE_CHECK=1`.
 
 ## Configuration
 
@@ -220,8 +240,9 @@ State and secrets live outside the repository, in `~/.cc-agent-viz/` (the folder
 
 | File | Contents |
 |---|---|
-| `config.json` | `viewToken`, `adminSecret`, `port` (7788), `privacy` (`summary` / `minimal`), `project`, `linkSession`, `remote` (`true` / `false`; unset = remote only if `workerUrl` is set), `cloudflaredPath`, `tunnelProtocol` (`http2`), `workerName` (`cc-agent-viz`), `workerUrl`, `kvNamespaceId`, `limits { source: off (default) / oauth / auto / statusline, … }`, `overviewMaxRoots`, `archiveDir`, `serviceScripts` |
+| `config.json` | `viewToken`, `adminSecret`, `port` (7788), `privacy` (`summary` / `minimal`), `project`, `linkSession`, `remote` (`true` / `false`; unset = remote only if `workerUrl` is set), `cloudflaredPath`, `tunnelProtocol` (`http2`), `workerName` (`cc-agent-viz`), `workerUrl`, `kvNamespaceId`, `limits { source: off (default) / oauth / auto / statusline, … }`, `overviewMaxRoots`, `archiveDir`, `serviceScripts`, `updateCheck` (`true` by default; `false` = no update check) |
 | `usage-cache.json` | last usage-limit values (percentages and reset times only) |
+| `update-check.json` | last update check: time, installed and latest version, release link, one-line notes |
 | `state.json` | process IDs of the server, relay, tunnel and watchdog; current tunnel URL |
 | `logs/` | `server.log`, `relay.log`, `cloudflared.log`, `watch.log` |
 

@@ -93,10 +93,32 @@ export function mountSettings() {
   hint.className = 'sm-hint';
   hint.textContent = t('core.settings.hint');
   // 버전: 메뉴 맨 아래 작게(서버 /healthz 의 version — package.json)
+  // 새 릴리스가 있으면(healthz update.newer) 버전 옆에 작은 점 + 'vA.B.C available' 링크(Release 페이지, 새 탭)
   const ver = document.createElement('p');
   ver.className = 'sm-ver';
   ver.hidden = true;
-  fetch('./healthz', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((j) => { if (j && j.version) { ver.textContent = 'v' + j.version; ver.hidden = false; } }).catch(() => {});
+  fetch('./healthz', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((j) => {
+    if (!j || !j.version) return;
+    const cur = document.createElement('span');
+    cur.className = 'sm-ver-cur';
+    cur.textContent = 'v' + j.version;
+    const u = j.update;
+    if (u && u.newer && typeof u.latest === 'string' && /^https:\/\/github\.com\//.test(String(u.url || ''))) {
+      const a = document.createElement('a');
+      a.className = 'sm-upd';
+      a.href = u.url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.title = t('core.update.title');
+      const dot = document.createElement('span');
+      dot.className = 'sm-upd-dot';
+      dot.setAttribute('aria-hidden', 'true');
+      a.append(dot, document.createTextNode(t('core.update.available', { v: 'v' + u.latest })));
+      ver.append(a);
+    }
+    ver.append(cur);
+    ver.hidden = false;
+  }).catch(() => {});
   menu.append(...rows, hint, ver);
   document.body.appendChild(menu);
   const more = top.querySelector('.tb-more');

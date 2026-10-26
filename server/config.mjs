@@ -89,6 +89,8 @@ export function loadConfig(file = defaultConfigPath()) {
     archiveDir: typeof cfg.archiveDir === 'string' && cfg.archiveDir ? cfg.archiveDir : null,
     // 작업 대상: 자기 도구 스크립트 → 서비스 이름 매핑 [{ pattern, name }]. 기본 없음
     serviceScripts: Array.isArray(cfg.serviceScripts) ? cfg.serviceScripts : [],
+    // 업데이트 확인(GitHub Releases latest 한 번/24시간). false 면 네트워크 호출 0
+    updateCheck: cfg.updateCheck !== false,
     created: dirty,
     file,
   };

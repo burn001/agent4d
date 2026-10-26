@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+- `agent4d update`: `update --check [--json] [--force]` asks GitHub for the latest release (one unauthenticated request, cached for 24 hours in `update-check.json`; offline or API errors never fail). `update [--yes]` updates a git clone with `git pull --ff-only` after checking that it is clean, on `main` and can fast-forward, refreshes a copied skill in `~/.claude/skills/agent4d` (a linked skill is left alone; replaced files are kept as `*.bak`) and restarts a running server with the same options. Clones whose `origin` is not this repository are left untouched.
+- The server checks for a new release at start and once a day; the ⚙ menu then shows a small dot and "vX.Y.Z available" next to the version, linking to the release page. Turn the check off with `"updateCheck": false` in `config.json` or `AGENT4D_NO_UPDATE_CHECK=1` (no network request at all).
+- The bundled skill checks for updates after finding the install, tells you about a new version and asks before updating (`AGENT4D_AUTO_UPDATE=1` updates without asking). New triggers: "update agent4d", "agent4d 업데이트".
+- README: link the skill folder instead of copying it (`ln -s`, Windows `mklink /J`), new "Updating" section, and the update check is listed under security and privacy.
+
 ### Fixed
 - Automatic camera in the overview: the "Overview" and project-island shots of "Framing: follow" (and clicking an island) no longer frame whole islands, their floor plates and the work-target layer. Like "Framing: all", they fit the active agents with their tool panels and labels, so agents appear much larger; the island box is used only when an island has no visible agents. "Framing: follow" also stops lingering on a project whose short turn has ended: idle agents score zero, and within about 3 seconds the camera moves to an island that is still working (for example a runner in another project). Same in 3D and 2D for Flow, Planet and Voxel Office.
 

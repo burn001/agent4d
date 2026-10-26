@@ -58,6 +58,7 @@ _스크린샷과 움직이는 화면은 모두 내장 가짜 데이터(`?mock=1&
 - [설치](#설치)
 - [실행](#실행)
 - [Claude Code 에서 쓰기(스킬)](#claude-code-에서-쓰기스킬)
+- [업데이트](#업데이트)
 - [배경음악](#배경음악)
 - [원격 접속(선택)](#원격-접속선택)
 - [사용 한도 게이지(옵트인)](#사용-한도-게이지옵트인)
@@ -130,20 +131,38 @@ npm run demo        # 합성 세션 트리 — transcript 를 읽지 않고 네�
 
 ## Claude Code 에서 쓰기(스킬)
 
-레포의 `skills/agent4d/` 에 Claude Code 스킬이 들어 있습니다. 개인 스킬 폴더에 복사하면 Claude Code 에게 "open agent4d", "show my agents in 3D", "agent4d 열어줘", "agent4d 꺼줘" 같은 말로 부탁할 수 있습니다. 스킬은 설치 위치를 찾고(`AGENT4D_HOME` → `~/agent4d` → `PATH` 의 `agent4d`), 필요하면 로컬 서버를 켠 뒤 링크를 보여 줍니다. 공개 터널은 사용자가 요청할 때만 엽니다.
+레포의 `skills/agent4d/` 에 Claude Code 스킬이 들어 있습니다. 개인 스킬 폴더에 넣으면 Claude Code 에게 "open agent4d", "show my agents in 3D", "agent4d 열어줘", "agent4d 업데이트", "agent4d 꺼줘" 같은 말로 부탁할 수 있습니다. 스킬은 설치 위치를 찾고(`AGENT4D_HOME` → `~/agent4d` → `PATH` 의 `agent4d`), 필요하면 로컬 서버를 켠 뒤 링크를 보여 줍니다. 공개 터널은 사용자가 요청할 때만 엽니다.
+
+복사보다 링크를 권합니다. 그러면 스킬이 늘 클론과 같습니다.
 
 ```bash
-# 클론 안에서(macOS·Linux·Git Bash)
-mkdir -p ~/.claude/skills && cp -r skills/agent4d ~/.claude/skills/
+# macOS·Linux (클론이 ~/agent4d 일 때)
+mkdir -p ~/.claude/skills && ln -s ~/agent4d/skills/agent4d ~/.claude/skills/agent4d
 ```
 
-```powershell
-# Windows PowerShell, 클론 안에서
-New-Item -ItemType Directory -Force "$HOME\.claude\skills" | Out-Null
-Copy-Item -Recurse -Force skills\agent4d "$HOME\.claude\skills\"
+```bat
+:: Windows (cmd), 클론이 %USERPROFILE%\agent4d 일 때 — 정션은 관리자 권한이 필요 없습니다
+mkdir "%USERPROFILE%\.claude\skills" 2>nul
+mklink /J "%USERPROFILE%\.claude\skills\agent4d" "%USERPROFILE%\agent4d\skills\agent4d"
 ```
 
-클론이 `~/agent4d` 가 아니면 `AGENT4D_HOME` 을 그 폴더로 지정하십시오. 복사한 뒤 Claude Code 세션을 새로 시작해야 스킬이 잡힙니다.
+그냥 복사해도 됩니다(`cp -r skills/agent4d ~/.claude/skills/`, PowerShell 은 `Copy-Item -Recurse`). 복사본이 클론과 다르면 `agent4d update` 가 갱신하고 이전 파일은 `*.bak` 으로 남깁니다.
+
+클론이 `~/agent4d` 가 아니면 `AGENT4D_HOME` 을 그 폴더로 지정하십시오. 설치한 뒤 Claude Code 세션을 새로 시작해야 스킬이 잡힙니다.
+
+## 업데이트
+
+```bash
+node bin/agent4d.mjs update --check   # 새 릴리스가 있는지(24시간 캐시)
+node bin/agent4d.mjs update           # 할 일을 보여 주고 물은 뒤 갱신
+node bin/agent4d.mjs update --yes     # 묻지 않고 갱신
+```
+
+`update` 는 git 클론에서 동작합니다. 클론에 고친 파일이 있거나, `main` 브랜치가 아니거나, `origin/main` 으로 fast-forward 할 수 없으면 이유를 말하고 멈춥니다. 그렇지 않으면 `git pull --ff-only`(태그 포함)를 하고, 복사해 둔 스킬을 갱신하고(링크면 할 일 없음), 서버가 떠 있었으면 같은 옵션으로 다시 띄웁니다. git 클론이 아닌 설치본에는 Releases 페이지만 안내합니다. `origin` 이 이 저장소가 아닌 클론(포크·개발 클론)은 건드리지 않습니다.
+
+서버는 켜질 때와 그 뒤 하루에 한 번 새 릴리스를 확인합니다(결과는 `update-check.json` 에 캐시). 새 버전이 있으면 ⚙ 메뉴의 버전 옆에 작은 점과 "새 버전 vX.Y.Z" 링크(릴리스 페이지)가 나옵니다. 스킬을 설치했다면 Agent4D 를 열 때 Claude Code 도 새 버전을 알려 주고, 갱신 전에 묻습니다(`AGENT4D_AUTO_UPDATE=1` 이면 묻지 않고 갱신).
+
+확인을 끄려면 `config.json` 에 `"updateCheck": false` 를 넣거나 환경 변수 `AGENT4D_NO_UPDATE_CHECK=1` 을 정하십시오. 그러면 네트워크 요청이 전혀 없습니다.
 
 ## 배경음악
 
@@ -208,6 +227,7 @@ python music/tracks.py copy lofi --from <tmp>             # mp3 + json 을 web/a
 - **읽기 전용입니다.** 서버는 transcript 와 작업 출력을 읽기만 합니다. 보관함 기능은 내가 고른 보관 폴더에만, `agent4d archive add` 를 실행할 때만 씁니다.
 - **마스킹은 최선의 노력입니다.** 모든 글은 `server/redact.mjs` 를 거쳐 API 키·Bearer 토큰·JWT·PEM·URL 속 자격 증명·`password=` 꼴·이메일·전화·주민번호 꼴·긴 무작위 문자열을 가립니다. thinking 내용과 도구 입력 전문은 보내지 않습니다. `"privacy": "minimal"` 이면 더 적게 보냅니다. 그래도 모든 것을 잡지는 못하니 민감한 작업에는 기대지 마십시오.
 - **토큰은 로그 파일에 남지 않습니다.** 토큰이 든 링크는 콘솔에만 출력합니다.
+- **업데이트 확인.** 서버와 `agent4d update --check` 는 하루에 많아야 한 번 GitHub API(`api.github.com/repos/burn001/agent4d/releases/latest`)에 인증 없는 요청을 하나 보냅니다. 그 밖에는 보내지 않습니다. 세션 데이터·경로·토큰·식별자 없이 보통의 HTTP 헤더(`User-Agent: agent4d/<버전>`)만 갑니다. 끄려면 `"updateCheck": false` 또는 `AGENT4D_NO_UPDATE_CHECK=1`.
 
 ## 구성
 
@@ -215,8 +235,9 @@ python music/tracks.py copy lofi --from <tmp>             # mp3 + json 을 web/a
 
 | 파일 | 내용 |
 |---|---|
-| `config.json` | `viewToken`, `adminSecret`, `port`(7788), `privacy`(`summary`/`minimal`), `project`, `linkSession`, `remote`(`true`/`false`, 없으면 `workerUrl` 이 있을 때만 원격), `cloudflaredPath`, `tunnelProtocol`(`http2`), `workerName`(`cc-agent-viz`), `workerUrl`, `kvNamespaceId`, `limits{ source: off(기본)/oauth/auto/statusline, … }`, `overviewMaxRoots`, `archiveDir`, `serviceScripts` |
+| `config.json` | `viewToken`, `adminSecret`, `port`(7788), `privacy`(`summary`/`minimal`), `project`, `linkSession`, `remote`(`true`/`false`, 없으면 `workerUrl` 이 있을 때만 원격), `cloudflaredPath`, `tunnelProtocol`(`http2`), `workerName`(`cc-agent-viz`), `workerUrl`, `kvNamespaceId`, `limits{ source: off(기본)/oauth/auto/statusline, … }`, `overviewMaxRoots`, `archiveDir`, `serviceScripts`, `updateCheck`(기본 `true`, `false` 면 업데이트 확인 안 함) |
 | `usage-cache.json` | 마지막 사용 한도 값(사용률·재설정 시각만) |
+| `update-check.json` | 마지막 업데이트 확인: 시각, 설치·최신 버전, 릴리스 링크, 한 줄 요약 |
 | `state.json` | 서버·릴레이·터널·감시 프로세스 ID, 현재 터널 주소 |
 | `logs/` | `server.log`, `relay.log`, `cloudflared.log`, `watch.log` |
 

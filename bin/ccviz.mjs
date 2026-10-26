@@ -11,6 +11,7 @@
 //   autostart on|off|status                        (Windows) 로그온 시 start --watch 예약 작업
 //   deploy                                         Worker·KV·시크릿 배포(cf CLI, 재실행 안전)
 //   rotate-token                                   viewToken 재발급 + Worker 시크릿 갱신
+//   update [--check [--json] [--force]] [--yes]    새 릴리스 확인·클론 fast-forward·스킬 사본·서버 재시작(bin/update.mjs)
 //   help | --help                                  도움말(사전 server/cli-i18n.mjs 'help')
 // 콘솔 문구는 server/cli-i18n.mjs t() — 영어 기본, 한국어 로케일이면 한국어. --lang en|ko 는 CCVIZ_LANG 으로 옮겨 자식 프로세스도 같은 언어
 //
@@ -456,6 +457,9 @@ async function cmdStart(opts) {
   const project = typeof opts.project === "string" ? opts.project : cfg.project;
   const serverPid = await startServer(cfg, st, port, project, startWaitMs(opts, cfg));
   const next = { ...st, serverPid, port, mode: remote ? "remote" : "local", startedAt: st.serverPid === serverPid ? st.startedAt : new Date().toISOString() };
+  // update 가 같은 옵션으로 다시 띄울 수 있게 명시한 --project 만 기억(config.project 는 다시 읽힘)
+  if (typeof opts.project === "string") next.project = opts.project;
+  else delete next.project;
   saveState(next);
 
   if (!remote) {
@@ -908,6 +912,12 @@ async function main() {
     }
     case "statusline":
       return cmdStatusline(opts);
+    case "update": {
+      // 새 릴리스 확인(--check)·git 클론 갱신·스킬 사본 갱신·서버 재시작
+      const m = await import("./update.mjs");
+      process.exitCode = await m.main(argv.slice(1));
+      return;
+    }
     case "archive": {
       // 보관함 관리(add·list). add 만 보관함에 쓴다
       const m = await import("./archive.mjs");

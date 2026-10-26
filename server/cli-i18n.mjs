@@ -241,6 +241,35 @@ const en = {
   'rot.done': 'Worker secret updated. Old links and cookies no longer open.',
   'rot.restart': 'If the local server is running, restart it to use the new token: ccviz stop && ccviz start',
 
+  // update
+  'upd.off': 'Update check is off (config updateCheck: false or AGENT4D_NO_UPDATE_CHECK=1).',
+  'upd.fail': 'Could not check for updates right now ({err}). Try again later.',
+  'upd.latest': 'Agent4D v{cur} is up to date.',
+  'upd.newer': 'Agent4D v{latest} is available (you have v{cur}).\n  {url}{notes}\n  Run: agent4d update',
+  'upd.notGit': 'This install ({dir}) is not a git clone, so it cannot update itself.\nDownload the latest release from {url} or re-clone: git clone https://github.com/{slug}.git',
+  'upd.devClone': 'Development clone (origin {origin} is not {slug}) — skipped, nothing changed.',
+  'upd.fetchFail': 'git fetch failed: {msg}',
+  'upd.noRemote': 'This clone has no origin/main to update from.',
+  'upd.stop.branch': 'Not updating: the clone is on branch "{branch}", not main. Switch with: git -C "{dir}" checkout main',
+  'upd.stop.dirty': 'Not updating: the clone has local changes. Commit or stash them first (git -C "{dir}" status).',
+  'upd.stop.diverged': 'Not updating: the clone has local commits that origin/main does not have, so a fast-forward is not possible.',
+  'upd.plan': 'Update Agent4D v{cur} → v{next} ({n} new commit(s) from origin/main). Will:',
+  'upd.planUpToDate': 'The code is already up to date (v{cur}). Will:',
+  'upd.do.pull': '  - git pull --ff-only (with tags)',
+  'upd.do.skill': '  - refresh the copied skill {dir} ({n} file(s); old files kept as *.bak)',
+  'upd.do.restart': '  - restart the running server with the same options ({args})',
+  'upd.do.nothing': '  - nothing to do',
+  'upd.confirm': 'Continue? [y/N] ',
+  'upd.needYes': 'Not a terminal, so I cannot ask. Re-run with --yes to apply.',
+  'upd.cancel': 'Cancelled, nothing changed.',
+  'upd.pullFail': 'git pull --ff-only failed: {msg}',
+  'upd.pulled': 'Updated to v{next}.',
+  'upd.skillLink': 'Skill {dir} is a link to the clone — already current.',
+  'upd.skillDone': 'Refreshed the skill copy in {dir} ({n} file(s)).',
+  'upd.skillFail': 'Could not refresh the skill copy in {dir}: {msg}',
+  'upd.restarting': 'Restarting the server: agent4d {args}',
+  'upd.restartFail': 'The server restart did not finish cleanly. Check with: agent4d status',
+  'upd.done': 'Done.',
   'help': `Usage: ccviz <command> [--lang en|ko]
   start [--tunnel|--no-tunnel] [--limits|--no-limits] [--port N] [--project X] [--session ID|auto] [--wait sec] [--watch]
                                                 start the server (127.0.0.1 only by default, prints a local link)
@@ -261,6 +290,7 @@ const en = {
   archive add <session ID…> [--dir D] [--why reason]
                                                 copy source sessions into the archive (timestamps kept, SHA-256 checked, skips existing), update the index
   archive list [--dir D] [--json]               list archived sessions (archive: --dir > CCVIZ_ARCHIVE > config archiveDir)
+  update [--check [--json] [--force]] [--yes]   check GitHub for a newer release (cached 24h) / update this git clone (fast-forward), the copied skill and the running server
   help                                          show this help
 Language: --lang en|ko > CCVIZ_LANG > LC_ALL/LC_MESSAGES/LANG > system locale (default English)`,
 
@@ -476,6 +506,35 @@ const ko = {
   'rot.done': 'Worker 시크릿 갱신 완료. 기존 링크·쿠키는 더 이상 열리지 않습니다.',
   'rot.restart': '로컬 서버가 실행 중이면 재시작해야 새 토큰을 씁니다: ccviz stop && ccviz start',
 
+  // update
+  'upd.off': '업데이트 확인이 꺼져 있습니다(config updateCheck: false 또는 AGENT4D_NO_UPDATE_CHECK=1).',
+  'upd.fail': '지금은 업데이트를 확인하지 못했습니다({err}). 나중에 다시 시도하십시오.',
+  'upd.latest': 'Agent4D v{cur} 가 최신입니다.',
+  'upd.newer': 'Agent4D v{latest} 이 나왔습니다(설치본 v{cur}).\n  {url}{notes}\n  실행: agent4d update',
+  'upd.notGit': '이 설치본({dir})은 git 클론이 아니라 스스로 갱신할 수 없습니다.\n{url} 에서 최신 릴리스를 받거나 다시 클론하십시오: git clone https://github.com/{slug}.git',
+  'upd.devClone': '개발 클론이라 건너뜀(origin {origin} ≠ {slug}) — 바꾼 것 없음.',
+  'upd.fetchFail': 'git fetch 실패: {msg}',
+  'upd.noRemote': '이 클론에는 갱신할 origin/main 이 없습니다.',
+  'upd.stop.branch': '갱신하지 않음: 클론이 main 이 아닌 "{branch}" 브랜치입니다. 바꾸기: git -C "{dir}" checkout main',
+  'upd.stop.dirty': '갱신하지 않음: 클론에 고친 파일이 있습니다. 먼저 커밋하거나 stash 하십시오(git -C "{dir}" status).',
+  'upd.stop.diverged': '갱신하지 않음: origin/main 에 없는 로컬 커밋이 있어 fast-forward 할 수 없습니다.',
+  'upd.plan': 'Agent4D v{cur} → v{next} 갱신(origin/main 새 커밋 {n}개). 할 일:',
+  'upd.planUpToDate': '코드는 이미 최신(v{cur})입니다. 할 일:',
+  'upd.do.pull': '  - git pull --ff-only (태그 포함)',
+  'upd.do.skill': '  - 복사해 둔 스킬 {dir} 갱신(파일 {n}개, 이전 파일은 *.bak 로 남김)',
+  'upd.do.restart': '  - 실행 중인 서버를 같은 옵션으로 재시작({args})',
+  'upd.do.nothing': '  - 할 일 없음',
+  'upd.confirm': '계속할까요? [y/N] ',
+  'upd.needYes': '터미널이 아니라 물어볼 수 없습니다. 적용하려면 --yes 를 붙여 다시 실행하십시오.',
+  'upd.cancel': '취소, 바꾼 것 없음.',
+  'upd.pullFail': 'git pull --ff-only 실패: {msg}',
+  'upd.pulled': 'v{next} 로 갱신했습니다.',
+  'upd.skillLink': '스킬 {dir} 는 클론을 가리키는 링크라 이미 최신입니다.',
+  'upd.skillDone': '스킬 사본 {dir} 갱신(파일 {n}개).',
+  'upd.skillFail': '스킬 사본 {dir} 를 갱신하지 못했습니다: {msg}',
+  'upd.restarting': '서버 재시작: agent4d {args}',
+  'upd.restartFail': '서버 재시작이 깔끔히 끝나지 않았습니다. 확인: agent4d status',
+  'upd.done': '완료.',
   'help': `사용법: ccviz <명령> [--lang en|ko]
   start [--tunnel|--no-tunnel] [--limits|--no-limits] [--port N] [--project X] [--session ID|auto] [--wait 초] [--watch]
                                                 서버 기동(기본 127.0.0.1 전용, 로컬 링크 출력)
@@ -495,6 +554,7 @@ const ko = {
   statusline uninstall | status                 설치 전으로 되돌림 / 설치·기록 상태
   archive add <세션ID…> [--dir D] [--why 사유]  원본 세션을 보관함에 복사(시각 보존·SHA-256 대조, 있으면 건너뜀)·index 갱신
   archive list [--dir D] [--json]               보관된 세션 목록 (보관함: --dir > CCVIZ_ARCHIVE > config archiveDir)
+  update [--check [--json] [--force]] [--yes]   새 릴리스 확인(24시간 캐시) / 이 git 클론(fast-forward)·복사한 스킬·실행 중 서버 갱신
   help                                          이 도움말
 언어: --lang en|ko > CCVIZ_LANG > LC_ALL/LC_MESSAGES/LANG > 시스템 로케일 (기본 영어)`,
 

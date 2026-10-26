@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Agent4D 수집·스트리밍 서버. Node 내장 모듈만 사용. 127.0.0.1 전용.
 import { readVersion } from './version.mjs';
+import { UpdateChecker, repoSlugOf } from './update.mjs';
 import http from 'node:http';
 import fs from 'node:fs';
 import { pipeline } from 'node:stream';
@@ -259,14 +260,18 @@ function scopeOf(url) {
   return s === 'all' ? 'all' : 'bad';
 }
 
-export function createServer({ token, manager, webRoot = WEB_ROOT, project = null, limits = null }) {
+export function createServer({ token, manager, webRoot = WEB_ROOT, project = null, limits = null, update = null }) {
   const SEC = { 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
   return http.createServer(async (req, res) => {
     let url;
     try { url = new URL(req.url, 'http://127.0.0.1'); } catch { res.writeHead(400); res.end(); return; }
     const p = url.pathname;
     try {
-      if (p === '/healthz') return sendJson(res, 200, { ok: true, version: VERSION }, SEC);
+      if (p === '/healthz') {
+        // update {current, latest, newer, url} — 마지막 확인이 성공했을 때만(꺼짐·실패면 키 없음)
+        const u = update ? update.get() : null;
+        return sendJson(res, 200, u ? { ok: true, version: VERSION, update: u } : { ok: true, version: VERSION }, SEC);
+      }
       if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405, SEC); res.end(); return; }
 
       const auth = checkAuth(req, url, token);
@@ -396,7 +401,10 @@ async function main() {
   }
   // 3차: 사용 한도 수집기. --demo 는 실제 파일·네트워크를 쓰지 않는 고정 값
   const limits = new LimitsCollector({ ...cfg.limits, demo: !!args.demo, version: VERSION }).start();
-  const server = createServer({ token: cfg.viewToken, manager, webRoot: args.webRoot || WEB_ROOT, project, limits });
+  // 업데이트 확인: 기동 시 + 1시간마다 캐시를 보고 24시간 지났을 때만 네트워크, 꺼짐이면 네트워크 0. --demo 는 AGENT4D_FAKE_UPDATE 가짜 값만
+  const update = new UpdateChecker({ home: path.dirname(args.config || defaultConfigPath()), current: VERSION, slug: repoSlugOf(),
+    cfg: { updateCheck: cfg.updateCheck }, offline: !!args.demo }).start();
+  const server = createServer({ token: cfg.viewToken, manager, webRoot: args.webRoot || WEB_ROOT, project, limits, update });
   server.keepAliveTimeout = 65_000;
   server.headersTimeout = 70_000;
   server.requestTimeout = 0;
@@ -405,7 +413,7 @@ async function main() {
     process.stdout.write(`CCVIZ_READY ${JSON.stringify({ port: server.address().port, pid: process.pid })}\n`);
     if (cfg.created) console.error('[ccviz] ' + t('server.configCreated', { file: cfg.file }));
   });
-  const shutdown = () => { try { manager.stop?.(); } catch {} try { limits.stop(); } catch {} server.close(); setTimeout(() => process.exit(0), 300).unref(); };
+  const shutdown = () => { try { manager.stop?.(); } catch {} try { limits.stop(); } catch {} try { update.stop(); } catch {} server.close(); setTimeout(() => process.exit(0), 300).unref(); };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
   // 색인 스캔 → 자동 감시 시작 → 자동 선택 대상 미리 적재(첫 접속 지연 줄이기)
