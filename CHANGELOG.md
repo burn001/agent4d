@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+- Automatic camera in the overview: the "Overview" and project-island shots of "Framing: follow" (and clicking an island) no longer frame whole islands, their floor plates and the work-target layer. Like "Framing: all", they fit the active agents with their tool panels and labels, so agents appear much larger; the island box is used only when an island has no visible agents. "Framing: follow" also stops lingering on a project whose short turn has ended: idle agents score zero, and within about 3 seconds the camera moves to an island that is still working (for example a runner in another project). Same in 3D and 2D for Flow, Planet and Voxel Office.
+
 ## [0.3.1] - 2026-10-26
 
 ### Added

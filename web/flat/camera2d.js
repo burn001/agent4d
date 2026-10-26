@@ -1,7 +1,7 @@
 // 2D(저사양) 표현의 카메라. 3D CameraDirector 와 같은 바깥 모양(app.js 가 쓰는 메서드·필드)을
 // three 없이 2D 팬·줌으로: 휠(커서 기준)·끌기·핀치·WASD/QE, 자동 카메라 = 살아 있는 노드 전체 맞춤(2D판, FitHold 히스테리시스),
 // '따라가기'는 활동 노드를 8초마다 확대(간이), 수동 조작 10초 뒤 복귀, 빈 곳 클릭 즉시 복귀(resumeAuto), 일시정지 얼림(enabled=false).
-import { isShown, isLive, scoreOf, pickBest, shotLost, FitHold, safeBand, ZOOM, autoFloor, nearestKids, FIT, isFitActive, pickFitIds, PanelMemo, pxToE } from '../camera-core.mjs';
+import { isShown, isLive, pickBest, shotLost, FitHold, safeBand, ZOOM, autoFloor, nearestKids, FIT, isFitActive, pickFitIds, PanelMemo, pxToE, shotFitScope, workScore } from '../camera-core.mjs';
 import { stageInsets } from '../screen-insets.js';
 import { t } from '../i18n.mjs';
 import { promptCamPlan } from '../camera-core.mjs'; // 입력 때 메인으로(Follow my prompts)
@@ -32,6 +32,7 @@ export class Director2D {
     this.scope = { mode: 'session', focusProject: null, focusSession: null, focusNode: null };
     this.camMode = 'fit';
     this.fit = new FitHold();
+    this.shotFit = new FitHold(); // 프로젝트 섬 샷의 노드 맞춤 유지
     this.active = true;
     this._ptrs = new Map();
     this._onKey = (e) => this._key(e);
@@ -158,6 +159,7 @@ export class Director2D {
     this._manual();
     if (t.type === 'plan') return; // 계획 보드 크게 보기: 보드는 월드 고정 — 카메라는 그 자리에 멈추고 카드만
     this.shot = t.type === 'cluster' ? { type: 'cluster', pid: t.pid } : { type: 'node', id: t.id };
+    this.shotFit.reset();
     this._startTransition(1.0);
     this.focusFly = true;
   }
@@ -247,9 +249,9 @@ export class Director2D {
   _clusterOf(id) { const v = this.view; if (v.nodeCluster) { const p = v.nodeCluster(id); if (p) return p; } const n = this.getNode(id); return n ? n.projectId || null : null; }
   _lastAt(id) { const a = this.activity.get(id); return a && a.length ? a[a.length - 1] : null; }
   _shown(id) { return isShown(this.view.vis.get(id)); }
-  _inScope(id, v) {
+  _inScope(id, v, sc = null) {
     const all = this.scope.mode === 'all';
-    const fp = all ? this.scope.focusProject : null, fsid = all ? this.scope.focusSession : null;
+    const fp = sc ? sc.pid : all ? this.scope.focusProject : null, fsid = sc ? sc.sid : all ? this.scope.focusSession : null;
     if (fsid) return !!(v.node && v.node.rootSessionId === fsid);
     if (fp) return this._clusterOf(id) === fp;
     return true;
@@ -257,12 +259,12 @@ export class Director2D {
   /**
    * 맞춤 대상 점(3D camera.js 와 같은 규칙): 지금 범위의 활성 노드(없으면 보이는 노드 전부) + 그 노드가 최근 PANEL_KEEP 초에
    * 펼친 도구 카드·노드 라벨 자리. 2D 카드·라벨은 화면 크기(px)로 그려지므로 노드 화면 자리 기준 px 상자를 화면 고정 몫 e 로 담는다.
-   * 섬·작업 대상 층·복셀 방 모서리는 담지 않는다
+   * 섬·작업 대상 층·복셀 방 모서리는 담지 않는다. sc = {pid, sid}(조망 샷 범위) — 주면 지금 범위 대신
    */
-  _fitPts(now = performance.now() / 1000) {
+  _fitPts(now = performance.now() / 1000, sc = null) {
     const view = this.view, list = [];
     for (const [id, v] of view.vis) {
-      if (!this._shown(id) || !this._inScope(id, v)) continue;
+      if (!this._shown(id) || !this._inScope(id, v, sc)) continue;
       list.push([id, isFitActive(v, v.icons ? v.icons.size || 0 : 0)]);
     }
     const ids = pickFitIds(list);
@@ -296,22 +298,22 @@ export class Director2D {
     }
     return pts;
   }
-  _fitFrame(now) {
+  _fitFrame(now, sc = null, hold = this.fit) {
     const { W, H } = this._size();
     const aspect = W / H;
-    const pts = this._fitPts(now);
+    const pts = this._fitPts(now, sc);
     // 노드 하나뿐일 때 바닥: MIN_R × MIN_R_K(예전 MIN_R 그대로 — 너무 멀었다), 수동 최소 D_MIN 보다는 멀리
     const dmin = Math.max(FLAT.D_MIN, fitMinD(aspect, 1 - FIT.M, 1 - FIT.M) * FIT.MIN_R_K);
-    if (!pts.length) return { x: this.cam.x, z: this.cam.z, D: this.cam.D }; // 보이는 노드가 없으면 그 자리(섬으로 물러나지 않음)
+    if (!pts.length) return { x: this.cam.x, z: this.cam.z, D: this.cam.D, n: 0 }; // 보이는 노드가 없으면 그 자리(섬으로 물러나지 않음)
     // 화면 아래 이벤트 띠·매크로 타임라인·재생 막대를 뺀 띠에 담는다 — 라벨은 점마다(e)
     const band = this._band(H, true);
     const mv = (1 - FIT.M) * band.k, mh = 1 - FIT.M;
     // 평행 투영: 화면 상자(반지름·카드·라벨 포함) 가운데로, 가로·세로 중 한쪽이 여백 끝까지
     const want = refineFit2D(pts, boxCenterXZ(pts), aspect, mh, mv, 3, this.view.fitMass !== false); // + 시각 무게중심
-    const here = this.fit.c ? fitNeed(pts, this.fit.c, aspect, mh, mv) : Infinity;
-    this.fit.step(now, want, here, dmin, FLAT.D_MAX, { freeze: !!this.view.exitSettling });
+    const here = hold.c ? fitNeed(pts, hold.c, aspect, mh, mv) : Infinity;
+    hold.step(now, want, here, dmin, FLAT.D_MAX, { freeze: !!this.view.exitSettling });
     // 시선점을 아래로(내용이 띠 가운데, 덮개 위로 올라감)
-    return { x: this.fit.c.x, z: this.fit.c.z + this.fit.D * band.yc, D: this.fit.D };
+    return { x: hold.c.x, z: hold.c.z + hold.D * band.yc, D: hold.D, n: pts.length };
   }
   /** 맞춤 띠(3D camera.js _band 와 같은 규칙) */
   _band(H, noLabels = false) {
@@ -337,14 +339,6 @@ export class Director2D {
     const D = clampD(autoFloor(Math.max(fitMinD(W / H) * (deep ? ZOOM.NODE_MIN_R_K : 1), fitNeed(pts, c, W / H, FLAT.FIT_MH, FLAT.FIT_MV * band.k) * (deep ? ZOOM.NODE_MARGIN_2D : 1.1)), FLAT.D_MIN));
     return { x: c.x, z: c.z + D * band.yc, D };
   }
-  /** 섬 샷 맞춤 점: 그 섬의 보이는 노드 + 표현이 담고 싶은 자리(복셀 방). 없으면 null */
-  _clusterPts(pid) {
-    const view = this.view, pts = [];
-    for (const [id, v] of view.vis) if (this._shown(id) && this._clusterOf(id) === pid) pts.push({ p: v.target, r: v.r * FLAT.FIT_PAD_K + FLAT.FIT_PAD });
-    if (!pts.length) return null;
-    if (view.fitExtra) view.fitExtra(pts, { mode: 'all', focusProject: pid });
-    return pts;
-  }
   _frame(shot, now = performance.now() / 1000) {
     if (shot.type === 'node' && this.view.has(shot.id)) {
       if (shot.prompt) { // 입력 받은 메인을 가운데로, 멀어지지 않게
@@ -356,16 +350,17 @@ export class Director2D {
     if (shot.type === 'cluster' && this.view.clusterTarget) {
       const c = this.view.clusterTarget(shot.pid);
       if (c) {
+        // 그 섬의 활성 노드 + 도구 카드·라벨('구도: 전체'와 같은 맞춤 점) — 섬 상자·작업 대상 층·복셀 방 모서리는 담지 않음
+        const sc = shotFitScope(shot, this.scope) || { pid: shot.pid, sid: null };
+        const f = this._fitFrame(now, sc, this.shotFit);
+        if (f.n) return f;
+        // 보이는 노드가 없으면 섬 상자 네 꼭짓점(없으면 경계원)
         const { W, H } = this._size();
-        // 그 섬의 보이는 노드(복셀 방 모서리)로 꽉 — 상자보다 가깝게. 노드가 없으면 상자·경계원
-        const npts = ZOOM.CLUSTER_NODES ? this._clusterPts(shot.pid) : null;
-        if (!npts && !c.box) return { x: c.center.x, z: c.center.z, D: clampD(fitNeed([{ p: c.center, r: c.r }], c.center, W / H)) };
-        // 섬 상자 네 꼭짓점을 맞춤 띠에 꽉(경계원 대신)
-        const pts = npts || [[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz]) => ({ p: { x: c.center.x + sx * c.box.hw, y: 0, z: c.center.z + sz * c.box.hd }, r: 1.2 }));
+        if (!c.box) return { x: c.center.x, z: c.center.z, D: clampD(fitNeed([{ p: c.center, r: c.r }], c.center, W / H)) };
+        const pts = [[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz]) => ({ p: { x: c.center.x + sx * c.box.hw, y: 0, z: c.center.z + sz * c.box.hd }, r: 1.2 }));
         const band = this._band(H);
-        const cc = npts ? boxCenterXZ(npts) : c.center;
-        const D = clampD(fitNeed(pts, cc, W / H, FLAT.FIT_MH, FLAT.FIT_MV * band.k));
-        return { x: cc.x, z: cc.z + D * band.yc, D };
+        const D = clampD(fitNeed(pts, c.center, W / H, FLAT.FIT_MH, FLAT.FIT_MV * band.k));
+        return { x: c.center.x, z: c.center.z + D * band.yc, D };
       }
     }
     return this._fitFrame(now);
@@ -377,7 +372,7 @@ export class Director2D {
     const list = [];
     for (const [id, v] of this.view.vis) {
       if (!this._shown(id) || !this._inScope(id, v) || !isLive(v, this._lastAt(id), now)) continue;
-      list.push([id, scoreOf(this.activity.get(id), v.icons ? v.icons.size : 0, this.added.get(id), now)]);
+      list.push([id, workScore(v, this.activity.get(id), this.added.get(id), this._lastAt(id), now)]); // 쉬는 노드는 0
     }
     const id = pickBest(list, this.prevTarget);
     if (!id) return { type: 'fit' };

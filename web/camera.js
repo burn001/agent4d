@@ -1,7 +1,7 @@
 // 카메라: OrbitControls + 자동 투어 + 수동 조작 10초 규칙
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { STALE_DWELL, isShown, isLive, isBusy, scoreOf, pickBest, shotLost, shotStale, shownAncestor, fitFrame, flightPose, boxCenter, requiredDist, refineFit, FitHold, safeBand, ZOOM, autoFloor, nearestKids, FIT, isFitActive, pickFitIds, PanelMemo, boxCorners, pxToE } from './camera-core.mjs';
+import { STALE_DWELL, isShown, isLive, isBusy, pickBest, shotLost, shotStale, shownAncestor, fitFrame, flightPose, boxCenter, requiredDist, refineFit, FitHold, safeBand, ZOOM, autoFloor, nearestKids, FIT, isFitActive, pickFitIds, PanelMemo, boxCorners, pxToE, shotFitScope, workScore, busyAlt } from './camera-core.mjs';
 import { stageInsets } from './screen-insets.js';
 import { bestPose, perspPose, needRepack } from './overview/fill-pack.mjs';
 import { legacyPack } from './overview/pack-view.js';
@@ -22,7 +22,7 @@ const CALM_WIN = 6, CALM_LO = 2.0, CALM_HI = 6.0;
 const CALM_EV = new Set(['node-add', 'tool-start', 'user']);
 const prefersReduced = () => { try { return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } };
 // 전체 맞춤 화면 여백: 반화각 탄젠트에 곱하는 비율(홀로그램 패널·말풍선·라벨이 잘리지 않게), 노드 반지름 덧댐
-const FIT_MH = 0.95, FIT_MV = 0.94, FIT_PAD_K = 1.15, FIT_PAD = 0.9; // 여백 5～6%(예전 0.92·0.86)
+const FIT_MH = 0.95, FIT_MV = 0.94; // 여백 5～6%(예전 0.92·0.86)
  // 화면 채움 비율·노드 여백(예전 0.84·0.78·1.4·1.8 — 너무 멀다는 피드백으로 당김)
 export const CAM_MODES = ['fit', 'follow'];
 // 렌더러가 cameraPrefs 를 안 주면 쓰는 값(1차 상수와 같음). azCenter/azRange(도)는 선택: 주면 방위각을 그 범위에 묶고 공전이 왕복한다
@@ -61,6 +61,7 @@ export class CameraDirector {
     // 자동 카메라 방식: 'fit' = 살아 있는 노드 전체 맞춤(기본), 'follow' = 활동 노드 따라가기(예전 순환)
     this.camMode = 'fit';
     this.fit = new FitHold();
+    this.shotFit = new FitHold(); // 조망 샷(전체 조망·프로젝트 섬)의 노드 맞춤 유지 — 샷이 바뀔 때마다 새로
 
     this._onManual = () => this._manual();
     this._bindDom();
@@ -283,6 +284,8 @@ export class CameraDirector {
     return n ? n.parentId || null : null;
   }
   _busyId(id, now) { return isBusy(this.view.vis.get(id), this._lastAt(id), now); }
+  /** 조용해진 대상(id, 섬 pid)에서 넘어갈 일하는 노드: 'same'(같은 섬) | 'other'(섬이 통째로 쉼, 다른 섬) | null */
+  _busyAlt(now, id, pid) { return busyAlt(this._collect(now).map((x) => ({ id: x.id, pid: x.pid, busy: this._busyId(x.id, now) })), id, pid); }
   /** 화면에 보이고 지금 활동 중인 노드인가(숨김·퇴장·희미·끝난 노드 제외) */
   _liveId(id, now) { const v = this.view.vis.get(id); return !!v && this._shownId(id) && isLive(v, this._lastAt(id), now); }
 
@@ -331,7 +334,8 @@ export class CameraDirector {
     const active = [...score].filter(([, s]) => s > 0).sort((a, b) => (b[1] - a[1]) || (a[0] < b[0] ? -1 : 1));
     if (idle || !active.length || !cls.length) return { type: 'overview' };
     if (beat === 0) return { type: 'overview' };
-    if (beat === 1 || !this.curCluster || !cand.has(this.curCluster)) {
+    // 지금 섬이 통째로 쉬면(점수 0) 박자 1 을 기다리지 않고 일하는 섬으로
+    if (beat === 1 || !this.curCluster || !cand.has(this.curCluster) || !(score.get(this.curCluster) > 0)) {
       let pid = active[0][0];
       if (active.length > 1 && pid === this.prevCluster) pid = active[1][0];
       this.prevCluster = pid;
@@ -353,15 +357,20 @@ export class CameraDirector {
   _replace(now, lostShot, busyOnly = false) {
     const lostId = lostShot && lostShot.type === 'node' ? lostShot.id : null;
     let live = this._collect(now).filter((x) => x.id !== lostId);
-    if (busyOnly) { // 조용해진 대상 → 같은 섬에서 지금 일하는 노드로
-      const pid = this.scope.mode === 'all' && lostId ? this._clusterOf(lostId) : null;
-      live = live.filter((x) => (!pid || x.pid === pid) && this._busyId(x.id, now));
+    if (busyOnly) { // 조용해진 대상 → 같은 섬에서 지금 일하는 노드로, 그 섬이 통째로 쉬면 다른 섬의 일하는 노드로
+      const pid = this.scope.mode === 'all' ? (lostId ? this._clusterOf(lostId) : lostShot && lostShot.pid) || null : null;
+      const busy = live.filter((x) => this._busyId(x.id, now));
+      const same = pid ? busy.filter((x) => x.pid === pid) : busy;
+      live = same.length ? same : busy;
     }
     if (live.length) {
       const pid = lostId ? this._clusterOf(lostId) || this.curCluster : this.curCluster;
       const same = this.scope.mode === 'all' && pid ? live.filter((x) => x.pid === pid) : [];
       const id = pickBest((same.length ? same : live).map((x) => [x.id, x.s]), null);
-      if (id) return { type: 'node', id };
+      if (id) {
+        if (this.scope.mode === 'all') { const np = (live.find((x) => x.id === id) || {}).pid; if (np && np !== this.curCluster) { this.prevCluster = this.curCluster; this.curCluster = np; } }
+        return { type: 'node', id };
+      }
     }
     if (lostId) {
       const a = shownAncestor(lostId, (id) => this._parentOf(id), (id) => this._shownId(id));
@@ -418,9 +427,8 @@ export class CameraDirector {
   }
 
   // ---------- 선택 ----------
-  _score(id, now) {
-    const v = this.view.vis.get(id);
-    return scoreOf(this.activity.get(id), v && v.icons ? v.icons.size : 0, this.added.get(id), now);
+  _score(id, now) { // 지금 일하는 노드만 점수(쉬는 노드는 0 — 짧은 알림 턴이 끝난 섬이 20초 창 동안 뽑히지 않게)
+    return workScore(this.view.vis.get(id), this.activity.get(id), this.added.get(id), this._lastAt(id), now);
   }
 
   _pick(now) {
@@ -484,11 +492,12 @@ export class CameraDirector {
   /**
    * 맞춤 대상 점: 지금 범위(전체 보기 무선택 = 보이는 노드 전체, 프로젝트 선택 = 그 섬, 세션 선택 = 그 트리)의
    * **활성** 노드(끝나지 않았고 작업 중이거나 열린 도구가 있음 — 없으면 보이는 노드 전부) + 그 노드의 펼친 도구 패널 자리(최근 PANEL_KEEP 초).
-   * 섬 바닥·섬 상자·작업 대상 층·복셀 방 모서리는 담지 않는다(예전엔 담아 노드가 작게 보였다). basis = 이번 맞춤의 화면 기저
+   * 섬 바닥·섬 상자·작업 대상 층·복셀 방 모서리는 담지 않는다(예전엔 담아 노드가 작게 보였다). basis = 이번 맞춤의 화면 기저.
+   * sc = {pid, sid}(조망 샷 범위, shotFitScope) — 주면 지금 범위 대신 그 섬·세션
    */
-  _fitPts(basis) {
+  _fitPts(basis, sc = null) {
     const view = this.view, all = this.scope.mode === 'all';
-    const fp = all ? this.scope.focusProject : null, fsid = all ? this.scope.focusSession : null;
+    const fp = sc ? sc.pid : all ? this.scope.focusProject : null, fsid = sc ? sc.sid : all ? this.scope.focusSession : null;
     const list = [];
     for (const [id, v] of view.vis) {
       if (!this._shownId(id)) continue;
@@ -541,15 +550,16 @@ export class CameraDirector {
    * 전체 맞춤 구도: 대상 점(활성 노드·패널 모서리)을 지금 카메라 방향으로 투영해, 맞춤 띠(하단 덮개·라벨 자리를 뺀 화면)의
    * 가로·세로 여백 6% 안을 꽉 채우는 거리와 투영 상자 가운데로 옮긴 시선점(refineFit). 히스테리시스(FitHold)로 작은 변화엔 그대로
    */
-  _fitFrame() {
+  _fitFrame(sc = null, hold = this.fit) {
     const now = this._now || performance.now() / 1000;
-    if (this._fitCache && this._fitCache.at === now) return this._fitCache.f;
+    const key = sc ? (sc.pid || '') + '|' + (sc.sid || '') : '';
+    if (this._fitCache && this._fitCache.at === now && this._fitCache.key === key) return this._fitCache.f;
     const pr = this._prefs();
     const fov = (this.camera.fov * Math.PI) / 180;
     const aspect = Math.max(0.4, this.camera.aspect || 1);
     const t = Math.tan(fov / 2);
     const B = this._fitBasis(this._fitDir());
-    const pts = this._fitPts(B);
+    const pts = this._fitPts(B, sc);
     // 노드가 하나뿐일 때의 바닥: minR × MIN_R_K 구가 띠 높이(짧은 쪽)를 채우는 거리, 수동 최소 거리보다는 멀리(예전 minR × nodeScale 구 — 너무 멀었다)
     const dmin = autoFloor((pr.minR * FIT.MIN_R_K) / (t * Math.min(1, aspect)), this.controls && this.controls.minDistance);
     const dmax = Math.max(pr.distMax, pr.overviewDistMax || pr.distMax);
@@ -566,11 +576,11 @@ export class CameraDirector {
       // 옮기면 원근 때문에 가까운(화면 아래) 점이 더 많이 올라가 아래가 비었다
       const vOff = band.yc * t;
       const want = refineFit(pts, boxCenter(pts), R, U, F, tanH, tanV, 4, vOff, this.view.fitMass !== false); // + 시각 무게중심 // 투영 상자 가운데로 3～4회 보정 — 가로나 세로 한쪽이 여백 끝까지
-      const here = this.fit.c ? requiredDist(pts, this.fit.c, R, U, F, tanH, tanV, vOff) : Infinity;
-      this.fit.step(now, want, here, dmin, dmax, { freeze: !!this.view.exitSettling }); // 퇴장 연출 중엔 줄이지 않고, 끝난 뒤 한 번만
-      f = { center: new THREE.Vector3(this.fit.c.x, this.fit.c.y, this.fit.c.z), dist: this.fit.D, r: want.D * t, n: pts.length };
+      const here = hold.c ? requiredDist(pts, hold.c, R, U, F, tanH, tanV, vOff) : Infinity;
+      hold.step(now, want, here, dmin, dmax, { freeze: !!this.view.exitSettling }); // 퇴장 연출 중엔 줄이지 않고, 끝난 뒤 한 번만
+      f = { center: new THREE.Vector3(hold.c.x, hold.c.y, hold.c.z), dist: hold.D, r: want.D * t, n: pts.length };
     }
-    this._fitCache = { at: now, f };
+    this._fitCache = { at: now, key, f };
     return f;
   }
 
@@ -582,8 +592,10 @@ export class CameraDirector {
     let pts = [];
     const all = this.scope.mode === 'all' && view.clusters;
     let wide = false;
-    const cpts = all ? this._clusterPts(shot) : null; // 섬 샷은 그 섬의 보이는 노드로(상자보다 가깝게)
-    if (cpts) return this._projFrame(cpts, pr);
+    // 전체 조망·프로젝트 섬 샷: '구도: 전체'와 같은 맞춤 점(활성 노드 + 도구 패널·라벨)으로 — 섬 상자·바닥판·작업 대상 층·
+    // 복셀 방 모서리는 담지 않음(예전엔 섬 상자·섬 노드 + 작업 대상 층(fitExtra3d)을 담아 노드·패널이 작게 보였다)
+    const sc = shotFitScope(shot, this.scope);
+    if (sc && !legacyPack()) { const f = this._fitFrame(sc, this.shotFit); if (f.n) return f; }
     const bpts = all ? this._boxPts(shot) : null; // 섬 상자 꼭짓점으로 투영 맞춤(경계구 대신 — 납작한 섬이 화면을 꽉 채우게)
     if (bpts) return this._projFrame(bpts, pr);
     if (all && shot.type === 'cluster') {
@@ -648,7 +660,7 @@ export class CameraDirector {
   /** 보기가 섬을 다시 배치한 차례(전체 보기 _ov.packSeq·복셀 캠퍼스 layout.packSeq) */
   _packSeq() { const v = this.view; return (v._ov && v._ov.packSeq) || (v.layout && v.layout.packSeq) || 0; }
   /** 점들이 가용 영역을 가장 크게 채우는 카메라 방향(단위벡터). 전체 보기는 방위각 0(섬 배치 축), 복셀은 방위각 범위 안에서 */
-  _poseDir(pts) {
+  _poseDir(pts, fitM = this.camMode === 'fit') {
     if (!pts || !pts.length || legacyPack()) return null;
     const pr = this._prefs();
     const cur = this._dirFrom(this.controls.target);
@@ -662,7 +674,7 @@ export class CameraDirector {
     else view.yaw0 = this.scope.mode === 'all' ? 0 : curAz;
     // 정사영 근사(bestPose)가 아니라 실제 원근 맞춤으로 자세를 고른다(perspPose — 높은 고도에서 원근 때문에 작아지는 것까지)
     const fov = (this.camera.fov * Math.PI) / 180, t = Math.tan(fov / 2), band = this._band();
-    const fm = this.camMode === 'fit' ? 1 - FIT.M : null; // 맞춤 여백(라벨은 점마다)
+    const fm = fitM ? 1 - FIT.M : null; // 맞춤 여백(라벨은 점마다) — 노드 맞춤 점이면 조망 샷도
     const bd = fm ? this._band(true) : band;
     const pose = perspPose(pts, view, t * Math.max(0.4, this.camera.aspect || 1) * (fm || FIT_MH * this._labelKx()), t * (fm || FIT_MV) * bd.k) || bestPose(rects, view);
     const el = (pose.el * Math.PI) / 180, az = (pose.yaw * Math.PI) / 180;
@@ -674,23 +686,7 @@ export class CameraDirector {
     const d = this._poseDir(this._fitPts());
     if (d && this.trans) { this.trans.dir = d; this.fit.reset(); }
   }
-  /** 섬 하나를 비추는 샷(cluster·선택 프로젝트 overview)의 맞춤 점: 그 섬의 보이는 노드(복셀 방 모서리). 전체 조망·노드 없음이면 null(상자) */
-  _clusterPts(shot) {
-    const view = this.view;
-    if (!ZOOM.CLUSTER_NODES || legacyPack() || (shot.type !== 'cluster' && shot.type !== 'overview')) return null;
-    const pid = shot.type === 'cluster' ? shot.pid : this.scope.focusProject;
-    if (!pid) return null;
-    const pts = [];
-    for (const [id, v] of view.vis) {
-      if (!this._shownId(id) || this._clusterOf(id) !== pid) continue;
-      const p = view.nodeTarget ? view.nodeTarget(id) : v.target;
-      if (p) pts.push({ p, r: (view.nodeRadius ? view.nodeRadius(id) : v.r || 1) * FIT_PAD_K + FIT_PAD });
-    }
-    if (!pts.length) return null;
-    if (view.fitExtra3d) view.fitExtra3d(pts, { mode: 'all', focusProject: pid });
-    return pts;
-  }
-  /** 섬 샷(cluster·전체 보기 overview)의 섬 상자 꼭짓점들 — 상자가 없으면 null(예전 경계구 계산) */
+  /** 섬 샷(cluster·전체 보기 overview)의 섬 상자 꼭짓점들 — 보이는 노드가 없을 때만. 상자가 없으면 null(예전 경계구 계산) */
   _boxPts(shot) {
     const view = this.view;
     if (legacyPack() || !view.clusters || !view.clusterTarget || (shot.type !== 'cluster' && shot.type !== 'overview')) return null;
@@ -775,8 +771,12 @@ export class CameraDirector {
     if (s.type === 'node') this.prevTarget = s.id;
     if (!same || fly || !this._inited) {
       this._startTransition();
-      const bp = this.scope.mode === 'all' ? this._boxPts(s) : null; // 섬으로 다가갈 때도 그 섬이 가장 크게 차는 자세로
-      if (bp && this.trans) this.trans.dir = this._poseDir(bp);
+      // 섬으로 다가갈 때도 가장 크게 차는 자세로 — 그 범위의 노드·패널 기준(노드가 없으면 섬 상자)
+      const sc = shotFitScope(s, this.scope);
+      const np = sc && !legacyPack() ? this._fitPts(null, sc) : null;
+      const bp = np && np.length ? np : this.scope.mode === 'all' ? this._boxPts(s) : null;
+      if (bp && this.trans) this.trans.dir = this._poseDir(bp, !!(np && np.length) || this.camMode === 'fit');
+      this.shotFit.reset();
     }
     this._inited = true;
     this._flyNext = false;
@@ -813,10 +813,13 @@ export class CameraDirector {
       if (!lost && this.shot.type === 'node' && !this.shot.wide) { // 넓은 구도(메인·세션 전체)는 활동 자손을 함께 담으므로 제외
         const v = this.view.vis.get(this.shot.id);
         if (v && !isBusy(v, this._lastAt(this.shot.id), now) && now - (this.shotAt || 0) >= STALE_DWELL) {
-          // 전체 보기에서는 같은 섬 안에서만 앞당긴다(다른 섬으로 건너가는 것은 8초 박자에 맡김 — 잦은 장거리 비행 방지)
+          // 전체 보기: 같은 섬에 일하는 노드가 있으면 그 섬 안에서, 섬이 통째로 쉬면 다른 섬의 일하는 노드로(— 예전엔 다른 섬은 8초 박자에 맡겨
+          // 알림 턴이 끝난 섬을 계속 비췄다)
           const pid = this.scope.mode === 'all' ? this._clusterOf(this.shot.id) : null;
-          stale = shotStale(v, this._lastAt(this.shot.id), this.shotAt || 0, now, this._collect(now).some((x) => x.id !== this.shot.id && (!pid || x.pid === pid) && this._busyId(x.id, now)));
+          stale = shotStale(v, this._lastAt(this.shot.id), this.shotAt || 0, now, !!this._busyAlt(now, this.shot.id, pid));
         }
+      } else if (!lost && this.shot.type === 'cluster' && this.scope.mode === 'all' && !this.scope.focusProject && now - (this.shotAt || 0) >= STALE_DWELL) {
+        stale = this._busyAlt(now, null, this.shot.pid) === 'other'; // 섬 샷: 그 섬이 쉬고 다른 섬이 일하면 넘어감
       }
       if (now - this.lastSwitch >= SWITCH_EVERY) {
         this.lastSwitch = now;

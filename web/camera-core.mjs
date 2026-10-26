@@ -13,9 +13,8 @@ export const ENDED = (st) => st === 'done' || st === 'stopped';
  * - NODE_K: 노드 샷 거리 배율(3D 경계구 거리식에 곱함, 예전 1)
  * - NODE_MIN_R_K: 노드 샷 최소 반지름(minR·2D MIN_R)에 곱함(예전 1 — 노드가 몇 개 안 되면 이 바닥에 걸려 더 못 다가갔다)
  * - NODE_MARGIN_2D: 2D 노드 샷 맞춤 거리 여유(예전 1.1)
- * - CLUSTER_NODES: 섬 샷(섬 투어·선택 프로젝트 조망)을 섬 상자 대신 그 섬의 보이는 노드(복셀은 방 모서리 포함)로 맞춤(예전 상자 꼭짓점)
  */
-export const ZOOM = { NODE_KIDS: 8, NODE_K: 0.85, NODE_MIN_R_K: 0.8, NODE_MARGIN_2D: 1.0, CLUSTER_NODES: true };
+export const ZOOM = { NODE_KIDS: 8, NODE_K: 0.85, NODE_MIN_R_K: 0.8, NODE_MARGIN_2D: 1.0 }; // CLUSTER_NODES(섬 샷 = 섬 노드 + 방 모서리)는 shotFitScope 로 대체
 
 /** 자동 카메라 거리 바닥: 수동 줌 최소 거리보다 가까이 가지 않는다 */
 export const autoFloor = (d, manualMin) => Math.max(d, manualMin || 0);
@@ -86,6 +85,32 @@ export const QUIET = 4;        // 이 시간(초) 동안 이벤트·열린 도�
 export function isBusy(v, lastAt, now) {
   const open = v && v.icons ? v.icons.size || 0 : 0;
   return open > 0 || (lastAt != null && now - lastAt < QUIET);
+}
+
+/**
+ * 고르기 점수: 지금 일하는 노드(열린 도구·QUIET 초 안 이벤트·status active)만 scoreOf, 아니면 0.
+ * 예전엔 WINDOW(20초) 창의 이벤트 수를 그대로 써서, 짧은 알림 턴이 끝나 쉬는 섬이 잦은 이벤트 몫으로 20초 넘게 뽑혔다
+ * (계속 도는 다른 프로젝트 러너는 열린 도구 ×2 뿐이라 졌다)
+ */
+export function workScore(v, times, addedAt, lastAt, now) {
+  const open = v && v.icons ? v.icons.size || 0 : 0;
+  const st = v && v.node && v.node.status;
+  if (!(open > 0 || st === 'active' || (lastAt != null && now - lastAt < QUIET))) return 0;
+  return scoreOf(times, open, addedAt, now);
+}
+
+/**
+ * 조용해진 대상에서 넘어갈 일하는 노드가 있나: list = [{id, pid, busy}](범위 안 활동 노드), id·pid = 지금 대상(섬 샷이면 id null).
+ * 같은 섬에 일하는 노드가 있으면 그 섬 안에서만, 그 섬이 통째로 쉬면 다른 섬의 일하는 노드도 — 반환 'same' | 'other' | null
+ */
+export function busyAlt(list, id, pid) {
+  let other = false;
+  for (const x of list) {
+    if (x.id === id || !x.busy) continue;
+    if (!pid || x.pid === pid) return 'same';
+    other = true;
+  }
+  return other ? 'other' : null;
 }
 
 /**
@@ -196,6 +221,18 @@ export function isFitActive(v, open = 0) {
 export function pickFitIds(list) {
   const act = list.filter((x) => x[1]).map((x) => x[0]);
   return act.length ? act : list.map((x) => x[0]);
+}
+
+/**
+ * 조망 샷 맞춤 범위: 전체 보기의 '전체 조망'(overview)·프로젝트 섬(cluster) 샷도 '구도: 전체'와 같은 맞춤 점
+ * (범위 안 활성 노드 + 도구 패널·라벨)으로 맞춘다 — 섬 상자·바닥판·작업 대상 층·복셀 방 모서리는 담지 않음(잘려도 됨).
+ * 반환 {pid, sid}(null = 그 조건 없음) | null(해당 없음: 노드 샷·맞춤 샷·단일 세션 보기)
+ */
+export function shotFitScope(shot, scope) {
+  if (!shot || !scope || scope.mode !== 'all') return null;
+  if (shot.type === 'cluster') return shot.pid ? { pid: shot.pid, sid: null } : null;
+  if (shot.type === 'overview') return { pid: scope.focusProject || null, sid: scope.focusSession || null };
+  return null;
 }
 
 /**
