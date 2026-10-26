@@ -23,7 +23,7 @@ import { sessionColorMap, nodeSessIdx } from '../multi-core.mjs';
 import { sessBadgeHtml, branchOf } from '../session-core.mjs';
 import { FlatSessions } from './flat-sessions.js';
 import { FlatIx } from './ix2d.js';
-import { ProjFade } from '../proj-fade.mjs';
+import { ProjFade, nodeFade } from '../proj-fade.mjs';
 import { projectAreaPad } from '../overview/pick-core.mjs';
 import { t } from '../i18n.mjs';
 import { isJob, jobOf, jobLabelKey } from '../job-core.mjs'; // 작업 노드
@@ -314,7 +314,7 @@ export class FlatView {
   /** 노드 그린 반지름(세계 단위): Flow 칩 크기 규칙과 같음. 하위 표현이 바꿀 수 있다 */
   _nodeR(node, kind) {
     const dev = isLauncher(node);
-    const r = RADIUS[kind] * NODE_SCALE * (dev ? 2 : 1);
+    const r = RADIUS[kind] * NODE_SCALE * (dev ? 2 * BATCH.DEVICE_K : 1);
     const k = dev ? 1.6 : ({ main: 0.95, 'claude-p': 1.25, workflow: 1.1 }[kind] ?? 1.45);
     return r * k;
   }
@@ -726,14 +726,15 @@ export class FlatView {
       const recent = !!(ov && rv && isRecentRoot(rv.node));
       // scopeD = 고정 희미(recent) — 문턱 판정, projA = 프로젝트 페이드, scopeK = 곱(그리기 배율)
       const d = recent ? 0.35 : 1;
-      const pa = ov ? this.pf.alpha2(pid, rid) : 1; // 세션 숨김도
+      const nf = ov ? nodeFade(this.pf, pid, rid, fp) : null; // 프로젝트 고르기·세션 숨김(루트 키는 숨김만 따름)
+      const pa = nf ? nf.a : 1;
       const k = d * pa;
       v.projectId = pid;
       v.scopeRecent = recent;
       v.ovHidden = hidden;
       v.scopeD = d; v.projA = pa;
-      v.projOut = !!((fp || this.pf.hide.size) && (this.pf.out(pid) || (rid && this.pf.out(rid))));
-      v.projGone = !!((fp || this.pf.hide.size) && (this.pf.gone(pid) || (rid && this.pf.gone(rid))));
+      v.projOut = !!(nf && nf.out);
+      v.projGone = !!(nf && nf.gone);
       if (v.labelEl && v.exiting == null) { const o = pa < 1 ? (Math.round(pa * 20) / 20).toFixed(2) : ''; if (v.labelEl.style.opacity !== o) v.labelEl.style.opacity = o; }
       const si = ov ? nodeSessIdx(v.node, this._sessColors) : null; // 세션 색
       if (si !== (v.sessIdx ?? null)) { v.sessIdx = si; v.sessC = si == null ? null : this.tokens['sess-' + si]; v._col = null; v._edgeK = null; v._labelHtml = null; this._labelText(v); }

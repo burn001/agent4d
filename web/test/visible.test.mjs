@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseVis, serializeVis, toggleProject, toggleSession, showAll, showOnly, markVisibility, fadeKeys, projVisible, sessVisible, emptyVis } from '../overview/visible.mjs';
-import { ProjFade } from '../proj-fade.mjs';
+import { ProjFade, nodeFade } from '../proj-fade.mjs';
 import { computeOverview } from '../overview/layout.mjs';
 import { computeCampus } from '../voxel/campus.mjs';
 
@@ -122,4 +122,34 @@ test('computeCampus: 숨긴 프로젝트는 동 없음, 바뀌면 슬롯을 새�
   assert.ok(c1.hidden.has('s:b1'));
   const keys = new Set(c1.buildings.map((b) => b.slot.col + ',' + b.slot.row));
   assert.equal(keys.size, 2);
+});
+
+test('프로젝트 고르기: 독립 기동기 루트(b:) 아래 회차·서브에이전트·작업은 같은 프로젝트면 그대로 보임(v0.4.1)', () => {
+  const now = new Date().toISOString();
+  const n = (id, kind, parentId, pid, extra = {}) => ({ id, kind, parentId, projectId: pid, status: 'active', startedAt: now, lastActivityAt: now, ...extra });
+  const nodes = [
+    n('s:m1', 'main', null, 'A', { sessionId: 'm1', rootSessionId: 'm1', status: 'idle' }),
+    n('m:w1', 'monitor', 's:m1', 'A', { rootSessionId: 'm1' }),
+    n('b:L1', 'bash-bg', null, 'A', { rootSessionId: 'm1', meta: { batch: true } }), // 부모 없는 기동기 → 섬 안 독립 루트
+    n('b:L1-r1', 'bash-bg', 'b:L1', 'A', { rootSessionId: 'm1' }),
+    n('s:p1', 'claude-p', 'b:L1', 'A', { sessionId: 'p1', rootSessionId: 'm1' }),
+    n('a:x1', 'subagent', 's:p1', 'A', { rootSessionId: 'm1' }),
+    n('b:j1', 'bash-bg', 'a:x1', 'A', { rootSessionId: 'm1' }),
+    ...mk('B', 'b1', 2),
+  ];
+  const roots = [{ sessionId: 'm1', projectId: 'A', live: true }, { sessionId: 'b1', projectId: 'B', live: true }];
+  const projects = ['A', 'B'].map((p) => ({ projectId: p, name: p, live: true, active: true, liveSessions: 1 }));
+  const ov = computeOverview(nodes, roots, projects, null, { view });
+  assert.equal(ov.rootOf.get('a:x1'), 'b:L1'); // 이 모양이 버그 조건(루트 키가 's:' 가 아님)
+  const pf = new ProjFade(0.5);
+  pf.setFocus('A', ['A', 'B'], { instant: true });
+  const gone = (id) => nodeFade(pf, ov.projectOf.get(id) || null, ov.rootOf.get(id), 'A').gone;
+  for (const x of nodes.filter((q) => q.projectId === 'A')) assert.equal(gone(x.id), false, x.id + ' 은 보여야 함');
+  for (const x of nodes.filter((q) => q.projectId === 'B')) assert.equal(gone(x.id), true, x.id + ' 은 숨어야 함');
+  assert.equal(pf.target('b:L1'), 1);
+  assert.equal(pf.target('B'), 0);
+  // 세션 숨김은 루트 키도 그대로 따른다
+  pf.setHidden(['b:L1'], { instant: true });
+  assert.equal(gone('a:x1'), true);
+  assert.equal(gone('m:w1'), false);
 });

@@ -779,7 +779,7 @@ export class VoxelView {
       const show = !m.released && m.pos;
       let v = this.vis.get(m.id);
       if (!show) { if (v) { this.vis.delete(m.id); changed = true; } continue; }
-      if (!v) { v = { node: m.node, target: new THREE.Vector3(), r: m.type === 'board' ? 2.4 : m.type === 'batch' ? 1.6 : m.type === 'job' ? 0.5 : 1.2, icons: { size: 0 } }; this.vis.set(m.id, v); changed = true; }
+      if (!v) { v = { node: m.node, target: new THREE.Vector3(), r: m.type === 'board' ? 2.4 : m.type === 'batch' ? 1.6 * BATCH.DEVICE_K : m.type === 'job' ? 0.5 : 1.2, icons: { size: 0 } }; this.vis.set(m.id, v); changed = true; }
       v.node = m.node;
       v.target.set(m.pos.x, m.type === 'rack' ? 1 : m.pos.y, m.pos.z);
       v.icons.size = (m.node.openTools || []).length;
@@ -1250,7 +1250,7 @@ export class VoxelView {
         const tags = nodeTags(n0, this.nodes, this.clock());
         const spt = spawnTag(n0); if (spt) tags.push(spt); // 띄움 꼬리표
         const tg = tags.length ? `<span class="ntags">${tags.map((x) => `<i>${esc(x)}</i>`).join('')}</span>` : '';
-        put(m.id, esc(trunc(n0.label || n0.id, 20)) + tg + `<small class="ndev">${esc(deviceSummary(m.info))}</small>`, 'machine batch' + (m.id === fid || m.id === hid ? ' focus' : ''), m.pos.x - 0.6, 1.9, m.pos.z - 0.6, null, true); // 장치 위·뒤(팀장 이름표와 겹치지 않게)
+        put(m.id, esc(trunc(n0.label || n0.id, 20)) + tg + `<small class="ndev">${esc(deviceSummary(m.info))}</small>`, 'machine batch' + (m.id === fid || m.id === hid ? ' focus' : ''), m.pos.x - 0.6 * BATCH.DEVICE_K, 1.9 * BATCH.DEVICE_K, m.pos.z - 0.6 * BATCH.DEVICE_K, null, true); // 장치 위·뒤(팀장 이름표와 겹치지 않게)
         continue;
       }
       put(m.id, esc(trunc(n0.label || n0.id, 16)) + `<small>${esc((KIND_LABEL[n0.kind] || n0.kind) + ' · ' + (STATUS_LABEL[n0.status] || '') + (m.standby ? ' · ' + _t('scene.standby') : ''))}</small>`, 'machine focus', m.pos.x, 0.02, m.pos.z + 0.6, null, true);

@@ -10,7 +10,7 @@ import { PlanetArt2D } from './art-layer2d.js'; // 작업 대상 층(켤 때만 
 import { RADIUS } from '../layout.js';
 import { paletteOf } from '../flowview/flow-style.mjs';
 import { FLOW, PacketPool, planFlow, easeInOut } from '../flow-core.mjs';
-import { isGuessLink, isLauncher } from '../batch-core.mjs';
+import { BATCH, isGuessLink, isLauncher } from '../batch-core.mjs';
 import { DEG, degOf, degOfLink, packetGone, lineFlicker, brokenDash } from '../degrade-core.mjs';
 const DG_DASH = [0, 0, 0, 0]; // 끊긴 선 무늬(재사용)
 
@@ -54,7 +54,7 @@ export class Planet2DView extends FlatView {
   /** 노드 그린 반지름(세계): scene.js 와 같음 — RADIUS × 0.68, 배치 장치는 2배, 본체 축소 bodyK(둘레는 궤도계) */
   _nodeR(node, kind) {
     const dev = isLauncher(node);
-    const r = RADIUS[kind] * NODE_SCALE * (dev ? 2 : 1) * (isProc(node) ? PROC.BODY_K : bodyK(kind, dev)); // 분리 프로세스는 조금 크게
+    const r = RADIUS[kind] * NODE_SCALE * (dev ? 2 * BATCH.DEVICE_K : 1) * (isProc(node) ? PROC.BODY_K : bodyK(kind, dev)); // 분리 프로세스는 조금 크게
     return node && node.meta && node.meta.job ? r * JOB2D.PLANET_R_K : r; // 작업 = 아주 작은 위성
   }
   /** 라벨 거리: scene.js CSS2D 라벨 자리(반지름 × 1.2 + 0.5, 아래 붙는 종류는 + 0.4) */

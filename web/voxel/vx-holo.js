@@ -10,7 +10,7 @@ import { HoloText } from '../holo-text.js';
 import { catColor } from '../flow-core.mjs';
 import { MON, monitorWanted, stepOpen, openShape, popShape } from './office-core.mjs';
 import { DESK_TOP } from './props.js';
-import { deviceInfo, fmtDur, cycleProgress } from '../batch-core.mjs';
+import { BATCH, deviceInfo, fmtDur, cycleProgress } from '../batch-core.mjs';
 import { t as _t } from '../i18n.mjs';
 
 const CAP = 320, THREAD_CAP = 160;
@@ -261,7 +261,7 @@ export class VxHolo {
       if (m.type !== 'batch' || m.released || !m.pos || v._isDim(m.id) || n >= CAP) continue;
       this._fa = v._fxA ? v._fxA(m.pos.x, m.pos.z) : 1;
       const H = 0.95, W = 1.6;
-      const x = m.pos.x + 0.1, z = m.pos.z, y = 1.6 + H / 2 + 0.12;
+      const x = m.pos.x + 0.1 * BATCH.DEVICE_K, z = m.pos.z, y = 1.6 * BATCH.DEVICE_K + H / 2 + 0.12; // 복합기 윗면(0.75배) 위
       const dist = Math.hypot(x - cp.x, y - cp.y, z - cp.z);
       const px = panelPx(H, dist, fov, viewportH);
       if (px < 3) continue;

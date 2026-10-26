@@ -101,10 +101,10 @@ export class Voxel2DView extends FlatView {
     this._staticVer = (this._staticVer || 0) + 1;
   }
 
-  /** 그린 반지름(세계): 캐릭터 0.5(팀장 0.66), 화면·랙 0.5, 복합기 1.0, 회의실 화이트보드 1.2 */
+  /** 그린 반지름(세계): 캐릭터 0.5(팀장 0.66), 화면·랙 0.5, 복합기 1.0×DEVICE_K, 회의실 화이트보드 1.2 */
   _nodeR(node, kind) {
     const k = KNOWN.has(node.kind) ? node.kind : 'subagent';
-    if (isLauncher(node)) return 1.0;
+    if (isLauncher(node)) return BATCH.DEVICE_K; // v0.4.1 복합기 0.75배(3D 와 같음)
     if (isJob(node)) return 0.2; // 작업 칩
     if (MACHINE_KIND[k]) return k === 'workflow' ? 1.2 : 0.5;
     return charRadius(k === 'main' || k === 'claude-p');
@@ -1068,7 +1068,7 @@ export class Voxel2DView extends FlatView {
       if (flash > 0.2) { ctx.strokeStyle = t.text; ctx.lineWidth = 1; ctx.strokeRect(x - w / 2, y - h / 2, w, h); }
     } else if (m.type === 'batch') {
       // 복합기(배치 장치): 몸통 + 종류 색 덮개 테두리 + 표시창 진행·표시등·상태 띠 5칸 + 출력 받침
-      const w = 1.9 * s * k, h = 1.25 * s * k, R = 1.0 * s * k;
+      const dk = BATCH.DEVICE_K, w = 1.9 * dk * s * k, h = 1.25 * dk * s * k, R = dk * s * k;
       ctx.fillStyle = pal.metal; ctx.fillRect(x - w / 2, y - h / 2, w, h);
       ctx.strokeStyle = this.kindColor('bash-bg'); ctx.lineWidth = Math.max(1, 0.1 * s); ctx.strokeRect(x - w / 2, y - h / 2, w, h);
       ctx.fillStyle = pal.screenOff; ctx.fillRect(x - w * 0.44, y - h * 0.42, w * 0.88, h * 0.84);
@@ -1086,7 +1086,7 @@ export class Voxel2DView extends FlatView {
         ctx.beginPath(); ctx.arc(x - 1.3 * s + (i + 0.5) * (2.6 * s / Math.max(1, n)), y, Math.max(1, 0.09 * s), 0, Math.PI * 2); ctx.fill();
       }
     }
-    if (foc) { ctx.globalAlpha = 0.9; ctx.strokeStyle = t.text; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(x, y, (m.type === 'batch' ? 1.4 : 0.8) * s, 0, Math.PI * 2); ctx.stroke(); }
+    if (foc) { ctx.globalAlpha = 0.9; ctx.strokeStyle = t.text; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(x, y, (m.type === 'batch' ? 1.4 * BATCH.DEVICE_K : 0.8) * s, 0, Math.PI * 2); ctx.stroke(); }
     ctx.globalAlpha = 1;
   }
 

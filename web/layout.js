@@ -1,6 +1,7 @@
 // 배치 — 순수 함수. three 에 의존하지 않는다.
 
 import { t } from './i18n.mjs';
+import { BATCH } from './batch-core.mjs';
 
 export const RADIUS = {
   main: 3.0, subagent: 1.6, workflow: 2.2, 'workflow-agent': 1.3, 'claude-p': 1.7, 'bash-bg': 0.8, monitor: 0.8,
@@ -28,7 +29,7 @@ export const isJobNode = (n) => !!(n && n.meta && n.meta.job);
 export const JOB_FIRST = 2.4, JOB_STEP = 2.0, JOB_SIDE = 0.7;
 
 /** 노드가 평면에서 차지하는 반지름(배치 단위, Flow 칩 기준 상한). 배치 장치는 넓은 상자 + 옆에 붙는 끝난 회차 자리 */
-export const DEVICE_EXTENT = 2.6;
+export const DEVICE_EXTENT = 2.6 * BATCH.DEVICE_K; // 장치 반폭(흐름 칩 1.45 × r)과 맞춤
 export function nodeExtent(n) {
   if (isLauncherNode(n)) return DEVICE_EXTENT;
   return RADIUS[n && n.kind] || RADIUS.subagent;

@@ -206,3 +206,18 @@ test('overview mock: demo_api 메인의 기동기(이어받음)·회차 참조 �
   assert.ok(guest && s.roots.some((r) => r.nodeId === guest.id));
   assert.equal(orphanPlan(assignRoots(byId, s.roots).roots, byId).get(guest.id).mode, 'guest');
 });
+
+test('v0.4.1 기동기 크기 0.75배: 공용 배율·배치 반폭·장치 옆 끝난 회차 자리가 같이 줄어듦', async () => {
+  const { BATCH: B } = await import('../batch-core.mjs');
+  const { DEVICE_EXTENT, nodeExtent, dockedPos } = await import('../layout.js');
+  assert.equal(B.DEVICE_K, 0.75);
+  assert.ok(Math.abs(DEVICE_EXTENT - 2.6 * 0.75) < 1e-9);
+  assert.equal(nodeExtent({ kind: 'bash-bg', meta: { launcher: {} } }), DEVICE_EXTENT);
+  const d0 = dockedPos({ x: 0, y: 0, z: 0 }, { x: -10, y: 0, z: 0 }, 0);
+  assert.ok(Math.abs(Math.hypot(d0.x, d0.z) - (DEVICE_EXTENT + 1.4)) < 1e-9);
+  // 2D 반지름 규칙(flat-view·planet2d 와 같은 식): 백그라운드 명령 0.8 × 0.68 × 2 × 0.75
+  const fs = await import('node:fs');
+  for (const f of ['../scene.js', '../flat/flat-view.js', '../flat/planet2d.js']) assert.match(fs.readFileSync(new URL(f, import.meta.url), 'utf8'), /\? 2 \* BATCH\.DEVICE_K : 1\)/, f);
+  assert.match(fs.readFileSync(new URL('../flat/voxel2d.js', import.meta.url), 'utf8'), /if \(isLauncher\(node\)\) return BATCH\.DEVICE_K;/);
+  assert.match(fs.readFileSync(new URL('../voxel/props.js', import.meta.url), 'utf8'), /const S = DEVICE_K;/);
+});

@@ -6,6 +6,8 @@
 import * as THREE from 'three';
 import { quarter, wallHigh, windowWall } from './xf.mjs';
 import { OFFICE_FX } from './office-core.mjs';
+import { BATCH } from '../batch-core.mjs';
+const DEVICE_K = BATCH.DEVICE_K; // v0.4.1 기동기 0.75배
 export { windowWall };
 
 export const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
@@ -631,27 +633,30 @@ export function drawMachine(m, st, pal, tokens, b, kindColor) {
     }
   } else if (m.type === 'batch') {
     // 배치 장치(기동기): 복합기 모양 — 몸통·덮개(종류색)·앞면 진행 막대·진행 표시등·최근 회차 상태 띠·출력 받침
-    // (위에 홀로그램 대시보드 = vx-holo.js)
+    // (위에 홀로그램 대시보드 = vx-holo.js). v0.4.1: 전체를 BATCH.DEVICE_K(0.75)배 — 바닥(y 0)·자리 가운데 기준으로 줄인다
+    const S = DEVICE_K;
+    const lb = (dx, yy, dz, w, h, d, c, ...r) => L.box(x + dx * S, yy * S, z + dz * S, w * S, h * S, d * S, c, ...r);
+    const gb = (dx, yy, dz, w, h, d, c) => G.box(x + dx * S, yy * S, z + dz * S, w * S, h * S, d * S, c);
     const run = (st.running || 0) > 0 && !ended && !err;
-    L.box(x, 0.72 * k, z, 1.6, 1.44 * k, 1.0, pal.metal, 0, st.id);
-    L.box(x, 1.47 * k, z, 1.66, 0.08, 1.06, kindColor, 0, st.id);
-    L.box(x - 0.32, 1.54 * k, z - 0.14, 0.8, 0.06, 0.56, pal.metalDark, 0, st.id); // 원고대
-    L.box(x - 0.14, 1.14, z + 0.505, 1.0, 0.28, 0.02, pal.metalDark, 0, st.id);    // 표시창 틀
+    lb(0, 0.72 * k, 0, 1.6, 1.44 * k, 1.0, pal.metal, 0, st.id);
+    lb(0, 1.47 * k, 0, 1.66, 0.08, 1.06, kindColor, 0, st.id);
+    lb(-0.32, 1.54 * k, -0.14, 0.8, 0.06, 0.56, pal.metalDark, 0, st.id); // 원고대
+    lb(-0.14, 1.14, 0.505, 1.0, 0.28, 0.02, pal.metalDark, 0, st.id);    // 표시창 틀
     const pr = run ? (st.progress == null ? 1 : st.progress) : 0;
-    if (pr > 0) G.box(x - 0.14 - 0.46 + 0.46 * pr, 1.14, z + 0.52, 0.92 * pr, 0.16, 0.02, tokens.skill);
-    G.box(x + 0.57, 1.14, z + 0.52, 0.13, 0.13, 0.02, err ? tokens.error : run ? (Math.sin(t * 6 + st.seed) > 0 ? tokens.skill : pal.ledIdle) : ended ? pal.ledOff : tokens.ok);
+    if (pr > 0) gb(-0.14 - 0.46 + 0.46 * pr, 1.14, 0.52, 0.92 * pr, 0.16, 0.02, tokens.skill);
+    gb(0.57, 1.14, 0.52, 0.13, 0.13, 0.02, err ? tokens.error : run ? (Math.sin(t * 6 + st.seed) > 0 ? tokens.skill : pal.ledIdle) : ended ? pal.ledOff : tokens.ok);
     const band = st.band || EMPTY_BAND, nb = band.length;
     for (let i = 0; i < 5; i++) {
       const bb = i - (5 - nb) >= 0 ? band[i - (5 - nb)] : 0;
       const c = bb === 1 ? tokens.skill : bb === 2 ? tokens.ok : bb === 3 ? tokens.stopped : bb === 4 ? tokens.error : pal.ledOff;
-      G.box(x - 0.56 + i * 0.28, 0.76, z + 0.515, 0.2, 0.14, 0.02, c);
+      gb(-0.56 + i * 0.28, 0.76, 0.515, 0.2, 0.14, 0.02, c);
     }
-    L.box(x, 0.34, z + 0.57, 1.05, 0.05, 0.28, pal.metalDark, 0, st.id); // 출력 받침
+    lb(0, 0.34, 0.57, 1.05, 0.05, 0.28, pal.metalDark, 0, st.id); // 출력 받침
     const slide = run ? ((t * 0.35 + st.seed) % 1) : 0;
-    L.box(x, 0.39, z + 0.55 + slide * 0.24, 0.6, 0.02, 0.36, pal.paper);
-    if (st.flash > 0) G.box(x, 1.56, z, 1.4 * st.flash, 0.04, 0.9, tokens.ok);
+    lb(0, 0.39, 0.55 + slide * 0.24, 0.6, 0.02, 0.36, pal.paper);
+    if (st.flash > 0) gb(0, 1.56, 0, 1.4 * st.flash, 0.04, 0.9, tokens.ok);
     // 홀로그램 대시보드 발광대(덮개 위)
-    G.box(x + 0.4, 1.53 * k, z + 0.2, 0.6, 0.02, 0.06, run ? pal.emitter : _c.copy(pal.emitter).multiplyScalar(0.35));
+    gb(0.4, 1.53 * k, 0.2, 0.6, 0.02, 0.06, run ? pal.emitter : _c.copy(pal.emitter).multiplyScalar(0.35));
   } else if (m.type === 'board') {
     const c = err ? tokens.error : ended ? pal.ledOff : status === 'idle' ? _c.copy(kindColor).multiplyScalar(0.6) : kindColor;
     L.box(x, 1.35, z + 0.15, 3.2, 1.5, 0.05, pal.board, 0, st.id);

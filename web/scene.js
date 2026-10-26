@@ -28,7 +28,7 @@ import { sessionColorMap, nodeSessIdx } from './multi-core.mjs';
 import { sessBadgeHtml, branchOf } from './session-core.mjs';
 import { SessionFx } from './session-fx.js';
 import { IxLayer } from './ix-fx.js';
-import { ProjFade } from './proj-fade.mjs';
+import { ProjFade, nodeFade } from './proj-fade.mjs';
 
 const TOKEN_NAMES = ['bg', 'fog', 'grid', 'link', 'text', 'k-main', 'k-subagent', 'k-workflow',
   'k-workflow-agent', 'k-claude-p', 'k-bash-bg', 'k-monitor', 'ok', 'error', 'skill', 'stopped', 'flow-call', 'link-spawn',
@@ -362,7 +362,7 @@ export class SceneView {
     else if (old) { this.updateNode(node.id, node); return; }
     // 어떤 메인에도 매칭되지 않은 독립 claude -p 루트(kind main + meta.orphanSdk)는 claude -p 모양·색으로 그린다
     const kind = displayKind(node);
-    const r = RADIUS[kind] * NODE_SCALE * (isLauncher(node) ? 2 : 1); // 배치 장치는 백그라운드 명령보다 크게
+    const r = RADIUS[kind] * NODE_SCALE * (isLauncher(node) ? 2 * BATCH.DEVICE_K : 1); // 배치 장치는 백그라운드 명령보다 크게(×DEVICE_K)
     const G = nodeGeo();
     node._order = this.order++;
     const group = new THREE.Group();
@@ -963,14 +963,15 @@ export class SceneView {
       const recent = !!(ov && rv && isRecentRoot(rv.node));
       // scopeD = 고정 희미(recent 0.35) — 문턱(<0.5) 판정용, projA = 프로젝트 페이드, scopeK = 둘의 곱(그리기 배율)
       const d = recent ? 0.35 : 1;
-      const pa = ov ? this.pf.alpha2(pid, rid) : 1; // 세션 숨김도
+      const nf = ov ? nodeFade(this.pf, pid, rid, fp) : null; // 프로젝트 고르기·세션 숨김(루트 키는 숨김만 따름)
+      const pa = nf ? nf.a : 1;
       const k = d * pa;
       v.projectId = pid;
       v.scopeRecent = recent;
       v.ovHidden = hidden;
       v.scopeD = d; v.projA = pa;
-      v.projOut = !!((fp || this.pf.hide.size) && (this.pf.out(pid) || (rid && this.pf.out(rid))));
-      v.projGone = !!((fp || this.pf.hide.size) && (this.pf.gone(pid) || (rid && this.pf.gone(rid))));
+      v.projOut = !!(nf && nf.out);
+      v.projGone = !!(nf && nf.gone);
       const si = ov ? nodeSessIdx(v.node, this._sessColors) : null; // 세션 색
       if (si !== (v.sessIdx ?? null)) { v.sessIdx = si; v.sessC = si == null ? null : this.tokens['sess-' + si]; this._styleVis(v); v._labelHtml = null; this._labelText(v); }
       this._syncHidden(v);

@@ -219,3 +219,30 @@ test('§86 보드 모델 영어: 출처·상태 라벨, 이름 없는 항목·�
   } finally { _setLangForTest('ko'); }
   assert.equal(PLAN_ST_LABEL.in_progress, '진행');
 });
+
+test('v0.4.1 계획 보드 앞뒤: 보드보다 가까운 노드만 판에 구멍(판 좌표·배율 전), 덧층은 무대 안·UI 아래', async () => {
+  const { boardHoles, holesMask, PLAN_UI: U } = await import('../plan-core.mjs');
+  const fs0 = (await import('node:fs')).readFileSync(new URL('../plan.css', import.meta.url), 'utf8');
+  const box = { x: 100, y: 200, w: 200, h: 300 }, s = 2;
+  const occ = [
+    { id: 'front', x: 150, y: 260, r: 20, d: 5 },    // 앞·겹침 → 구멍
+    { id: 'back', x: 160, y: 300, r: 20, d: 30 },    // 뒤 → 없음
+    { id: 'near', x: 200, y: 300, r: 10, d: 9.6 },   // 보드 깊이 10 과 여유(0.6) 안 → 없음
+    { id: 'off', x: 20, y: 20, r: 10, d: 1 },        // 판 밖 → 없음
+    { id: 'edge', x: 95, y: 300, r: 10, d: 2 },      // 판 가장자리에 걸침 → 구멍(가까운 것 먼저)
+  ];
+  const h = boardHoles(box, s, occ, 10);
+  assert.deepEqual(h, [{ x: -2.5, y: 50, r: 5 }, { x: 25, y: 30, r: 10 }]);
+  assert.equal(boardHoles(box, s, occ, 1).length, 0); // 보드가 맨 앞이면 구멍 없음
+  assert.equal(boardHoles(box, s, Array.from({ length: 40 }, (_, i) => ({ x: 150, y: 300, r: 5, d: i })), 100).length, U.OCC_MAX);
+  assert.equal(holesMask([]), '');
+  assert.equal(holesMask([{ x: 10, y: 20, r: 5 }, { x: 1, y: 2, r: 1 }]), 'radial-gradient(circle 5px at 10px 20px, transparent 3.5px, #000 5px), radial-gradient(circle 1px at 1px 2px, transparent 0px, #000 1px)');
+  assert.match(fs0, /mask-composite: intersect/);
+  // 덧층 CSS: z-index 0(무대 #stage 의 쌓임 맥락 안 — 상단 바 20·패널 18·팝업 30+ 아래)
+  const fs = await import('node:fs');
+  const css = fs.readFileSync(new URL('../plan.css', import.meta.url), 'utf8');
+  assert.match(css, /#plan-boards \{[^}]*z-index: 0;/);
+  assert.match(css, /#plan-links \{[^}]*z-index: 0;/);
+  const ui = fs.readFileSync(new URL('../plan-ui.js', import.meta.url), 'utf8');
+  assert.ok(!/document\.body\.append\(svg, layer\);\n\s*layer\.addEventListener/.test(ui) && /getElementById\('stage'\)/.test(ui));
+});

@@ -13,10 +13,11 @@ import { escapeHtml as esc } from './html-util.mjs';
 import { t } from './i18n.mjs';
 import {
   PLAN_UI, PLAN_STORE_KEY, PLAN_ST_LABEL, planInitial, diffPlans, PlanFx, gatherPlans, boardWorld, boardScreen, boardCard, sheetInspectModel, PLAN_CAM,
-  planInspectModel, boardAnchor, liveCycleOf,
+  planInspectModel, boardAnchor, liveCycleOf, boardHoles, holesMask,
 } from './plan-core.mjs';
 
 let cssDone = false;
+let occV = null; // 가림 노드 투영용 벡터 하나(프레임마다 만들지 않음)
 function ensureCss() {
   if (cssDone || typeof document === 'undefined') return;
   cssDone = true;
@@ -113,10 +114,21 @@ export function mountPlans(h) {
     if (layer) return;
     layer = document.createElement('div'); layer.id = 'plan-boards'; layer.setAttribute('aria-hidden', 'false');
     svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.id = 'plan-links'; svg.setAttribute('aria-hidden', 'true');
-    document.body.append(svg, layer);
+    attachLayer();
     layer.addEventListener('click', (e) => { const b = e.target.closest('.pb'); if (b && b.dataset.node && h.openPlan) h.openPlan(b.dataset.node); }); // 크게 보기(카드)
     layer.addEventListener('pointerover', (e) => { const b = e.target.closest('.pb'); hover = b ? b.dataset.node : null; });
     layer.addEventListener('pointerleave', () => { hover = null; });
+  }
+  /** v0.4.1 덧층 자리: 장면 무대(#stage — position:fixed 라 그 자체가 쌓임 맥락) 안, 라벨 그릇(#labels) **앞**.
+   *  그래서 상단 바·실황 패널·타임라인·팝업·⚙ 메뉴 같은 UI 는 늘 보드 위, 노드 이름표·말풍선·섬 이름표(CSS2D)도 보드 위.
+   *  예전엔 body 에 z 12 로 붙어 장면의 모든 DOM(이름표·말풍선) 위에 떴다. 무대가 없으면(시험 등) body */
+  function attachLayer() {
+    if (!layer) return;
+    const stage = document.getElementById('stage'), lab = document.getElementById('labels');
+    if (stage) {
+      const before = lab && lab.parentNode === stage ? lab : stage.firstChild;
+      if (svg.parentNode !== stage || layer.parentNode !== stage || layer.nextSibling !== before) { stage.insertBefore(svg, before); stage.insertBefore(layer, before); }
+    } else if (layer.parentNode !== document.body) document.body.append(svg, layer);
   }
   function dropLayer() {
     if (layer) layer.remove();
@@ -257,6 +269,27 @@ export function mountPlans(h) {
     const dom = view && view.renderer && view.renderer.domElement;
     const cr = dom ? dom.getBoundingClientRect() : { left: 0, top: 0 };
     const rects = [];
+    attachLayer(); // 표현 전환으로 무대가 바뀌어도 자리 유지
+    // v0.4.1 3D 앞뒤: 보드보다 카메라에 가까운 노드는 판에 구멍을 내 앞에 보이게(DOM 덧층이라 깊이 판정이 없어 늘 위에 그려졌다)
+    const occ3d = !!(view && !view.flat && view.camera && view.nodePos && view.camera.position);
+    let occ = null;
+    const occluders = () => {
+      if (occ) return occ;
+      occ = [];
+      const cam = view.camera, crect = dom ? dom.getBoundingClientRect() : { left: 0, top: 0, width: W, height: H };
+      const th = Math.tan(((cam.fov || 50) * Math.PI) / 360), vox = !!(view.constructor && view.constructor.modeId === 'voxel');
+      for (const id of nodes.keys()) {
+        if (!shownNode(view, id)) continue;
+        const p = view.nodePos(id);
+        if (!p || !p.clone) continue;
+        const q = (occV || (occV = p.clone())).copy(p).project(cam);
+        if (q.z > 1 || q.z < -1) continue;
+        const d = cam.position.distanceTo(p) || 1;
+        const wr = (view.nodeRadius ? view.nodeRadius(id) : 1) * (vox ? 0.9 : 1); // 화면 원 = 노드 몸체(복셀 반지름은 자리 몫이라 조금 줄임)
+        occ.push({ id, x: crect.left + ((q.x + 1) / 2) * crect.width, y: crect.top + ((1 - q.y) / 2) * crect.height, r: (wr / (d * th)) * (crect.height / 2), d });
+      }
+      return occ;
+    };
     for (const c of pick) {
       const pj = boardProject(view, c.aid);
       if (!pj) continue;
@@ -278,6 +311,13 @@ export function mountPlans(h) {
       const tf = `translate(${bx.toFixed(1)}px, ${by.toFixed(1)}px) scale(${sc.s.toFixed(4)})`;
       if (tf !== b.tf) { b.tf = tf; b.el.style.transform = tf; }
       b.el.hidden = false;
+      let clip = '';
+      if (occ3d && pj.wp) {
+        const cp = view.camera.position, wc = { x: pj.wp.x + pj.wb.w / 2 - cp.x, y: pj.wp.y + pj.wb.h / 2 - cp.y, z: pj.wp.z - cp.z };
+        const all = occluders().filter((o) => o.id !== c.aid);
+        clip = holesMask(boardHoles(sc.box, sc.s, all, Math.hypot(wc.x, wc.y, wc.z)));
+      }
+      if (clip !== (b.clip || '')) { b.clip = clip; b.el.style.maskImage = clip; b.el.style.webkitMaskImage = clip; b.el.classList.toggle('occ', !!clip); }
       rects.push([bx - cr.left, by - cr.top, bx + sc.box.w - cr.left, by + sc.box.h - cr.top]); // 라벨이 피할 고정 장애물(캔버스 좌표)
       if (!svg) continue;
       // 선 하나: 앵커 원 가장자리 → 보드 왼쪽 변(앵커 높이에 가장 가까운 점). 양 끝 모두 이번 프레임 투영

@@ -1,7 +1,7 @@
 /* 계획 보드 — 러너(없으면 메인) 옆 월드 고정 자리에 세운 작은 판(일반 홀로그램 모니터의 약 2배): 불투명 판·굵은 테·큰 진행률·상태별 색과 기호.
    기준 폭 280px 로 짜고 원근 배율을 transform scale 로(왼쪽 위 기준). 누르면 카드로 크게 보기(.ins-wide). */
-#plan-boards { position: fixed; inset: 0; z-index: 12; pointer-events: none; }
-#plan-links { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 11; pointer-events: none; overflow: visible; }
+#plan-boards { position: fixed; inset: 0; z-index: 0; pointer-events: none; } /* v0.4.1: #stage 안·#labels 앞 — 장면 DOM(이름표)·모든 UI 아래 */
+#plan-links { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 0; pointer-events: none; overflow: visible; }
 .pb {
   --pb-ok: var(--ok); --pb-run: var(--warn); --pb-hold: #a78bfa; --pbk: 1;
   position: absolute; left: 0; top: 0; box-sizing: border-box; padding: calc(7px * var(--pbk)) calc(9px * var(--pbk)) calc(7px * var(--pbk));
@@ -130,3 +130,5 @@
 .pb.lod .pb-cells { height: 2.6em; }
 .pb.lod .pc { height: 2.4em; max-width: none; }
 .pb.lod .pc.st-pending, .pb.lod .pc.st-hold { border-width: 6px; }
+/* v0.4.1 3D 앞뒤: 앞에 선 노드 자리만 구멍(plan-ui holesMask) — 원마다 한 겹을 교집합, 판 밖으로는 넘지 않음 */
+.pb.occ { mask-repeat: no-repeat; -webkit-mask-repeat: no-repeat; mask-composite: intersect; -webkit-mask-composite: source-in; mask-size: 100% 100%; -webkit-mask-size: 100% 100%; }

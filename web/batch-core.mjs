@@ -15,6 +15,7 @@ export const BATCH = {
   DOCK_SCALE: 0.5,      // 장치에 붙은 끝난 회차 크기 배율
   REARM_WAIT_S: 600,    // 만료된 Monitor 가 재무장을 기다리며 대기 표시로 남는 시간(서버 재무장 판정 창 10분)
   BAND_N: 5,            // 최근 회차 상태 띠 칸 수(서버 recent 최대 5)
+  DEVICE_K: 0.75,       // 기동기(배치 장치) 크기 배율 — 세 표현 × 3D·2D 공통(v0.4.1 사용자 지적으로 0.75배, 배치 간격 DEVICE_EXTENT 도 같이)
 };
 
 const ENDED = new Set(['done', 'stopped', 'error']);

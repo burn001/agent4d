@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-26
+
+### Fixed
+- Picking one project (top project picker or `agent4d ctl scope project:…`) no longer hides most of it. A launcher started with `nohup … &` has no parent, so it is drawn as its own root inside the island; the project fade only exempted session roots (`s:…`), so the launcher and everything under it (runs, their subagents and jobs) faded out with the other projects and only the main agent was left. Every root node now follows only the show/hide checkboxes, never the project pick. Flow and Planet in 3D and 2D share the same rule.
+- Plan boards no longer sit on top of everything. The board layer now lives inside the scene stage, under node labels, speech bubbles and island tags and under all UI (top bar, live panel, timeline, popups, ⚙ menu). In 3D, nodes that are nearer to the camera than a board now cut through it (a soft-edged hole per node), so a node in front of a board shows in front.
+
+### Changed
+- Launcher devices (`relaunch.sh`, nohup loops) are 25% smaller (0.75×) in Flow, Planet and Voxel, 3D and 2D. Layout spacing, the docked finished runs, labels, the Voxel copier, its dashboard and its name tag follow the new size.
+
 ## [0.4.0] - 2026-10-26
 
 ### Added

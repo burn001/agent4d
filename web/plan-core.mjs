@@ -24,7 +24,32 @@ export const PLAN_UI = {
   HOT_MS: 6000,       // 바뀐 뒤 이만큼 밝게
   FX_MS: 1600,        // 항목 변경 연출 길이
   DEL_MS: 1100,       // 지운 항목 잔상
+  OCC_MARGIN: 0.6,    // v0.4.1 3D 앞뒤: 중심이 보드보다 이만큼(월드) 넘게 카메라에 가까운 노드만 보드를 가린다(나란히 선 이웃은 가리지 않음)
+  OCC_MAX: 24,        // 보드 한 장에 뚫는 가림 구멍 상한
 };
+
+/**
+ * v0.4.1 3D 앞뒤 관계: 보드(DOM 덧층)보다 카메라에 가까운 노드가 그 판을 가리는 자리.
+ * box = 보드 화면 상자 {x,y,w,h}(뷰포트 px), s = 판 배율, occ = [{x,y,r(화면 px), d(카메라 거리 — 앞면)}], depth = 보드 카메라 거리.
+ * 반환 = 판 안 좌표(배율 전 px)의 원 [{x,y,r}] — 가까운 것부터, OCC_MAX 개까지
+ */
+export function boardHoles(box, s, occ, depth, { margin = PLAN_UI.OCC_MARGIN, max = PLAN_UI.OCC_MAX } = {}) {
+  if (!box || !(s > 0) || !Array.isArray(occ)) return [];
+  const hit = [];
+  for (const o of occ) {
+    if (!o || !(o.r > 0) || !(o.d < depth - margin)) continue;
+    if (o.x + o.r <= box.x || o.x - o.r >= box.x + box.w || o.y + o.r <= box.y || o.y - o.r >= box.y + box.h) continue;
+    hit.push(o);
+  }
+  hit.sort((a, b) => a.d - b.d);
+  return hit.slice(0, max).map((o) => ({ x: (o.x - box.x) / s, y: (o.y - box.y) / s, r: o.r / s }));
+}
+/** 구멍들을 뺀 마스크(CSS mask-image, 원마다 한 겹 · intersect — 겹친 구멍도 그대로 구멍). 구멍 없으면 '' */
+export function holesMask(holes) {
+  if (!holes || !holes.length) return '';
+  const n = (v) => String(Math.round(v * 10) / 10);
+  return holes.map((h) => `radial-gradient(circle ${n(h.r)}px at ${n(h.x)}px ${n(h.y)}px, transparent ${n(Math.max(0, h.r - 1.5))}px, #000 ${n(h.r)}px)`).join(', ');
+}
 
 export const PLAN_SRC_LABEL = tLabels('boards.plan.src.', ['todo', 'tasks', 'exitplan', 'file', 'phases', 'workflow']);
 export const PLAN_SRC_GLYPH = { todo: '☑', tasks: '☷', exitplan: '✎', file: '☐', phases: '▤', workflow: '⧉' };

@@ -8,6 +8,19 @@ export const PROJ_FADE = { DUR: 0.5 };
 /** 0..1 → 0..1 부드러운 곡선(양끝 느리게) */
 export const fadeEase = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
 
+/** 노드 id(루트 키)인가 — 노드 id 는 늘 '<종류>:' 접두, 프로젝트 id 는 콜론 없음 */
+export const isRootKey = (k) => typeof k === 'string' && k.includes(':');
+
+/** 노드 하나의 프로젝트·세션 페이드(흐름·Planet 3D·2D 공용): pid = 소속 프로젝트, rid = 섬 안 루트 노드 id, fp = 고른 프로젝트 */
+export function nodeFade(pf, pid, rid, fp) {
+  const on = !!(fp || pf.hide.size);
+  return {
+    a: pf.alpha2(pid, rid),
+    out: on && (pf.out(pid) || (!!rid && pf.out(rid))),
+    gone: on && (pf.gone(pid) || (!!rid && pf.gone(rid))),
+  };
+}
+
 export class ProjFade {
   constructor(dur = PROJ_FADE.DUR) {
     this.dur = dur;
@@ -16,10 +29,12 @@ export class ProjFade {
     this.t = new Map(); // pid → 선형 진행 0(안 보임)..1(보임) — 목표에 닿은 '보임'은 지운다
     this.ver = 0;       // 값이 바뀔 때마다 +1(그리기 쪽이 다시 칠할지 판단)
   }
-  /** 목표: 고른 프로젝트가 없으면 모두 보임, 있으면 그 프로젝트(또는 소속 없는 것)만 보임 */
+  /** 목표: 고른 프로젝트가 없으면 모두 보임, 있으면 그 프로젝트(또는 소속 없는 것)만 보임.
+   *  루트 노드 키('s:'·'b:'·'p:'… 콜론 접두 — 프로젝트 id 는 encodeCwd 라 콜론이 없다)는 프로젝트 고르기와 무관하게 숨김만 따른다.
+   *  예전엔 's:' 만 빼서 독립 기동기 루트('b:…') 아래 회차·서브에이전트·작업이 프로젝트를 고르는 순간 통째로 숨었다(v0.4.1 수리) */
   target(pid) {
     if (pid != null && this.hide.has(pid)) return 0;
-    return !this.focus || pid == null || pid === this.focus || String(pid).startsWith('s:') ? 1 : 0;
+    return !this.focus || pid == null || pid === this.focus || isRootKey(pid) ? 1 : 0;
   }
   /** 숨길 키 바꾸기(프로젝트 id·'s:<sid>'). 바뀐 키는 지금 자리 값에서 이어 움직인다 */
   setHidden(keys, { instant = false } = {}) {
