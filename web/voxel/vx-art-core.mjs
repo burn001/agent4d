@@ -5,7 +5,7 @@
 //   앞 벽 바깥(출입문 왼쪽): git 우편함 = 저장소(push 깃발·편지 눈금), (출입문 오른쪽): 택배 창구 = 원격(상자 + 바깥으로 점선),
 //   (가운데): 결재함 트레이 = 산출물(만들 때 서류가 솟았다 내려앉음)
 // 좌표는 방의 '돌리기 전'(room.local) 지역 좌표로 짓고 xf(90° 단위)로 세계에 옮긴다. 배정은 결정적·안정적(이미 놓인 대상은 자리를 지킴).
-import { ART, ARTGEO, freshness, dbLevel, fileSub, districtKey, districtLabel } from '../artifact-core.mjs';
+import { ART, ARTGEO, freshness, dbLevel, fileSub, districtKey, districtLabel, zoneKeyOf } from '../artifact-core.mjs';
 import { KI, styleAlpha, litMap, fxState, itemAlpha, shield, beams, commonFx, ease, extOf, dashed, boxEdges } from '../art-meta.mjs';
 import { toWorld, quarter } from './xf.mjs';
 import { ActPos, drawActs } from '../art-act-core.mjs'; // 상호작용 연출
@@ -75,11 +75,11 @@ export class VxArtPlan {
     if (!S) { S = { bay: new Map(), inBay: new Map(), kind: Object.fromEntries(Object.keys(KMAX).map((k) => [k, new Map()])) }; this.S.set(pid, S); }
     const F = vxFrame(room), xs = bayXs(F), spots = fixtureSpots(F);
     const nBay = Math.max(1, xs.length - 1); // 맨 끝 칸 = 넘친 폴더('…')
-    const files = items.filter((it) => it.k === 'file').sort(byFirst);
+    const files = items.filter((it) => it.k === 'file' || (it.k === 'zone' && it.tmp)).sort(byFirst); // 접힌 임시 폴더 = 서랍 칸 하나(굵은 묶음 탭)
     const byDk = new Map();
     for (const it of files) { const dk = districtKey(it); (byDk.get(dk) || byDk.set(dk, []).get(dk)).push(it); }
     const folderOver = assign(S.bay, [...byDk.keys()], nBay);
-    const plan = { pid, room, F, bays: [], slots: new Map(), over: { file: 0, folders: folderOver }, has: {}, spots };
+    const plan = { pid, room, F, bays: [], slots: new Map(), over: { file: 0, folders: folderOver }, has: {}, spots, agg: new Map(items.filter((it) => it.k === 'zone').map((it) => [it.id, it])) };
     const T = (lx, lz) => (F.xf ? toWorld(F.xf, lx, lz) : { x: lx, z: lz });
     const bayAt = (bi, dk, label, list) => {
       const bx = xs[bi];
@@ -159,7 +159,7 @@ export function voxelArtGeometry(book, plans, fx, nowSec, env, geo) {
   let budget = env.labels === false ? 0 : ARTGEO.LABELS - 3;
   const AC = fx && fx.acts && fx.acts.list.length ? fx.acts : null;
   const AP = env._ap || (env._ap = new ActPos()); AP.begin();
-  const want = AC ? AC.keys(book) : null;
+  const want = AC ? AC.keys(book, zoneKeyOf) : null; // 접힌 임시 파일의 연출은 그 묶음 칸에
   for (const [pid, P] of plans) {
     if (!geo.pidStart(env, pid)) continue; // 프로젝트 페이드
     const F = P.F, k = F.xf ? quarter(F.xf.k) : 0, odd = k % 2 === 1;
@@ -217,7 +217,7 @@ export function voxelArtGeometry(book, plans, fx, nowSec, env, geo) {
     }
     // ── 대상 하나씩 ──
     for (const [id, s] of P.slots) {
-      const it = book.get(pid, id);
+      const it = book.get(pid, id) || (P.agg && P.agg.get(id)); // 접힌 임시 폴더 묶음
       if (!it) continue;
       const fr = freshness(nowMs - (it.last || 0));
       const key = pid + '|' + id;
@@ -237,12 +237,12 @@ export function voxelArtGeometry(book, plans, fx, nowSec, env, geo) {
       }
       if (s.k === 'file') {
         // 서랍 앞 탭: 하위 종류 = 탭 모양(코드 가늘고 긴 · 문서 넓고 낮은 + 접힌 귀 · 데이터 가로 두 줄 · 이미지 대각 · 계획 가로 두루마리)
-        const sub = it.del ? 'del' : fileSub(it);
+        const sub = it.del ? 'del' : it.k === 'zone' ? 'fold' : fileSub(it);
         const out = 0.22 * st.pulse + (lit > 0.3 ? 0.06 : 0);                 // 고칠 때 서랍이 열림(탭이 앞으로)
         const drop = (1 - st.hk) * 0.7;                                        // 새 파일: 위에서 꽂힘
         const shrink = 1 - st.gone;
         let tw = 0.075, th = 0.3;
-        if (sub === 'doc') { tw = 0.11; th = 0.22; } else if (sub === 'data') { tw = 0.1; th = 0.26; } else if (sub === 'image') { tw = 0.1; th = 0.2; } else if (sub === 'plan') { tw = 0.12; th = 0.09; } else if (sub === 'del') { tw = 0.08; th = 0.08; }
+        if (sub === 'doc') { tw = 0.11; th = 0.22; } else if (sub === 'data') { tw = 0.1; th = 0.26; } else if (sub === 'image') { tw = 0.1; th = 0.2; } else if (sub === 'plan') { tw = 0.12; th = 0.09; } else if (sub === 'del') { tw = 0.08; th = 0.08; } else if (sub === 'fold') { tw = 0.13; th = 0.34; } // 묶음 탭: 넓고 높게
         th *= shrink; const y0 = s.ly - 0.18 + drop, y1 = y0 + th, z = lz + out;
         const c = st.gone ? KI.del : col;
         BX(lx, (y0 + y1) / 2, z - 0.03, tw, Math.max(0.02, th), 0.05, c, BODY * 1.4 + (env.isLight ? 0.6 : 0.35) * lit, ref); // 라이트도 점등한 탭은 잉크 색 쪽으로
@@ -332,6 +332,6 @@ export function voxelArtGeometry(book, plans, fx, nowSec, env, geo) {
     if (P.over.file && P.bays.length) { /* 넘친 탭 수는 칸 라벨(+n)로 */ }
   }
   geo.ka = 1;
-  if (AC) drawActs(geo, AC, nowSec, { theme: 'voxel', unitPx: env.unitPx || null, KI, pos: AP, zoneOf: null, book, nodePos: env.nodePos, reduced: env.reduced, isLight: env.isLight, pidAlpha: env.pidAlpha || null }); // 장면도 프로젝트 페이드
+  if (AC) drawActs(geo, AC, nowSec, { theme: 'voxel', unitPx: env.unitPx || null, KI, pos: AP, zoneOf: zoneKeyOf, book, nodePos: env.nodePos, reduced: env.reduced, isLight: env.isLight, pidAlpha: env.pidAlpha || null }); // 장면도 프로젝트 페이드
   return geo;
 }

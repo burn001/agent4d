@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-26
+
+### Added
+- Live output of foreground shell commands. Claude Code writes the output of a running foreground Bash/PowerShell call to `tasks/<random id>.output` in the session temp folder and deletes it when the call ends, and that id never appears in the transcript, so long commands (for example a 10-minute test driver that prints a line per step) used to look frozen until they finished. The server now picks up unknown `.output` files in the session's task folders, attaches each one to the open (no result yet) Bash/PowerShell call of that session or its subagents whose start time is closest, and streams new lines to that call's tool panel as they arrive. The link ends when the result arrives, the file disappears or the turn ends. Live only; replay and archive are unchanged. Also works for sessions after `/clear`, whose temp folder carries a different session id. The first line may appear up to about 2 seconds late.
+
+### Changed
+- Work-target layer: temporary files no longer crowd out real work. Files under folders such as `tmp`, `temp`, `scratch`, `scratchpad`, `.cache` or `__pycache__` (and `*.tmp`) are marked temporary and are dropped first when a project reaches the 500-target limit. When four or more temporary files share a folder, they are folded into one group (count, five most recent files and the combined activity log in its card). Projects driven by autonomous loops that write many scratch files per round now show mostly their real code and documents. Same rule in Flow, Planet and Voxel Office.
+
 ## [0.3.2] - 2026-10-26
 
 ### Added

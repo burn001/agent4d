@@ -260,3 +260,32 @@ test('서비스 스크립트 매핑: 기본 없음, config.serviceScripts 로 �
     assert.deepEqual(shellServices('python tools/acme-report.mjs list').map((s) => [s.name, s.w]), [['Acme', false]]);
   } finally { setServiceScripts([]); }
 });
+
+// 임시 파일: 서버 /artifacts 상한(500)에서 임시 파일(.autopilot/scratch/…)이 먼저 버려지고, 항목에 tmp 표식
+test('ArtifactStore 상한: 임시 파일은 오래된 일반 파일보다 먼저 버림(§79.16)', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ccviz-art-tmp-'));
+  try {
+    const pid = 'D--fixture-tmp', sid = '21111111-2222-4333-8444-555555555555';
+    fs.mkdirSync(path.join(dir, pid), { recursive: true });
+    const T = Date.now() - 2 * 86_400_000, cwd = 'D:\fx\proj';
+    const iso = (dt) => new Date(T + dt).toISOString();
+    const rows = [JSON.stringify({ type: 'user', timestamp: iso(0), cwd, sessionId: sid, message: { role: 'user', content: '시작' } })];
+    const write = (i, fp, dt) => {
+      rows.push(JSON.stringify({ type: 'assistant', timestamp: iso(dt), cwd, sessionId: sid, message: { content: [{ type: 'tool_use', id: 'w' + i, name: 'Write', input: { file_path: fp, content: 'x' } }] } }));
+      rows.push(JSON.stringify({ type: 'user', timestamp: iso(dt + 10), cwd, sessionId: sid, toolUseResult: { type: 'create' }, message: { content: [{ type: 'tool_result', tool_use_id: 'w' + i, content: 'ok' }] } }));
+    };
+    for (let i = 0; i < 420; i++) write(i, `src/m${i % 7}/f${i}.py`, 1000 + i * 100);                         // 오래된 일반 420
+    for (let i = 0; i < 300; i++) write(1000 + i, `.autopilot/scratch/q${148 + (i % 4)}/r${i}.jsonl`, 86_400_000 + i * 100); // 하루 뒤 임시 300
+    fs.writeFileSync(path.join(dir, pid, sid + '.jsonl'), rows.join('\n') + '\n');
+    const { SessionIndex } = await import('../discovery.mjs');
+    const index = new SessionIndex({ projectsDir: dir, sessionsDir: path.join(dir, 'none') });
+    await index.refresh();
+    const store = new ArtifactStore({ index, minRefreshMs: 0 });
+    const p = await store.payload({ projectId: pid, waitMs: 10_000 });
+    assert.equal(p.items.length, 500);
+    const tmp = p.items.filter((x) => x.tmp);
+    assert.equal(p.items.filter((x) => !x.tmp).length, 420, '일반 파일은 모두 남음');
+    assert.equal(tmp.length, 80, '임시는 남는 칸만');
+    assert.ok(tmp.every((x) => x.id.startsWith('.autopilot/scratch/')));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

@@ -288,7 +288,7 @@ export class VoxelArt3D extends ArtLayerBase3D {
     if (key !== this._pk) {
       this._pk = key;
       this.plans.clear(); st.lay.clear();
-      for (const [pid, room] of rooms) { const P = this.plan.sync(pid, st.book.shownItems(pid), room); this.plans.set(pid, P); st.lay.set(pid, P); }
+      for (const [pid, room] of rooms) { const P = this.plan.sync(pid, st.book.layoutItems(pid).items, room); this.plans.set(pid, P); st.lay.set(pid, P); }
       if (st.foot) st.foot.set = st.book.touchedBy(st.foot.pid, st.foot.node);
     }
     env.unitPx = (pid) => { const P = this.plans.get(pid); if (!P) return 20; const o = P.room.origin; return this._pxAt(o.x, 1, o.z); };

@@ -32,6 +32,8 @@ export const PANEL_MERGE_MS = 250;
 const IDLE_MS = 60_000;
 const EPOCH = '1970-01-01T00:00:00.000Z';
 const OFFLINE_OUTPUT_MAX = 1 << 20; // offline: 출력 파일 꼬리 1MB
+// 포그라운드 셸 출력 매칭: 새 파일 보류(백그라운드 결과가 먼저 올 틈) · 짝 없으면 포기 · tool_use 기록이 파일보다 늦게 찍히는 여유
+const FG_HOLD = 1200, FG_GIVEUP = 8000, FG_SLACK = 2000;
 export const TOOLS_MAX = 5000; // 라이브 tools Map 상한(넘으면 TOOLS_KEEP 까지 오래된 끝난 항목 삭제)
 export const TOOLS_KEEP = 4000;
 /** 기동기 아래 끝난 회차를 노드로 남기는 수(나머지는 meta.batch 집계로만) */
@@ -250,6 +252,8 @@ export class RootRuntime {
     this.killCmds = [];         // 끄는 셸 명령 시각(ms) — '중지됨' 판정
     this._failed = new Map();   // failed 로 끝난 백그라운드 작업 nodeId → {ev, endMs, startMs} (늦게 본 끄는 명령으로 고치기)
     this.outputs = new Map(); // nodeId → output 상태
+    // 포그라운드 셸 실시간 출력(라이브 전용): 열린 호출 id · 연결(호출 id → 기록) · 파일 → 연결 · 보류 중인 새 파일 · 무시할 파일
+    this._fg = { open: new Set(), byTu: new Map(), byFile: new Map(), seen: new Map(), ignore: new Set(), dueAt: 0 };
     this.children = []; // claude -p 대기 목록
     this.launchNodes = new Map(); // 기동기: 기동 tool_use id(인계는 adopt:<id>) → {nodeId, tsMs, key, script, cwd, watcher, owner, projectDir, cycles}
     this.launcherByNode = new Map(); // 기동기 노드 id → 위 레코드
@@ -473,6 +477,7 @@ export class RootRuntime {
         const quiet = now - t._grewAt;
         t._dueAt = now + (t._session || quiet < 60_000 ? 0 : quiet < 600_000 ? 1500 : 5000);
       }
+      await this._fgScan(all);
     } catch (e) { log('poll', e); } finally { this._polling = false; }
   }
 
@@ -509,6 +514,8 @@ export class RootRuntime {
     for (const t of this.timers) clearInterval(t);
     for (const t of this.tails.values()) t.close();
     for (const o of this.outputs.values()) if (o.timer) clearTimeout(o.timer);
+    for (const r of this._fg.byTu.values()) { r.closed = true; if (r.timer) clearTimeout(r.timer); }
+    this._fg.byTu.clear(); this._fg.byFile.clear(); this._fg.seen.clear(); this._fg.open.clear();
   }
 
   // ───────────── 시계 (live = 지금, offline = 처리한 레코드의 최대 시각) ─────────────
@@ -845,6 +852,8 @@ export class RootRuntime {
       w.cwd = rec.cwd;
       g.updateNode(ownerId, { meta: { cwd: rec.cwd } }, ts);
     }
+    // /clear 뒤 세션은 기록의 sessionId 와 임시 폴더 세션 ID 가 다르다 — 레코드 최상위 session_id(실측: 임시 폴더 tasks/ 의 세션 ID)
+    if (typeof rec.session_id === 'string' && rec.session_id !== w.sessionId) this._noteTmpSession(w, rec.session_id);
     // 세션 문패용 git 브랜치·worktree(기록의 gitBranch·cwd). 'HEAD'(git 아님·분리)는 없음으로
     if (ownerId === w.nodeId && (node.kind === 'main' || node.kind === 'claude-p') && (rec.gitBranch !== undefined || rec.cwd)) {
       const git = typeof rec.gitBranch === 'string' && rec.gitBranch && rec.gitBranch !== 'HEAD' ? redact(rec.gitBranch).slice(0, 60) : (rec.gitBranch !== undefined ? null : node.meta.git ?? null);
@@ -1006,6 +1015,8 @@ export class RootRuntime {
         const a = L && ((id && this.index.launchPin?.(id)) || analyzeLaunch(L, resolveCwdGuess(this._recCwd || w.cwd || node.meta.cwd, L.cdGuess)));
         if (a && id) this._addLauncher(id, node, w, ts, input, a, L);
       }
+      // 포그라운드 셸: 실행 중 tasks/<무작위 id>.output 을 이 호출에 잇기 위해 열린 목록에 둔다(라이브만, 보관함 제외)
+      if (!input.run_in_background && id && !this.offline && !this.index.taskRoots) this._fg.open.add(id);
       // 포그라운드에서 프로세스를 끄는 명령(taskkill·Stop-Process·kill …) → 곧 올 failed 알림을 '중지됨'으로
       if (!input.run_in_background && isKillCommand(input.command)) this._noteKill(Date.parse(ts));
     }
@@ -1073,10 +1084,12 @@ export class RootRuntime {
     if (idx >= 0) owner.openTools.splice(idx, 1);
     else if (tu?.ended) return; // 중복 tool_result
     if (tu) { tu.ended = true; tu.endMs = Date.parse(ts); }
+    if (this._fg.open.delete(tuid) || this._fg.byTu.has(tuid)) this._fgDrop(tuid, { flush: false }); // 결과 패널이 꼬리를 대신하므로 남은 조각은 버림
     if (!ok) owner.counts.errors++;
     const durationMs = tu ? Math.max(0, Date.parse(ts) - tu.tsMs) || 0 : 0;
     const bodyText = textOfContent(item.content);
     const tur = rec.toolUseResult && typeof rec.toolUseResult === 'object' ? rec.toolUseResult : (ok ? inferToolUseResult(name, bodyText) : null);
+    if (tur && typeof tur.outputFile === 'string' && /\.output$/i.test(tur.outputFile)) w.tasksDirs.add(path.dirname(tur.outputFile)); // 비동기 Agent 등의 출력 폴더
     let panel = null;
     if (g.privacy !== 'minimal') {
       panel = resultPanel(name, null, tur, stripTags(bodyText), item.content, ok, tu?.panel || null);
@@ -1342,6 +1355,179 @@ export class RootRuntime {
         await o.tail.drain();
       }
     }
+  }
+
+  // ───────────── 포그라운드 셸 실시간 출력 ─────────────
+  // Claude Code 는 포그라운드 Bash·PowerShell 도 실행 중에 <임시>/<인코딩 cwd>/<세션ID>/tasks/<무작위 id>.output 에 출력을 쓰고
+  // 끝나면 지운다. 그 id 는 transcript 에 남지 않아 로는 못 찾으므로, 세션 tasks 폴더에 생긴 '모르는 id' 새 파일을
+  // 같은 세션(메인 + 서브에이전트 — 서브에이전트 출력도 부모 세션 폴더에 생김) 안의 아직 결과가 없는 포그라운드 셸 호출에 잇는다.
+
+  /** 임시 폴더 세션 ID(기록 sessionId 와 다를 때, /clear 뒤) → 그 tasks 폴더를 이 세션이 아는 폴더로 */
+  _noteTmpSession(w, sid) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sid)) return;
+    const S = w.tmpSessions || (w.tmpSessions = new Set());
+    if (S.has(sid) || S.size >= 8) return;
+    S.add(sid);
+    const encs = new Set([w.cwd ? encodeCwd(w.cwd) : null, path.basename(w.projectPath)].filter(Boolean));
+    for (const r of (this.index.taskRoots || claudeTmpRoots())) for (const e of encs) w.tasksDirs.add(path.join(r, e, sid, 'tasks'));
+  }
+
+  /**
+   * 이 세션의 tasks 폴더 후보: 기록에서 알게 된 폴더 전부(백그라운드 작업·Agent·Monitor 의 출력 파일 폴더, 임시 폴더 세션 ID
+   * /clear 뒤엔 세션 ID 가 기록과 다름) + 임시 루트/<인코딩 cwd>/<세션ID>/tasks(없어도 넣어 둠 — 생기면 잡힘)
+   */
+  _fgDirs(w) {
+    const out = new Set();
+    for (const d of w.tasksDirs) out.add(path.normalize(d));
+    const encs = new Set([w.cwd ? encodeCwd(w.cwd) : null, path.basename(w.projectPath)].filter(Boolean)); // 프로젝트 폴더 이름도 같은 인코딩
+    for (const r of claudeTmpRoots()) for (const e of encs) out.add(path.normalize(path.join(r, e, w.sessionId, 'tasks')));
+    return [...out];
+  }
+
+  /** 이미 다른 경로(백그라운드 bash·Monitor·워크플로)로 아는 task id */
+  _fgKnown(id) {
+    return this.taskMap.has(id) || this.outputs.has(`b:${id}`) || this.outputs.has(`m:${id}`) || this.graph.has(`w:${id}`);
+  }
+
+  /**
+   * 매칭: 같은 watcher 의 열린(결과 없음·아직 파일 없음) 포그라운드 셸 호출 중
+   * tool_use 가 파일 생성보다 먼저(기록 지연 여유 FG_SLACK)이고 생성 시각과 가장 가까운 것
+   */
+  _fgPick(w, birthMs) {
+    let best = null, bd = Infinity;
+    for (const id of this._fg.open) {
+      if (this._fg.byTu.has(id)) continue;
+      const t = this.tools.get(id);
+      if (!t || t.watcher !== w || t.ended) continue;
+      if (!(t.tsMs <= birthMs + FG_SLACK)) continue;
+      const d = Math.abs(birthMs - t.tsMs);
+      if (d < bd) { bd = d; best = t; }
+    }
+    return best;
+  }
+
+  /** 500ms 폴링 끝에 1초 간격으로: 닫힌 호출 내림 → tasks 폴더 훑기 → 새 파일 보류·매칭 → 사라진 파일 끊기 */
+  async _fgScan(all = false) {
+    const F = this._fg;
+    if (this.offline || this.index.taskRoots || this.closed) return; // 재생·보관함 무관(실시간 전용)
+    if (!F.open.size && !F.byTu.size && !F.seen.size) return;
+    const now = Date.now();
+    if (!all && now < F.dueAt) return;
+    F.dueAt = now + 1000;
+    // 턴 끝(turn_duration)으로 닫혔거나 노드가 사라진 호출은 내린다
+    for (const id of [...F.open]) {
+      const t = this.tools.get(id);
+      const o = t && this.graph.get(t.owner);
+      if (!t || t.ended || !o || !(o.openTools || []).some((x) => x.toolUseId === id)) { F.open.delete(id); this._fgDrop(id, { flush: true }); }
+    }
+    const ws = new Set();
+    for (const id of F.open) { const t = this.tools.get(id); if (t?.watcher) ws.add(t.watcher); }
+    for (const r of F.byTu.values()) ws.add(r.w);
+    for (const s of F.seen.values()) ws.add(s.w);
+    const listed = new Set(); // 이번에 훑은 폴더에 있던 파일(사라짐 판정용)
+    const scanned = new Set();
+    for (const w of ws) {
+      for (const dir of this._fgDirs(w)) {
+        if (scanned.has(dir)) continue;
+        let names;
+        try { names = await fs.promises.readdir(dir); } catch { continue; } // 아직 없거나 지우는 중 — 조용히
+        scanned.add(dir);
+        for (const name of names) {
+          if (!name.endsWith('.output')) continue;
+          const file = path.join(dir, name);
+          listed.add(file);
+          if (F.byFile.has(file) || F.ignore.has(file)) continue;
+          const tid = name.slice(0, -'.output'.length);
+          if (this._fgKnown(tid)) { F.seen.delete(file); continue; }
+          let s = F.seen.get(file);
+          if (!s) {
+            let birthMs = now;
+            try { const st = await fs.promises.stat(file); if (st.birthtimeMs > 0) birthMs = st.birthtimeMs; } catch { continue; } // 지워지는 중
+            s = { w, firstMs: now, birthMs };
+            F.seen.set(file, s);
+          }
+          // 잠깐 보류: run_in_background 결과(backgroundTaskId)가 곧 와서 아는 id 가 될 수 있다
+          if (now - s.firstMs < FG_HOLD) continue;
+          const tu = this._fgPick(s.w, s.birthMs);
+          if (tu) { F.seen.delete(file); this._fgLink(tu, file, s.w); }
+          else if (now - s.firstMs > FG_GIVEUP) { F.seen.delete(file); F.ignore.add(file); } // 끝내 짝이 없으면 무시
+        }
+      }
+    }
+    // 연결된 파일이 사라졌거나 나중에 다른 경로로 알게 된 id 면 끊는다(폴더째 사라져도 끊음)
+    const gone = (file) => !listed.has(file) && (scanned.has(path.dirname(file)) || !fs.existsSync(path.dirname(file)));
+    for (const r of [...F.byTu.values()]) {
+      if (gone(r.file) || this._fgKnown(path.basename(r.file).slice(0, -'.output'.length))) this._fgDrop(r.tuid, { flush: true });
+    }
+    for (const file of [...F.seen.keys()]) if (gone(file)) F.seen.delete(file);
+    for (const file of [...F.ignore]) if (gone(file)) F.ignore.delete(file);
+    while (F.ignore.size > 2000) F.ignore.delete(F.ignore.values().next().value);
+  }
+
+  /** 연결: 파일을 text tail 로 붙이고(읽기는 pollAll 이 함께 돎) 조각을 그 호출의 꼬리 패널로 */
+  _fgLink(tu, file, w) {
+    const F = this._fg;
+    const r = { tuid: tu.id, owner: tu.owner, file, w, lt: new LineTail(PANEL_LIMITS.lines), buf: '', timer: null, lastEmit: 0, closed: false, tail: null, shared: false };
+    F.byTu.set(tu.id, r);
+    F.byFile.set(file, r);
+    if (this.tails.has(file)) { r.tail = this.tails.get(file); r.shared = true; return; } // 이미 다른 경로가 보는 파일이면 손대지 않음(드묾)
+    r.tail = new FileTail(file, { mode: 'text', onText: (s) => this._fgText(r, s) });
+    this.addTail(file, r.tail);
+    log('fg link', tu.id, file);
+  }
+
+  /** 끊기: tail 닫고 표에서 뺌. flush=false(결과 도착)면 남은 조각은 버림 */
+  _fgDrop(tuid, { flush = true } = {}) {
+    const F = this._fg;
+    const r = F.byTu.get(tuid);
+    if (!r) return;
+    if (r.timer) { clearTimeout(r.timer); r.timer = null; }
+    if (flush) this._fgFlush(r);
+    r.closed = true;
+    F.byTu.delete(tuid);
+    F.byFile.delete(r.file);
+    if (!r.shared) { r.tail.close(); if (this.tails.get(r.file) === r.tail) this.tails.delete(r.file); }
+    F.ignore.add(r.file); // 지워지기 전 잠깐 남아 있어도 다시 잇지 않음
+    log('fg drop', tuid);
+  }
+
+  _fgText(r, s) {
+    if (r.closed || !s) return;
+    r.buf += s;
+    if (r.buf.length > 4000) r.buf = r.buf.slice(-4000);
+    r.lt.push(s);
+    if (!r.timer) {
+      const wait = Math.max(0, 250 - (Date.now() - r.lastEmit));
+      r.timer = setTimeout(() => { r.timer = null; this._fgFlush(r); }, wait);
+    }
+  }
+
+  /** 백그라운드 출력과 같은 output 이벤트(꼬리 패널, ref = 그 셸 호출). nodeId = 호출한 노드(메인·서브에이전트) */
+  _fgFlush(r) {
+    if (r.closed || !r.buf) return;
+    const text = r.buf.replace(/\r/g, '');
+    r.buf = '';
+    r.lastEmit = Date.now();
+    const g = this.graph;
+    const owner = g.get(r.owner);
+    if (!owner) return;
+    const ts = this.nowIso();
+    this.touch(r.owner, ts, false);
+    if (!text.trim()) return;
+    let panel = null;
+    if (g.privacy !== 'minimal') {
+      const tu = this.tools.get(r.tuid);
+      const title = tu?.panel?.title || (tu?.input?.command ? '$ ' + String(tu.input.command).split(/\r?\n/)[0] : '');
+      const secret = !!tu?.panel?.secret;
+      const view = r.lt.view();
+      panel = tailPanel(title, view, { nodeId: r.owner, toolUseId: r.tuid }, { secret, mode: 'shell' });
+      const hidden = r.lt.total + (r.lt.partial.trim() ? 1 : 0) - view.length;
+      if (!secret && hidden > 0) panel.more = hidden;
+      // 새로 붙는 화면(스냅샷 openTools)도 지금 꼬리를 보게
+      const ot = (owner.openTools || []).find((x) => x.toolUseId === r.tuid);
+      if (ot) { const sp = sanitizePanel(panel, g.privacy); if (sp) ot.panel = sp; }
+    }
+    g.emit({ ts, type: 'output', nodeId: r.owner, toolUseId: r.tuid, fg: true, text, ...(panel ? { panel } : {}) });
   }
 
   onOutput(o, s, backlog) {

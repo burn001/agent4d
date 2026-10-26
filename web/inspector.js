@@ -450,7 +450,7 @@ export function mountInspector(h) {
   /** 작업 대상: 누가 언제 무엇을(최근 기록)·변경 크기·관계 노드 */
   function renderArtifact(nowMs) {
     const A = h.getArt && h.getArt();
-    const it = A ? A.book.get(target.pid, target.id) : null;
+    const it = A ? A.book.get(target.pid, target.id) || A.book.foldItem(target.pid, target.id) : null; // 접힌 임시 폴더도
     if (!it) { setBody(`<p class="ins-dim">${esc(tr('cards.ins.noRecord'))}</p>`); return; }
     const labelOf = (id) => { const nn = h.nodes.get(id); return nn ? nn.label || id : A.book.nodeLabels.get(id) || id; };
     const m = artInspectModel(it, nowMs, labelOf);

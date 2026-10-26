@@ -24,7 +24,9 @@ export function ensureArtCss() {
 // ───────────── 상수·열거 ─────────────
 export const ART = {
   WINDOW_MS: 7 * 86_400_000,   // 프로젝트 누적 창(7일) — 이보다 오래된 대상은 장부에서 빠짐
-  MAX_ITEMS: 500,              // 프로젝트당 대상 상한(넘으면 중요도 없는·오래된 것부터)
+  MAX_ITEMS: 500,              // 프로젝트당 대상 상한(넘으면 임시 파일 → 중요도 없는·오래된 것부터)
+  TEMP_FOLD_MIN: 4,            // 임시 폴더 하나에 임시 파일이 이만큼 이상이면 묶음 항목 하나로 접는다
+  TEMP_FOLD_FILES: 5,          // 접힌 묶음이 들고 있는 대표 파일 수(팝업)
   LOG_MAX: 12,                 // 대상마다 최근 기록(누가 언제 무엇을)
   WHO_MAX: 8,                  // 대상마다 간선(노드) 상한
   FOLDER_MAX: 80,              // 프로젝트당 폴더 구역 상한(넘으면 '…' 구역 하나로 — 폴더 LOD)
@@ -147,9 +149,39 @@ export function isShown(it) {
   if (it.k === 'file' || it.k === 'output') return (c.create || 0) + (c.modify || 0) + (c.delete || 0) + (c.write || 0) > 0;
   return (c.create || 0) + (c.modify || 0) + (c.delete || 0) + (c.write || 0) + (c.push || 0) + (c.query || 0) > 0;
 }
+// ───────────── 임시 경로 ─────────────
+// 자율 루프의 회차별 임시 폴더(.autopilot/scratch/q148…)·세션 임시 폴더(~/AppData/Local/Temp/claude/…)·캐시 폴더의 파일은
+// 수는 많지만 늘 '방금' 만들어져 신선해 보여서 바닥층을 덮는다. 상한 계산에서 가장 먼저 버리고(keepScore), 폴더마다 접어 그린다(foldTempItems).
+// 폴더 구간 하나가 이것이면 임시: tmp·temp·scratch·scratchpad(그리고 tmp-xyz·tmp_1·temp2 처럼 붙인 꼴), .tmp·.temp, .cache, __pycache__, .pytest/.mypy/.ruff_cache.
+// 'out'·'build'·'dist' 는 산출물 폴더로도 많이 써서 넣지 않는다(근거 약함). 'template'·'temporal' 은 안 맞음(붙임 꼴은 -_. 또는 숫자만).
+const TEMP_SEG = /^(?:\.?(?:tmp|temp|scratch|scratchpad)(?:[-_.][^/]*|\d+)?|\.cache|__pycache__|\.(?:pytest|mypy|ruff)_cache)$/i;
+const TEMP_NAME = /\.(?:tmp|temp)$/i; // 파일 이름 자체가 임시(foo.tmp)
+/**
+ * 임시 경로면 '접을 폴더'(표시 경로 꼴), 아니면 null. 접을 폴더 = 가장 깊은 임시 구간 + 그 아래 한 구간(회차 폴더 — scratch/q148,
+ * scratchpad/shots), 파일이 임시 구간 바로 아래면 그 임시 폴더. 임시 폴더 밖 foo.tmp 는 그 파일의 폴더. 순수 함수(서버·웹·시험 공용)
+ */
+export function tempFolder(p) {
+  const segs = String(p || '').replace(/\\/g, '/').split('/');
+  if (segs.length && !segs[segs.length - 1]) segs.pop();
+  if (!segs.length || !segs[segs.length - 1]) return null;
+  const name = segs.pop();
+  let i = -1;
+  for (let q = segs.length - 1; q >= 0; q--) if (TEMP_SEG.test(segs[q])) { i = q; break; }
+  if (i < 0) return TEMP_NAME.test(name) ? segs.join('/') : null;
+  return segs.slice(0, Math.min(segs.length, i + 2)).join('/');
+}
+/** 임시 경로인가(tempFolder 가 null 이 아님) */
+export const isTempPath = (p) => tempFolder(p) != null;
+/** 임시 대상인가: 파일·산출물(Artifact 도구 산출물 제외)이고 경로가 임시 */
+export function isTempItem(it) {
+  if (!it || (it.k !== 'file' && it.k !== 'output')) return false;
+  const id = String(it.id || '');
+  if (id.startsWith('artifact:')) return false;
+  return isTempPath(it.p || id);
+}
 const editsOf = (it) => { const c = it.cnt || {}; return (c.create || 0) + (c.modify || 0) + (c.write || 0) + (c.push || 0) + (c.query || 0); };
-/** 상한 넘칠 때 남길 순위(클수록 남김): 중요도 → 파일 아닌 종류 → 최근·접촉 수 */
-const keepScore = (it) => (it.imp ? 2e15 : 0) + (it.k !== 'file' ? 1e15 : 0) + (it.last || 0) + Math.min(50, editsOf(it)) * 60_000; // 중요 > 파일 아닌 대상(DB·원격·저장소·서비스·산출물) > 최근·자주
+/** 상한 넘칠 때 남길 순위(클수록 남김): 임시 아님(최우선 — 임시 파일은 중요도 없는 것보다도 먼저 버림) → 중요도 → 파일 아닌 종류 → 최근·접촉 수 */
+const keepScore = (it) => (it.tmp ? 0 : 4e15) + (it.imp ? 2e15 : 0) + (it.k !== 'file' ? 1e15 : 0) + (it.last || 0) + Math.min(50, editsOf(it)) * 60_000; // 중요 > 파일 아닌 대상(DB·원격·저장소·서비스·산출물) > 최근·자주
 /** 같은 폴더 구역 열쇠 */
 /** 폴더 → 구역 폴더(윗 폴더로 묶음 — 구역 수를 줄인다): 프로젝트 안은 첫 조각, '~/' 는 세 조각, 절대 경로는 두 조각 */
 export function topFolder(d) {
@@ -160,7 +192,8 @@ export function topFolder(d) {
   return segs[0];
 }
 export function districtKey(it) {
-  if (it.k === 'file' || it.k === 'output') return 'f:' + topFolder(it.d ?? dirOf(it.p || it.id)).toLowerCase();
+  // 접힌 임시 폴더는 원래 파일의 구역에
+  if (it.k === 'file' || it.k === 'output' || (it.k === 'zone' && it.tmp)) return 'f:' + topFolder(it.d ?? dirOf(it.p || it.id)).toLowerCase();
   return '#' + it.k;
 }
 export function districtLabel(key) {
@@ -214,6 +247,7 @@ export class ArtBook {
     for (const it of items || []) {
       if (!it || !it.id || !ART_KINDS.includes(it.k)) continue;
       const c = { ...it, cnt: { ...newCnt(), ...(it.cnt || {}) }, who: (it.who || []).map((w) => ({ ...w })), log: (it.log || []).map((l) => ({ ...l })) };
+      c.tmp = isTempItem(c) ? 1 : 0; // 서버 값을 믿지 않고 다시(옛 서버는 없음)
       m.set(c.id, c);
       for (const l of c.log) if (l.tu) this._mark(l.tu + '|' + c.id);
     }
@@ -250,6 +284,7 @@ export class ArtBook {
       if (v === 'read') return null;
       it = { id: ref.id, k: ref.k, n: ref.n || ref.id, p: ref.p ?? null, d: ref.d ?? (ref.k === 'file' || ref.k === 'output' ? dirOf(ref.p || ref.id) : null),
         first: t, last: t, cnt: newCnt(), sz: 0, rows: null, del: 0, x: null, xAt: 0, imp: null, coll: [], who: [], log: [], est: ref.est ? 1 : 0 };
+      it.tmp = isTempItem(it) ? 1 : 0; // 임시(상한에서 먼저 버림·폴더로 접음) — 만들 때 한 번만 판정
       m.set(it.id, it);
     }
     const wasShown = isShown(it);
@@ -304,6 +339,21 @@ export class ArtBook {
   snapshot(pid, { limit = this.max } = {}) {
     return this.items(pid).sort((a, b) => b.last - a.last).slice(0, limit);
   }
+
+  /**
+   * 배치용 항목(세 표현 공용 ① 단계): 보이는 대상에서 임시 파일을 폴더마다 접은 것 — {items, agg:Map<묶음 id, 묶음 항목>}.
+   * 장부 version 이 같으면 캐시. 흐름·Planet(ArtState.syncLayout)·복셀(VxArtPlan.sync) 모두 shownItems 대신 이것으로 배치한다.
+   */
+  layoutItems(pid) {
+    const lc = this._lc || (this._lc = new Map());
+    const c = lc.get(pid);
+    if (c && c.ver === this.version) return c.res;
+    const res = foldTempItems(this.shownItems(pid));
+    lc.set(pid, { ver: this.version, res });
+    return res;
+  }
+  /** 접힌 임시 폴더 묶음 항목(팝업) — 없으면 null */
+  foldItem(pid, id) { return String(id || '').startsWith(TEMP_ZONE) ? this.layoutItems(pid).agg.get(id) || null : null; }
 
   /** 노드가 만진 대상 열쇠(발자국 강조): Set<id> */
   touchedBy(pid, nodeId) {
@@ -742,8 +792,8 @@ export function artGeometry(book, lay, fx, nowSec, env, geo = new ArtGeo()) {
   if (AC) drawActs(geo, AC, nowSec, { theme: 'flow', unitPx: env.cellPx ? (p) => { const a = env.anchor(p); return env.cellPx(p) / (ART.CELL * ((a && a.k) || 1)); } : null, KI, pos: AP, zoneOf: zoneKeyOf, book, nodePos: env.nodePos, reduced: env.reduced, isLight: env.isLight, pidAlpha: env.pidAlpha || null }); // 장면도 프로젝트 페이드
   return geo;
 }
-/** 구역 묶음 배치에서 대상이 묶인 구역 묶음 열쇠 */
-export const zoneKeyOf = (it) => '#zone:' + districtKey(it);
+/** 구역 묶음 배치에서 대상이 묶인 구역 묶음 열쇠 — 임시 폴더로 접힌 대상이면 그 묶음 열쇠 */
+export const zoneKeyOf = (it) => TEMP_FOLD_OF.get(it) || '#zone:' + districtKey(it);
 
 /** 바닥층 세계 좌표 경계(카메라 맞춤): 프로젝트마다 네 모서리 점 [{p:{x,y,z}, r}] 을 out 에 더한다 */
 export function artFitPoints(lay, anchor, out, { y = ART.FLOOR_Y, pid = null } = {}) {
@@ -757,14 +807,14 @@ export function artFitPoints(lay, anchor, out, { y = ART.FLOOR_Y, pid = null } =
   return out;
 }
 
-/** 대상 집기(2D·3D 공통): 세계 (x,z)(바닥 높이) 가 가장 가까운 대상 {pid,id} (반경 = 칸 × 축척 × 0.75 안), 집계 묶음은 제외 */
+/** 대상 집기(2D·3D 공통): 세계 (x,z)(바닥 높이) 가 가장 가까운 대상 {pid,id} (반경 = 칸 × 축척 × 0.75 안), 구역 묶음은 제외(접힌 임시 폴더 은 포함 — 팝업) */
 export function artPickXZ(lay, anchor, wx, wz, maxK = 0.75) {
   let best = null, bd = Infinity;
   for (const [pid, L] of lay) {
     const a = anchor(pid); if (!a) continue;
     const k = a.k || 1, lim = ART.CELL * k * maxK;
     for (const [id, p] of L.pos) {
-      if (id.startsWith('#zone:')) continue;
+      if (id.startsWith('#zone:') && !id.startsWith(TEMP_ZONE)) continue;
       const d = Math.hypot(a.x + p.x * k - wx, a.z + p.z * k - wz);
       if (d < lim && d < bd) { bd = d; best = { pid, id }; }
     }
@@ -773,6 +823,57 @@ export function artPickXZ(lay, anchor, wx, wz, maxK = 0.75) {
 }
 
 // ───────────── 표현 공용 상태(흐름 3D·2D, 다음 단계 Planet·복셀도 그대로) ─────────────
+/** 접힌 임시 폴더 묶음 id 머리 — '#zone:' 으로 시작해 구역 묶음과 같은 길(L.agg·k 'zone' 그리기)을 탄다 */
+export const TEMP_ZONE = '#zone:tmp:';
+const TEMP_FOLD_OF = new WeakMap(); // 장부 항목 → 그것이 접힌 묶음 id(zoneKeyOf — 연출 자리·팝업 자리)
+/**
+ * 임시 파일 접기: 같은 접을 폴더(tempFolder)에 임시 대상이 min 개 이상이면 묶음 항목 하나로 바꾼다. 그보다 적으면 그대로.
+ * 묶음 {id:'#zone:tmp:<폴더 소문자>', k:'zone', tmp:1, n:끝 두 조각, p·d:폴더, first, last, count, cnt(합), sz(합), del(모두 지워졌나),
+ *       x·xAt(가장 최근 파괴적), imp, who(노드별 합, ≤8), log(합쳐 최근 12), files:[{id,n,p,last,v}](최근 5 — 대표 파일), est(모두 추정이면)}
+ * 반환 {items(접은 뒤 — 묶음은 끝에), agg:Map<id, 묶음>}. 입력 배열·항목은 바꾸지 않음(묶임 표식만 WeakMap 에)
+ */
+export function foldTempItems(items, min = ART.TEMP_FOLD_MIN) {
+  const groups = new Map();
+  for (const it of items) {
+    if (!(it.tmp ?? (isTempItem(it) ? 1 : 0))) { TEMP_FOLD_OF.delete(it); continue; }
+    const f = tempFolder(it.p || it.id) ?? '';
+    const key = f.toLowerCase();
+    let g = groups.get(key); if (!g) { g = { f, list: [] }; groups.set(key, g); }
+    g.list.push(it);
+  }
+  const agg = new Map(), folded = new Set();
+  for (const [key, { f, list }] of groups) {
+    if (list.length < min) { for (const it of list) TEMP_FOLD_OF.delete(it); continue; }
+    const id = TEMP_ZONE + key;
+    const short = (s) => (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s) ? s.slice(0, 8) : s); // 세션 uuid 는 앞 8자
+    const z = { id, k: 'zone', tmp: 1, n: f.split('/').filter(Boolean).slice(-2).map(short).join('/') || t('boards.district.root'), p: f, d: f, first: Infinity, last: 0, count: list.length,
+      cnt: newCnt(), sz: 0, rows: null, del: 1, x: null, xAt: 0, imp: null, coll: [], who: [], log: [], files: [], est: 1 };
+    const who = new Map();
+    for (const it of list) {
+      folded.add(it); TEMP_FOLD_OF.set(it, id);
+      z.first = Math.min(z.first, it.first || 0); z.last = Math.max(z.last, it.last || 0);
+      for (const v of ART_VERBS) z.cnt[v] += (it.cnt && it.cnt[v]) || 0;
+      z.sz += it.sz || 0;
+      if (!it.del) z.del = 0;
+      if (!it.est) z.est = 0;
+      if (it.x && (it.xAt || 0) >= z.xAt) { z.x = it.x; z.xAt = it.xAt || 0; }
+      if (it.imp && !z.imp) z.imp = it.imp;
+      for (const w of it.who || []) { const o = who.get(w.node); if (!o) who.set(w.node, { ...w }); else { o.c += w.c; if (w.last >= o.last) { o.last = w.last; o.v = w.v; } } }
+      for (const l of it.log || []) z.log.push(l);
+    }
+    z.who = [...who.values()].sort((a, b) => b.last - a.last).slice(0, ART.WHO_MAX);
+    z.log = z.log.sort((a, b) => a.t - b.t).slice(-ART.LOG_MAX);
+    z.files = [...list].sort((a, b) => (b.last || 0) - (a.last || 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).slice(0, ART.TEMP_FOLD_FILES)
+      .map((it) => ({ id: it.id, n: it.n || it.id, p: it.p || it.id, last: it.last || 0, v: (it.log && it.log.length && it.log[it.log.length - 1].v) || null }));
+    if (!Number.isFinite(z.first)) z.first = 0;
+    agg.set(id, z);
+  }
+  if (!agg.size) return { items, agg };
+  const out = items.filter((it) => !folded.has(it));
+  for (const z of agg.values()) out.push(z);
+  return { items: out, agg };
+}
+
 /**
  * 집계(폴더 LOD) 항목: 파일·산출물을 구역(윗 폴더)마다 하나로 묶는다. 그 밖 종류(DB·저장소·원격·서비스)는 그대로.
  * 묶음 항목 {id:'#zone:<구역>', k:'zone', n:구역 이름, d, first, last, count, cnt, imp}
@@ -819,8 +920,9 @@ export class ArtState {
     const keep = new Set(pids);
     for (const p of [...this.lay.keys()]) if (!keep.has(p)) { this.lay.delete(p); this.full.delete(p); this.anchors.delete(p); }
     for (const p of pids) {
-      const items = this.book.shownItems(p);
+      const { items, agg: tmpAgg } = this.book.layoutItems(p); // 임시 폴더는 접어서(묶음 항목은 L.agg 로 찾음)
       const full = this.layout.sync(p, items);
+      if (tmpAgg.size) full.agg = tmpAgg;
       this.full.set(p, full);
       const t = targetOf ? targetOf(p) : null;
       if (t) this.boxes.set(p, { hw: t.hw, hd: t.hd });
@@ -828,7 +930,7 @@ export class ArtState {
       if (t && fitScale(full.bounds, t) < ART.LOD_SCALE) { // 폴더 LOD: 묶어서 다시
         const ag = aggregateItems(items);
         L = this.aggLayout.sync(p, ag);
-        L.agg = new Map(ag.filter((x) => x.k === 'zone').map((x) => [x.id, x]));
+        L.agg = new Map(ag.filter((x) => x.k === 'zone').map((x) => [x.id, x])); // 접힌 임시 폴더도 k 'zone' 이라 그대로 지나와 여기 듦
       }
       this.lay.set(p, L);
     }
@@ -885,7 +987,7 @@ export class ArtState {
     const L = this.lay.get(pid), a = this.anchors.get(pid);
     if (!L || !a) return null;
     let p = L.pos.get(id);
-    if (!p && L.agg) { const it = this.book.get(pid, id); if (it) p = L.pos.get('#zone:' + districtKey(it)); }
+    if (!p && L.agg) { const it = this.book.get(pid, id); if (it) p = L.pos.get(zoneKeyOf(it)) || L.pos.get('#zone:' + districtKey(it)); } // 접힌 임시 폴더 → 없으면 구역 묶음
     if (!p) return null;
     const k = a.k || 1;
     return { x: a.x + p.x * k, y: y + 0.6, z: a.z + p.z * k };
@@ -965,6 +1067,11 @@ export function artInspectModel(it, nowMs, labelOf = (id) => id) {
   const c = it.cnt || {};
   const verbs = ART_VERBS.filter((v) => c[v]).map((v) => `${ART_VERB_LABEL[v]} ${c[v]}`);
   const lines = [];
+  const fold = it.k === 'zone' && !!it.tmp; // 접힌 임시 폴더: 파일 수 + 대표 파일(최근순)
+  if (fold) {
+    lines.push(t('boards.insp.tempN', { n: fmtNum(it.count || 0) }));
+    for (const f of it.files || []) lines.push(`· ${f.n} — ${ago(nowMs - (f.last || 0))}`);
+  }
   if (it.sz) lines.push(t('boards.insp.size', { n: fmtNum(it.sz) }));
   if (it.rows != null) lines.push(t('boards.insp.rows', { n: fmtNum(Number(it.rows)) }));
   if (it.coll && it.coll.length) lines.push(t('boards.insp.coll', { list: it.coll.join(', ') }));
@@ -974,7 +1081,7 @@ export function artInspectModel(it, nowMs, labelOf = (id) => id) {
     x: !!l.x && l.x !== 'overwrite',
   }));
   return {
-    glyph: ART_GLYPH[it.k] || '▤', kind: ART_KIND_LABEL[it.k] || it.k, title: it.n || it.id, path: it.p || (it.k === 'file' || it.k === 'output' ? it.id : null),
+    glyph: fold ? '▦' : ART_GLYPH[it.k] || '▤', kind: fold ? t('boards.kind.tempFold') : ART_KIND_LABEL[it.k] || it.k, title: it.n || it.id, path: it.p || (it.k === 'file' || it.k === 'output' ? it.id : null),
     state: it.del ? t('boards.state.deleted') : it.x && it.x !== 'overwrite' && nowMs - (it.xAt || 0) < ART.ALARM_MS ? t('boards.state.afterX') : t('boards.state.present'),
     last: ago(nowMs - (it.last || 0)), first: ago(nowMs - (it.first || 0)), verbs: verbs.join(' · '), lines,
     imp: it.imp ? ART_IMP_LABEL[it.imp] : null, x: it.x ? ART_X_LABEL[it.x] : null, est: !!it.est,

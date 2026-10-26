@@ -189,6 +189,7 @@ export function planetArtGeometry(book, lay, fx, nowSec, env, geo) {
         if (fa > 0.01) geo.box(x, Y0 + 0.3, z, C * 0.9, 0.6, w, KI.file, fa, null);
         if (budget > 0 && px > 10) { geo.label(x, Y0 + 2.4, z, `${it.n} ${it.count}`, 'art-zone', 'zone', 0.55); budget--; }
         if (R) R.top = Y0 + 1.2;
+        if (it.tmp) hit(env, pid, id, x, Y0 + 0.8, z, C * 0.6); // 접힌 임시 폴더는 집음(팝업: 수·대표 파일)
         continue;
       }
       if (it.k === 'file') {
