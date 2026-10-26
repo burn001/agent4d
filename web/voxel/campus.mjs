@@ -14,6 +14,7 @@ import { orphanPlan } from '../batch-core.mjs';
 import { liveMainSids } from '../multi-core.mjs';
 import { rotateOffice } from './xf.mjs';
 import { chooseGridCols, needRepack } from '../overview/fill-pack.mjs';
+import { userHiddenProjects, userHiddenRoots, visSig } from '../overview/visible.mjs';
 
 export const OFFICE_GAP = 4;      // 같은 동 안 사무실(묶음) 사이
 export const OFFICES_PER_ROW = 3; // 동 안 한 줄 사무실 수(넘치면 뒤로 다음 줄)
@@ -147,12 +148,16 @@ export function computeCampus(nodes, roots, projects, prev, opts = {}) {
   const prevMainOrder = (prev && prev.mainOrder) || new Map();
   const officeByMain = new Map();
   const hidden = new Set();
+  // 표시 고르기: 사용자가 숨긴 프로젝트·세션(루트)은 사무실·동 없이 숨김, 바뀌면 슬롯을 새로(빈자리 없이)
+  const uhP = userHiddenProjects(projects), uhR = userHiddenRoots(roots);
+  const sig = visSig(uhP, uhR);
+  const userHid = (r) => uhP.has(r.projectId) || uhR.has(r.nodeId);
   const projectOf = new Map();
 
   // 1-0. 독립 claude -p 루트: 메인 없는 빈 사무실을 만들지 않는다. 추정 소속(likelyMain) 메인이 보이면 그 사무실 앞 벽 대기석(guest),
   //      아니면 그 프로젝트 동 한쪽 '외부 작업' 구역(팀장 책상 없는 방, 독립 루트들이 직원 책상에)으로
   const plan = orphanPlan(R, byId);
-  const isHiddenRoot = (id) => { const n = byId.get(id); return isRecentRoot(n) && !showInactive; };
+  const isHiddenRoot = (id) => { const n = byId.get(id); const r = R.find((x) => x.nodeId === id); return (r && userHid(r)) || (isRecentRoot(n) && !showInactive); };
   const guests = new Map();   // host → [orphanRootId]
   const externals = new Map(); // projectId → [orphanRootId]
   for (const [oid, pl] of plan) {
@@ -174,7 +179,7 @@ export function computeCampus(nodes, roots, projects, prev, opts = {}) {
     for (const id of sub.keys()) projectOf.set(id, r.projectId);
     if (planned.has(r.nodeId)) continue;
     const recent = isRecentRoot(rootNode);
-    if (recent && !showInactive) { for (const id of sub.keys()) hidden.add(id); continue; }
+    if (userHid(r) || (recent && !showInactive)) { for (const id of sub.keys()) hidden.add(id); continue; }
     const g = guests.get(r.nodeId) || [];
     for (const oid of g) for (const id of subtrees.get(oid).keys()) projectOf.set(id, r.projectId);
     const lay = computeOffice(withOrphans([...sub.values()], g, { parentId: r.nodeId, guest: true }), r.nodeId, prevOff.get(r.nodeId));
@@ -202,7 +207,11 @@ export function computeCampus(nodes, roots, projects, prev, opts = {}) {
   // 2. 동 목록: 사무실이 있는 프로젝트 + 루트가 없는 live/recent 프로젝트(지붕 덮은 낮은 상자)
   const pids = new Set(byProj.keys());
   for (const q of projById.values()) if (!q.temp && (q.live || q.recent)) pids.add(q.projectId);
-  for (const r of R) if (hidden.has(r.nodeId)) pids.add(r.projectId);
+  for (const r of R) if (hidden.has(r.nodeId) && !userHid(r)) pids.add(r.projectId);
+  for (const pid of [...pids]) {
+    const rs = R.filter((r) => r.projectId === pid);
+    if (uhP.has(pid) || (!byProj.has(pid) && rs.length && rs.every((r) => uhR.has(r.nodeId)))) pids.delete(pid);
+  }
   const buildings = [];
   for (const pid of pids) {
     const q = projById.get(pid) || { projectId: pid, name: pid, live: false, active: false, busy: false, temp: false, recent: false, sessions: 0 };
@@ -271,7 +280,7 @@ export function computeCampus(nodes, roots, projects, prev, opts = {}) {
   //    이전 슬롯 유지, 새 동은 활성 먼저 앞줄 가운데부터 빈 슬롯
   // opts.view(가용 영역 비율·카메라 범위)가 있으면 열 수를 맞춤 배율 최대로, 비율이 25% 넘게 바뀌면 슬롯을 새로
   const view = opts.view && opts.view.aspect > 0 ? opts.view : null;
-  const repack = !!(view && prev && needRepack(prev.packAspect, view.aspect));
+  const repack = !!(prev && ((view && needRepack(prev.packAspect, view.aspect)) || (prev.visSig || '') !== sig));
   const prevSlot = new Map((repack ? [] : (prev && prev.buildings) || []).map((b) => [b.projectId, b.slot]));
   const prevIdx = new Map(((prev && prev.buildings) || []).map((b, i) => [b.projectId, i]));
   const used = new Set();
@@ -328,7 +337,7 @@ export function computeCampus(nodes, roots, projects, prev, opts = {}) {
 
   // 4. 전역 좌표로 합치기
   const out = { rooms: [], seat: new Map(), machine: new Map(), corridors: [], roomOf: new Map(), rootId: null, bounds: null,
-    buildings: [], roots: new Set(), officeByMain, mainOrder: new Map(), grid, hidden, projectOf, campus: true, lounges: [] };
+    buildings: [], roots: new Set(), officeByMain, mainOrder: new Map(), grid, hidden, projectOf, campus: true, lounges: [], visSig: sig };
   if (view) { const fresh0 = repack || !(prev && prev.packAspect > 0); out.packAspect = fresh0 ? view.aspect : prev.packAspect; out.packSeq = ((prev && prev.packSeq) || 0) + (fresh0 ? 1 : 0); }
   const bb = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity };
   const firstActive = [...buildings].sort((a, b) => (rank(a) - rank(b)) || ((a.temp ? 1 : 0) - (b.temp ? 1 : 0)) || (b._act - a._act))[0];

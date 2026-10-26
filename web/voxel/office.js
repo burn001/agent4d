@@ -552,11 +552,11 @@ export class VoxelView {
   setScope(scope = {}) {
     const mode = scope.mode === 'all' ? 'all' : 'session';
     const prevMode = this.scope.mode;
-    this.scope = { mode, roots: scope.roots || [], projects: scope.projects || [], showInactive: !!scope.showInactive, focusProject: mode === 'all' ? scope.focusProject || null : null };
+    this.scope = { mode, roots: scope.roots || [], projects: scope.projects || [], showInactive: !!scope.showInactive, focusProject: mode === 'all' ? scope.focusProject || null : null, fadeHide: scope.fadeHide || null };
     this.sess.setProjects(this.scope.projects, mode); // 세션 색
     if (mode === 'all') ensureOverviewCss();
     if (mode === 'session' && prevMode === 'all') { for (const sg of this._signs) { sg.o.visible = false; } this._clusterV.clear(); }
-    this.pf.setFocus(this.scope.focusProject, [...this._clusterV.keys()], { instant: !this._clusterV.size || prevMode !== mode });
+    this.pf.setFocus(this.scope.focusProject, [...this._clusterV.keys()], { instant: !this._clusterV.size || prevMode !== mode }); this.pf.setHidden(mode === 'all' ? scope.fadeHide : null, { instant: !this._clusterV.size || prevMode !== mode }); // //
     this.layoutDirty = true;
     this.staticSig = '';
     this._lblAt = 0;

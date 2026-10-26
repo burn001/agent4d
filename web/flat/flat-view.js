@@ -667,11 +667,11 @@ export class FlatView {
   setScope(scope = {}) {
     const mode = scope.mode === 'all' ? 'all' : 'session';
     const prevMode = this.scope.mode;
-    this.scope = { mode, roots: scope.roots || [], projects: scope.projects || [], showInactive: !!scope.showInactive, focusProject: mode === 'all' ? scope.focusProject || null : null };
+    this.scope = { mode, roots: scope.roots || [], projects: scope.projects || [], showInactive: !!scope.showInactive, focusProject: mode === 'all' ? scope.focusProject || null : null, fadeHide: scope.fadeHide || null };
     this._sessColors = mode === 'all' ? sessionColorMap(this.scope.projects) : new Map();
     if (mode === 'all') ensureOverviewCss();
     if (mode === 'session') { this._clusters = []; this._clusterV.clear(); this._ov = null; this._syncIslandEls(); }
-    this.pf.setFocus(this.scope.focusProject, [...this._clusterV.keys()], { instant: !this._clusterV.size || prevMode !== mode });
+    this.pf.setFocus(this.scope.focusProject, [...this._clusterV.keys()], { instant: !this._clusterV.size || prevMode !== mode }); this.pf.setHidden(mode === 'all' ? scope.fadeHide : null, { instant: !this._clusterV.size || prevMode !== mode }); // //
     this.layoutDirty = true;
     if (prevMode !== mode) this._relayout(); else this._applyScope();
     this.lastLabelPass = 0;
@@ -726,14 +726,14 @@ export class FlatView {
       const recent = !!(ov && rv && isRecentRoot(rv.node));
       // scopeD = 고정 희미(recent) — 문턱 판정, projA = 프로젝트 페이드, scopeK = 곱(그리기 배율)
       const d = recent ? 0.35 : 1;
-      const pa = ov ? this.pf.alpha(pid) : 1;
+      const pa = ov ? this.pf.alpha2(pid, rid) : 1; // 세션 숨김도
       const k = d * pa;
       v.projectId = pid;
       v.scopeRecent = recent;
       v.ovHidden = hidden;
       v.scopeD = d; v.projA = pa;
-      v.projOut = !!(fp && this.pf.out(pid));
-      v.projGone = !!(fp && this.pf.gone(pid));
+      v.projOut = !!((fp || this.pf.hide.size) && (this.pf.out(pid) || (rid && this.pf.out(rid))));
+      v.projGone = !!((fp || this.pf.hide.size) && (this.pf.gone(pid) || (rid && this.pf.gone(rid))));
       if (v.labelEl && v.exiting == null) { const o = pa < 1 ? (Math.round(pa * 20) / 20).toFixed(2) : ''; if (v.labelEl.style.opacity !== o) v.labelEl.style.opacity = o; }
       const si = ov ? nodeSessIdx(v.node, this._sessColors) : null; // 세션 색
       if (si !== (v.sessIdx ?? null)) { v.sessIdx = si; v.sessC = si == null ? null : this.tokens['sess-' + si]; v._col = null; v._edgeK = null; v._labelHtml = null; this._labelText(v); }

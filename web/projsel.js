@@ -7,7 +7,7 @@
 import { mountProjectList, selectionLabel, dotOf, groupProjects } from './projects.js';
 import { t } from './i18n.mjs';
 
-export function mountProjectSelector({ host, onSelect = () => {}, getNodeCount = null } = {}) {
+export function mountProjectSelector({ host, onSelect = () => {}, getNodeCount = null, visibility = null } = {}) {
   host.classList.add('psel');
   host.innerHTML = `
     <button type="button" class="tb psel-btn" id="proj-btn" aria-haspopup="listbox" aria-expanded="false" title="${t('app.psel.title')}">
@@ -23,7 +23,7 @@ export function mountProjectSelector({ host, onSelect = () => {}, getNodeCount =
   let projects = [], sel = { scope: 'all' }, label = null, disabled = false;
 
   const pl = mountProjectList({
-    el: host.querySelector('.psel-list'), sessions: false, getNodeCount,
+    el: host.querySelector('.psel-list'), sessions: false, getNodeCount, visibility, // 체크박스
     onSelect: (s) => { close(); if (!s.again) onSelect(s); },
   });
   function renderBtn() {
@@ -62,7 +62,8 @@ export function mountProjectSelector({ host, onSelect = () => {}, getNodeCount =
     setProjects(list) { projects = Array.isArray(list) ? list : []; pl.setProjects(projects); renderBtn(); },
     setSelection(next) { sel = next && next.scope ? { ...next } : { scope: 'all' }; pl.setSelection(sel); renderBtn(); },
     setLabel(s) { label = s || null; renderBtn(); },
-    setArchive(a) { pl.setArchive(a); renderBtn(); }, // 보관함 요약(GET /archive)
+    setArchive(a) { pl.setArchive(a); renderBtn(); },
+    setVisibility() { pl.render && pl.render(); }, // // 보관함 요약(GET /archive)
     setDisabled(on, title = '') { disabled = !!on; btn.disabled = disabled; btn.dataset.dtitle = title; if (disabled) close(); renderBtn(); },
     open, close,
     get isOpen() { return !pop.hidden; },

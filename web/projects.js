@@ -7,6 +7,7 @@
 // 순수 함수(relTime·groupProjects·serializeSelection·parseSelection·selectionLabel…)는 DOM 없이 node 시험 대상.
 
 import { t as tr } from './i18n.mjs';
+import { projVisible, sessVisible, toggleProject, toggleSession, showAll, showOnly } from './overview/visible.mjs';
 
 export const RECENT_MS = 2 * 3600 * 1000;
 const LS_KEY = 'ccviz.projlist';
@@ -176,8 +177,10 @@ export function archiveGroupHtml(archive, sel) {
   return h + '</div>';
 }
 
-export function mountProjectList({ el, onSelect = () => {}, getNodeCount = null, now = () => Date.now(), sessions = true } = {}) {
+export function mountProjectList({ el, onSelect = () => {}, getNodeCount = null, now = () => Date.now(), sessions = true, visibility = null } = {}) {
   ensureCss();
+  // visibility = { get: 모델, set(모델) } — 있으면 프로젝트 줄 앞 체크박스·세션 체크(펼침)·모두/하나만
+  const visExp = new Set(); // 세션 체크 목록을 펼친 프로젝트
   let projects = [], sel = { scope: 'all' }, disabled = false, collapsed = false, archive = null;
   let expanded = null;            // 세션 목록을 펼친 프로젝트
   let chipOpen = false;           // 좁은 화면: 선택 칩의 세션 목록
@@ -216,6 +219,17 @@ export function mountProjectList({ el, onSelect = () => {}, getNodeCount = null,
     const t = e.target.closest('[data-act]');
     if (!t || !el.contains(t)) return;
     const act = t.dataset.act;
+    if (visibility && act.startsWith('v')) { // 표시 고르기(선택 범위는 그대로, 목록은 열린 채)
+      e.stopPropagation();
+      const vm = visibility.get(), pids = listedPids();
+      if (act === 'vis') visibility.set(toggleProject(vm, t.dataset.pid, pids));
+      else if (act === 'vsess') visibility.set(toggleSession(vm, t.dataset.sid));
+      else if (act === 'vall') visibility.set(showAll());
+      else if (act === 'vnone') visibility.set(showOnly(vm, pids, sel.projectId || null));
+      else if (act === 'vexp') { const pid = t.dataset.pid; if (visExp.has(pid)) visExp.delete(pid); else visExp.add(pid); }
+      render();
+      return;
+    }
     if (act === 'all') { expanded = null; chipOpen = false; if (!sessions && sel.scope === 'all') { onSelect({ scope: 'all', again: true }); return; } choose({ scope: 'all' }); }
     else if (act === 'proj') {
       const pid = t.dataset.pid;
@@ -254,13 +268,34 @@ export function mountProjectList({ el, onSelect = () => {}, getNodeCount = null,
     const act = relTime(lastActivity(p) ? new Date(lastActivity(p)).toISOString() : null, nowMs);
     const nodes = getNodeCount ? getNodeCount(p.projectId) : null;
     const tip = [p.path || p.name, p.nameGuessed ? tr('app.proj.nameGuessed') : '', nodes ? tr('app.proj.nodes', { n: nodes }) : ''].filter(Boolean).join('\n');
-    let html = `<button type="button" class="pl-row${on ? ' on' : ''}${dot === 'off' ? ' dim' : ''}" role="option" aria-selected="${on}" data-act="proj" data-pid="${esc(p.projectId)}" title="${esc(tip)}">
+    let html = visibility ? visHead(p) : '';
+    html += `<button type="button" class="pl-row${on ? ' on' : ''}${dot === 'off' ? ' dim' : ''}" role="option" aria-selected="${on}" data-act="proj" data-pid="${esc(p.projectId)}" title="${esc(tip)}">
       <i class="pl-dot ${dot}" aria-hidden="true"></i>
       <span class="pl-name">${esc(p.name || p.projectId)}</span>
       <span class="pl-meta">${esc(countsText(p))}${act ? ` · ${esc(act)}` : ''}</span>
     </button>`;
+    if (visibility) html += '</div>' + (visExp.has(p.projectId) ? visSessHtml(p) : '');
     if (sessions && expanded === p.projectId) html += sessionsHtml(p, nowMs);
     return html;
+  }
+  // 목록에 실린 프로젝트(체크 대상): live · recent · 임시
+  function listedPids() { const g = groupProjects(projects, now()); return [...g.live, ...g.recent, ...g.temp].map((p) => p.projectId); }
+  function visHead(p) {
+    const vm = visibility.get(), on = projVisible(vm, p.projectId), n = sessionsOf(p).length;
+    const label = tr(on ? 'app.proj.vis.hide' : 'app.proj.vis.show', { name: p.name || p.projectId });
+    const ex = visExp.has(p.projectId);
+    return `<div class="pl-vrow${on ? '' : ' off'}"><button type="button" class="pl-vis" role="checkbox" aria-checked="${on}" data-act="vis" data-pid="${esc(p.projectId)}" title="${esc(label)}" aria-label="${esc(label)}"><i aria-hidden="true"></i></button>`
+      + (n ? `<button type="button" class="pl-vexp" aria-expanded="${ex}" data-act="vexp" data-pid="${esc(p.projectId)}" title="${esc(tr('app.proj.vis.sessions'))}" aria-label="${esc(tr('app.proj.vis.sessions'))}"><svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${ex ? 'M4 6l4 4 4-4' : 'M6 4l4 4-4 4'}"/></svg></button>` : '<span class="pl-vexp"></span>');
+  }
+  function visSessHtml(p) {
+    const vm = visibility.get(), pon = projVisible(vm, p.projectId);
+    const list = sessionsOf(p);
+    return '<div class="pl-vsess" role="group">' + list.map((s) => {
+      const on = sessVisible(vm, s.sessionId);
+      const label = (s.title || s.sessionId.slice(0, 8));
+      return `<div class="pl-vrow sub${on && pon ? '' : ' off'}"><button type="button" class="pl-vis" role="checkbox" aria-checked="${on}" data-act="vsess" data-sid="${esc(s.sessionId)}" title="${esc(tr(on ? 'app.proj.vis.hide' : 'app.proj.vis.show', { name: label }))}"${pon ? '' : ' disabled'}><i aria-hidden="true"></i></button>
+        <span class="pl-vst"><i class="pl-dot sm ${s.live ? (s.liveStatus === 'busy' ? 'busy' : 'idle') : 'off'}" aria-hidden="true"></i>${esc(trunc(label, 36))}<span class="pl-meta"> · ${esc(s.live ? tr('app.proj.vis.live') : tr('app.proj.st.past'))}</span></span></div>`;
+    }).join('') + '</div>';
   }
   function sessionsHtml(p, nowMs) {
     const list = sessionsOf(p);
@@ -284,6 +319,7 @@ export function mountProjectList({ el, onSelect = () => {}, getNodeCount = null,
     let h = `<button type="button" class="pl-row pl-all${allOn ? ' on' : ''}" role="option" aria-selected="${allOn}" data-act="all">
       <i class="pl-dot ${g.live.some((p) => dotOf(p) === 'busy') ? 'busy' : g.live.length ? 'idle' : 'off'}" aria-hidden="true"></i>
       <span class="pl-name">${esc(tr('app.proj.all'))}</span><span class="pl-meta">${esc(tr('app.proj.allMeta', { n: g.totals.projects, a: g.totals.activeSessions }))}</span></button>`;
+    if (visibility && (g.live.length + g.recent.length + g.temp.length) > 1) h += `<div class="pl-vbar"><span>${esc(tr('app.proj.vis.title'))}</span><button type="button" data-act="vall">${esc(tr('app.proj.vis.all'))}</button><button type="button" data-act="vnone" title="${esc(tr('app.proj.vis.noneTitle'))}">${esc(tr('app.proj.vis.none'))}</button></div>`;
     for (const p of g.live) h += rowHtml(p, nowMs);
     for (const p of g.recent) h += rowHtml(p, nowMs);
     // 지금 고른 프로젝트가 2시간이 지나 비활성이 됐으면(또는 오래된 세션 링크) 그 한 줄만 남겨 무엇을 보고 있는지 보이게 —
@@ -345,6 +381,7 @@ export function mountProjectList({ el, onSelect = () => {}, getNodeCount = null,
       render();
     },
     setDisabled(on) { disabled = !!on; render(); },
+    render: () => render(), // 표시 고르기가 바뀌면 다시 그림
     setArchive(a) { archive = a && a.enabled ? a : null; render(); },
     get archive() { return archive; },
     setCollapsed: (c) => setCollapsed(c, true),

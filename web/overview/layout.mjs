@@ -8,6 +8,7 @@ import { computeLayout, RADIUS, isDetachedRoot, nodeExtent } from '../layout.js'
 import { orphanPlan, isOrphanRoot } from '../batch-core.mjs';
 import { liveMainSids, assignToAnchors, podAngles } from '../multi-core.mjs';
 import { chooseArrangement, needRepack, scaleOf, KEEP_GAIN } from './fill-pack.mjs';
+import { userHiddenProjects, userHiddenRoots, visSig } from './visible.mjs';
 
 export const MAIN_GAP = 6;        // 같은 섬 안 메인 경계 사이
 export const CLUSTER_GAP = 3;     // 섬끼리(8 → 3, 촘촘히)
@@ -309,6 +310,9 @@ export function computeOverview(nodes, roots, projects, prev, opts = {}) {
   const parentOf = new Map();
   const hidden = new Set();
   const projectOf = new Map();
+  // 표시 고르기: 사용자가 숨긴 프로젝트·세션(루트) — 끝난 루트처럼 숨기고 섬 자리도 내준다
+  const uhP = userHiddenProjects(projects), uhR = userHiddenRoots(roots);
+  const sig = visSig(uhP, uhR);
 
   // 1. 루트(멤버) 목록 — 지역 배치는 섬 안 모양을 정한 뒤(부채꼴이 필요하면 그걸로)
   const mains = new Map(); // projectId → [member]
@@ -319,11 +323,12 @@ export function computeOverview(nodes, roots, projects, prev, opts = {}) {
     const recent = isRecentRoot(rootNode) || (isDetachedRoot(rootNode) && isRecentRoot(spawnerMain(rootNode, byId, rootOf)));
     const pid = r.projectId;
     for (const id of sub.keys()) projectOf.set(id, pid);
-    if (recent && !showInactive) { for (const id of sub.keys()) hidden.add(id); }
+    const uh = uhP.has(pid) || uhR.has(r.nodeId);
+    if (uh || (recent && !showInactive)) { for (const id of sub.keys()) hidden.add(id); }
     let act = 0;
     for (const n of sub.values()) act = Math.max(act, tsOf(n.lastActivityAt));
     const start = tsOf(rootNode && rootNode.startedAt) || act;
-    const m = { nodeId: r.nodeId, sub, order, act, start, recent, hidden: recent && !showInactive,
+    const m = { nodeId: r.nodeId, sub, order, act, start, recent, hidden: uh || (recent && !showInactive), userHidden: uh,
       external: isOrphanRoot(rootNode), detached: isDetachedRoot(rootNode), local: null, parentOf: null, r: 0 };
     if (!mains.has(pid)) mains.set(pid, []);
     mains.get(pid).push(m);
@@ -375,8 +380,10 @@ export function computeOverview(nodes, roots, projects, prev, opts = {}) {
   const pids = new Set(mains.keys());
   for (const q of projById.values()) if (!q.temp && (q.live || q.recent)) pids.add(q.projectId);
   for (const pid of pids) {
+    if (uhP.has(pid)) continue; // 숨긴 프로젝트는 섬 없음
     const q = projById.get(pid) || { projectId: pid, name: pid, live: false, active: false, busy: false, temp: false, recent: false, sessions: 0 };
     const list = (mains.get(pid) || []).slice();
+    if (list.length && list.every((m) => m.userHidden)) continue; // 세션을 모두 숨긴 프로젝트도
     // 메인 순서(목록·mainOrder 용): 이전 순서 유지, 새 메인은 활동 시각 내림차순
     list.sort((a, b) => {
       if (a.external !== b.external) return a.external ? 1 : -1;
@@ -558,7 +565,9 @@ export function computeOverview(nodes, roots, projects, prev, opts = {}) {
 
   // 3. 섬 자리: 이전 자리를 되도록 유지 — 크기가 크게 바뀌거나 겹치면 그때만 다시 줄 배치(packRows)
   // '' = 자리 유지, 'held' = 더 촘촘한 배치가 있지만 기다리는 중, 그 밖 = 다시 배치한 까닭(aspect·fresh·clash·state·gain·waste)
-  const repackWhy = placeClusters(clusters, prev, aspect, view, roundOpt ? ROUND_REPACK_TOL : undefined, nowMs);
+  // 표시 고르기가 바뀌면 숨긴 섬 자리를 비워 두지 않고 바로 다시 줄 배치(남은 섬끼리 모음, 자리 이동은 렌더러 보간)
+  const repackWhy = prev && (prev.visSig || '') !== sig ? (packFresh(clusters, prev, aspect, view), 'visible')
+    : placeClusters(clusters, prev, aspect, view, roundOpt ? ROUND_REPACK_TOL : undefined, nowMs);
   const repacked = !!repackWhy && repackWhy !== 'held';
   const gainSince = repackWhy === 'held' ? (prev && Number.isFinite(prev.gainSince) ? prev.gainSince : nowMs) : null;
   const packAt = repacked || !(prev && Number.isFinite(prev.packAt)) ? nowMs : prev.packAt;
@@ -588,7 +597,7 @@ export function computeOverview(nodes, roots, projects, prev, opts = {}) {
   }
   for (const [d] of mergedInto) if (!mainOrder.has(d)) mainOrder.set(d, 1000 + mainOrder.size);
   for (const [d] of mergedInto) parentOf.set(d, null); // 관계는 끊긴 그대로(띄움 점선)
-  return { clusters, pos, parentOf, rootOf, hidden, projectOf, mainOrder, roots: R, guestOf, mergedInto, packAspect, packSeq, repackWhy, gainSince, packAt, packBase };
+  return { clusters, pos, parentOf, rootOf, hidden, projectOf, mainOrder, roots: R, guestOf, mergedInto, packAspect, packSeq, repackWhy, gainSince, packAt, packBase, visSig: sig };
 }
 
 /**

@@ -518,7 +518,7 @@ export class CameraDirector {
       for (let k = 0; k < 4; k++) {
         const key = id + '|' + k, b = lmemo.get(key, now), a = b && lanc.get(key);
         if (!b) { lanc.delete(key); if (k) break; continue; }
-        if (a) pts.push({ p: { x: p.x + a.x, y: p.y + a.y, z: p.z + a.z }, r: 0, e: pxToE(b, unit), label: true });
+        if (a) pts.push({ p: { x: p.x + a.x, y: p.y + a.y, z: p.z + a.z }, r: 0, e: pxToE(b, unit), label: true, aux: true });
       }
       const cs = pan && pan.get(id);
       if (cs && cs.length) {
@@ -532,7 +532,7 @@ export class CameraDirector {
         memo.put(id, now, { x0, x1, y0, y1 });
       }
       const b = memo.get(id, now);
-      if (b) for (const q of boxCorners(p, b, B.R, B.U)) pts.push(q);
+      if (b) { const w = ((b.x1 - b.x0) * (b.y1 - b.y0)) / 4; for (const q of boxCorners(p, b, B.R, B.U)) { q.aux = true; q.w = w; pts.push(q); } } // 패널 = 보조 점, 넓이를 네 모서리에 나눠 무게중심에
     }
     return pts;
   }
@@ -565,7 +565,7 @@ export class CameraDirector {
       // 띠 가운데(덮개 위)를 맞춤 식 안에서(vOff): 시선점은 화면 가운데 그대로, 띠 위·아래 끝까지 각각 잰다 — 예전처럼 맞춘 뒤 시선점을
       // 옮기면 원근 때문에 가까운(화면 아래) 점이 더 많이 올라가 아래가 비었다
       const vOff = band.yc * t;
-      const want = refineFit(pts, boxCenter(pts), R, U, F, tanH, tanV, 4, vOff); // 투영 상자 가운데로 3～4회 보정 — 가로나 세로 한쪽이 여백 끝까지
+      const want = refineFit(pts, boxCenter(pts), R, U, F, tanH, tanV, 4, vOff, this.view.fitMass !== false); // + 시각 무게중심 // 투영 상자 가운데로 3～4회 보정 — 가로나 세로 한쪽이 여백 끝까지
       const here = this.fit.c ? requiredDist(pts, this.fit.c, R, U, F, tanH, tanV, vOff) : Infinity;
       this.fit.step(now, want, here, dmin, dmax, { freeze: !!this.view.exitSettling }); // 퇴장 연출 중엔 줄이지 않고, 끝난 뒤 한 번만
       f = { center: new THREE.Vector3(this.fit.c.x, this.fit.c.y, this.fit.c.z), dist: this.fit.D, r: want.D * t, n: pts.length };

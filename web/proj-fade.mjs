@@ -12,11 +12,29 @@ export class ProjFade {
   constructor(dur = PROJ_FADE.DUR) {
     this.dur = dur;
     this.focus = null;
+    this.hide = new Set(); // 표시 고르기로 숨긴 키(프로젝트 id · 세션 루트 노드 id 's:<sid>')
     this.t = new Map(); // pid → 선형 진행 0(안 보임)..1(보임) — 목표에 닿은 '보임'은 지운다
     this.ver = 0;       // 값이 바뀔 때마다 +1(그리기 쪽이 다시 칠할지 판단)
   }
   /** 목표: 고른 프로젝트가 없으면 모두 보임, 있으면 그 프로젝트(또는 소속 없는 것)만 보임 */
-  target(pid) { return !this.focus || pid == null || pid === this.focus ? 1 : 0; }
+  target(pid) {
+    if (pid != null && this.hide.has(pid)) return 0;
+    return !this.focus || pid == null || pid === this.focus || String(pid).startsWith('s:') ? 1 : 0;
+  }
+  /** 숨길 키 바꾸기(프로젝트 id·'s:<sid>'). 바뀐 키는 지금 자리 값에서 이어 움직인다 */
+  setHidden(keys, { instant = false } = {}) {
+    const nh = new Set(keys || []);
+    if (nh.size === this.hide.size && [...nh].every((k) => this.hide.has(k))) return false;
+    const touched = new Set([...this.hide, ...nh]);
+    const cur = new Map([...touched].map((k) => [k, this.lin(k)]));
+    this.hide = nh;
+    for (const [k, x] of cur) {
+      const g = this.target(k);
+      if (instant || x === g) this.t.delete(k); else this.t.set(k, x);
+    }
+    this.ver++;
+    return true;
+  }
   /**
    * 고른 프로젝트 바꾸기. pids = 지금 화면에 있는 프로젝트들(그 자리에서 이어서 움직인다).
    * instant = 애니메이션 없이 바로(처음 열 때·표현 전환 직후)
@@ -25,7 +43,7 @@ export class ProjFade {
     fp = fp || null;
     if (fp === this.focus) return false;
     const cur = new Map();
-    for (const p of pids) if (p != null) cur.set(p, this.lin(p));
+    for (const p of [...pids, ...this.hide]) if (p != null) cur.set(p, this.lin(p));
     this.focus = fp;
     this.t.clear();
     if (!instant) for (const [p, x] of cur) if (x !== this.target(p)) this.t.set(p, x);
@@ -40,6 +58,8 @@ export class ProjFade {
   out(pid) { return this.target(pid) === 0; }
   /** 다 사라짐 — 실제로 숨긴다 */
   gone(pid) { return this.target(pid) === 0 && this.lin(pid) <= 0; }
+  /** 프로젝트·세션 루트 둘 다 따진 투명도(둘 중 옅은 쪽) */
+  alpha2(pid, rid) { const a = this.alpha(pid); return rid && this.hide.size ? Math.min(a, this.alpha(rid)) : a; }
   /** 움직이는 중인가 */
   get busy() { return this.t.size > 0 && [...this.t].some(([p, x]) => x !== this.target(p)); }
   /** dt 초 진행. 바뀐 값이 있으면 true */

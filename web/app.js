@@ -33,7 +33,8 @@ import { mockEn } from './mock-en.mjs'; // 가짜 데이터 문구 → 영어 �
 import { PauseBuffer, eventsAfter, spaceForPause } from './live-pause.mjs';
 import { escClears, scopeClears } from './filter-ui.mjs';
 import { pickLabelAt } from './overview/pick-core.mjs';
-import { blankClickAction, areaAtDown } from './proj-fade.mjs';
+import { blankClickAction, areaAtDown, PROJ_FADE } from './proj-fade.mjs';
+import { VIS_KEY, emptyVis, parseVis, serializeVis, markVisibility, fadeKeys } from './overview/visible.mjs'; // 표시 고르기
 import { mountInspector } from './inspector.js'; // 객체 클릭 상세 팝업
 import { userBook, consoleLines } from './user-core.mjs'; // 사용자 콘솔(나 · 사용자) 장부 — 세 표현 × 3D·2D 가 읽음
 import { mountArtifacts } from './art-ui.js'; // 작업 대상 층(⚙ 켬/끔)
@@ -725,11 +726,25 @@ let streamAll = false;       // 지금 /events?scope=all 에 붙어 있는가
 // 예전 '비활성 표시' 토글(ccviz.inactive)은 없앴다 — 비활성 세션은 목록·장면 어디에도 싣지 않는다. 남은 저장값은 지운다
 try { localStorage.removeItem('ccviz.inactive'); } catch (e) { /* 저장소 없음 */ }
 let sessionsResp = null;     // /sessions 응답(선택지 보충용)
+// 전체 보기 표시 고르기(선택기 체크박스). visModel = 고른 것(페이드 목표), visApplied = 배치에 반영된 것(숨김은 페이드가 끝난 뒤)
+let visModel = (() => { try { return parseVis(localStorage.getItem(VIS_KEY)); } catch (e) { return emptyVis(); } })();
+let visApplied = visModel, visTimer = null;
+function setVisModel(next) {
+  visModel = next;
+  try { localStorage.setItem(VIS_KEY, serializeVis(next)); } catch (e) { /* 저장소 없음 */ }
+  // 다시 보이는 것은 바로 배치에 넣고(그 자리에서 페이드 인), 새로 숨길 것은 페이드 아웃이 끝난 뒤 배치에서 빼 남은 섬끼리 모은다
+  visApplied = { hp: new Set([...visApplied.hp].filter((x) => next.hp.has(x))), hs: new Set([...visApplied.hs].filter((x) => next.hs.has(x))) };
+  clearTimeout(visTimer);
+  visTimer = setTimeout(() => { visApplied = visModel; if (streamAll && view.setScope) view.setScope(scopeArgs()); }, PROJ_FADE.DUR * 1000 + 80);
+  if (pl && pl.setVisibility) pl.setVisibility(visModel);
+  if (streamAll && view.setScope) view.setScope(scopeArgs());
+}
 if (CAN_ALL) {
   // 상단 바 프로젝트 선택기 하나(전체 · 프로젝트들). 예전 범위 드롭다운·패널 프로젝트 목록·재생 고르기 창을 합침
   pl = mountProjectSelector({
     host: $('proj-sel'),
     onSelect: (s) => selectScope(s),
+    visibility: { get: () => visModel, set: (v) => setVisModel(v) }, // 체크박스
     getNodeCount: (pid) => { let n = 0; for (const x of store.nodes.values()) if (x.projectId === pid) n++; return n; },
   });
   pl.setSelection(sel);
@@ -769,7 +784,8 @@ let archive = null;
 const archiveSession = (sid) => (archive && (archive.sessions || []).find((x) => x.sessionId === sid)) || null;
 const archiveName = (pid) => { const p = pid && archive && (archive.projects || []).find((x) => x.projectId === pid); return p ? p.name : null; };
 function scopeArgs() {
-  return { mode: 'all', roots: store.roots, projects: store.projects, showInactive: false, focusProject: focusProjectOf(sel) };
+  const m = markVisibility(store.roots, store.projects, visApplied); // 표시 고르기
+  return { mode: 'all', roots: m.roots, projects: m.projects, showInactive: false, focusProject: focusProjectOf(sel), fadeHide: fadeKeys(visModel) };
 }
 
 /** 3D·카메라·패널에 현재 선택 반영(전체 보기 스트림일 때). fly = 사용자가 방금 고름 */

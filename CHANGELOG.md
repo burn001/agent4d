@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/) (0.x until a stable 1.0).
 
+## [Unreleased]
+
+## [0.3.1] - 2026-10-26
+
+### Added
+- Overview visibility checkboxes in the top-bar project selector: tick which projects, and which sessions inside a project (expand the row), are shown in the overview. Clicking a project name still selects that single project. "All" / "None" quick toggles; at least one project always stays visible ("None" keeps the selected or first project). Hidden projects and sessions fade out like single-project mode, then the remaining islands (or Voxel buildings) are packed together again with no empty gaps. Works in Flow, Planet and Voxel Office, 3D and 2D. The choice is remembered in the browser (`ccviz.visible`); projects that appear later are shown by default.
+
+### Changed
+- Automatic camera, "Framing: all": after fitting the projected box, the view centre moves to the visual centre of mass of the active agents and their tool panels, weighted by how much screen area each takes. Tool output that opens mostly on one side no longer leaves the composition looking lopsided. Everything stays on screen; if centring would push the camera more than 15% farther back, it moves only part of the way. Same rule in 3D and 2D for all views.
+
 ## [0.3.0] - 2026-10-26
 
 ### Added

@@ -85,7 +85,7 @@ export function fitNeed(pts, c, aspect, mh = FLAT.FIT_MH, mv = FLAT.FIT_MV) {
   return D;
 }
 /** 평행 투영 맞춤: 화면 상자(반지름·화면 고정 몫 포함)의 가운데로 시선점을 옮기고 거리를 다시 — 반환 {c, D} */
-export function refineFit2D(pts, c0, aspect, mh = FLAT.FIT_MH, mv = FLAT.FIT_MV, iters = 3) {
+export function refineFit2D(pts, c0, aspect, mh = FLAT.FIT_MH, mv = FLAT.FIT_MV, iters = 3, mass = false) {
   let c = { x: c0.x, y: 0, z: c0.z };
   let D = fitNeed(pts, c, aspect, mh, mv);
   for (let it = 0; it < iters && pts.length; it++) {
@@ -97,6 +97,24 @@ export function refineFit2D(pts, c0, aspect, mh = FLAT.FIT_MH, mv = FLAT.FIT_MV,
     const nc = { x: (x0 + x1) / 2, y: 0, z: (z0 + z1) / 2 };
     if (Math.abs(nc.x - c.x) < 1e-4 * D && Math.abs(nc.z - c.z) < 1e-4 * D) break;
     c = nc; D = fitNeed(pts, c, aspect, mh, mv);
+  }
+  if (!mass || !pts.length) return { c, D };
+  // 시각 무게중심(refineFit 과 같음): 노드 = r², 패널 카드 = 화면 상자 넓이(e × D), 중심이 상자 가운데에 있지 않으면 그만큼 옮겨 셈
+  let sw = 0, sx = 0, sz = 0;
+  for (const q of pts) {
+    const r = q.r || 0;
+    let w, px = q.p.x, pz = q.p.z;
+    if (q.panel && q.e) { w = (q.e.l + q.e.r) * (q.e.t + q.e.b) * D * D; px += ((q.e.r - q.e.l) / 2) * D; pz += ((q.e.b - q.e.t) / 2) * D; }
+    else w = q.aux ? 0 : r * r;
+    if (!(w > 0)) continue;
+    sw += w; sx += w * px; sz += w * pz;
+  }
+  if (!(sw > 0)) return { c, D };
+  const sh = { x: sx / sw - c.x, z: sz / sw - c.z };
+  for (const k of [1, 0.75, 0.5, 0.25]) {
+    const ck = { x: c.x + sh.x * k, y: 0, z: c.z + sh.z * k };
+    const Dk = fitNeed(pts, ck, aspect, mh, mv);
+    if (Dk <= D * 1.15) return { c: ck, D: Dk };
   }
   return { c, D };
 }

@@ -292,7 +292,7 @@ export class Director2D {
       if (v.labelOn && v._lrel) { const r = v._lrel; lmemo.put(id, now, { x0: r[0], y0: r[1], x1: r[2], y1: r[3] }); }
       pts.push({ p: v.target, r: nr * FIT.NODE_K + FIT.NODE_PAD, e: pxToE(lmemo.get(id, now), unit) });
       const b = memo.get(id, now), a = b && anc.get(id);
-      if (b && a) pts.push({ p: { x: v.target.x + a.dx, y: 0, z: v.target.z + a.dz }, r: 0, e: pxToE(b, unit), panel: true });
+      if (b && a) pts.push({ p: { x: v.target.x + a.dx, y: 0, z: v.target.z + a.dz }, r: 0, e: pxToE(b, unit), panel: true, aux: true });
     }
     return pts;
   }
@@ -307,7 +307,7 @@ export class Director2D {
     const band = this._band(H, true);
     const mv = (1 - FIT.M) * band.k, mh = 1 - FIT.M;
     // 평행 투영: 화면 상자(반지름·카드·라벨 포함) 가운데로, 가로·세로 중 한쪽이 여백 끝까지
-    const want = refineFit2D(pts, boxCenterXZ(pts), aspect, mh, mv, 3);
+    const want = refineFit2D(pts, boxCenterXZ(pts), aspect, mh, mv, 3, this.view.fitMass !== false); // + 시각 무게중심
     const here = this.fit.c ? fitNeed(pts, this.fit.c, aspect, mh, mv) : Infinity;
     this.fit.step(now, want, here, dmin, FLAT.D_MAX, { freeze: !!this.view.exitSettling });
     // 시선점을 아래로(내용이 띠 가운데, 덮개 위로 올라감)

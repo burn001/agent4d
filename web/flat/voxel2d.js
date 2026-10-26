@@ -407,8 +407,8 @@ export class Voxel2DView extends FlatView {
       const k = this.scope.mode === 'all' ? this.pf.alpha(pid) : 1;
       v.projectId = pid;
       v.scopeD = 1; v.projA = k;
-      v.projOut = !!(fp && this.pf.out(pid));
-      v.projGone = !!(fp && this.pf.gone(pid));
+      v.projOut = !!((fp || this.pf.hide.size) && this.pf.out(pid)); // 표시 고르기 숨김도
+      v.projGone = !!((fp || this.pf.hide.size) && this.pf.gone(pid));
       if (k !== (v.scopeK ?? 1)) { v.scopeK = k; this._styleVis(v); }
       if (v.labelEl && v.exiting == null) { const o = k < 1 ? (Math.round(k * 20) / 20).toFixed(2) : ''; if (v.labelEl.style.opacity !== o) v.labelEl.style.opacity = o; }
     }

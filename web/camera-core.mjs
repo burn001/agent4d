@@ -279,7 +279,7 @@ export function requiredDist(pts, c, R, U, F, tanH, tanV, vOff = 0) {
  * 결과: 가로나 세로 중 한쪽이 여백(tanH·tanV) 끝까지 꽉 찬다. vOff = 띠 가운데 세로 자리(— 시선점을 나중에 옮기면 원근 때문에
  * 가까운 점이 더 많이 밀려 아래가 비었다). 반환 {c, D}
  */
-export function refineFit(pts, c0, R, U, F, tanH, tanV, iters = 3, vOff = 0) {
+export function refineFit(pts, c0, R, U, F, tanH, tanV, iters = 3, vOff = 0, mass = false) {
   let c = { x: c0.x, y: c0.y, z: c0.z };
   let D = requiredDist(pts, c, R, U, F, tanH, tanV, vOff);
   for (let it = 0; it < iters && pts.length; it++) {
@@ -296,8 +296,27 @@ export function refineFit(pts, c0, R, U, F, tanH, tanV, iters = 3, vOff = 0) {
     c = { x: c.x + R.x * mx + U.x * my, y: c.y + R.y * mx + U.y * my, z: c.z + R.z * mx + U.z * my };
     D = requiredDist(pts, c, R, U, F, tanH, tanV, vOff);
   }
+  if (!mass || !pts.length) return { c, D };
+  // 시각 무게중심: 에이전트·도구 패널을 화면에서 차지하는 넓이(w, 없으면 노드 r²)로 가중한 투영 중심을 화면(띠) 가운데로.
+  // 상자 가운데에서 그쪽으로 옮기되, 다 담는 거리가 MASS_GROW 배를 넘으면 덜 옮김(고정 비율 없음)
+  let sw = 0, sx = 0, sy = 0;
+  for (const q of pts) {
+    const w = q.w != null ? q.w : q.aux ? 0 : q.r * q.r;
+    if (!(w > 0)) continue;
+    const dx = q.p.x - c.x, dy = q.p.y - c.y, dz = q.p.z - c.z;
+    const depth = Math.max(1e-3, D + dx * F.x + dy * F.y + dz * F.z), k = w / (depth * depth);
+    sw += k; sx += k * (dx * R.x + dy * R.y + dz * R.z) / depth; sy += k * (dx * U.x + dy * U.y + dz * U.z) / depth;
+  }
+  if (!(sw > 0)) return { c, D };
+  const shx = (sx / sw) * D, shy = (sy / sw - vOff) * D;
+  for (const k of [1, 0.75, 0.5, 0.25]) {
+    const ck = { x: c.x + (R.x * shx + U.x * shy) * k, y: c.y + (R.y * shx + U.y * shy) * k, z: c.z + (R.z * shx + U.z * shy) * k };
+    const Dk = requiredDist(pts, ck, R, U, F, tanH, tanV, vOff);
+    if (Dk <= D * MASS_GROW) return { c: ck, D: Dk };
+  }
   return { c, D };
 }
+export const MASS_GROW = 1.15;
 
 /** 화면 px 상자(노드 화면 자리 기준 {x0, x1, y0, y1}, y 아래 +)를 화면 고정 몫 e(단위 = unit px 당 1)로 */
 export function pxToE(b, unit) {
