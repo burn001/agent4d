@@ -4,7 +4,7 @@
 
 const AGENT_KINDS = new Set(['main', 'claude-p', 'subagent', 'workflow-agent']);
 const STEP_TYPES = new Set(['text', 'tool-start', 'thinking']);
-// 절대량 기준(80k～400k)도 한 바퀴에 다 보이게 창을 500k 로(6% 30k → 97% 485k → compact 12% 60k). 창 대비 기준의 % 흐름은 예전과 같다
+// mock 창 500k(6% 30k → 97% 485k → compact 12% 60k). 열화 단계는 % 로만 정해져 창 크기와 무관하다
 export const MOCK_LIMIT = 500_000;
 
 const hash01 = (s) => { let h = 2166136261; for (const c of String(s)) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return ((h >>> 0) % 1000) / 1000; };
@@ -13,7 +13,7 @@ const val = (used, limit, base) => ({ used, limit, pct: Math.min(100, Math.round
 export class MockCtx {
   /**
    * @param {{mainStart?:number, mainStep?:number, roots?:boolean, limit?:number, mainBase?:number}} o  roots: 전체 보기 — 메인마다 다른 시작 수준.
-   *   limit: 창(분모, 기본 MOCK_LIMIT). mainBase: 메인 기준선(첫 응답, 토큰) — 없으면 첫 값(늘어난 양 = used − base). 전체 보기는 40k
+   *   limit: 창(분모, 기본 MOCK_LIMIT). mainBase: 메인 기준선(첫 응답, 토큰, 카드의 '늘어난 양' 표시용) — 없으면 첫 값. 전체 보기는 40k
    */
   constructor({ mainStart = 0.06, mainStep = 0.01, roots = false, limit = MOCK_LIMIT, mainBase = null } = {}) {
     this.used = new Map();

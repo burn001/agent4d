@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-10-26
+
+### Changed
+- Signal decay now always follows the percentage of the context window (20% grain, 40% scanlines, 58% chroma/glitch, 75% datamosh and "Consider wrapping up"). The "absolute" basis (tokens added since the first response), which made decay show up too early, and the basis selector in the context card are removed; the card and tooltip still show "Start 63k · added +152k" for information. The `?ctxk=` mock preview is gone (`?ctx=` still works).
+
 ## [0.3.3] - 2026-10-26
 
 ### Added

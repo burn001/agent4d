@@ -110,12 +110,6 @@
 @media (max-width: 719px) { #pause-badge span { display: none; } }
 
 /* ── 신호 열화 2차 ── */
-/* 기준 선택(절대량 / 창 대비) */
-.ctxb { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; color: var(--muted); }
-.ctxb > span { margin-right: 2px; }
-.ctxb-opt { font: inherit; font-size: 11.5px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--chip-bg); color: var(--text); cursor: pointer; }
-.ctxb-opt:hover { background: var(--hover); }
-.ctxb-opt.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, var(--chip-bg)); font-weight: 650; }
 /* 글자 깨짐(degrade-text.js): 원래 글자는 투명하게(자리·textContent·접근성 이름 그대로), 깨진 글을 ::after 로 덮음.
    content 의 '/ ""' 는 대체 글 — 스크린리더가 깨진 글을 읽지 않게 */
 .ccv-gx { -webkit-text-fill-color: transparent; }

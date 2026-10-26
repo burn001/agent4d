@@ -54,10 +54,7 @@ const TOKEN = params.get('t'); // 보통 서버가 302 로 지우고 쿠키로 �
 const SHOW_FPS = flag('fps');
 // ?mock=1&ctx=85: 메인 컨텍스트 사용률을 고정(열화 단계 미리 보기·시험)
 const CTX_FIX = params.has('ctx') && isFinite(Number(params.get('ctx'))) ? Math.max(0, Math.min(100, Number(params.get('ctx')))) : null;
-// ?mock=1&ctxk=250: 메인 컨텍스트의 '늘어난 양'을 토큰(천 단위)으로 고정 — 절대량 기준 단계 미리 보기. 기준선(첫 응답) 60k 위에 +k, 창 1M
-const CTX_K = params.has('ctxk') && isFinite(Number(params.get('ctxk'))) ? Math.max(0, Math.min(900, Number(params.get('ctxk')))) : null;
-const mockCtxOpts = () => (CTX_K != null ? { mainStart: (60 + CTX_K) / 1000, limit: 1e6, mainBase: 60_000, mainStep: 0 }
-  : CTX_FIX != null ? { mainStart: CTX_FIX / 100, mainStep: 0 } : {});
+const mockCtxOpts = () => (CTX_FIX != null ? { mainStart: CTX_FIX / 100, mainStep: 0 } : {});
 // 3차: 전체 보기. live 는 기본 '전체', mock 은 ?scope= 가 있을 때만(기존 ?mock=1 화면은 그대로)
 const URL_SCOPE = params.get('scope');
 const URL_SESSION = params.get('session');

@@ -1,48 +1,33 @@
-// 신호 열화 2차: 기준(절대량·창 대비)·단계·D·버스트 판정·글자 깨짐·패킷 소실·잔상 오프셋·DEG
+// 신호 열화 2차: 열화 수준(창 대비)·기준선 표시·단계·D·버스트 판정·글자 깨짐·패킷 소실·잔상 오프셋·DEG
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  absLevel, levelOf, baseOf, grownOf, recommendLevel, FALLBACK_BASE, grainAmp, stageOfCtx, stageTable, degD, degScaled, stageCross, burstWanted, burstEnv, BurstBook, BURST_MS, BURST_GAP_MS,
-  textGlitchPlan, glitchStr, glitchAt, GLYPHS, packetGone, lineGap, lineFlicker, ghostOffsets, DEG, degOf, degOfLink, normBasis, hash2, seedOf,
+  levelOf, baseOf, grownOf, FALLBACK_BASE, grainAmp, stageOfCtx, stageTable, degD, degScaled, stageCross, burstWanted, burstEnv, BurstBook, BURST_MS, BURST_GAP_MS,
+  textGlitchPlan, glitchStr, glitchAt, GLYPHS, packetGone, lineGap, lineFlicker, ghostOffsets, DEG, degOf, degOfLink, hash2, seedOf,
 } from '../degrade-core.mjs';
-import { stageOf, isCtxDrop } from '../ctx-core.mjs';
+import { isCtxDrop } from '../ctx-core.mjs';
 
 const C = (used, limit = 1e6, base) => ({ used, limit, pct: Math.round((used / limit) * 1000) / 10, ...(base != null ? { base } : {}) });
 
-test('절대량 기준 = 늘어난 양(used − 기준선): +50k 시작 · +100k 주사선 · +150k 뚜렷 · +300k 심함 · +500k 최대', () => {
-  assert.equal(absLevel(0), 0);
-  assert.equal(absLevel(50e3), 20);
-  assert.equal(absLevel(100e3), 40);
-  assert.equal(absLevel(150e3), 58);
-  assert.equal(absLevel(300e3), 75);
-  assert.equal(absLevel(500e3), 95);
-  assert.equal(absLevel(2e6), 100);
-  const B = 100e3; // 시작부터 100k 쓰는 세션
-  assert.deepEqual([100e3, 149e3, 150e3, 199e3, 200e3, 249e3, 250e3, 399e3, 400e3, 650e3].map((u) => stageOfCtx(C(u, 1e6, B), 'abs')), [0, 0, 1, 1, 2, 2, 3, 3, 4, 4]);
-  assert.equal(recommendLevel('abs'), 95);
-  assert.equal(recommendLevel('pct'), 75);
-  assert.ok(levelOf(C(B + 500e3, 1e6, B), 'abs') >= recommendLevel('abs'));
+test('열화 수준 = 창 대비 %: 단계 경계 20/40/58/75, 단계표도 %', () => {
+  assert.equal(levelOf(C(200e3, 1e6, 60e3)), 20);   // opus 1M 창 200k = 20% → 그레인 시작
+  assert.equal(levelOf(C(150e3, 200e3)), 75);
+  assert.equal(levelOf({ pct: 140 }), 100);
+  assert.equal(levelOf({ pct: NaN }), 0);
+  assert.equal(levelOf(null), 0);
+  assert.deepEqual([19.9, 20, 39.9, 40, 57.9, 58, 74.9, 75, 100].map((p) => stageOfCtx({ pct: p })), [0, 1, 1, 2, 2, 3, 3, 4, 4]);
+  // 기준선(base)이 있어도 열화 수준은 늘어난 양과 무관(절대량 기준 폐지)
+  assert.equal(levelOf(C(560e3, 1e6, 60e3)), levelOf(C(560e3, 1e6)));
+  assert.deepEqual(stageTable().map((s) => s.at), ['0%', '20%', '40%', '58%', '75%']);
 });
 
-test('기준선: 서버 base → 화면에서 본 최솟값 → min(지금, 60k)', () => {
+test('기준선(카드 표시용): 서버 base → 화면에서 본 최솟값 → min(지금, 60k)', () => {
   assert.equal(baseOf(C(300e3, 1e6, 110e3)), 110e3);
   assert.equal(baseOf(C(300e3), 95e3), 95e3);
   assert.equal(baseOf(C(300e3)), FALLBACK_BASE);
   assert.equal(baseOf(C(40e3)), 40e3);           // 지금이 상한보다 작으면 지금
   assert.equal(baseOf(C(30e3, 1e6, 110e3)), 30e3); // compact 로 기준선보다 작아지면 그 값
   assert.equal(grownOf(C(260e3, 1e6, 110e3)), 150e3);
-  assert.equal(levelOf(C(260e3, 1e6, 110e3), 'abs'), 58);
-});
-
-test('창 대비 기준은 예전 % 그대로, 알 수 없는 값은 절대량', () => {
-  // opus 1M 창 200k(첫 응답 60k) = 20% → 창 대비면 그레인 시작, 절대량(+140k)이면 주사선 끝 무렵
-  assert.equal(levelOf(C(200e3, 1e6, 60e3), 'pct'), 20);
-  assert.equal(stageOf(levelOf(C(200e3, 1e6, 60e3), 'abs')), 2);
-  assert.equal(normBasis('x'), 'abs');
-  assert.equal(normBasis('pct'), 'pct');
-  assert.equal(levelOf(null), 0);
-  assert.deepEqual(stageTable('abs').map((s) => s.at), ['+0', '+50k', '+100k', '+150k', '+300k']);
-  assert.deepEqual(stageTable('pct').map((s) => s.at), ['0%', '20%', '40%', '58%', '75%']);
 });
 
 test('세션 세기 D: 문턱 20 에서 0, 95 에서 1, 세기 슬라이더 배율', () => {
@@ -54,10 +39,9 @@ test('세션 세기 D: 문턱 20 에서 0, 95 에서 1, 세기 슬라이더 배�
   assert.ok(Math.abs(degScaled(57.5, 0.5) - 0.5) < 1e-9);
 });
 
-test('정화(급락) 판정도 같은 기준: 1M 창 180k→40k(기준선 30k) 는 창 대비면 아님, 절대량이면 급락', () => {
-  const a = C(180e3, 1e6, 30e3), b = C(40e3, 1e6, 30e3);
-  assert.equal(isCtxDrop({ pct: levelOf(a, 'pct') }, { pct: levelOf(b, 'pct') }), false);
-  assert.equal(isCtxDrop({ pct: levelOf(a, 'abs') }, { pct: levelOf(b, 'abs') }), true);
+test('정화(급락) 판정도 열화 수준(창 대비)으로: 1M 창 180k→40k 는 급락 아님, 200k 창 180k→40k 는 급락', () => {
+  assert.equal(isCtxDrop({ pct: levelOf(C(180e3, 1e6)) }, { pct: levelOf(C(40e3, 1e6)) }), false);
+  assert.equal(isCtxDrop({ pct: levelOf(C(180e3, 200e3)) }, { pct: levelOf(C(40e3, 200e3)) }), true);
 });
 
 test('단계 넘김·버스트 판정: 오를 때만, 처음 값·quiet·움직임 줄이기·꺼짐은 생략', () => {
@@ -144,10 +128,9 @@ test('DEG: 꺼져 있으면 0, 버스트는 세션 키로 더해짐', () => {
   assert.equal(seedOf('abc'), seedOf('abc'));
 });
 
-test('그레인 진폭(§76.8): 시작 ±10/255 · +150k ±20 · 최대 ±30, 문턱 아래 0', () => {
+test('그레인 진폭(§76.8): 시작 ±10/255 · 58% ±20 · 최대 ±30, 문턱 아래 0', () => {
   assert.equal(grainAmp(0.1), 0);
   assert.ok(Math.abs(grainAmp(0.22) - 10.1) < 0.6);
   assert.ok(Math.abs(grainAmp(0.58) - 20) < 0.01);
   assert.ok(Math.abs(grainAmp(0.95) - 30) < 0.01);
-  assert.ok(grainAmp(absLevel(150e3) / 100) >= 19.9);
 });

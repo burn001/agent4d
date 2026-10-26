@@ -1,29 +1,13 @@
 // 신호 열화 2차 순수 규칙 — DOM·three 없음, node --test 대상.
-//  · 기준(basis): 'abs' 절대 토큰량(기본) · 'pct' 창 대비 %. 어느 쪽이든 '열화 수준'(0～100, 예전 % 와 같은 눈금)으로 바꿔
-//    단계(stageOf)·셰이더·오디오·정화 판정이 같은 값을 쓴다.
+//  · 열화 수준(0～100) = 창 대비 %(meta.ctx.pct). 단계(stageOf)·셰이더·오디오·정화 판정이 같은 값을 쓴다.
+//    (절대 토큰량 기준 'abs' 는 "너무 빨리 열화된다"는 지적으로 2026-10-26 폐지)
 //  · 세션 열화 세기 D(0～1) — 메인 잔상·글자 깨짐·흐름선 끊김의 공통 입력.
 //  · 문턱 버스트(단계가 오르는 순간 0.5초), 글자 깨짐·패킷 소실·선 끊김의 결정적 해시.
 //  · 렌더러가 읽는 실행 상태 DEG(ctx-ui 가 채움). 꺼져 있으면 degOf() 가 바로 0 — 렌더러 비용 0.
 import { stageOf, STAGES } from './ctx-core.mjs';
 
-export const BASIS_ABS = 'abs';
-export const BASIS_PCT = 'pct';
-export const DEFAULT_BASIS = BASIS_ABS;
-export const normBasis = (v) => (v === BASIS_PCT ? BASIS_PCT : BASIS_ABS);
-
-/**
- * 절대량 기준 = 대화로 늘어난 양(used − 기준선). 기준선(base)은 노드별 첫 유효 응답 usage — 시스템 프롬프트·도구·스킬·메모리만으로
- * 이미 수십 k 라 그 위에 쌓인 양으로 잰다. compact 뒤에도 원래 기준선을 유지하되 그보다 작아지면 낮춘다(= 지금까지 본 최솟값).
- * 늘어난 양 → 열화 수준(예전 % 눈금) 꺾은선. 이 PC 실측(최근 14일 메인 498세션, 2026-10-24): 첫 응답 중앙값 63k(10～90% 54～73k),
- * 세션 최대 증가량 중앙값 +100k · 75% +199k · 90% +268k · 95% +334k · 99% +477k, 머문 시간 비율 ≥+50k 81% · ≥+150k 37% · ≥+300k 4.7% · ≥+500k 0.2%.
- * → +50k 그레인 시작 · +100k 주사선 · +150k 색수차·글리치(뚜렷) · +300k 데이터모시(심함) · +500k 최대·"세션 정리 권장".
- */
-export const ABS_KNOTS = [[0, 0], [50e3, 20], [100e3, 40], [150e3, 58], [300e3, 75], [500e3, 95], [600e3, 100]];
-/** 단계 경계 증가량(STAGES 와 같은 순서) — 카드 단계표 */
-export const ABS_STAGE_TOKENS = [0, 50e3, 100e3, 150e3, 300e3];
-/** 권장 문구·험 기준 열화 수준: 절대량 +500k(95), 창 대비 75% */
-export const ABS_RECOMMEND = 500e3;
-export const recommendLevel = (basis) => (normBasis(basis) === BASIS_ABS ? 95 : 75);
+// 기준선(base) = 노드별 첫 유효 응답 usage. 열화 판정에는 쓰지 않고 카드·툴팁의 '시작 63k · 늘어난 양 +152k' 표시에만 쓴다.
+// compact 뒤에도 원래 기준선을 유지하되 그보다 작아지면 낮춘다(= 지금까지 본 최솟값).
 /** 기준선을 모를 때(서버가 base 를 안 보낸 예전 값·세션 중간에 처음 본 스냅샷) 쓰는 상한 — 첫 응답 실측 중앙값 근처 */
 export const FALLBACK_BASE = 60e3;
 /** 기준선: 서버 base → 이 화면에서 본 최솟값(seen) → min(지금 값, FALLBACK_BASE) */
@@ -36,29 +20,15 @@ export function baseOf(c, seen = null) {
 }
 export const grownOf = (c, seen = null) => (c ? Math.max(0, (Number(c.used) || 0) - baseOf(c, seen)) : 0);
 
-export function absLevel(used) {
-  const u = Number(used);
-  if (!isFinite(u) || u <= 0) return 0;
-  for (let i = 1; i < ABS_KNOTS.length; i++) {
-    const [x1, y1] = ABS_KNOTS[i];
-    if (u <= x1) { const [x0, y0] = ABS_KNOTS[i - 1]; return y0 + ((u - x0) / (x1 - x0)) * (y1 - y0); }
-  }
-  return 100;
-}
-
-/** meta.ctx → 열화 수준(0～100). 기준이 창 대비면 pct 그대로, 절대량이면 늘어난 양(seen: 기준선을 모를 때 이 화면에서 본 최솟값) */
-export function levelOf(c, basis = DEFAULT_BASIS, seen = null) {
+/** meta.ctx → 열화 수준(0～100) = 창 대비 %. (절대량 기준은 2026-10-26 폐지) */
+export function levelOf(c) {
   if (!c) return 0;
-  if (normBasis(basis) === BASIS_PCT) return isFinite(c.pct) ? Math.max(0, Math.min(100, c.pct)) : 0;
-  return Math.round(absLevel(grownOf(c, seen)) * 10) / 10;
+  return isFinite(c.pct) ? Math.max(0, Math.min(100, c.pct)) : 0;
 }
-export const stageOfCtx = (c, basis, seen) => stageOf(levelOf(c, basis, seen));
+export const stageOfCtx = (c) => stageOf(levelOf(c));
 
-/** 단계표 문구: 절대량이면 토큰, 창 대비면 % */
-export function stageTable(basis = DEFAULT_BASIS) {
-  const abs = normBasis(basis) === BASIS_ABS;
-  return STAGES.map((s, i) => ({ key: s.key, name: s.name, at: abs ? (i ? '+' + Math.round(ABS_STAGE_TOKENS[i] / 1000) + 'k' : '+0') : s.min + '%' }));
-}
+/** 카드 단계표 문구: 단계마다 시작 % */
+export const stageTable = () => STAGES.map((s) => ({ key: s.key, name: s.name, at: s.min + '%' }));
 
 /** 열화 수준 → 세션 열화 세기 D(0～1). 20(그레인 시작)에서 0, 95 에서 1 */
 export function degD(level) {

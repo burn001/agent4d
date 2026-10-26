@@ -3,7 +3,7 @@
 //   cx.noteCtx(ev, prevNode, {quiet})  — node-update 에 meta.ctx 가 있을 때(병합 전) 부른다. 급락이면 정화 연출, ev.ctxNote 를 붙임
 //   cx.hover(nodeId|null, pointerEvent) — 노드 툴팁
 // 상단 바·설정 DOM 은 이 모듈이 직접 만든다(index.html 무변경). 저장값은 localStorage try/catch.
-// 2차: 열화 기준(절대 토큰량 기본 / 창 대비) → 열화 수준(levelOf). 단계·셰이더·오디오·정화·버스트·재생 모두 같은 값.
+// 2차: 열화 수준(levelOf) = 창 대비 %. 단계·셰이더·오디오·정화·버스트·재생 모두 같은 값(절대량 기준은 2026-10-26 폐지).
 //   메인 노드 잔상(셰이더 uMain·2D FlatDegrade)·글자 깨짐(TextGlitch)·흐름선 끊김(렌더러가 DEG 를 읽음)·문턱 버스트.
 import {
   noiseParams, noiseNeeded, ctxNote, ctxShort, ctxTitle, pctText, gaugeLevel, pickGaugeNode, rankRegions, isCtxDrop,
@@ -12,7 +12,7 @@ import {
 // 신호 열화 후처리(noise.js, three)는 3D 장면일 때만 필요할 때 불러온다 — 2D 화면은 three.js 를 받지 않는다
 import { nodeSubtitle } from './node-title.mjs';
 import {
-  DEG, levelOf, normBasis, stageTable, baseOf, grownOf, recommendLevel, degScaled, stageCross, burstWanted, BurstBook, ghostOffsets, seedOf, BASIS_ABS, BASIS_PCT,
+  DEG, levelOf, stageTable, baseOf, grownOf, degScaled, stageCross, burstWanted, BurstBook, ghostOffsets, seedOf,
 } from './degrade-core.mjs';
 import { TextGlitch } from './degrade-text.js';
 import { FlatDegrade } from './flat/flat-degrade.js';
@@ -118,11 +118,8 @@ export function mountCtx({ store, getView, getState, music = null, sfx = null })
   let strength = Number(lsGet('ccviz.noiseAmt', String(DEFAULT_STRENGTH)));
   if (!isFinite(strength)) strength = DEFAULT_STRENGTH;
   strength = Math.max(0, Math.min(1, strength));
-  let basis = normBasis(lsGet('ccviz.ctxBasis', BASIS_ABS)); // 열화 기준: 절대량(기본) / 창 대비
-  // 기준선(첫 응답): 서버 c.base 우선, 없으면 이 화면에서 본 최솟값(seen), 그것도 없으면 min(지금, 60k)
+  // 기준선(첫 응답, 카드·툴팁 표시용): 서버 c.base 우선, 없으면 이 화면에서 본 최솟값(seen), 그것도 없으면 min(지금, 60k)
   const seen = new Map();
-  const lvOf = (c, id) => levelOf(c, basis, id != null ? seen.get(id) : null);
-  const recLv = () => recommendLevel(basis);
 
   // ── 상단 바: 게이지 알약(한도 게이지 앞). 누르면 설정 카드(신호 열화 켜기/끄기·세기) — 상단 바 폭을 늘리지 않으려고 카드에 넣었다 ──
   const top = document.getElementById('topbar');
@@ -133,9 +130,6 @@ export function mountCtx({ store, getView, getState, music = null, sfx = null })
     + `<div class="ctxg-card" hidden><h4>${T('sound.ctx.card')} <small class="ctxg-cwho"></small></h4><p class="ctxg-cdet"></p>`
     + `<div class="ctxn"><button id="btn-noise" class="tb" type="button" title="${T('sound.ctx.noise.title')}">${T('sound.ctx.noise')}</button>`
     + `<label class="ctxn-amt"><span>${T('sound.ctx.amt')}</span><input id="noise-amt" type="range" min="0" max="1" step="0.05" aria-label="${T('sound.ctx.amt.aria')}"></label></div>`
-    + `<div class="ctxb" role="radiogroup" aria-label="${T('sound.ctx.basis.aria')}"><span>${T('sound.ctx.basis')}</span>`
-    + `<button type="button" class="ctxb-opt" role="radio" data-basis="abs" title="${T('sound.ctx.basis.abs.title')}">${T('sound.ctx.basis.abs')}</button>`
-    + `<button type="button" class="ctxb-opt" role="radio" data-basis="pct" title="${T('sound.ctx.basis.pct.title')}">${T('sound.ctx.basis.pct')}</button></div>`
     + '<ol class="ctxg-stages"></ol>'
     + '<p class="ctxg-note"></p></div>';
   const limEl = document.getElementById('limits');
@@ -157,15 +151,9 @@ export function mountCtx({ store, getView, getState, music = null, sfx = null })
   label();
   btn.addEventListener('click', () => { enabled = !enabled; lsSet('ccviz.noise', enabled ? 'on' : 'off'); label(); if (!enabled) { book.clear(); bursts.clear(); noise.setActive(false); } });
   amt.addEventListener('input', () => { strength = Number(amt.value) || 0; lsSet('ccviz.noiseAmt', String(strength)); });
-  // 기준 선택 + 단계표(기준마다 토큰/% 표기)
-  const stagesEl = gauge.querySelector('.ctxg-stages'), noteEl = gauge.querySelector('.ctxg-note');
-  const basisLabel = () => {
-    for (const b of gauge.querySelectorAll('.ctxb-opt')) { const on = b.dataset.basis === basis; b.setAttribute('aria-checked', String(on)); b.classList.toggle('on', on); }
-    stagesEl.innerHTML = stageTable(basis).map((x) => `<li><b>${esc(x.at)}</b> ${esc(x.name)}</li>`).join('');
-    noteEl.textContent = tr(basis === BASIS_ABS ? 'sound.ctx.note.abs' : 'sound.ctx.note.pct');
-  };
-  basisLabel();
-  for (const b of gauge.querySelectorAll('.ctxb-opt')) b.addEventListener('click', () => { const nb = normBasis(b.dataset.basis); if (nb === basis) return; basis = nb; lsSet('ccviz.ctxBasis', basis); basisLabel(); lastUi = 0; lastDegMap = 0; disp.clear(); });
+  // 단계표(창 대비 %)
+  gauge.querySelector('.ctxg-stages').innerHTML = stageTable().map((x) => `<li><b>${esc(x.at)}</b> ${esc(x.name)}</li>`).join('');
+  gauge.querySelector('.ctxg-note').textContent = tr('sound.ctx.note');
 
   // ── 툴팁·권장 문구 ──
   const tip = document.createElement('div'); tip.id = 'ctx-tip'; tip.hidden = true; document.body.appendChild(tip);
@@ -267,13 +255,13 @@ export function mountCtx({ store, getView, getState, music = null, sfx = null })
     const on = enabled && strength > 0;
     if (!on) return;
     if (!st.streamAll) {
-      const D = degScaled(lvOf(nodeCtx(store.root), store.root), strength);
+      const D = degScaled(levelOf(nodeCtx(store.root)), strength);
       if (D <= 0) return;
       for (const id of store.nodes.keys()) { DEG.base.set(id, D); DEG.sessOf.set(id, 'full'); }
       return;
     }
     const sd = new Map();
-    for (const r of store.roots || []) { const id = 's:' + r.sessionId; const D = degScaled(lvOf(nodeCtx(id), id), strength); if (D > 0) sd.set(r.sessionId, D); }
+    for (const r of store.roots || []) { const id = 's:' + r.sessionId; const D = degScaled(levelOf(nodeCtx(id)), strength); if (D > 0) sd.set(r.sessionId, D); }
     if (!sd.size) return;
     for (const [id, n] of store.nodes) {
       const rs = n.rootSessionId || (id.startsWith('s:') ? id.slice(2) : null);
@@ -358,12 +346,12 @@ export function mountCtx({ store, getView, getState, music = null, sfx = null })
       const pur = book.get('full', now) || (id ? book.get(id, now) : null);
       const bu = bursts.get('full', now);
       if (c || pur) {
-        const lv = c ? lvOf(c, id) : 0;
+        const lv = c ? levelOf(c) : 0;
         const L = smooth('full', lv / 100, dt);
         const purge = pur ? { p: pur.p, oldL: pur.oldL } : null;
         list.push({ x: 0, y: 0, r: 1, L, burst: bu, purge, pct: c ? c.pct : 0, lv });
         fRegions.push({ key: 'full', c: null, r: 1, L, burstKey: 'full', purge });
-        if (c && lv >= recLv()) bannerC = c;
+        if (c && lv >= RECOMMEND_PCT) bannerC = c;
       }
       addMain(id, 'full');
     } else {
@@ -376,7 +364,7 @@ export function mountCtx({ store, getView, getState, music = null, sfx = null })
         const c = nodeCtx(id);
         const pur = book.get(id, now);
         if (!c && !pur) continue;
-        ents.push({ id, sid: r.sessionId, pct: c ? lvOf(c, id) : 0, c, purging: pur ? 1 : 0, pur });
+        ents.push({ id, sid: r.sessionId, pct: c ? levelOf(c) : 0, c, purging: pur ? 1 : 0, pur });
       }
       const ranked = enabled ? rankRegions(ents, MAX_REGIONS) : [];
       for (const e of ranked) {
@@ -389,7 +377,7 @@ export function mountCtx({ store, getView, getState, music = null, sfx = null })
         const purge = e.pur ? { p: e.pur.p, oldL: e.pur.oldL } : null;
         list.push({ x: p.x, y: p.y, r: p.r, L, burst: bu, purge, pct: e.c ? e.c.pct : 0, lv: e.pct });
         fRegions.push({ key: e.id, c: b.c, r: b.r, L, burstKey: e.id, purge });
-        if (e.pct >= recLv()) shown.push({ p, c: e.c, lv: e.pct, id: e.id });
+        if (e.pct >= RECOMMEND_PCT) shown.push({ p, c: e.c, lv: e.pct, id: e.id });
         addMain(e.id, e.id);
       }
     }
@@ -415,7 +403,7 @@ export function mountCtx({ store, getView, getState, music = null, sfx = null })
     // 권장 문구: 화면 전체면 띠 하나, 전체 보기면 섬 위마다
     const showBanner = enabled && need && bannerC != null;
     banner.hidden = !showBanner;
-    if (showBanner) { const txt = tr('sound.ctx.recommend', { what: recText(bannerC, false, store.root) }); if (banner.textContent !== txt) banner.textContent = txt; banner.classList.toggle('still', reduced); }
+    if (showBanner) { const txt = tr('sound.ctx.recommend', { what: recText(bannerC, false) }); if (banner.textContent !== txt) banner.textContent = txt; banner.classList.toggle('still', reduced); }
     const cw = stage.clientWidth, chh = stage.clientHeight;
     let ti = 0;
     const placedTags = []; // 같은 섬 메인 여럿이면 권장 문구가 겹칠 수 있다 — 겹치면 앞(높은 사용률) 것만
@@ -427,7 +415,7 @@ export function mountCtx({ store, getView, getState, music = null, sfx = null })
       placedTags.push({ x, y: ty });
       const t = tagAt(ti++);
       t.style.transform = `translate(${Math.round(x)}px, ${Math.round(Math.max(8, y - rCss * 0.75))}px) translate(-50%, -100%)`;
-      const txt = tr('sound.ctx.recommend', { what: recText(s.c, true, s.id) });
+      const txt = tr('sound.ctx.recommend', { what: recText(s.c, true) });
       if (t.textContent !== txt) t.textContent = txt;
       t.classList.toggle('still', reduced);
       t.hidden = false;
@@ -436,10 +424,9 @@ export function mountCtx({ store, getView, getState, music = null, sfx = null })
 
     if (now - lastUi > 250) { lastUi = now; updateGauge(st); }
   }
-  /** 권장 문구 숫자: 절대량이면 토큰, 창 대비면 % */
-  function recText(c, short = false, id = null) {
+  /** 권장 문구 숫자: 창 대비 % */
+  function recText(c, short = false) {
     if (!c) return '';
-    if (basis === BASIS_ABS) return tr('sound.ctx.recTokens', { n: fmtTokens(grownOf(c, id != null ? seen.get(id) : null)) });
     return short ? pctText(c.pct) : tr('sound.ctx.recPct', { pct: pctText(c.pct) });
   }
 
@@ -466,14 +453,14 @@ export function mountCtx({ store, getView, getState, music = null, sfx = null })
       const whoEl = pill.querySelector('.ctxg-who');
       if (whoEl.textContent !== who) whoEl.textContent = who;
       pill.querySelector('.ctxg-bar i').style.width = Math.min(100, c.pct) + '%';
-      const title = ctxTitle(c, (pick.why === 'max' ? tr('sound.ctx.highest') : '') + (n.label || n.id), lvOf(c, gaugeId), recLv()) + '\n'
-        + tr(enabled ? 'sound.ctx.pill.stateOn' : 'sound.ctx.pill.stateOff', { basis: tr(basis === BASIS_ABS ? 'sound.ctx.basis.abs' : 'sound.ctx.basis.pct') });
+      const title = ctxTitle(c, (pick.why === 'max' ? tr('sound.ctx.highest') : '') + (n.label || n.id), levelOf(c), RECOMMEND_PCT) + '\n'
+        + tr(enabled ? 'sound.ctx.pill.stateOn' : 'sound.ctx.pill.stateOff');
       if (pill.title !== title) pill.title = title;
-      if (!card.hidden) { gauge.querySelector('.ctxg-cwho').textContent = (n.label || n.id).slice(0, 40); gauge.querySelector('.ctxg-cdet').textContent = ctxTitle(c, '', lvOf(c, gaugeId), recLv()).split(NL).slice(0, 4).join(NL) + NL + baseLine(c, gaugeId); }
+      if (!card.hidden) { gauge.querySelector('.ctxg-cwho').textContent = (n.label || n.id).slice(0, 40); gauge.querySelector('.ctxg-cdet').textContent = ctxTitle(c, '', levelOf(c), RECOMMEND_PCT).split(NL).slice(0, 4).join(NL) + NL + baseLine(c, gaugeId); }
     }
     // 소리: 게이지가 보여 주는 세션 기준
     if (audio) {
-      const p = noiseParams(c ? lvOf(c, gaugeId) : 0, strength); // 선택 기준의 열화 수준
+      const p = noiseParams(c ? levelOf(c) : 0, strength); // 열화 수준(창 대비 %)
       let musicOn = false, sfxOn = false;
       try { musicOn = !!music.on; } catch (e) {}
       try { sfxOn = !!(sfx && sfx.enabled); } catch (e) {}
@@ -494,12 +481,12 @@ export function mountCtx({ store, getView, getState, music = null, sfx = null })
     if (!next) return null;
     const prev = prevNode && prevNode.meta ? prevNode.meta.ctx : null;
     let note = ctxNote(prev, next);
-    // 정화(급락)·버스트는 선택 기준의 열화 수준으로 판정(패널 메모의 50·70·90 은 게이지 % 그대로)
+    // 정화(급락)·버스트는 열화 수준으로 판정(패널 메모의 50·70·90 은 게이지 % 그대로)
     const nid = (prevNode && prevNode.id) || ev.nodeId;
-    const l0 = prev ? lvOf(prev, nid) : null;
+    const l0 = prev ? levelOf(prev) : null;
     // 기준선 장부: 처음 값이면 그 값, 아니면 지금까지의 기준선과 새 값 중 작은 것(compact 뒤 더 작아지면 낮춤)
     seen.set(nid, prev ? Math.min(baseOf(prev, seen.get(nid)), Number(next.used) || 0) : Number(next.used) || 0);
-    const l1 = lvOf(next, nid);
+    const l1 = levelOf(next);
     const dropL = prev ? isCtxDrop({ pct: l0 }, { pct: l1 }) : false;
     if (dropL && (!note || note.kind !== 'drop')) note = { kind: 'drop', from: prev.pct, to: next.pct };
     if (note) ev.ctxNote = note;
@@ -522,12 +509,12 @@ export function mountCtx({ store, getView, getState, music = null, sfx = null })
     const c = nodeCtx(id);
     if (!c || !e) { tip.hidden = true; return; }
     const n = store.nodes.get(id);
-    const lv = lvOf(c, id);
+    const lv = levelOf(c);
     const st = STAGES[stageOf(lv)];
     const sub = n ? nodeSubtitle(n) : ''; // 노드 이름 + 자동 제목 부제
     const who = n ? `<span class="ctx-tip-who">${esc(n.label || id)}${sub ? `<i>${esc(sub)}</i>` : ''}</span>` : '';
-    tip.innerHTML = `${who}<b class="lv-${gaugeLevel(c.pct)}">${esc(tr('sound.ctx.tip', { v: ctxShort(c) }))}</b><small>${esc(st.name)}${c.estimated ? esc(tr('sound.ctx.tip.est')) : ''}${lv >= recLv() ? esc(tr('sound.ctx.tip.rec')) : ''}</small>`;
-    tip.title = ctxTitle(c, n && n.label, lv, recLv()) + NL + baseLine(c, id);
+    tip.innerHTML = `${who}<b class="lv-${gaugeLevel(c.pct)}">${esc(tr('sound.ctx.tip', { v: ctxShort(c) }))}</b><small>${esc(st.name)}${c.estimated ? esc(tr('sound.ctx.tip.est')) : ''}${lv >= RECOMMEND_PCT ? esc(tr('sound.ctx.tip.rec')) : ''}</small>`;
+    tip.title = ctxTitle(c, n && n.label, lv, RECOMMEND_PCT) + NL + baseLine(c, id);
     tip.style.transform = `translate(${Math.round(e.clientX + 14)}px, ${Math.round(e.clientY + 16)}px)`;
     tip.hidden = false;
   }
@@ -535,11 +522,10 @@ export function mountCtx({ store, getView, getState, music = null, sfx = null })
   requestAnimationFrame(frame);
   const api = {
     noteCtx, hover,
-    get enabled() { return enabled; }, get strength() { return strength; }, get reduced() { return reduced; }, get basis() { return basis; },
+    get enabled() { return enabled; }, get strength() { return strength; }, get reduced() { return reduced; },
     setEnabled(on) { if (!!on !== enabled) btn.click(); },
     setStrength(v) { amt.value = String(v); amt.dispatchEvent(new Event('input')); },
     setReduced(on) { reduced = !!on; document.body.classList.toggle('ccv-still', reduced); },
-    setBasis(b) { const el = gauge.querySelector(`.ctxb-opt[data-basis="${normBasis(b)}"]`); if (el) el.click(); },
     /** 시험: 세션 키('full'|'s:<id>')에 버스트를 바로 건다(문턱 넘김과 같은 연출) */
     burst(key = 'full') { if (bursts.start(key, performance.now())) { stat.bursts++; return true; } return false; },
     get stat() { return { ...stat, renders: noise.renders, active: noise.active, humOn: audio ? audio.humOn : false, lowpassWired: audio ? audio.wired : false, deg: DEG.on, degNodes: DEG.base.size, glitch: { ...glitch.stat }, flatDraws: flatFx.draws }; },
