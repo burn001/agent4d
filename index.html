@@ -43,6 +43,7 @@ video { width: 100%; aspect-ratio: 16 / 9; border-radius: 12px; border: 1px soli
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 ul { padding-left: 20px; color: var(--mute); }
 li { margin: 4px 0; }
+.ver { color: var(--mute); margin: 0 0 8px; font-size: 14px; }
 footer { margin-top: 32px; color: var(--mute); font-size: 13px; }
 footer a { color: var(--mute); }
 </style>
@@ -54,8 +55,9 @@ footer a { color: var(--mute); }
   <video src="intro.mp4" poster="og.png" controls autoplay muted loop playsinline></video>
   <div class="cta">
     <a class="btn primary" href="https://github.com/burn001/agent4d">★ View on GitHub</a>
-    <a class="btn" href="https://github.com/burn001/agent4d/releases/latest">Latest release</a>
+    <a class="btn" id="rel" href="https://github.com/burn001/agent4d/releases/latest">Latest release</a>
   </div>
+  <p class="ver" id="ver" hidden></p>
   <ul>
     <li>Main agent, subagents, workflows, <code>claude -p</code> sessions and background commands, streamed live from local transcripts (read-only).</li>
     <li>Three views — Flow, Planet and Voxel Office — in 3D or lightweight 2D.</li>
@@ -63,5 +65,20 @@ footer a { color: var(--mute); }
   </ul>
   <footer>Apache-2.0 · © burn001 (Dr. Cho, Sangkyu) · Not affiliated with Anthropic. <a href="https://github.com/burn001/agent4d">github.com/burn001/agent4d</a></footer>
 </main>
+<script>
+// 최신 Release 를 그때그때 읽어 버전·날짜 표시(실패하면 정적 링크 그대로)
+fetch('https://api.github.com/repos/burn001/agent4d/releases/latest', { headers: { Accept: 'application/vnd.github+json' } })
+  .then((r) => r.ok ? r.json() : Promise.reject(r.status))
+  .then((d) => {
+    const v = d.tag_name, day = (d.published_at || '').slice(0, 10);
+    document.getElementById('rel').textContent = 'Latest release · ' + v;
+    document.getElementById('rel').href = d.html_url;
+    const t = (d.name || '').replace(/^v[\d.]+:\s*/, '');
+    const el = document.getElementById('ver');
+    el.textContent = v + (day ? ' · ' + day : '') + (t ? ' — ' + t : '');
+    el.hidden = false;
+  })
+  .catch(() => {});
+</script>
 </body>
 </html>
