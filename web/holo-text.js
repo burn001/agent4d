@@ -6,6 +6,36 @@ import * as THREE from 'three';
 import { PANEL, shapeLayout, panelRows, fallbackPanel, markStyle, textRows, jobRowHits, jobLinesKey, jobLineStyle } from './holo-core.mjs';
 import { DEG, degOf } from './degrade-core.mjs';
 import { t as tr } from './i18n.mjs';
+import { runRing } from './run-core.mjs'; // 셸 머리줄 진행 링
+
+const REDUCED = () => { try { return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } };
+const RUN_STALE_INK = ['#fb923c', '#c2410c']; // 정체 주황(작업 줄 표시 정체 색과 같음)
+
+/**
+ * 머리줄 오른쪽 경과 꼬리표: [진행 링] 3:42. 장시간(30초↑)이면 링이 이번 1분 안의 진행을 채운다(초마다 한 칸 — 움직임 줄이기면 가득 찬 정적 링).
+ * 반환 = 차지한 폭(px)
+ */
+export function drawRunTag(ctx, xRight, yc, fs, e, ink, light) {
+  if (!e.runHead) return 0;
+  const col = e.runStale ? RUN_STALE_INK[light ? 1 : 0] : ink;
+  ctx.save();
+  ctx.shadowBlur = 0;
+  ctx.font = `700 ${fs}px ${MONO}`;
+  const tw = ctx.measureText(e.runHead).width;
+  const r = fs * 0.36, gap = fs * 0.35;
+  ctx.fillStyle = col; ctx.textAlign = 'right';
+  ctx.fillText(e.runHead, xRight, yc);
+  if (e.runLong) {
+    const cx = xRight - tw - gap - r, lw = Math.max(1.5, fs * 0.13);
+    ctx.lineWidth = lw; ctx.strokeStyle = col; ctx.globalAlpha = 0.3;
+    ctx.beginPath(); ctx.arc(cx, yc, r, 0, Math.PI * 2); ctx.stroke();
+    const k = REDUCED() ? 1 : runRing(e.runMs);
+    ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.arc(cx, yc, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0.04, k)); ctx.stroke();
+  }
+  ctx.restore();
+  return tw + (e.runLong ? gap + r * 2 : 0) + fs * 0.6;
+}
 
 const MONO = '"D2Coding", "Cascadia Mono", Consolas, "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans Mono CJK KR", monospace';
 
@@ -70,6 +100,11 @@ function wrap(ctx, s, maxW) {
   }
   return out;
 }
+/** 꼬리 작은 상태: 마지막(비지 않은) 줄 하나 → [{text, mark}] */
+export function lastRow(p) {
+  for (let i = p.lines.length - 1; i >= 0; i--) if (String(p.lines[i]).trim()) return [{ text: p.lines[i], mark: p.marks[i] || 'o' }];
+  return [];
+}
 function lock(ctx, cx, cy, s, color) {
   ctx.save();
   ctx.strokeStyle = ctx.fillStyle = color; ctx.lineWidth = Math.max(2, s * 0.11); ctx.lineCap = 'round';
@@ -109,11 +144,12 @@ export function drawPanel(ctx, W, H, e, rows, light, ink, jobs = null) {
     return;
   }
   if (rows <= 0) {
-    // 먼 거리: 제목만 크게(두 줄까지)
+    // 먼 거리: 제목만 크게(두 줄까지) — 셸 경과는 제목 뒤에
     const fs = Math.min(bh * 0.36, 60);
     ctx.font = `700 ${fs}px ${MONO}`; ctx.fillStyle = ink; glow(ink, 8);
     let tl = wrap(ctx, title, bw);
-    if (tl.length > 2) tl = [tl[0], fit(ctx, tl.slice(1).join(' '), bw)];
+    if (e.runHead) tl = [fit(ctx, tl.join(' '), bw), e.runHead]; // 경과는 둘째 줄(잘리지 않게)
+    else if (tl.length > 2) tl = [tl[0], fit(ctx, tl.slice(1).join(' '), bw)];
     const y0 = Y(by1) + bh / 2 - (tl.length - 1) * fs * 0.6;
     tl.forEach((t, i) => ctx.fillText(t, X(bx0), y0 + i * fs * 1.2));
     ctx.shadowBlur = 0;
@@ -129,10 +165,11 @@ export function drawPanel(ctx, W, H, e, rows, light, ink, jobs = null) {
     ctx.fillStyle = dimC; ctx.shadowBlur = 0;
     ctx.fillText(tr('cards.holo.brief'), X(tx1) - tagW + tfs * 0.4, Y((ty0 + ty1) / 2));
   }
+  tagW += drawRunTag(ctx, X(tx1) - tagW, Y((ty0 + ty1) / 2), tfs * 0.86, e, ink, light); // 셸 경과(진행 링)
   ctx.font = `700 ${tfs}px ${MONO}`; ctx.fillStyle = ink; glow(ink, 6);
   ctx.fillText(fit(ctx, title, X(tx1) - X(tx0) - tagW), X(tx0), Y((ty0 + ty1) / 2));
-  // 줄
-  const R = p.fallback ? Math.min(rows, 4) : rows;
+  // 줄 — 꼬리 작은 상태(mini)는 마지막 줄 하나만
+  const R = e.mini ? 1 : p.fallback ? Math.min(rows, 4) : rows;
   const rh = bh / R, fs = Math.min(rh * 0.78, 34);
   ctx.font = `500 ${fs}px ${MONO}`;
   let list;
@@ -140,7 +177,8 @@ export function drawPanel(ctx, W, H, e, rows, light, ink, jobs = null) {
     const all = [];
     p.lines.forEach((t, i) => { for (const w of wrap(ctx, t, bw)) all.push({ text: w, mark: p.marks[i] || 'o' }); });
     list = all.length > R ? [{ text: '…', mark: 'm' }, ...all.slice(all.length - R + 1)] : all;
-  } else list = panelRows(p, R);
+  } else if (e.mini) list = lastRow(p);
+  else list = panelRows(p, R);
   const hits = jobs && jobs.length && p.mode !== 'say' ? jobRowHits(list, jobs) : null;
   list.forEach((r, i) => {
     const st = markStyle(r.mark, light);

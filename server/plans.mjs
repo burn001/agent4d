@@ -46,9 +46,20 @@ export function normStatus(s) {
 
 // ── 마크다운 계획 파서 ──
 const CB_RE = /^\s{0,12}(?:[-*+]|\d{1,3}[.)])\s+\[([ xX~\-/>✓✔])\]\s+(.+?)\s*$/;
-// 단계 설계서: 제목 `### 단계 3 — 배포 …`(또는 Phase 3: …), 표식 `**단계 3 상태**: ✅ **닫힘** …`
-const PH_HEAD_RE = /^#{2,5}\s*(?:단계|Phase|PHASE|Step|STEP)\s*(\d{1,3})\s*(?:[—–\-:.·]\s*(.*))?$/;
-const PH_STAT_RE = /^\s*\*\*(?:단계|Phase|PHASE|Step|STEP)\s*(\d{1,3})\s*(?:상태|status|Status)\*\*\s*[:：]?\s*(.*)$/;
+// 단계 설계서: 제목 `### 단계 3 — 배포 …`(Phase 3: … · 단계 1a · 두 자리 번호), 표식 `**단계 3 상태**: ✅ **닫힘** …`,
+// 표 줄 `| 단계 3 | 배포 | ✅ |`. 번호 = 숫자 1～3자리 + 선택 영문 한 자(1a). 1.2 같은 하위 번호는 단계가 아님.
+const PH_WORD_RE = /단계|phase|step|stage/i;
+const PH_HEAD_RE = /^#{2,5}\s*(?:\*\*)?(?:단계|phase|step|stage)\s*(\d{1,3}[a-z]?)(?![\w.])(?:\*\*)?\s*[—–\-:.·)]?\s*(.*)$/i;
+const PH_STAT_RE = /^\s*(?:[-*]\s+)?(?:\*\*)?(?:단계|phase|step|stage)\s*(\d{1,3}[a-z]?)\s*(?:상태|status)\s*(?:\*\*\s*[:：]?|[:：]\s*(?:\*\*)?)\s*(.*)$/i;
+const PH_ROW_RE = /^\s*\|\s*(?:\*\*)?(?:단계|phase|step|stage)\s*(\d{1,3}[a-z]?)(?![\w.])(?:\*\*)?\s*[—–\-:.·]?\s*([^|]*)\|(.*)$/i;
+/** 상태를 말하는 글인가(표 칸 — 없으면 '상태 모름') */
+const STATUS_WORD_RE = /✅|☑|✔|⏸|🔧|◐|◑|◔|⬜|☐|닫힘|완료|착지|보류|대기|진행|착수|\b(?:done|closed|complete[d]?|hold|in[ _-]?progress|wip|pending|todo|open)\b/i;
+const isBare = (t) => /^(?:단계|phase|step|stage)\s*\d{1,3}[a-z]?$/i.test(String(t || '').trim());
+/** 단계 열쇠 정렬: 번호 → 꼬리 글자(단계 1 < 단계 1a < 단계 2 < 단계 10) */
+export function phaseCmp(a, b) {
+  const pa = /(\d+)([a-z]?)/i.exec(a) || [], pb = /(\d+)([a-z]?)/i.exec(b) || [];
+  return (Number(pa[1]) || 0) - (Number(pb[1]) || 0) || String(pa[2] || '').localeCompare(String(pb[2] || ''));
+}
 
 /** 단계 표식 줄의 상태 글 → {s, hold} (✅ 닫힘 = done, ⏸ = 보류(아직 안 끝남, hold), 진행 표지 = in_progress, 나머지 pending) */
 export function phaseStatus(txt) {
@@ -76,15 +87,26 @@ export function parsePlanMarkdown(text, opts = {}) {
   const lines = text.split(/\r?\n/);
   let title = '';
   const heads = new Map(); const stats = []; const cbs = []; const nums = []; const h2 = [];
+  const rows = new Map(); // 표 줄의 단계 번호 → {name, st}
+  let word = '';           // 문서가 쓰는 단계 낱말(단계·Phase·Step …) — 표시 글에 그대로
   let fence = false;
   for (const raw of lines) {
     if (/^\s*```/.test(raw)) { fence = !fence; continue; }
     if (fence) continue;
     if (!title) { const m = /^#\s+(.+)$/.exec(raw); if (m) title = plainText(m[1]); }
     let m = PH_HEAD_RE.exec(raw);
-    if (m) { if (!heads.has(m[1])) heads.set(m[1], plainText(m[2] || '')); continue; }
+    const w = () => { if (!word) { const x = PH_WORD_RE.exec(raw)[0]; word = x === '단계' ? x : x[0].toUpperCase() + x.slice(1).toLowerCase(); } };
+    if (m) { w(); const n = m[1].toLowerCase(); if (!heads.has(n)) heads.set(n, plainText((m[2] || '').replace(/\*\*\s*$/, ''))); continue; }
     m = PH_STAT_RE.exec(raw);
-    if (m) { stats.push([m[1], m[2]]); continue; }
+    if (m) { w(); stats.push([m[1].toLowerCase(), m[2]]); continue; }
+    m = PH_ROW_RE.exec(raw);
+    if (m) {
+      const cells = m[3].split('|').map((c) => c.trim());
+      const name = plainText(m[2].trim() || (STATUS_WORD_RE.test(cells[0] || '') ? '' : cells[0] || ''));
+      const n = m[1].toLowerCase();
+      if (!rows.has(n)) { w(); rows.set(n, { name, st: cells.filter(Boolean).join(' ') }); }
+      continue;
+    }
     m = CB_RE.exec(raw);
     if (m) { cbs.push([m[1], m[2]]); continue; }
     if (opts.loose) {
@@ -95,14 +117,23 @@ export function parsePlanMarkdown(text, opts = {}) {
     }
   }
   const done = (kind, items) => (items.length ? { kind, title: clip(title, PLAN.TITLE), items: dedupe(items) } : null);
-  if (stats.length) {
-    const seen = new Set(), items = [];
-    for (const [n, st] of stats) {
-      if (seen.has(n)) continue; seen.add(n);
+  // 단계 설계서 = 표식 줄 ∪ 단계 제목 ∪ 표 줄. 표식이 하나라도 있으면 단계 설계서, 없으면 단계 제목·표 줄이 min(기본 2) 이상이고
+  // 체크박스 계획이 아닐 때. 표식 없는 단계는 대기 + nos(상태 모름 — 부분 관찰이면 아는 상태를 덮지 않음).
+  const phaseN = new Set([...stats.map(([n]) => n), ...heads.keys(), ...rows.keys()]);
+  if (stats.length || (phaseN.size >= (opts.min ?? 2) && cbs.length < 2)) {
+    const stOf = new Map();
+    for (const [n, st] of stats) if (!stOf.has(n)) stOf.set(n, st);
+    const items = [];
+    for (const n of phaseN) {
+      const row = rows.get(n);
+      let st = stOf.get(n), nos = false;
+      if (st == null && row && STATUS_WORD_RE.test(row.st)) st = row.st;
+      if (st == null) { st = ''; nos = true; }
       const ps = phaseStatus(st);
-      const name = heads.get(n);
-      items.push({ k: `단계 ${n}`, t: clip(`단계 ${n}${name ? ' — ' + name : ''}`, PLAN.TEXT), s: ps.s, ...(ps.hold ? { hold: 1 } : {}) });
+      const name = heads.get(n) || (row && row.name) || '';
+      items.push({ k: `단계 ${n}`, t: clip(`${word || '단계'} ${n}${name ? ' — ' + name : ''}`, PLAN.TEXT), s: ps.s, ...(ps.hold ? { hold: 1 } : {}), ...(nos ? { nos: 1 } : {}) });
     }
+    items.sort((a, b) => phaseCmp(a.k, b.k));
     return done('phases', items);
   }
   if (cbs.length >= (opts.min ?? (opts.loose ? 1 : 2))) return done('checkbox', cbs.map(([c, t]) => ({ k: itemKey(t), t: clip(plainText(t), PLAN.TEXT), s: cbStatus(c) })));
@@ -318,6 +349,7 @@ export class PlanTracker {
       if (f && typeof f.content === 'string') {
         const full = !(Number(f.startLine) > 1) && !(Number(f.totalLines) > Number(f.numLines));
         if (full) text = f.content;
+        else return this._seen(desc, f.content, nodeId, t); // 부분 Read: 본 줄의 단계·체크박스만 합침(안 본 단계는 그대로)
       }
     } else if (desc.op === 'edit') {
       const mem = this.docs.get(desc.key);
@@ -344,7 +376,7 @@ export class PlanTracker {
     const seen = [];
     for (const e of desc.edits) {
       const pn = parsePlanMarkdown(e.n, { min: 1 });
-      if (pn) seen.push(...pn.items.filter((it) => p.items.has(it.k) || p.src === 'file'));
+      if (pn) seen.push(...pn.items.filter((it) => p.items.has(it.k) || p.src === 'file' || (p.src === 'phases' && pn.kind === 'phases')));
     }
     const runner = this._runnerOf(nodeId);
     this._set(pk, { src: p.src, title: p.title, owner: runner || p.owner, strong: !!runner }, seen, nodeId, t, { merge: true, touch: true, text: false });
@@ -357,29 +389,45 @@ export class PlanTracker {
     if (!out) return;
     const byBase = new Map(desc.files.map((f) => [f.base.toLowerCase(), f]));
     const lines = new Map(); // 파일 열쇠 → 줄들
+    const orphan = [];       // 파일이 여럿인데 경로 머리가 없는 줄
     for (const raw of out.split(/\r?\n/)) {
       let l = raw, f = desc.files.length === 1 ? desc.files[0] : null;
       const m = /^([^\s:]*\.(?:md|markdown)):(?=\d+[:-])/i.exec(l); // grep 여러 파일: 경로:줄:
       if (m) { f = byBase.get(m[1].replace(/\\/g, '/').split('/').pop().toLowerCase()) || null; l = l.slice(m[0].length); }
       l = l.replace(/^\s*\d+[:\-\t→]\s?/, ''); // grep -n · cat -n · Read 꼴 줄 번호
-      if (!f) continue;
+      if (!f) { if (!m) orphan.push(l); continue; }
       if (!lines.has(f.key)) lines.set(f.key, []);
       lines.get(f.key).push(l);
     }
-    const runner = this._runnerOf(nodeId);
+    // 파일이 여럿인데 경로 머리 없는 줄(`git status && grep -n '단계 . 상태' 설계서.md` · `cat A.md; sed -n … B.md`):
+    // 단계 표식 줄만, 받을 파일이 하나로 정해질 때 그 파일 몫으로 — 이미 아는 단계 계획 하나, 없으면 설계서 이름 하나
+    const marks = orphan.filter((l) => PH_STAT_RE.test(l));
+    if (marks.length && desc.files.length > 1) {
+      const nm = (f) => f.key.split('/').pop();
+      const known = desc.files.filter((f) => this.plans.get(`file:${f.key}`)?.src === 'phases');
+      const named = desc.files.filter((f) => /design|설계|plan/i.test(nm(f)) && !/^(?:_?status|readme|claude|supervisor|backlog|todo)\./i.test(nm(f)));
+      const to = known.length === 1 ? known[0] : !known.length && named.length === 1 ? named[0] : null;
+      if (to) { if (!lines.has(to.key)) lines.set(to.key, []); lines.get(to.key).push(...marks); }
+    }
     for (const f of desc.files) {
       const ls = lines.get(f.key);
-      if (!ls || !ls.length) continue;
-      const pn = parsePlanMarkdown(ls.join('\n'), { min: 1 });
-      if (!pn) continue;
-      const pk = `file:${f.key}`;
-      const p = this.plans.get(pk);
-      if (!p && !(runner && pn.kind === 'phases')) continue;
-      const items = pn.items.filter((it) => !p || p.items.has(it.k) || p.src !== 'workflow');
-      const differs = !p || items.some((it) => { const o = p.items.get(it.k); return !o || o.s !== it.s || !!o.hold !== !!it.hold; });
-      if (differs && this.docs.has(f.key)) this._doc(f.key, null); // 기억한 본문과 표식이 다르면 그 본문은 낡음(그 사이 다른 곳에서 고침)
-      this._set(pk, { src: p ? p.src : 'phases', title: p ? p.title : f.base, owner: runner || nodeId, strong: !!runner }, items, nodeId, t, { merge: true, touch: true, text: false });
+      if (ls && ls.length) this._seen(f, ls.join('\n'), nodeId, t);
     }
+  }
+
+  /** 파일 일부를 본 관찰(셸 출력·부분 Read) → 아는 계획에 합침(러너 아래 단계 표식·제목이면 새 계획도). 안 본 단계는 지우지 않음 */
+  _seen(f, text, nodeId, t) {
+    const pn = parsePlanMarkdown(text, { min: 1 });
+    if (!pn) return;
+    const runner = this._runnerOf(nodeId);
+    const pk = `file:${f.key}`;
+    const p = this.plans.get(pk);
+    if (!p && !(runner && pn.kind === 'phases')) return;
+    if (p && p.src === 'phases' && pn.kind !== 'phases') return; // 단계 설계서 일부의 체크박스 줄은 단계가 아님
+    const items = pn.items.filter((it) => !p || p.items.has(it.k) || p.src !== 'workflow');
+    const differs = !p || items.some((it) => { const o = p.items.get(it.k); return !o || (!it.nos && (o.s !== it.s || !!o.hold !== !!it.hold)); });
+    if (differs && this.docs.has(f.key)) this._doc(f.key, null); // 기억한 본문과 표식이 다르면 그 본문은 낡음(그 사이 다른 곳에서 고침)
+    this._set(pk, { src: p ? p.src : 'phases', title: p ? p.title : f.base, owner: runner || nodeId, strong: !!runner }, items, nodeId, t, { merge: true, touch: true, text: false });
   }
 
   // ── Workflow ──
@@ -459,7 +507,10 @@ export class PlanTracker {
       const old = p.items.get(it.k);
       if (it.del) { if (old && newer(old)) { p.items.delete(it.k); p.gone.set(it.k, t); changed = true; } continue; }
       if (!old && p.gone.has(it.k) && p.gone.get(it.k) > t && !force) continue; // 나중에 지워진 항목의 옛 관찰
-      if (old && !newer(old)) { if (text && it.t && old.t === old.k && clip(it.t, PLAN.TEXT) !== old.t) { old.t = clip(it.t, PLAN.TEXT); changed = true; } continue; } // 옛 관찰이라도 맨 '단계 N' 글에는 제목을 채움
+      // 맨 '단계 N' 글에는 (옛 관찰·글을 안 바꾸는 부분 관찰이라도) 제목이 붙은 글을 채움
+      if (old && it.t && (old.t === old.k || isBare(old.t)) && !isBare(it.t) && clip(it.t, PLAN.TEXT) !== old.t) { old.t = clip(it.t, PLAN.TEXT); changed = true; }
+      if (old && !newer(old)) continue;
+      if (old && it.nos && merge) { old.seen = Math.max(old.seen, t); continue; } // 상태를 말하지 않는 부분 관찰(제목만 본 줄) — 아는 상태 유지
       const s = STATUS.has(it.s) ? it.s : 'pending';
       const tt = text || !old ? clip(it.t, PLAN.TEXT) : old.t;
       if (old && old.s === s && old.t === tt && !!old.hold === !!it.hold) { old.seen = Math.max(old.seen, t); continue; }
@@ -482,7 +533,7 @@ export class PlanTracker {
     if (!merge) order = [...obs.map((x) => x.k).filter((k) => p.items.has(k)), ...p.order.filter((k) => p.items.has(k) && !seenKeys.has(k))];
     else order = [...p.order.filter((k) => p.items.has(k)), ...obs.map((x) => x.k).filter((k) => p.items.has(k) && !p.order.includes(k))];
     order = [...new Set(order)];
-    if (p.src === 'phases') order.sort((a, b) => (Number((/\d+/.exec(a) || [])[0]) || 0) - (Number((/\d+/.exec(b) || [])[0]) || 0));
+    if (p.src === 'phases') order.sort(phaseCmp);
     if (order.length !== p.order.length || order.some((k, i) => k !== p.order[i])) changed = true;
     p.order = order;
     if (touch && t >= p.byT && (p.by !== by || p.cy !== cy)) changed = true;

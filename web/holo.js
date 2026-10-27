@@ -198,6 +198,7 @@ export class HoloLayer {
     this.view = view;
     this.scene = scene;
     this.book = new HoloBook();
+    { const vw = view; this.book.nodeOf = (id) => { const x = vw.vis && vw.vis.get(id); return x ? x.node : (vw.nodes && vw.nodes.get ? vw.nodes.get(id) : null); }; this.book.clock = () => (typeof vw.clock === 'function' ? vw.clock() : Date.now()); } // 셸 머리줄 경과·꼬리 작은 상태
     this.enabled = true;
     const cap = this.cap = HOLO.MAX;
     const geo = new THREE.PlaneGeometry(1, 1);
@@ -433,7 +434,7 @@ export class HoloLayer {
         if (ph.phase === 'gone') continue;
         // 종류별 방향: shell 오른쪽 · read 왼쪽 위 · edit/write 왼쪽 · search 위 · web 오른쪽 위 · agent 아래 · skill 왼쪽 아래 · 그 밖 오른쪽 아래
         const d = holoDir(e.dir);
-        const He = e.shape === 1 ? H * 1.12 : H, We = He * (e.asp || HOLO.ASPECT);
+        const He = (e.shape === 1 ? H * 1.12 : H) * (e.mini ? HOLO.MINI_K : 1), We = He * (e.asp || HOLO.ASPECT); // 백그라운드 셸 꼬리 작은 상태
         // 그 방향에 노드 라벨이 있으면 더 띄움: Flow 는 라벨이 아래, Planet 은 위
         // 라벨 높이는 SceneView 라벨 패스가 재 둔 값(포커스면 이력까지 커짐)
         const labH = v.labelOn ? (v._labelH || 34) : 0;
@@ -590,7 +591,7 @@ export class HoloLayer {
       const T = this.tags[i], c = list[i];
       if (!c) { if (T.o.visible) T.o.visible = false; continue; }
       const e = c.e;
-      if (T.key !== e.id) { T.key = e.id; T.el.textContent = e.label.tool || e.tool || ''; T.el.style.setProperty('--hc', e.cat === 'skill' ? 'var(--skill)' : catColor(e.cat, this.tokens.isLight)); }
+      if (T.key !== e.id + (e._rk || '')) { T.key = e.id + (e._rk || ''); T.el.textContent = (e.label.tool || e.tool || '') + (e.runHead ? ' · ' + e.runHead : ''); T.el.style.setProperty('--hc', e.cat === 'skill' ? 'var(--skill)' : catColor(e.cat, this.tokens.isLight)); } // 셸 경과(Bash · 3:42)
       T.o.position.set(c.x, c.y, c.z);
       const op = String(Math.round(Math.min(1, c.fade) * 20) / 20);
       if (T.el.style.opacity !== op) T.el.style.opacity = op;
@@ -664,10 +665,10 @@ export class HoloLayer {
       const c = cand[i], e = c.e;
       // 도구명 · 대상 · (끝났으면) 결과 한 줄(exit 0 · …, 7개 파일, +12 −3). 같은 패널이 이어받으면 내용만 바뀜
       const ended = c.phase === 'flash' || c.phase === 'linger';
-      const key = e.id + (ended ? '#r' : '#t');
+      const key = e.id + (ended ? '#r' : '#t') + (e._rk || '');
       if (L.key !== key) {
         L.key = key;
-        L.b.textContent = e.label.tool;
+        L.b.textContent = e.label.tool + (e.runHead ? ' · ' + e.runHead : ''); // 셸 경과(Bash · 3:42)
         L.s.textContent = e.label.target;
         L.r.textContent = ended && e.result ? '→ ' + e.result : '';
         L.el.style.setProperty('--hc', e.cat === 'skill' ? 'var(--skill)' : catColor(e.cat, this.tokens.isLight));

@@ -21,6 +21,7 @@ const _s = new THREE.Vector3();
 const _v = new THREE.Vector3();
 const _c = new THREE.Color();
 const _c2 = new THREE.Color();
+const RUN_STALE_C = new THREE.Color('#ff7a3a'); // 실행 중 셸 정체(흐름 jobStale 과 같은 주황)
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const _mx = new THREE.Matrix4(), _mt = new THREE.Matrix4();
 const PORTAL_YAW = Math.PI / 4;                 // 포털 고리는 기본 카메라 방위(45°)를 향함
@@ -422,7 +423,7 @@ function buildOfficeFurniture(room, pal, b, C, wwall = 'back') {
   const dx = o.x + F.dispatch.x, dz = o.z + F.dispatch.z + ext;
   L.box(dx, 0.05, dz, 1.5, 0.1, 1.5, C(pal.pad));
   L.box(dx - 0.25, 0.105, dz, 0.08, 0.01, 0.6, C(pal.paper)); L.box(dx + 0.25, 0.105, dz, 0.08, 0.01, 0.6, C(pal.paper)); L.box(dx, 0.105, dz, 0.5, 0.01, 0.08, C(pal.paper));
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) G.box(dx + sx * 0.66, 0.11, dz + sz * 0.66, 0.08, 0.02, 0.08, C(_c.copy(pal.emitter).multiplyScalar(0.6)));
+  // 모서리 등은 github 활동·CI 실패 잔광 때만 켠다(drawFacilities — 흐름 포털 평소 숨김 F4 의 복셀 판, 예전엔 늘 켜짐)
   // 포털(agent) 앞 왼쪽: 받침 + 상자 고리
   const ppx = room.portal.x, ppz = room.portal.z;
   L.box(ppx, 0.08, ppz, 2.4, 0.16, 0.9, C(pal.metalDark));
@@ -521,6 +522,12 @@ function drawFacilities_(room, act, pal, tokens, t, b, dim) {
     const pz = o.z + OFFICE_FX.pantry.z - 0.55, ppx = o.x + OFFICE_FX.pantry.x;
     G.box(ppx + 0.17, 1.38, pz + 0.12, 0.03, 0.05, 0.05, room._brew ? tokens.ok : pal.ledIdle);
     if (room._brew) for (let i = 0; i < 3; i++) { const k = (t * 0.7 + i / 3) % 1; G.box(ppx + 0.2 + Math.sin(t * 2 + i) * 0.04, 1.1 + k * 0.5, pz + 0.12, 0.04 * (1 - k) + 0.01, 0.04 * (1 - k) + 0.01, 0.04 * (1 - k) + 0.01, pal.fogGlass); }
+    // 발송대 모서리 등(F4 복셀 판): github 활동이면 발광색(잔광만큼), CI 실패 잔광이면 오류색, 평소엔 꺼짐
+    if (ix && (ix.github > 0.02 || ix.ciFail)) {
+      const ddx = o.x + OFFICE_FX.dispatch.x, ddz = o.z + OFFICE_FX.dispatch.z + (room.ext || 0);
+      const lc = ix.ciFail ? tokens.error : _c.copy(pal.emitter).multiplyScalar(0.25 + 0.75 * Math.min(1, ix.github || 0));
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) G.box(ddx + sx * 0.66, 0.11, ddz + sz * 0.66, 0.08, 0.02, 0.08, lc);
+    }
     // 외부 단말(부스): 안테나 깜빡, 화면
     G.box(o.x + 11.33, 1.5, o.z + 5, 0.03, 0.42, 0.48, act.kiosk > 0 || (ix && ix.remote) ? tokens['k-workflow'] : pal.screenDim);
     G.box(o.x + 11.4, 2.7, o.z + 5, 0.08, 0.08, 0.08, act.kiosk > 0 || (ix && ix.remote) ? (Math.sin(t * 9) > 0 ? tokens.skill : pal.ledOff) : pal.ledIdle);
@@ -616,6 +623,7 @@ export function drawMachine(m, st, pal, tokens, b, kindColor) {
       if (err) c = Math.floor(t * 2.5) % 2 ? tokens.error : pal.ledOff;
       else if (ended) c = pal.ledOff;
       else if (st.flash > 0) c = _c.copy(pal.led).lerp(_c2.set(0xffffff), st.flash * 0.7);
+      else if (st.runStale) c = (i % 2 === 0) === (Math.floor(t * 0.8) % 2 === 0) ? RUN_STALE_C : pal.ledIdle; // 정체: 주황 LED 가 느리게 번갈아
       else if (status === 'idle') c = pal.ledIdle;
       else c = ((Math.floor(t * 7 + i * 1.7 + st.seed) % 3) ? pal.led : pal.ledIdle);
       G.box(x - 0.22 + (i % 2) * 0.12, yy, z + 0.415, 0.08, 0.06, 0.02, c);

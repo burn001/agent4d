@@ -8,6 +8,7 @@ import {
   jobCardModel, ownerJobsModel, laneTableModel, procCardModel,
 } from './inspector-core.mjs';
 import { isJob, isProc, jobOf } from './job-core.mjs';
+import { runCardModel } from './run-core.mjs'; // 실행 중 셸
 import { isLauncher, isRunner } from './batch-core.mjs';
 import { ctxShort, gaugeLevel } from './ctx-core.mjs';
 import { branchOf } from './session-core.mjs';
@@ -365,6 +366,12 @@ export function mountInspector(h) {
     const nd = nowDoing(n, book);
     if (nd && (nd.text || nd.tool) && n.status !== 'done') {
       parts.push(`<section class="ins-sec"><h4>${esc(tr('cards.ins.h.now'))}</h4><p class="ins-now">${nd.tool ? `<b class="ins-tool">${esc(nd.tool)}</b> ` : ''}${esc(nd.text || '')}${nd.more > 0 ? ` <small>${esc(tr('cards.ins.moreTools', { n: nd.more }))}</small>` : ''}</p></section>`);
+    }
+    // 실행 중 셸(meta.run): 경과 · 마지막 출력 · 버퍼링 추정 · 정체 · rc
+    const rm = runCardModel(n, nowMs);
+    if (rm) {
+      const rows = rm.rows.map((r) => `<dt>${esc(r.label)}</dt><dd class="k-${esc(r.key)}"${r.title ? ` title="${esc(r.title)}"` : ''}>${esc(r.value)}</dd>`).join('');
+      parts.push(`<section class="ins-sec ins-run${rm.stale ? ' stale' : ''}"><h4>${esc(tr('cards.run.h'))} <small>${esc(rm.kind === 'fg' ? 'fg' : 'bg')}</small></h4><dl class="ins-jrows">${rows}</dl></section>`);
     }
     // 컨텍스트(메인·claude -p)
     const ctx = n.meta && n.meta.ctx;

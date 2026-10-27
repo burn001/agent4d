@@ -24,6 +24,7 @@ import { ArchiveSource, isArchiveId, archiveKey, resolveArchiveDir } from './arc
 import { t } from './cli-i18n.mjs'; // 콘솔 문구(영어 기본, 한국어 로케일이면 한국어)
 import { ControlHub, handleControlAdmin, readBody } from './control.mjs'; // 화면 원격 조작
 import { sseHeaders } from './sse.mjs';
+import { configureExtJobs } from './extjobs.mjs'; // 외부 작업 등록부(상시 서버만 끝난 서술 파일 정리)
 
 export const VERSION = readVersion(); // package.json 이 근거
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -423,6 +424,7 @@ async function main() {
   else {
     manager = createRealManager({ project, session: args.session, privacy, overviewMaxRoots: cfg.overviewMaxRoots,
       archiveDir: resolveArchiveDir({ arg: args.archive, cfg }) });
+    configureExtJobs({ prune: true }); // 끝난 지 keepSec 넘은 <상태 폴더>/jobs/*.json 정리
     // 색인 전체 스캔은 부하가 크면 수십 초 걸린다. listen 을 먼저 하고 색인은 뒤에서 채운다
     // (/sessions·/state 는 진행 중인 refresh 를 기다린다). /healthz 는 즉시 응답.
   }

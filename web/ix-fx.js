@@ -1,11 +1,42 @@
 // 특별 상호작용 연출 — 3D 그리기. 순수 부분(IxModel·ixGeometry)은 ix-core.mjs.
 // SceneView(Planet)·FlowView(Flow, SceneView 상속)가 하나씩 갖는다. 복셀은 쓰지 않는다.
-// 그리기 호출 2번(선 LineSegments 1개 + 작은 정이십면체 InstancedMesh 1개) + CSS2D 라벨 풀 10개. 프레임마다 객체 생성 없음,
+// 그리기 호출 2번(굵은 선 = 인스턴스 사각 선분 1개 + 작은 정이십면체 InstancedMesh 1개) + CSS2D 라벨 풀 10개. 프레임마다 객체 생성 없음,
 // 효과가 없으면 갱신도 건너뛴다. 알파는 색을 배경으로 섞어 낸다(다크 = 가산 혼합, 라이트 = 일반 혼합).
+// 선은 WebGL 1px 고정 선(LineBasicMaterial) 대신 화면 폭 2px(상위 활동·포커스·카메라 대상 3px, ixGeometry 가 정함)의 둥근 끝 선분 셰이더다(F1).
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { IxModel, IxGeo, ixGeometry, IXGEO, IX_KEYS, ixKeyColor, ensureIxCss } from './ix-core.mjs';
+import { IxModel, IxGeo, ixGeometry, IXGEO, IX_KEYS, ixKeyColor, ensureIxCss, ixPortalPts, ixDimUnderLabels, ixLabelSizeGuess } from './ix-core.mjs';
 import { userBook, consoleLines, wantsConsole, hitRect } from './user-core.mjs'; // 사용자 콘솔
+
+// 굵은 선분: 인스턴스마다 두 끝(세계) + 색·화면 폭(px). 사각 네 꼭짓점(position.x = 0|1 끝, y = ±1 옆)을 화면 px 공간에서 펼치고
+// 조각 셰이더가 선분까지 거리로 둥근 끝·가장자리 1px 부드럽게. 화면 공간에서 선형 보간하려고 NDC(w = 1)로 낸다.
+const SEG_VS = `
+attribute vec3 iA; attribute vec3 iB; attribute vec4 iC;
+uniform vec2 uRes; uniform float uDpr;
+varying vec3 vCol; varying vec2 vP; varying float vLen; varying float vHw;
+void main() {
+  vec4 ca = projectionMatrix * modelViewMatrix * vec4(iA, 1.0);
+  vec4 cb = projectionMatrix * modelViewMatrix * vec4(iB, 1.0);
+  if (ca.w < 1e-3 || cb.w < 1e-3) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; } // 카메라 뒤 끝은 버림
+  vec2 sa = ca.xy / ca.w * 0.5 * uRes, sb = cb.xy / cb.w * 0.5 * uRes;
+  vec2 d = sb - sa; float len = length(d);
+  vec2 dir = len > 1e-4 ? d / len : vec2(1.0, 0.0); vec2 nrm = vec2(-dir.y, dir.x);
+  float hw = iC.w * uDpr * 0.5; float pad = hw + 1.0;
+  float e = position.x * 2.0 - 1.0;
+  vec2 p = mix(sa, sb, position.x) + dir * e * pad + nrm * position.y * pad;
+  float z = mix(ca.z / ca.w, cb.z / cb.w, position.x);
+  gl_Position = vec4(p / (0.5 * uRes), z, 1.0);
+  vCol = iC.rgb; vP = vec2(position.x * len + e * pad, position.y * pad); vLen = len; vHw = hw;
+}`;
+const SEG_FS = `
+varying vec3 vCol; varying vec2 vP; varying float vLen; varying float vHw;
+void main() {
+  float dx = max(max(-vP.x, vP.x - vLen), 0.0);
+  float cov = clamp(vHw + 0.5 - length(vec2(dx, vP.y)), 0.0, 1.0);
+  if (cov <= 0.0) discard;
+  gl_FragColor = vec4(vCol, cov);
+  #include <colorspace_fragment>
+}`;
 
 export class IxLayer {
   static CON_MIN_PX = 26; // 콘솔 화면이 이만큼(px) 넘을 때만 이름표
@@ -18,15 +49,20 @@ export class IxLayer {
     this.geo = new IxGeo();
     this.enabled = true;
     this.theme = view.constructor && view.constructor.modeId === 'flow' ? 'flow' : 'planet';
-    // 선
-    this.lPos = new Float32Array(IXGEO.LINES * 6);
-    this.lCol = new Float32Array(IXGEO.LINES * 6);
-    const lg = this.lGeo = new THREE.BufferGeometry();
-    lg.setAttribute('position', new THREE.BufferAttribute(this.lPos, 3).setUsage(THREE.DynamicDrawUsage));
-    lg.setAttribute('color', new THREE.BufferAttribute(this.lCol, 3).setUsage(THREE.DynamicDrawUsage));
-    lg.setDrawRange(0, 0);
-    this.lMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 1, depthWrite: false });
-    this.lines = new THREE.LineSegments(lg, this.lMat);
+    // 굵은 선(F1): 인스턴스 사각 선분. 상한 IXGEO.LINES 그대로, 버퍼만 채운다
+    this.lA = new Float32Array(IXGEO.LINES * 3);
+    this.lB = new Float32Array(IXGEO.LINES * 3);
+    this.lC = new Float32Array(IXGEO.LINES * 4);
+    const lg = this.lGeo = new THREE.InstancedBufferGeometry();
+    lg.setAttribute('position', new THREE.Float32BufferAttribute([0, -1, 0, 1, -1, 0, 1, 1, 0, 0, 1, 0], 3));
+    lg.setIndex([0, 1, 2, 0, 2, 3]);
+    lg.setAttribute('iA', new THREE.InstancedBufferAttribute(this.lA, 3).setUsage(THREE.DynamicDrawUsage));
+    lg.setAttribute('iB', new THREE.InstancedBufferAttribute(this.lB, 3).setUsage(THREE.DynamicDrawUsage));
+    lg.setAttribute('iC', new THREE.InstancedBufferAttribute(this.lC, 4).setUsage(THREE.DynamicDrawUsage));
+    lg.instanceCount = 0;
+    this.lU = { uRes: { value: new THREE.Vector2(1, 1) }, uDpr: { value: 1 } };
+    this.lMat = new THREE.ShaderMaterial({ uniforms: this.lU, vertexShader: SEG_VS, fragmentShader: SEG_FS, transparent: true, depthWrite: false });
+    this.lines = new THREE.Mesh(lg, this.lMat);
     this.lines.frustumCulled = false;
     this.lines.renderOrder = 3;
     scene.add(this.lines);
@@ -71,7 +107,7 @@ export class IxLayer {
     this.applyTheme(view.tokens);
     this._env = {
       light: !!this.isLight,
-      theme: this.theme, reduced: false,
+      theme: this.theme, reduced: false, // update 첫 줄에서 view.reduced 로 맞춘다(F6 — FlowView 는 생성 뒤에 reduced 를 정함)
       pos: (id) => {
         const v = this.view.vis.get(id);
         if (!v || v.gone || v.hidden || v.exiting != null || !v.group.visible || (v.scopeD ?? 1) < 0.5) return null; // 페이드 중엔 그대로(투명도는 fade)
@@ -82,9 +118,46 @@ export class IxLayer {
       fade: (id) => { const v = this.view.vis.get(id); return v && v.projA != null ? v.projA : 1; }, // 프로젝트 페이드
       consoleRoots: () => this.consoleRoots(),
       consoleInfo: (root) => this.consoleInfo(root),
+      vip: (id) => this._vip(id),   // 굵은 선 3px · 스테이션 화면 하한 대상
+      ppu: (id) => this._ppu(id),   // F2: 그 노드 자리의 세계 1단위당 화면 px(vip 아니면 0)
+      edge: (id, dx, dz) => this._edge(id, dx, dz), // F3 remote: 노드에서 방향 (dx,dz) 로 섬 가장자리까지 거리(전체 보기만, 없으면 null)
+      deck: this.theme === 'planet', // Planet 3D: db·tests·batch·remote 스테이션을 행성 아래 갑판에(IX_PLANET, 흐름은 floorY)
+      ext: (id) => (this.view.deco && this.view.deco.extentOf ? this.view.deco.extentOf(id) : 1), // 궤도계 겉 반지름(본체 반지름 배) — 갑판 반지름
     };
+    this._ppuAt = -1; this._ppuMap = new Map();
     this._rootOf = (id) => this.rootOf(id);
     this.stats = { lines: 0, quads: 0, labels: 0, fx: 0 };
+  }
+
+  /** 상위 활동(홀로그램 TOP_ACTIVE 와 같은 목록)·포커스·호버·카메라 대상 */
+  _vip(id) {
+    const v = this.view, top = v.holo && v.holo._top;
+    return id === v.focusId || id === v.hoverId || id === v.camShotId || !!(top && top.has(id));
+  }
+  /** F2: vip 노드 자리의 세계 1단위당 화면 px(프레임마다 한 번), 아니면 0 */
+  _ppu(id) {
+    if (this._ppuAt !== this._frameT) { this._ppuMap.clear(); this._ppuAt = this._frameT; }
+    let k = this._ppuMap.get(id);
+    if (k !== undefined) return k;
+    k = 0;
+    const v = this.view.vis.get(id), cam = this.view.camera;
+    if (v && cam && this._vip(id)) {
+      const d = cam.position.distanceTo(v.group.position);
+      const H = (this.view.renderer && this.view.renderer.domElement.clientHeight) || this.view.container.clientHeight || 1;
+      if (d > 1e-3) k = H / (2 * d * Math.tan((cam.fov * Math.PI) / 360));
+    }
+    this._ppuMap.set(id, k);
+    return k;
+  }
+
+  /** 섬(전체 보기 군집 원 center·r) 가장자리까지 거리: |o + d·t| = r 의 양의 근 */
+  _edge(id, dx, dz) {
+    const v = this.view.vis.get(id), CV = this.view._clusterV;
+    const cl = v && v.projectId && CV ? CV.get(v.projectId) : null;
+    if (!cl || !(cl.r > 0)) return null;
+    const ox = v.group.position.x - cl.center.x, oz = v.group.position.z - cl.center.z;
+    const b = ox * dx + oz * dz, c = ox * ox + oz * oz - cl.r * cl.r, disc = b * b - c;
+    return disc < 0 ? null : -b + Math.sqrt(disc);
   }
 
   rootOf(id) {
@@ -96,6 +169,9 @@ export class IxLayer {
     }
     return cur;
   }
+
+  /** 카메라 git 붙잡기가 함께 담을 그 노드 뿌리의 포털 점(세계) [{x,y,z,r}] | null */
+  holdPts(id) { const root = this.rootOf(id), rp = this._env.pos(root); return rp ? ixPortalPts(this.theme, rp, Math.max(0.4, this._env.rad(root) || 0.8)) : null; }
 
   /** 콘솔을 둘 뿌리: 끝나지 않은 메인마다(사용자 이벤트를 기다리지 않음) */
   consoleRoots() {
@@ -155,7 +231,7 @@ export class IxLayer {
     return out;
   }
   _hide() {
-    this.lGeo.setDrawRange(0, 0);
+    this.lGeo.instanceCount = 0;
     this.quads.count = 0;
     for (const L of this.labels) if (L.o.visible) L.o.visible = false;
     for (const L of this.conLabels) if (L.o.visible) L.o.visible = false;
@@ -164,22 +240,28 @@ export class IxLayer {
   }
 
   update(now) {
+    this._env.reduced = !!this.view.reduced; // F6 움직임 줄이기 배선
+    this._env.floorY = this.theme === 'flow' ? (this.view.tierFloor ?? -2.2) : null; // F3 흐름 3D: db·tests·batch·remote 스테이션을 바닥에
     const m = this.model;
     m.step(now);
     this._frameT = now;
     if (!this.enabled || (!m.fx.size && !m.portal.size && !m.console.size && !this._anyMain())) { if (this._shown) this._hide(); this.stats.fx = 0; return; }
     const g = ixGeometry(m, now, this._env, this.geo);
-    // 선
-    const P = this.lPos, C = this.lCol, c = this._c;
+    this._dimUnderLabels(g); // 노드 라벨 아래 스테이션 칸은 옅게
+    // 굵은 선(F1): 두 끝 + 색 + 화면 폭(px)
+    const LA = this.lA, LB = this.lB, LC = this.lC, c = this._c;
     for (let i = 0; i < g.nl; i++) {
-      const o = i * 6;
-      for (let k = 0; k < 6; k++) P[o + k] = g.L[o + k];
+      const o = i * 6, o3 = i * 3, o4 = i * 4;
+      LA[o3] = g.L[o]; LA[o3 + 1] = g.L[o + 1]; LA[o3 + 2] = g.L[o + 2];
+      LB[o3] = g.L[o + 3]; LB[o3 + 1] = g.L[o + 4]; LB[o3 + 2] = g.L[o + 5];
       this._mix(c, g.LC[i], g.LA[i]);
-      C[o] = C[o + 3] = c.r; C[o + 1] = C[o + 4] = c.g; C[o + 2] = C[o + 5] = c.b;
+      LC[o4] = c.r; LC[o4 + 1] = c.g; LC[o4 + 2] = c.b; LC[o4 + 3] = g.LW[i];
     }
-    this.lGeo.attributes.position.needsUpdate = true;
-    this.lGeo.attributes.color.needsUpdate = true;
-    this.lGeo.setDrawRange(0, g.nl * 2);
+    const at = this.lGeo.attributes;
+    at.iA.needsUpdate = true; at.iB.needsUpdate = true; at.iC.needsUpdate = true;
+    this.lGeo.instanceCount = g.nl;
+    const rd = this.view.renderer;
+    if (rd) { rd.getDrawingBufferSize(this.lU.uRes.value); this.lU.uDpr.value = rd.getPixelRatio(); }
     // 점
     const q = this.quads;
     for (let i = 0; i < g.nq; i++) {
@@ -205,10 +287,27 @@ export class IxLayer {
       const op = (Math.round(d.alpha * 20) / 20).toFixed(2);
       if (L.el.style.opacity !== op) L.el.style.opacity = op;
       if (!L.o.visible) L.o.visible = true;
+      const sk = d.cls + '|' + d.text, sz = this._labSz;
+      if (sz && !sz.has(sk) && L.el.offsetWidth) { if (sz.size > 256) sz.clear(); sz.set(sk, [L.el.offsetWidth, L.el.offsetHeight]); } // 다음 프레임부터 잰 크기로
     }
     this._consoles(g);
     this._shown = true;
     this.stats.lines = g.nl; this.stats.quads = g.nq; this.stats.labels = g.labels.length; this.stats.fx = m.fx.size;
+  }
+
+  /** 바닥·갑판 스테이션 점·선이 노드 라벨 상자(화면) 안이면 옅게 — 외부 작업 진행 띠가 그 작업 라벨을 덮던 것(흐름·Planet 공통) */
+  _dimUnderLabels(g) {
+    if (!g.st || (!g.st.length && !(g.stl && g.stl.length)) || !this.view.labelScreenBoxes || !this.view.camera) return;
+    const dom = this.view.renderer && this.view.renderer.domElement;
+    const W = (dom && dom.clientWidth) || this.view.container.clientWidth || 1, H = (dom && dom.clientHeight) || this.view.container.clientHeight || 1;
+    const boxes = this.view.labelScreenBoxes(W, H, this._lboxes || (this._lboxes = []));
+    if (!boxes.length) return;
+    const cam = this.view.camera, p = this._p, cp = cam.position, tf = 2 * Math.tan((cam.fov * Math.PI) / 360);
+    // 점은 화면 반지름까지(o.k = 그 깊이의 세계 1단위당 px), 스테이션 글자는 잰 크기(없으면 글자 수 추정)로 겹침을 본다
+    const toS = (x, y, z, o) => { p.set(x, y, z); const d = p.distanceTo(cp); p.project(cam); if (p.z > 1 || p.z < -1) return false; o.x = (p.x * 0.5 + 0.5) * W; o.y = (-p.y * 0.5 + 0.5) * H; o.k = d > 1e-3 ? H / (d * tf) : 0; return true; };
+    const sz = this._labSz || (this._labSz = new Map());
+    this.stats.underLabel = ixDimUnderLabels(g, toS, boxes, undefined, undefined, (i, d) => sz.get(d.cls + '|' + d.text) || ixLabelSizeGuess(d.text, d.cls));
+    boxes.length = 0;
   }
 
   _anyMain() { for (const v of this.view.vis.values()) if (wantsConsole(v.node)) return true; return false; }

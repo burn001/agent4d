@@ -7,6 +7,7 @@
 import { jobOf, jobCode, jobProgress } from '../job-core.mjs';
 import { JOB2D, JOB_ALPHA, jobAnim, jobPalette, jobPill, jobOrbitArc, jobWaitFill, jobStalePulse, jobMarquee, jobBeatY, mixColor } from './flat-core.mjs';
 import { rrect } from './flat-draw.js';
+import { JOB_BODY_K, JOB_GLYPH, jobWeightK, TRACK, trackSlots, trackSpan, trackRadius, trackModel, trackLabels } from '../planet-core.mjs'; // 무게·글리프·항로(3D 와 같은 규칙)
 
 const TAU = Math.PI * 2;
 const TOP = -Math.PI / 2;
@@ -184,9 +185,10 @@ export function drawJobMoon(view, ctx, v, x, y, R, alpha, now, owner) {
   if (a < 0.01) return;
   const stale = code === 5;
   const pulse = stale ? jobStalePulse(now, v.seed, view.reduced) : 1;
+  R *= jobWeightK(jobOf(v.node), view.clock()) / JOB_BODY_K; // G2 오래 돈 만큼 무게(배치 반지름은 그대로)
   if (R < JOB2D.DOT_PX * 0.8) { ctx.globalAlpha = a * (stale ? 0.4 + 0.6 * pulse : 1); ctx.fillStyle = col; ctx.fillRect(x - 1, y - 1, 2, 2); ctx.globalAlpha = 1; return; }
-  // 궤도 흔적: 주인 둘레를 도는 위성처럼(주인–작업 거리 반지름, 작업 각도 ±ORBIT_ARC)
-  if (owner && owner._sp && !owner.hidden && !owner.gone) {
+  // 궤도 흔적: 주인 둘레를 도는 위성처럼(주인–작업 거리 반지름, 작업 각도 ±ORBIT_ARC) — 항로 자리의 작업은 drawJobTracks 가 항로로
+  if (owner && owner._sp && !owner.hidden && !owner.gone && !(view._jobSlots && view._jobSlots.has(v.id))) {
     const ox = owner._sp.x, oy = owner._sp.y, dx = x - ox, dy = y - oy, rr = Math.hypot(dx, dy);
     if (rr > R * 3) {
       const an = Math.atan2(dy, dx), ha = jobOrbitArc(rr);
@@ -200,7 +202,8 @@ export function drawJobMoon(view, ctx, v, x, y, R, alpha, now, owner) {
   ctx.globalAlpha = a; ctx.fillStyle = J.dim[code];
   ctx.beginPath(); ctx.arc(x, y, R, 0, TAU); ctx.fill();
   ctx.strokeStyle = col; ctx.lineWidth = Math.max(1, R * 0.16); ctx.stroke();
-  if (R > 3) { ctx.globalAlpha = a * 0.75; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x - R * 0.32, y - R * 0.32, R * 0.32, 0, TAU); ctx.fill(); }
+  if (R >= JOB_GLYPH.PX) glyphPlanet(ctx, code, x, y, R * 0.62, col, view.tokens.isLight, a, js.wait, pulse); // G1 상태 글리프
+  else if (R > 3) { ctx.globalAlpha = a * 0.75; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x - R * 0.32, y - R * 0.32, R * 0.32, 0, TAU); ctx.fill(); }
   // 둘레 호
   const ro = R * 1.75, lw = Math.max(1.2, R * 0.3);
   ctx.lineWidth = lw; ctx.strokeStyle = col;
@@ -221,5 +224,126 @@ export function drawJobMoon(view, ctx, v, x, y, R, alpha, now, owner) {
   }
   const foc = v.id === view.focusId || v.id === view.hoverId;
   if (foc) { ctx.globalAlpha = 0.85; ctx.strokeStyle = view.tokens.text; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(x, y, ro + lw + 2, 0, TAU); ctx.stroke(); }
+  ctx.globalAlpha = 1;
+}
+
+/**
+ * G1 Planet 2D 상태 글리프(3D·흐름 jobTop 과 같은 여섯 — 점 셋 · 재생 삼각 · 모래시계 · 체크 · 엑스 · 느낌표). gr = 글리프 반지름(px).
+ * 다크 = 밝은 상태색 + 어두운 받침, 라이트 = 진한 상태색 + 흰 받침.
+ */
+function glyphPlanet(ctx, code, gx, gy, gr, col, L, a, wf, pulse) {
+  ctx.globalAlpha = a * 0.6; ctx.fillStyle = L ? '#ffffff' : '#05080f';
+  ctx.beginPath(); ctx.arc(gx, gy, gr, 0, TAU); ctx.fill();
+  const ink = L ? mixColor(col, '#000000', 0.35) : mixColor(col, '#ffffff', 0.25);
+  ctx.globalAlpha = a; ctx.fillStyle = ink; ctx.strokeStyle = ink; ctx.lineWidth = Math.max(1, gr * 0.24); ctx.lineCap = 'round';
+  const q = gr * 0.62;
+  ctx.beginPath();
+  if (code === 1) { ctx.moveTo(gx - q * 0.55, gy - q * 0.75); ctx.lineTo(gx + q * 0.8, gy); ctx.lineTo(gx - q * 0.55, gy + q * 0.75); ctx.closePath(); ctx.fill(); }
+  else if (code === 2) { // 모래시계: 위 모래가 until 쪽으로 줄어듦
+    const f = wf >= 0 ? wf : 0.5;
+    ctx.moveTo(gx - q * 0.6, gy - q); ctx.lineTo(gx + q * 0.6, gy - q); ctx.lineTo(gx - q * 0.6, gy + q); ctx.lineTo(gx + q * 0.6, gy + q); ctx.closePath(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(gx - q * 0.4 * (1 - f), gy - q * (0.9 - 0.9 * f) - q * 0.05); ctx.lineTo(gx + q * 0.4 * (1 - f), gy - q * (0.9 - 0.9 * f) - q * 0.05); ctx.lineTo(gx, gy); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(gx - q * 0.5 * f, gy + q * 0.9); ctx.lineTo(gx + q * 0.5 * f, gy + q * 0.9); ctx.lineTo(gx, gy + q * (0.9 - 0.8 * f)); ctx.closePath(); ctx.fill();
+  } else if (code === 3) { ctx.moveTo(gx - q * 0.75, gy); ctx.lineTo(gx - q * 0.2, gy + q * 0.55); ctx.lineTo(gx + q * 0.8, gy - q * 0.55); ctx.stroke(); }
+  else if (code === 4) { const k = q * 0.62; ctx.moveTo(gx - k, gy - k); ctx.lineTo(gx + k, gy + k); ctx.moveTo(gx + k, gy - k); ctx.lineTo(gx - k, gy + k); ctx.stroke(); }
+  else if (code === 5) { ctx.globalAlpha = a * pulse; ctx.moveTo(gx, gy - q * 0.85); ctx.lineTo(gx, gy + q * 0.15); ctx.stroke(); ctx.beginPath(); ctx.arc(gx, gy + q * 0.62, Math.max(0.8, gr * 0.14), 0, TAU); ctx.fill(); }
+  else { for (let i = -1; i <= 1; i++) { ctx.moveTo(gx + i * q * 0.65 + gr * 0.12, gy); ctx.arc(gx + i * q * 0.65, gy, Math.max(0.8, gr * 0.12), 0, TAU); } ctx.fill(); }
+  ctx.lineCap = 'butt';
+}
+
+/** 항로 자리(주인마다 끝나지 않은 작업 TRACK.PER_OWNER 개 — 3D 와 같은 trackSlots). 0.5초마다 view._jobSlots 에 */
+export function jobTrackSlots(view, now) {
+  if (view._jobSlots && now - (view._jobSlotsAt || -1e9) < 0.5 && now >= view._jobSlotsAt) return view._jobSlots;
+  view._jobSlotsAt = now;
+  const items = [];
+  for (const v of view.vis.values()) {
+    if (v.gone || v.hidden || !isJobVis(v)) continue;
+    items.push({ id: v.id, owner: v.node.parentId, job: jobOf(v.node) });
+  }
+  return (view._jobSlots = trackSlots(items));
+}
+
+/**
+ * 안 A Planet 2D 항로(노드 아래 층): 위에서 본 원 항로 — 주인 중심 · 반지름 = 주인–작업 거리(궤도계 안쪽이면 바깥으로).
+ * 지나온 항로 = 탐사선 쪽으로 굵고 진해지는 항적(예상 비율이면 점선) · 남은 항로 = 옅은 점선 · 도착·출발 관문(작은 고리) · 관문 글자(분 단위).
+ * 대기 = 앞쪽 12칸 눈금이 until 쪽으로 · 비율 모름 = 전체 흐린 점선 + 혜성 꼬리 · 정체 = 식은 항적 · 끝·실패 = 그리지 않음(탐사선만).
+ * ownerExt(v) = 주인 궤도계 겉 반지름(px), 분리 프로세스 아래 계기는 건너뜀(skip(v)).
+ */
+export function drawJobTracks(view, ctx, now, s, ownerExt, skip) {
+  const slots = jobTrackSlots(view, now);
+  if (!slots.size) return;
+  const J = pal(view), L = !!view.tokens.isLight, nowMs = view.clock();
+  ctx.save();
+  for (const id of slots) {
+    const v = view.vis.get(id);
+    if (!v || !v._on || v.hidden || v.gone || !v._sp || (skip && skip(v))) continue;
+    const ov = view.vis.get(view.parentOf.get(v.id) || v.node.parentId);
+    if (!ov || ov.hidden || ov.gone || !ov._sp) continue;
+    const job = jobOf(v.node);
+    const js = v._js || syncJob(view, v, now);
+    if (!job || !js) continue;
+    const code = js.code;
+    const alpha = (v.scopeK ?? 1) * (v.exitF ?? 1) * (v.projA ?? 1);
+    if (alpha < 0.03 || code === 0 || code === 3 || code === 4) continue;
+    const ox = ov._sp.x, oy = ov._sp.y, dx = v._sp.x - ox, dy = v._sp.y - oy;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 6) continue;
+    const rr = trackRadius(dist, ownerExt(ov) || 0);
+    const m = trackModel(job, code, nowMs, rr / Math.max(1e-6, s), js.p >= 0 ? js.p : null);
+    if (!(m.span > 0)) continue;
+    const an = Math.atan2(dy, dx), dir = (v.seed * 7) % 2 < 1 ? 1 : -1;
+    const A = (u) => an + dir * (u - m.p) * m.span; // u = 0 출발 · 1 도착
+    const col = J.c[code];
+    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineCap = 'round';
+    // 남은 항로(옅은 점선) — 대기는 12칸 눈금
+    if (m.mode === 'wait') {
+      for (let k = 0; k < 12; k++) {
+        const u0 = m.p + ((1 - m.p) * (k + 0.2)) / 12, u1 = m.p + ((1 - m.p) * (k + 0.8)) / 12, lit = (k + 0.5) / 12 <= (m.wait ?? 0);
+        ctx.globalAlpha = alpha * (lit ? 0.85 : TRACK.REMAIN_A * 0.8); ctx.lineWidth = 2.6;
+        ctx.beginPath(); ctx.arc(ox, oy, rr, Math.min(A(u0), A(u1)), Math.max(A(u0), A(u1))); ctx.stroke();
+      }
+    } else {
+      ctx.globalAlpha = alpha * TRACK.REMAIN_A * (m.mode === 'spin' ? 0.8 : 1); ctx.lineWidth = 1.2; ctx.setLineDash([2, 4]);
+      if (m.mode === 'spin') ctx.lineDashOffset = view.reduced ? 0 : -now * 6;
+      ctx.beginPath(); ctx.arc(ox, oy, rr, Math.min(A(m.mode === 'spin' ? 0 : m.p), A(1)), Math.max(A(m.mode === 'spin' ? 0 : m.p), A(1))); ctx.stroke();
+      ctx.setLineDash([]); ctx.lineDashOffset = 0;
+    }
+    // 지나온 항로(항적): 탐사선 쪽으로 굵고 진하게 — 비율 모름은 혜성 꼬리 한 토막, 예상 비율은 점선, 정체는 식은 색
+    const wakeFrom = m.mode === 'spin' ? Math.max(0, m.p - 0.14) : 0;
+    if (m.p > wakeFrom + 1e-3) {
+      const N = 10;
+      if (m.mode === 'est') ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = m.mode === 'stale' ? mixColor(col, L ? '#8a6a58' : '#a08878', 0.55) : col;
+      for (let i = 0; i < N; i++) {
+        const u0 = wakeFrom + ((m.p - wakeFrom) * i) / N, u1 = wakeFrom + ((m.p - wakeFrom) * (i + 1)) / N, k = (i + 1) / N;
+        ctx.globalAlpha = alpha * (m.mode === 'wait' ? 0.3 : 0.22 + 0.78 * Math.pow(k, 1.5)) * (m.mode === 'stale' ? 0.7 : 1);
+        ctx.lineWidth = m.mode === 'wait' ? 1.2 : 1.2 + 2.6 * Math.pow(k, 1.4);
+        ctx.beginPath(); ctx.arc(ox, oy, rr, Math.min(A(u0), A(u1)), Math.max(A(u0), A(u1))); ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    }
+    // 관문(작은 고리) + 글자(분 단위로만 바뀜)
+    const gr = Math.max(2.5, Math.min(6, (v._R || 4) * 0.6));
+    for (const [u, k] of [[0, 0.45], [1, 0.85]]) {
+      if (m.mode === 'spin' && u === 1) continue;
+      const gx = ox + Math.cos(A(u)) * rr, gy = oy + Math.sin(A(u)) * rr;
+      ctx.globalAlpha = alpha * k; ctx.lineWidth = 1.6; ctx.strokeStyle = col;
+      ctx.beginPath(); ctx.arc(gx, gy, gr, 0, TAU); ctx.stroke();
+    }
+    if ((v._R || 0) >= 4) {
+      const tl = v._tl || (v._tl = { at: -1e12, code: -1, lab: null });
+      if (nowMs - tl.at >= 60000 || tl.code !== code || nowMs < tl.at) { tl.at = nowMs; tl.code = code; tl.lab = trackLabels(job, m, nowMs); }
+      ctx.font = '600 10px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      for (const [u, text, k] of [[0, tl.lab.from, 0.7], [1, tl.lab.to, 0.95]]) {
+        if (!text) continue;
+        const gx = ox + Math.cos(A(u)) * rr, gy = oy + Math.sin(A(u)) * rr - gr - 3;
+        const w = ctx.measureText(text).width + 8;
+        ctx.globalAlpha = alpha * k * 0.85; ctx.fillStyle = L ? 'rgba(255,255,255,0.88)' : 'rgba(6,12,22,0.75)';
+        rrect(ctx, gx - w / 2, gy - 13, w, 14, 4); ctx.fill();
+        ctx.globalAlpha = alpha * k; ctx.fillStyle = col; ctx.fillText(text, gx, gy);
+      }
+    }
+  }
+  ctx.restore();
   ctx.globalAlpha = 1;
 }

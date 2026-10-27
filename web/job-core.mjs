@@ -22,7 +22,10 @@ export const JOBW = {
   KEEP_ENDED: 3,     // 주인마다 남겨 둘 끝난 작업 수(서버 JOB.KEEP_ENDED 와 같은 값). 나머지는 접음(그리지 않음)
   STALE_SEC: 600,    // meta.job.staleSec 가 없을 때 정체 문턱
   WAIT_GRACE_SEC: 300, // 대기(until) 작업은 재확인 시각 + 이만큼 지나야 정체
+  LABEL_PX: 4,       // 작업 노드 몸체가 화면에서 이만큼(반지름 px) 넘으면 끝났어도 라벨 후보(가까이서 보는 작업 — 끝난 외부 작업 라벨이 사라지던 것)
 };
+/** 라벨 후보: 작업 노드이고 화면 반지름 px 가 LABEL_PX 이상(끝남·오래됨과 무관) */
+export const jobLabelNear = (n, px) => isJob(n) && px >= JOBW.LABEL_PX;
 
 /** 작업 상태 번호(셰이더·2D 색 고르기용): 0 줄 섬 · 1 진행 · 2 대기 · 3 끝 · 4 실패 · 5 정체(끝나지 않은 작업만) */
 export const JOB_CODE = { queued: 0, running: 1, waiting: 2, done: 3, failed: 4, stale: 5 };

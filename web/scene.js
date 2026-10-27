@@ -22,12 +22,14 @@ import { ExitParticles } from './exit-fx.js';
 import { nodeSubtitle } from './node-title.mjs';
 import { escapeHtml } from './html-util.mjs';
 import { t as _t } from './i18n.mjs';
-import { isJob, jobOf, jobLabelKey } from './job-core.mjs'; // 작업 노드
-import { BATCH, batchFold, isLauncher, isGuessLink, deviceInfo, deviceSummary, nodeTags, rearmStandby } from './batch-core.mjs';
+import { isJob, jobLabelNear } from './job-core.mjs'; // 작업 노드 · 가까운 작업 라벨
+import { RUNW, runOf, runVisStatus, runVis, runTagTip, runStatusText, runLabelOrder } from './run-core.mjs'; // 실행 중 셸
+import { BATCH, batchFold, isLauncher, isGuessLink, deviceInfo, deviceSummary, nodeTags, rearmStandby, clockLabelKey } from './batch-core.mjs';
 import { sessionColorMap, nodeSessIdx } from './multi-core.mjs';
 import { sessBadgeHtml, branchOf } from './session-core.mjs';
 import { SessionFx } from './session-fx.js';
 import { IxLayer } from './ix-fx.js';
+import { ixSeedEvent } from './ix-core.mjs';
 import { ProjFade, nodeFade } from './proj-fade.mjs';
 
 const TOKEN_NAMES = ['bg', 'fog', 'grid', 'link', 'text', 'k-main', 'k-subagent', 'k-workflow',
@@ -422,6 +424,7 @@ export class SceneView {
     for (const t of node.openTools || []) this.toolStart(node.id, { ...t, toolUseId: t.toolUseId, ts: t.startedAt }, true);
     this._syncSkill(v);
     this._touchDevice(node.parentId);
+    if (this.ix) { const se = ixSeedEvent(node); if (se) this.ix.event(se); } // 외부 작업 진행 띠를 스냅샷에서 바로(다음 진행 이벤트를 기다리지 않음)
     this.layoutDirty = true;
   }
 
@@ -536,7 +539,8 @@ export class SceneView {
   }
 
   _styleVis(v) {
-    const t = this.tokens; const st = v.node.status;
+    const t = this.tokens; const rv = v.node.meta && v.node.meta.run ? runVis(v.node, this.clock()) : null;
+    const st = rv ? runVisStatus(v.node, this.clock()) : v.node.status;
     const base = this.kindColor(v.kind);
     const c = this._tmpC.copy(base);
     if (st === 'done') {
@@ -549,6 +553,7 @@ export class SceneView {
     }
     // 세션 색: 같은 프로젝트 live 메인이 여럿이면 메인 도형을 그 세션 색으로
     if (v.sessC && v.kind === 'main' && !v.node.parentId && !ENDED_OK(st)) c.lerp(v.sessC, 0.8);
+    if (rv === 'stale') c.lerp(this._runStaleC || (this._runStaleC = new THREE.Color('#ff7a3a')), 0.65); // 실행 중 셸 정체: 정체 주황(작업 정체와 같은 색)
     v.mat.color.copy(c);
     v.mat.emissive.copy(c);
     const sk = v.scopeK ?? 1; // 전체 보기 희미 처리(다른 프로젝트 0.15, recent 루트 0.35). 단일 세션은 1
@@ -614,6 +619,9 @@ export class SceneView {
     return m;
   }
 
+  /** 시계로만 바뀌는 표시(정체· 실행 경과·정체 모습)가 바뀜: 라벨 다시, 실행 중 셸이면 모습도 */
+  _clockRefresh(v) { this._labelText(v); if (runOf(v.node)) this._styleVis(v); }
+
   _labelText(v) {
     const n = v.node;
     const name = trunc(n.label || n.id, 24);
@@ -622,7 +630,7 @@ export class SceneView {
     const job = isJob(n); // 작업 노드
     const kindName = v.device ? _t('scene.kind.device') : v.dockK ? _t('scene.kind.dock') : job ? _t('cards.job.kind') : (KIND_LABEL[v.kind] || v.kind);
     // 작업: 상태는 꼬리표(진행·대기·정체·rc)가 말하므로 둘째 줄은 종류만
-    const sub = job ? kindName : `${kindName} · ${waiting ? _t('scene.waitingSub') : v.standby ? _t('scene.standby') : (STATUS_LABEL[n.status] || n.status || '')}`;
+    const sub = job ? kindName : `${kindName} · ${waiting ? _t('scene.waitingSub') : v.standby ? _t('scene.standby') : runStatusText(n, this.clock(), (x) => STATUS_LABEL[x] || x || '')}`; // 실행 중 셸: 정체·작업 중
     const tools = v.icons.size > 1 ? ' · ' + _t('scene.tools', { n: v.icons.size }) : '';
     // 세션·claude -p 노드는 라벨이 역할 표기("메인 · 프로젝트")라 자동 제목(meta.title)을 이름 아래 흐린 한 줄로
     const st = nodeSubtitle(n);
@@ -630,9 +638,9 @@ export class SceneView {
     const stHtml = st ? `<span class="ntitle" title="${escapeHtml(st)}">${escapeHtml(st)}</span>` : '';
     // 꼬리표: 이어받음·회차 #k·연결 추정·재무장 ×N·추정 소속/외부 작업, 장치는 회차 집계 한 줄
     const tags = nodeTags(n, this._nodeMap(), this.clock());
-    if (job) v._jobKey = jobLabelKey(jobOf(n), this.clock()); // 시계로만 바뀌는 정체 표시를 _exitPass 가 다시 그림
+    v._jobKey = clockLabelKey(n, this.clock()); // 시계로만 바뀌는 정체·실행 경과 표시를 _exitPass 가 다시 그림
     const spt = spawnTag(n); if (spt) tags.push(spt); // 띄움 꼬리표
-    const tgHtml = tags.length ? `<span class="ntags">${tags.map((x) => `<i>${escapeHtml(x)}</i>`).join('')}</span>` : '';
+    const tgHtml = tags.length ? `<span class="ntags">${tags.map((x) => { const tp = runTagTip(x, n); return `<i${tp ? ` title="${escapeHtml(tp)}"` : ''}>${escapeHtml(x)}</i>`; }).join('')}</span>` : ''; // 버퍼링? 꼬리표는 툴팁(이유별: python -u 권고·파이프·출력 버림)
     const devHtml = v.device && v.devInfo ? `<span class="ndev">${escapeHtml(deviceSummary(v.devInfo))}</span>` : '';
     v._extraH = (tgHtml ? 13 : 0) + (devHtml ? 13 : 0);
     const sb = v.sessIdx != null && v.kind === 'main' && !n.parentId ? sessBadgeHtml(v.sessIdx, n.meta && n.meta.ctx, branchOf(n)) : ''; // 세션 색·브랜치·컨텍스트
@@ -820,7 +828,7 @@ export class SceneView {
       const cm = this.clock();
       for (const v of this.vis.values()) {
         if (v.exiting != null || v.gone) this._unexit(v);
-        if (v._jobKey != null && jobLabelKey(jobOf(v.node), cm) !== v._jobKey) this._labelText(v); // 정체 표시(시계)
+        if (v._jobKey != null && clockLabelKey(v.node, cm) !== v._jobKey) this._clockRefresh(v); // 정체· 실행 경과(시계)
       }
       return;
     }
@@ -838,7 +846,7 @@ export class SceneView {
       const ago = v.node.endedAt ? (clockMs - Date.parse(v.node.endedAt)) / 1000 : -1;
       const standby = v.kind === 'monitor' && !v.foldHidden && rearmStandby(v.node, nodes.get(v.node.parentId), ago);
       if (standby !== !!v.standby) { v.standby = standby; this._labelText(v); }
-      if (v._jobKey != null && jobLabelKey(jobOf(v.node), clockMs) !== v._jobKey) this._labelText(v); // 정체 표시(시계)
+      if (v._jobKey != null && clockLabelKey(v.node, clockMs) !== v._jobKey) this._clockRefresh(v); // 정체· 실행 경과(시계)
       let want = elig.has(id) && v.endWall != null && now - v.endWall >= linger && !standby;
       if (v.foldHidden && elig.has(id) && v.endWall != null) want = true; // 장치 안으로 접힌 노드는 연출 없이
       if (want && v.foldHidden && !v.gone) { if (v.exiting != null) this._exitingN = Math.max(0, this._exitingN - 1); v.exiting = null; v.gone = true; v.exitF = 0; this._syncHidden(v); continue; }
@@ -1118,8 +1126,15 @@ export class SceneView {
     for (const v of this.vis.values()) if (v.device) push(v.id, false, true); // 배치 장치는 회차 집계를 늘 보인다
     // 고정: 루트·섬 메인·배치 장치는 단단히(자리가 없으면 흐리게), 작업 중 노드는 'soft'(줄임 → 이름만 → 먼 자리·리더선, 그래도 없으면 숨김 — 겹친 채 남지 않음)
     for (const v of actives) if (v.sat || (this.holo && this.holo.hasOpenCat(v.id, 'skill'))) push(v.id, false, 'soft'); // 스킬 사용 중 우선
+    const runIds = runLabelOrder(this.vis.values(), this.clock()); // 오래 도는 셸(전경·백그라운드, 정체 포함): 오래 돈 몇 개는 최근 활동보다 먼저, 나머지도 후보
+    for (const id of runIds.slice(0, RUNW.LABEL_FIRST)) push(id, false, 'soft');
     for (const v of actives.slice(0, maxLabels)) push(v.id, false, 'soft');
+    for (const id of runIds) push(id, false, 'soft');
     for (const v of this.vis.values()) if (v.exiting != null && v.labelOn) push(v.id, false);
+    { // 가까운 작업 노드(끝났어도 — 접기 뒤 남은 것만 그려짐)는 라벨 후보: 끝난 지 10분 넘은 외부 작업이 근접 화면에서 라벨 없던 것
+      const f0 = H / (2 * Math.tan((this.camera.fov * Math.PI) / 360));
+      for (const v of this.vis.values()) if (!v.hidden && !v.gone && v.group.visible && isJob(v.node) && jobLabelNear(v.node, (v.mesh.scale.x * f0) / Math.max(0.01, v.group.position.distanceTo(this.camera.position)))) push(v.id, false);
+    }
     if (this.vis.size <= 12) for (const id of this.vis.keys()) push(id, false);
     else {
       // 다음 순위: 대기 중이거나 최근 10분 안에 끝난 에이전트류(위성 제외). 겹침 해소가 넘치는 것은 걸러 낸다.
@@ -1293,7 +1308,7 @@ export class SceneView {
       v.vel.z += ((v.target.z - p.z) * k - v.vel.z * c) * dt;
       p.x += v.vel.x * dt; p.y += v.vel.y * dt; p.z += v.vel.z * dt;
 
-      const st = v.node.status;
+      const st = v.node.meta && v.node.meta.run ? runVisStatus(v.node, nowMs) : v.node.status; // 오래 도는 셸은 작업 중 맥동(정체는 멈춤)
       // 크기: 등장 0.6초 + 맥동 + 오래된 done 축소
       const appear = Math.min(1, (now - v.bornAt) / 0.6);
       let target = 1;

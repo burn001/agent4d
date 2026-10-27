@@ -3,6 +3,13 @@
 //   말풍선(DOM .flow-bubble, BubbleBook) · 배치 장치 칩(진행 막대·표시등·상태 띠 5칸).
 // 1단계에서 flow2d.js 안에 있던 코드를 그대로 옮겼다 — 표현마다 다른 것은 기준점(anchorOf: 노드 자리 대신 책상 등)뿐.
 import { HOLO, PANEL, panelRows, textRows, fallbackPanel, markStyle } from '../holo-core.mjs';
+import { runRing } from '../run-core.mjs'; // 셸 머리 띠 진행 링
+
+/** 꼬리 작은 상태: 마지막(비지 않은) 줄 하나 → [{text, mark}] (holo-text.js lastRow 와 같음) */
+function lastRow(p) {
+  for (let i = p.lines.length - 1; i >= 0; i--) if (String(p.lines[i]).trim()) return [{ text: p.lines[i], mark: p.marks[i] || 'o' }];
+  return [];
+}
 import { foldSlide, easeOut } from '../exit-core.mjs';
 import { catColor } from '../flow-core.mjs';
 import { cycleProgress } from '../batch-core.mjs';
@@ -70,7 +77,7 @@ export function drawCards(view, ctx, now, s, anchorOf = null, onlyTop = false) {
       if (e.slot < 0) continue;
       const ph = book.phaseOf(e, now);
       if (!ph || ph.phase === 'gone') continue;
-      const hPx = cardPx(1.25 + 0.3 * v.r, s, { boost, minPx: top ? HOLO.MIN_PX_ACTIVE : 0 });
+      const hPx = cardPx(1.25 + 0.3 * v.r, s, { boost, minPx: top ? HOLO.MIN_PX_ACTIVE : 0 }) * (e.mini ? HOLO.MINI_K : 1); // 백그라운드 셸 꼬리 작은 상태
       if (hPx < HOLO.LOD_HIDE_PX) continue;
       const score = (foc ? 1e6 : 0) + (shot ? 5e5 : 0) + (top ? 1e5 : 0) + hPx + (e.endAt == null ? 50 : 0) + (e.panel ? 25 : 0) + (e._txt ? 1.2e5 : 0);
       cards.push({ e, v, ph, hPx, score });
@@ -144,9 +151,26 @@ function drawCard(view, ctx, { e, v, ph, hPx }, now, L, anchorOf) {
   // 신호 열화: 그 세션 카드 글이 가끔 ▒·? 로 깨졌다 돌아옴(표시만, 원문 그대로)
   const dg = DEG.on && !DEG.reduced ? degOf(e.node) : 0, gs = dg > 0 ? (e._gs ?? (e._gs = seedOf(e.id))) : 0;
   const gl = (str, i) => (dg > 0 ? glitchAt(str, dg, DEG.t, gs + i * 131) : str);
-  ctx.fillText(gl(fitChars((secret ? '🔒 ' : '') + title, cols), 0), x0 + 5, y0 + hh / 2 + 1);
+  let tcols = cols;
+  if (e.runHead && !secret) { // 셸 경과: 머리 띠 오른쪽 [링] 3:42
+    const rc = e.runStale ? (L ? '#c2410c' : '#fb923c') : ink;
+    const rt = e.runHead, rw = Math.ceil(rt.length * fs * 0.62) + 4;
+    ctx.textAlign = 'right'; ctx.fillStyle = rc;
+    ctx.fillText(rt, x0 + w - 5, y0 + hh / 2 + 1);
+    let used = rw;
+    if (e.runLong && w > 90) {
+      const r = fs * 0.36, cx = x0 + w - 5 - rw - r - 1, cy = y0 + hh / 2 + 1;
+      ctx.lineWidth = Math.max(1, fs * 0.14); ctx.strokeStyle = rc;
+      ctx.globalAlpha = alpha * 0.3; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = alpha; ctx.beginPath(); ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0.04, view.reduced ? 1 : runRing(e.runMs))); ctx.stroke();
+      used += r * 2 + 3;
+    }
+    ctx.textAlign = 'left'; ctx.fillStyle = ink;
+    tcols = Math.max(3, cols - Math.ceil(used / (fs * 0.62)));
+  }
+  ctx.fillText(gl(fitChars((secret ? '🔒 ' : '') + title, tcols), 0), x0 + 5, y0 + hh / 2 + 1);
   // 본문: 가까우면(카드 높이 ≥ PANEL.TITLE_PX) 실제 출력 줄, 멀면 머리줄만. 글 칸은 점수 높은 TEXT_MAX 장만
-  if (h < PANEL.TITLE_PX || !e._txt) { ctx.globalAlpha = 1; return; }
+  if ((h < PANEL.TITLE_PX && !(e.mini && h >= 22)) || !e._txt) { ctx.globalAlpha = 1; return; } // 작은 상태는 낮아도 한 줄
   const bodyY = y0 + hh + 4, bodyH = h - hh - 7, bodyW = w - 12;
   if (secret) {
     ctx.fillStyle = L ? '#3a4558' : '#b9c7da';
@@ -155,7 +179,7 @@ function drawCard(view, ctx, { e, v, ph, hPx }, now, L, anchorOf) {
     ctx.globalAlpha = 1;
     return;
   }
-  const rows = e._rows = textRows(h, e._rows ?? null);
+  const rows = e._rows = e.mini ? 1 : textRows(h, e._rows ?? null); // 꼬리 작은 상태 = 마지막 줄 하나
   if (rows === 0) {
     // 제목만 단계: 대상을 본문 자리에 크게
     const f2 = Math.round(Math.max(8, Math.min(13, bodyH * 0.32)));
@@ -166,7 +190,7 @@ function drawCard(view, ctx, { e, v, ph, hPx }, now, L, anchorOf) {
     ctx.globalAlpha = 1;
     return;
   }
-  const lines = panelRows(panel, rows);
+  const lines = e.mini ? lastRow(panel) : panelRows(panel, rows);
   const lh = Math.max(7, Math.min(13, bodyH / Math.max(1, Math.max(rows, lines.length))));
   const lf = Math.round(Math.max(7, lh * 0.82));
   const fN = `500 ${lf}px ${MONO}`, fB = `700 ${lf}px ${MONO}`;

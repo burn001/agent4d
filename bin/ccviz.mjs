@@ -13,6 +13,7 @@
 //   rotate-token                                   viewToken 재발급 + Worker 시크릿 갱신
 //   update [--check [--json] [--force]] [--yes]    새 릴리스 확인·클론 fast-forward·스킬 사본·서버 재시작(bin/update.mjs)
 //   ctl <명령> [값] [--client X] [--temp] [--json] | ctl clients | ctl state   열린 화면 원격 조작(bin/ctl.mjs)
+//   job add|list|find|rm|prune …                    세션 밖에서 따로 띄운 작업 등록·표시(bin/job.mjs)
 //   help | --help                                  도움말(사전 server/cli-i18n.mjs 'help')
 // 콘솔 문구는 server/cli-i18n.mjs t() — 영어 기본, 한국어 로케일이면 한국어. --lang en|ko 는 CCVIZ_LANG 으로 옮겨 자식 프로세스도 같은 언어
 //
@@ -936,6 +937,13 @@ async function main() {
     case "update": {
       // 새 릴리스 확인(--check)·git 클론 갱신·스킬 사본 갱신·서버 재시작
       const m = await import("./update.mjs");
+      process.exitCode = await m.main(argv.slice(1));
+      return;
+    }
+    case "job":
+    case "jobs": {
+      // 세션 밖에서 따로 띄운 작업 등록(서술 파일 <상태 폴더>/jobs/*.json)
+      const m = await import("./job.mjs");
       process.exitCode = await m.main(argv.slice(1));
       return;
     }

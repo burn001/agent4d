@@ -142,6 +142,8 @@ node bin/agent4d.mjs help       # 명령·옵션 전체
 
 `start` 는 따로 요청하지 않으면 로컬에만 머뭅니다. 공개 Cloudflare 터널은 `--tunnel` 을 주거나, 설정에 `"remote": true` 또는 배포된 `workerUrl` 이 있을 때만 엽니다. `--no-tunnel` 은 언제나 로컬 전용입니다. `--watch` 를 붙이면 서버가 죽었을 때 다시 띄우는 감시 프로세스도 함께 둡니다.
 
+**Claude Code 밖에서 따로 띄운 오래 도는 작업**(분리 실행한 측정, 배치 스크립트)도 프로젝트 옆에 보이게 할 수 있습니다: `node bin/agent4d.mjs job add --log run.log [--pid N] [--pattern 정규식] [--end done.flag] [--expect 2h]`. 서버가 로그를 따라 읽어 진행률·속도·남은 시간과 함께 그립니다(실시간 전용). 관리는 `job list`·`job find`·`job rm`·`job prune`.
+
 **내 데이터 없이 써 보기:**
 
 ```bash

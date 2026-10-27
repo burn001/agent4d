@@ -5,7 +5,7 @@ import { PlanetArt3D } from './art-layer3d.js';
 import { PlanetDeco } from './planet-deco.js';
 import { bodyK, JOB_BODY_K } from './planet-core.mjs';
 import { isJob, isProc, procJobId, procState, jobOf, isAutoJob, jobLaneValues, fmtRate, heatLevel } from './job-core.mjs'; // 작업 노드 = 작은 탐사선
-import { PROC, superviseLine, procName, bigNum } from './planet-proc-core.mjs'; // 분리 프로세스 연출
+import { PROC, superviseLine, procName, bigNum, isExtRig, extMeterModel } from './planet-proc-core.mjs'; // 분리 프로세스 연출 · 외부 작업 = 플랫폼 승격
 import { t as tr } from './i18n.mjs';
 const LABEL_NEAR_PX = 11;
 
@@ -15,6 +15,8 @@ export class PlanetView extends SceneView {
 
   constructor(container, labelContainer) {
     super(container, labelContainer);
+    // 움직임 줄이기(prefers-reduced-motion): 흐름(FlowView)처럼 표현이 정한다 — ix 연출(IxLayer F6)·행성 연출(PlanetDeco)이 view.reduced 를 읽는다(예전 Planet 은 정하지 않아 늘 false)
+    this.reduced = !!(typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches);
     this.deco = new PlanetDeco(this);
     for (const v of this.vis.values()) { this._planetBody(v); this.deco.attach(v); }
     // 홀로그램: 궤도계 바깥에 놓고, 궤도 위성이 투사하는 빛줄로 잇는다(흐름과 같은 HoloBook·문구, 그리기 위치만)
@@ -43,14 +45,14 @@ export class PlanetView extends SceneView {
   _planetBody(v) {
     if (v._plR) return;
     v._plR = true;
-    v.r *= isProc(v.node) ? PROC.BODY_K : isJob(v.node) ? JOB_BODY_K : bodyK(v.kind, !!v.device); // 작업은 백그라운드 명령 위성보다 작게 · 분리 프로세스는 조금 크게
+    v.r *= isProc(v.node) || isExtRig(v.node) ? PROC.BODY_K : isJob(v.node) ? JOB_BODY_K : bodyK(v.kind, !!v.device); // 작업은 백그라운드 명령 위성보다 작게 · 분리 프로세스(외부 작업 플랫폼 포함)는 조금 크게
     const r = v.r;
     if (v.kind === 'bash-bg' || v.kind === 'monitor') v.label.position.set(0, -r * 1.2 - 0.4, 0);
     else v.label.position.set(0, r * 1.2 + 0.5, 0);
     v.mesh.scale.setScalar(r);
   }
   /** 작업 노드: scene 기본 색칠(종류 색·상태 흐림) 뒤에 표시 상태 색(렌더러 시계)으로 덮는다 — PlanetDeco.jobStyle */
-  _styleVis(v) { super._styleVis(v); if (this.deco && isJob(v.node)) this.deco.jobStyle(v); if (this.deco && this.deco.proc && (isProc(v.node) || isAutoJob(v.node))) this.deco.proc.style(v); }
+  _styleVis(v) { super._styleVis(v); if (this.deco && isJob(v.node)) this.deco.jobStyle(v); if (this.deco && this.deco.proc && (isProc(v.node) || isAutoJob(v.node) || isExtRig(v.node))) this.deco.proc.style(v); }
   // ---- 분리 프로세스: 들여다보기(watch) 이벤트·meta.proc 갱신을 장부로, 감독 줄·툴팁 ----
   flowEvent(ev, opts = {}) { super.flowEvent(ev, opts); if (ev.type === 'watch' && this.deco && this.deco.proc) { this.deco.proc.event(ev); const v = this.vis.get(ev.nodeId); if (v) this._labelText(v); } }
   updateNode(id, patch = {}, opts = {}) {
@@ -85,7 +87,7 @@ export class PlanetView extends SceneView {
     if (!fx || now - this._supAt < 0.5) return;
     this._supAt = now;
     const cur = new Set();
-    if (fx.rigs.size) for (const r of fx.rigs.values()) { const p = r.v.node.parentId; if (p) cur.add(p); }
+    if (fx.rigs.size) for (const r of fx.rigs.values()) { const p = r.v.node.parentId; if (p && !r.ext) cur.add(p); } // 외부 작업 플랫폼은 감독 줄 없음
     if (fx.rigs.size) for (const p of fx.watch.pulses(this.clock())) if (p.open) cur.add(p.from);
     for (const id of cur) { const v = this.vis.get(id); if (v) this._labelText(v); }
     for (const id of this._supSet) if (!cur.has(id)) { const v = this.vis.get(id); if (v) this._labelText(v); }
@@ -109,17 +111,26 @@ export class PlanetView extends SceneView {
     const v = id && this.vis.get(id);
     if (!v) return hide();
     let pv = null, jv = null;
+    if (isExtRig(v.node)) { // 외부 작업 플랫폼: 이름 + 계기 한 줄(진행·처리율·경과 또는 예상 · ETA)
+      const m = extMeterModel(jobOf(v.node), this.clock()), r = m && m.rows[0];
+      this._tipShow(e, v.node.label || '', r ? [r.text, r.rate, r.last, m.eta ? 'ETA ' + m.eta : ''].filter(Boolean).join(' · ') : '');
+      return;
+    }
     if (isProc(v.node)) { pv = v; jv = this.vis.get(procJobId(v.node)); }
     else if (isAutoJob(v.node)) { jv = v; pv = this.vis.get(v.node.parentId) || null; if (pv && !isProc(pv.node)) pv = null; }
     if (!pv && !jv) return hide();
-    const tipEl = this._procTipEl || (this._procTipEl = Object.assign(document.createElement('div'), { className: 'holo-tip' }));
-    if (!tipEl.isConnected) { tipEl.setAttribute('role', 'tooltip'); document.body.appendChild(tipEl); }
     const now = this.clock(), job = jv ? jobOf(jv.node) : null;
     const lanes = job ? jobLaneValues(job, now).slice(0, 4).map((l) => `${l.key} ${bigNum(l.value)}${l.unit ? ' ' + l.unit : ''}${l.rate ? ' · ' + fmtRate(l.rate) : ''}`) : [];
     const heat = job ? tr('cards.heat.' + heatLevel(Number(job.heat) || 0)) : '';
+    this._tipShow(e, pv ? `${tr('cards.proc.kind')} · ${procName(pv.node)}` : (jv.node.label || ''), lanes.length ? lanes.join(' / ') + (heat ? ' · ' + heat : '') : (pv ? (pv.node.meta && pv.node.meta.title) || '' : ''));
+  }
+  /** 툴팁 한 장(굵은 머리 · 한 줄 · 안내)을 마우스 옆에 */
+  _tipShow(e, head, line) {
+    const tipEl = this._procTipEl || (this._procTipEl = Object.assign(document.createElement('div'), { className: 'holo-tip' }));
+    if (!tipEl.isConnected) { tipEl.setAttribute('role', 'tooltip'); document.body.appendChild(tipEl); }
     tipEl.textContent = '';
-    const b = document.createElement('b'); b.textContent = pv ? `${tr('cards.proc.kind')} · ${procName(pv.node)}` : (jv.node.label || '');
-    const sp = document.createElement('span'); sp.textContent = lanes.length ? lanes.join(' / ') + (heat ? ' · ' + heat : '') : (pv ? (pv.node.meta && pv.node.meta.title) || '' : '');
+    const b = document.createElement('b'); b.textContent = head;
+    const sp = document.createElement('span'); sp.textContent = line;
     const sm = document.createElement('small'); sm.textContent = tr('scene.holo.tipHint');
     tipEl.append(b, sp, sm);
     tipEl.style.setProperty('--hc', 'var(--skill)');
@@ -127,6 +138,8 @@ export class PlanetView extends SceneView {
     tipEl.style.left = Math.min(window.innerWidth - 20, e.clientX + 14) + 'px'; tipEl.style.top = Math.min(window.innerHeight - 40, e.clientY + 16) + 'px';
   }
   _disposeVis(v) { if (this.deco) this.deco.detach(v); super._disposeVis(v); }
+  /** 계기 판(자동 진행 계기 · 외부 작업 플랫폼 위 계기)도 노드 라벨이 피할 사각형 — 이웃 플랫폼 계기가 라벨을 덮던 것 */
+  _extraRects(rects) { const fx = this.deco && this.deco.proc; if (fx) for (const m of fx.meters.values()) { const r = m.rect; if (r && m.sprite.visible) rects.push([r.x, r.y, r.x + r.w, r.y + r.h]); } }
   /** 가까이서 보면 라벨이 궤도선·소행성대 위에 얹히던 것 — 본체 화면 반지름 px 가 궤도계가 다 보이는 크기(LABEL_NEAR_PX,
    *  orbitLod 2 단계와 같은 11px)를 넘으면 라벨을 궤도 쪽으로 조금 띄우고(본체 px × 0.5, 상한 34px) 라벨 뒤에 배경색 옅은 번짐(.pl-halo) */
   _labelGapPx(v, px) {

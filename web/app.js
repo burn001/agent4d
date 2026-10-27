@@ -20,6 +20,7 @@ import { mountArchiveCard } from './replay/archive-card.js'; // 보관함 설명
 import { demoTargetSpeed, nextInPlaylist, DEMO } from './replay/demo-core.mjs'; // 연속 재생
 import { mountEnv } from './env/env.js';
 import { mountLimits } from './limits.js';
+import { EvQueue, batchItems } from './ev-queue.mjs'; // SSE 이벤트 처리 예산·따라잡기 · 서버 묶음
 import { mountTimeline } from './timeline.mjs';
 import { CAT_ORDER, catColor } from './flow-core.mjs';
 import { mountCtx } from './ctx-ui.js';
@@ -82,6 +83,7 @@ const getNode = (id) => store.nodes.get(id);
 let timeline = null; // 화면 아래 이벤트 타임라인, 장면을 만든 뒤 붙인다
 let ctxUi = null;    // 컨텍스트 게이지·신호 열화
 const pauseBuf = new PauseBuffer(); // 실시간 일시정지
+let catchSaved = null, catchShownAt = 0; // 따라잡기 칩(연결 칩 원래 문구)
 let pendingSnap = null;             // 정지 중 도착한 스냅샷(mock 재개용)
 let frozenPerf = null;              // 정지한 순간의 performance.now (타임라인 시계를 멈춤)
 
@@ -606,6 +608,7 @@ function onEvent(ev, opts = {}) {
   const quiet = !!opts.quiet;
   const speed = opts.speed || 1;
   const fx = !quiet;
+  const dense = ev.coalesced > 1; // 서버가 여러 건을 하나로 정리한 이벤트 — 효과음·흐름 패킷은 생략(상태·패널은 그대로)
   // 빠른 재생에서는 포커스 노드만 말풍선
   const sayOk = fx && (speed < 16 || ev.nodeId === focusId);
   const n = store.nodes.get(ev.nodeId);
@@ -656,6 +659,13 @@ function onEvent(ev, opts = {}) {
     case 'tool-end':
       if (n) { n.openTools = (n.openTools || []).filter((t) => t.toolUseId !== ev.toolUseId); view.toolEnd(n.id, ev); }
       break;
+    case 'tool-summary': // 서버 몰림 정리: 짝이 맞은 짧은 도구 n건(시작·끝 대신 한 건) — 패널 한 줄, 홀로그램은 원문으로 온 마지막 것
+      if (n && Array.isArray(ev.ids) && ev.ids.length) {
+        const ids = new Set(ev.ids), open = (n.openTools || []).filter((t) => ids.has(t.toolUseId));
+        if (open.length) { n.openTools = n.openTools.filter((t) => !ids.has(t.toolUseId)); for (const t of open) view.toolEnd(n.id, { type: 'tool-end', nodeId: n.id, toolUseId: t.toolUseId, tool: t.tool, cat: t.cat, ok: true, ts: ev.ts }); }
+      }
+      if (art && Array.isArray(ev.arts)) for (const a of ev.arts) art.event({ ...a, nodeId: ev.nodeId, projectId: ev.projectId, rootSessionId: ev.rootSessionId, ts: ev.ts }, { quiet: true, speed }); // 작업 대상 장부는 빠짐없이(연출 없이)
+      break;
     case 'text':
       if (fx) view.ripple(ev.nodeId);
       if (sayOk && ev.role === 'assistant' && ev.text) view.say(ev.nodeId, ev.text, { type: 'text' });
@@ -692,12 +702,12 @@ function onEvent(ev, opts = {}) {
   // 흐름 연출·타임라인: 라이브·재생 같은 경로. 스크럽·밀린 이벤트(quiet)는 건너뛴다
   if (fx) {
     activity.note(ev, clockFn()); // 자동 선곡 지표(밀린·스크럽 이벤트는 세지 않음)
-    if (view.flowEvent) view.flowEvent(ev, { speed });
+    if (view.flowEvent && !dense) view.flowEvent(ev, { speed });
     timeline.push(ev, store.nodes.get(ev.nodeId) || ev.node || null);
   }
-  director.noteEvent(ev);
+  director.noteEvent(ev, { quiet, batch: !!opts.batch, speed }); // git 붙잡기는 quiet·서버 묶음·몰림 정리·8배속↑ 이면 안 함
   panel.add(ev);
-  sfx.onEvent(ev, { node: store.nodes.get(ev.nodeId) || ev.node || null, speed, quiet, replay: !!opts.replay });
+  sfx.onEvent(ev, { node: store.nodes.get(ev.nodeId) || ev.node || null, speed, quiet: quiet || dense, replay: !!opts.replay });
   if (env) env.noteEvent(ev, { quiet });
   statsDirty = true;
 }
@@ -864,11 +874,38 @@ let connSaved = null;
 let ctl = null; // 화면 원격 조작: 데이터 SSE 에 화면 id 를 붙여 명령도 받는다(mountControl, 아래)
 function setConn(state, text) {
   if (pauseBuf.paused) { connSaved = [state, text]; return; } // 정지 중엔 정지 문구 유지(재개 때 복원)
+  if (catchSaved) { catchSaved = [state, text]; return; } // 따라잡는 동안엔 그 문구(끝나면 복원)
   const c = $('conn'); c.className = 'conn ' + state; c.querySelector('b').textContent = text; c.title = text;
 }
 
+// SSE 이벤트는 바로 처리하지 않고 프레임마다 예산(약 6ms)만큼 — 몰리면 앞부분은 quiet 로 따라잡고 연결 칩에 '따라잡는 중 n'
+function showCatchup(n) {
+  const c = $('conn');
+  if (!n) {
+    if (!catchSaved) return;
+    const prev = catchSaved; catchSaved = null; catchShownAt = 0;
+    if (!pauseBuf.paused) setConn(...prev);
+    return;
+  }
+  if (pauseBuf.paused || replaying) return; // 정지 문구·재생 상태가 우선(정지 중엔 큐가 pauseBuf 로 바로 넘김)
+  if (!catchSaved) catchSaved = [c.className.replace(/^conn\s*/, '').split(' ')[0] || 'ok', c.querySelector('b').textContent];
+  const t = performance.now();
+  if (catchShownAt && t - catchShownAt < 250) return; // 글자 갱신은 초당 4번까지
+  catchShownAt = t;
+  c.className = 'conn wait catchup'; c.querySelector('b').textContent = tr('app.conn.catchup', { n }); c.title = tr('app.conn.catchupTitle', { n });
+}
+const evq = new EvQueue({
+  apply: (it, { quiet }) => {
+    if (it.fn) { it.fn(); return; }
+    onEvent(it.ev, quiet ? { quiet: true } : it.batch ? { batch: true } : undefined); // 서버 묶음으로 온 것 표지
+  },
+  onCatchup: showCatchup,
+});
+document.addEventListener('visibilitychange', () => evq.wake()); // 숨기면 rAF 가 멈춤 → 타이머로 quiet 처리
+
 function disconnect() {
   clearTimeout(retryTimer);
+  evq.clear(); // 남은 것은 새 연결의 snapshot·since 가 대신함
   setLoading('');
   if (es) { if (ctl) ctl.unbind(es); es.close(); es = null; }
   if (mockSrc) { mockSrc.close(); mockSrc = null; }
@@ -963,15 +1000,18 @@ function connect() {
   const q = all ? { scope: 'all' } : { session: sel.scope === 'session' ? sel.sessionId : 'auto' };
   if (!all) streamAll = false;
   refreshScopeUi();
+  q.batch = '1'; // 묶음 이벤트(event: batch)를 받을 줄 앎
   const src = (es = new EventSource(relApi('events', ctl ? { ...q, ...ctl.query() } : q)));
   if (ctl) ctl.bind(src); // control·ctl-hello 이벤트
   src.addEventListener('snapshot', (e) => {
     if (src !== es) return;
     setLoading('');
+    evq.clear(); // snapshot 이 앞 이벤트를 대신함(넘친 연결의 다시 맞추기 포함)
     try { const d = JSON.parse(e.data); if (all) onSnapshotAll(d); else onSnapshot(d); } catch (err) { console.warn('snapshot parse', err); }
   });
-  src.addEventListener('ev', (e) => { if (src !== es) return; try { onEvent(JSON.parse(e.data)); } catch (err) { console.warn('ev parse', err); } });
-  src.addEventListener('projects', (e) => { if (src !== es) return; try { onProjects(JSON.parse(e.data)); } catch (err) { console.warn('projects parse', err); } });
+  src.addEventListener('ev', (e) => { if (src !== es) return; try { evq.push({ ev: JSON.parse(e.data) }); } catch (err) { console.warn('ev parse', err); } }); // 예산 큐(JSON 풀기는 메시지 때 — 예산 안에 넣으면 따라잡기가 2～3배 느려짐, 실측)
+  src.addEventListener('batch', (e) => { if (src !== es) return; try { for (const it of batchItems(JSON.parse(e.data))) { it.batch = true; evq.push(it); } } catch (err) { console.warn('batch parse', err); } }); // 서버가 몰림 창을 정리해 보낸 묶음(뒤쪽만 연출)
+  src.addEventListener('projects', (e) => { if (src !== es) return; try { const d = JSON.parse(e.data); evq.push({ fn: () => onProjects(d) }); } catch (err) { console.warn('projects parse', err); } }); // 이벤트와 순서 유지
   src.addEventListener('limits', (e) => { if (src !== es) return; try { lg.set(JSON.parse(e.data)); } catch (err) { console.warn('limits parse', err); } });
   src.addEventListener('root', (e) => {
     if (src !== es || replaying) return; // 재생 중엔 자동 전환 무시
@@ -1271,7 +1311,7 @@ async function setPaused(on, { drop = false } = {}) {
   if (on === pauseBuf.paused || resuming) return;
   if (on) {
     if (replaying) return;
-    const cur = $('conn'); connSaved = [cur.className.replace(/^conn\s*/, '').split(' ')[0] || 'ok', cur.querySelector('b').textContent];
+    const cur = $('conn'); connSaved = catchSaved || [cur.className.replace(/^conn\s*/, '').split(' ')[0] || 'ok', cur.querySelector('b').textContent]; catchSaved = null; // 따라잡기 문구는 저장하지 않음
     pauseBuf.pause(Date.now());
     freezeAll(true);
     pauseLabel(); pauseConn();
@@ -1383,7 +1423,8 @@ setInterval(() => {
 
 // 시험용 핸들(콘솔·자동화 확인용)
 window.__ccviz = {
-  store, get director() { return director; }, panel, onEvent, onSnapshot, sfx, music, sound, replayUI: ui,
+  store, evq, // 이벤트 처리 예산 큐(stats·length)
+  get director() { return director; }, panel, onEvent, onSnapshot, sfx, music, sound, replayUI: ui,
   get view() { return view; }, get viewMode() { return viewMode; }, switchView,
   replay: () => eng, startReplay, stopReplay, get replaying() { return replaying; },
   get fps() { return fps; },

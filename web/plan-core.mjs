@@ -13,6 +13,7 @@ export const PLAN_UI = {
   NEXT_N: 2,          // 판에 보이는 다음 단계 수(지금 단계 뒤)
   BASE_PX: 180,       // 보드 DOM 기준 폭(px) — 화면 크기는 월드 크기 × 원근 배율로 scale(글자도 함께)
   HOLO_H_K: 1.5,      // 보드 높이 = 그 표현 일반 홀로그램 모니터 높이 × 이 배(폭은 모니터와 같음)
+  SIZE_K: 2,          // 보드 크기 배수(박사님 "Plan board size -> 2x") — 월드 폭·높이에 곱함 → 화면 배율이 함께 2배라 글자·막대·칸·여백 모두 2배. 앵커 오프셋·모니터 기준(holo·BOOST)은 그대로
   VX_MON_H: 1.0,      // 복셀 모니터(voxel/office-core MON.H·ASP — 시험이 같은지 확인)
   VX_MON_ASP: 1.62,
   BOOST: { flow: [30, 10], voxel: [64, 1.9] }, // 활동 노드 모니터와 같은 최소 크기 키움 [모니터 최소 높이 px, 배율 상한] (holo-core HOLO.MIN_PX_ACTIVE·BOOST_MAX, office-core MON.MIN_PX·BOOST)
@@ -20,7 +21,7 @@ export const PLAN_UI = {
   DROP_K: 0.5,        // 보드 아래 변 = 앵커 중심보다 반지름 × 이만큼 아래(3D 는 y, 2D 는 화면 아래 = +z)
   HIDE_PX: 14,        // 화면 폭이 이보다 작으면 숨김(아주 먼 전체 보기 — 홀로그램 LOD 와 같은 뜻)
   LOD_PX: 96,         // 화면 폭이 이보다 작으면 간략(출처 글리프·완료/전체·막대·칸만)
-  S_MAX: 4,           // 원근 배율 상한(아주 가까울 때 — 자리는 그대로, 크기만)
+  S_MAX: 8,           // 원근 배율 상한(아주 가까울 때 — 자리는 그대로, 크기만). 크기 2배에 맞춰 4 → 8
   HOT_MS: 6000,       // 바뀐 뒤 이만큼 밝게
   FX_MS: 1600,        // 항목 변경 연출 길이
   DEL_MS: 1100,       // 지운 항목 잔상
@@ -212,7 +213,7 @@ export function holoMonitor(worldR, mode = 'flow') {
 export function boardWorld(worldR, mode = 'flow', holo = null) {
   const r = Math.max(0.1, worldR || 1);
   const m = holo && holo.w > 0 && holo.h > 0 ? holo : holoMonitor(r, mode);
-  const w = m.w, h = m.h * PLAN_UI.HOLO_H_K;
+  const w = m.w * PLAN_UI.SIZE_K, h = m.h * PLAN_UI.HOLO_H_K * PLAN_UI.SIZE_K; // 크기 2배(비율은 그대로)
   return { w, h, aspect: h / w, holo: { w: m.w, h: m.h }, boost: PLAN_UI.BOOST[mode === 'voxel' ? 'voxel' : 'flow'], off: r * 1.3 + PLAN_UI.GAP_W, drop: r * PLAN_UI.DROP_K };
 }
 

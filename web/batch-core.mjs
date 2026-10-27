@@ -8,7 +8,8 @@
 // 진행 중 회차와 그 하위만 펼친다. 재무장 Monitor 사슬은 마지막 하나만 그리고 앞 것의 자리를 이어받는다.
 
 import { t as tr } from './i18n.mjs';
-import { isJob, jobOf, jobTags, jobFold, isProc, procTags } from './job-core.mjs'; // 작업 노드 · 분리 프로세스
+import { isJob, jobOf, jobTags, jobFold, isProc, procTags, jobLabelKey } from './job-core.mjs'; // 작업 노드 · 분리 프로세스
+import { runOf, runTags, runLabelKey } from './run-core.mjs'; // 실행 중 셸(meta.run)
 
 export const BATCH = {
   KEEP_ENDED: 2,        // 장치에 작게 붙여 둘 끝난 회차 수(서버 BATCH_KEEP_ENDED 와 같은 값)
@@ -169,7 +170,18 @@ export function nodeTags(n, byId = null, nowMs = Date.now()) {
   if (isOrphanRoot(n)) t.push(tr(m.likelyMain ? 'cards.tag.likely' : 'cards.tag.external'));
   if (m.inheritedFrom) t.push(tr('cards.tag.inherited')); // /clear 앞 세션에서 이어받은 작업
   if (isProc(n)) t.push(...procTags(n)); // 정체·rc·들여다봄 N
+  if (runOf(n)) t.push(...runTags(n, nowMs, { proc: isProc(n) })); // 실행 경과·조용함·정체·버퍼링?·rc
   return t;
+}
+
+/**
+ * 시계로만 바뀌는 꼬리표의 열쇠(작업 정체 + 실행 경과·조용함·정체). 렌더러가 몇 번/초 이것만 비교해
+ * 바뀌었을 때만 라벨을 다시 그린다. 둘 다 없으면 null(비교할 것 없음).
+ */
+export function clockLabelKey(n, nowMs) {
+  const j = isJob(n), r = !!runOf(n);
+  if (!j && !r) return null;
+  return (j ? jobLabelKey(jobOf(n), nowMs) : '') + '#' + (r ? runLabelKey(n, nowMs) : '');
 }
 
 /**

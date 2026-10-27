@@ -38,7 +38,10 @@ test('끝 구간: 닫히지 않은 도구가 있어도 프로세스가 busy 가 
   assert.equal(data.finalState.nodes.get(main).status, 'idle', '재생 끝 상태 대기');
   const idle = data.events.filter((e) => e.nodeId === main && e.type === 'node-update' && e.patch?.status === 'idle');
   assert.equal(idle.length, 1);
-  assert.equal(idle[0].t, Date.parse(data.events.filter((e) => e.nodeId === main && !e.synth).at(-1).ts) + 60_000, '마지막 기록 + 60초');
+  // 열린 포그라운드 셸(sleep 9999, timeout 없음)은 그 상한(tool_use + 10분 + 1분)까지 대기 금지 → max(마지막 기록 + 60초, 상한)
+  const shellStart = Date.parse(data.events.find((e) => e.type === 'tool-start' && e.toolUseId === 'toolu_long').ts);
+  const lastRec = Date.parse(data.events.filter((e) => e.nodeId === main && !e.synth).at(-1).ts);
+  assert.equal(idle[0].t, Math.max(lastRec + 60_000, shellStart + 660_000), '열린 셸 상한 뒤 대기');
   assert.ok(data.finalState.nodes.get(main).openTools.length >= 1, '열린 도구는 그대로(라이브와 같음)');
   const live = new RootRuntime({ sessionId: M, index });
   await live.start();

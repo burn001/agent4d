@@ -3,6 +3,7 @@
 //                       └──(done/error)──▶ leave ─▶ gone
 import { pathBetween, pathLength, hashStr } from './layout.js';
 import { STAND_CATS, breakDecision, BREAK, superviseAct } from './office-core.mjs';
+import { runOf, runWorking, runVisStatus } from '../run-core.mjs'; // 실행 중 셸
 
 const PI = Math.PI;
 const WALK_SPEED = 3.5;
@@ -72,6 +73,14 @@ export class Character {
     }
     if (this.tools.length > keep + 4) this.tools = this.tools.filter((t) => t.end == null || now < t.end + TOOL_LINGER + 2);
     return cur;
+  }
+
+  /** meta.run(전경)이 도는 중이면 가상의 셸 도구(이벤트로 받은 열린 셸이 있으면 그쪽이 먼저) */
+  _runTool(ctx) {
+    if (ctx.clockMs == null || !runOf(this.node) || this.node.meta.run.kind !== 'fg' || !runWorking(this.node, ctx.clockMs)) return null;
+    const r = this._runT || (this._runT = { id: 'run:' + this.id, cat: 'shell', tool: 'Bash', t0: 0, end: null });
+    r.tool = this.node.meta.run.tool || 'Bash';
+    return r;
   }
 
   openCount() { let n = 0; for (const t of this.tools) if (t.end == null) n++; return n; }
@@ -167,12 +176,13 @@ export class Character {
       return;
     }
     if (this.visit) this.visit = null;
-    const tool = this.currentTool(now);
+    // 전경 셸이 오래 도는 중(meta.run fg, 정체 아님)이면 도구 이벤트를 놓쳤어도(스냅샷·재생 중간) 셸 작업으로 본다 — 커피·대기 대신 작업
+    const tool = this.currentTool(now) || this._runTool(ctx);
     if (tool || this.lastBusy == null) this.lastBusy = now;
     // 쉬러 가기: 팀장은 사람 입력을 기다리는 동안, 팀원은 도구 없이 오래 생각할 때 가끔 — 탕비실 커피
     if (!tool && ctx.breakSpot) {
       const onBreak = !!(this.target && this.target.type === 'break');
-      const d = breakDecision({ lead: this.lead, status: this.node.status, idleFor: now - this.lastBusy, hash: this.hash, ts: ctx.ts || 1, now, breakUntil: this.breakUntil, cooldownUntil: this.cooldownUntil, onBreak });
+      const d = breakDecision({ lead: this.lead, status: ctx.clockMs != null ? runVisStatus(this.node, ctx.clockMs) : this.node.status, idleFor: now - this.lastBusy, hash: this.hash, ts: ctx.ts || 1, now, breakUntil: this.breakUntil, cooldownUntil: this.cooldownUntil, onBreak });
       if (d === 'go' || d === 'stay') {
         if (!onBreak) {
           const sp = ctx.breakSpot(this);

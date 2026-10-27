@@ -8,8 +8,10 @@
 //  드릴 회전 = 처리율, 과열(heat)이면 드릴 끝이 호박 → 주홍으로 달아오르고 열기 입자, 느려지며 가끔 멈칫(최장 시간 길수록).
 //  들여다보기(watch): wait = 플랫폼 둘레 대기 궤도 고리 + 그 위를 도는 탐사선, peek·끝난 펄스 = 서브에이전트에서 플랫폼을 훑는 스캔 빔,
 //  progress 면 플랫폼 → 서브에이전트로 돌아오는 작은 패킷 + 계기에 체크.
-import { isProc, procOf, procState, procJobId, isAutoJob, jobOf, jobLaneValues, jobHeat, heatLevel, jobEtaMs, fmtRate, WatchTracker, isJobEndedState } from './job-core.mjs';
+import { isProc, procOf, procState, procJobId, isAutoJob, jobOf, jobLaneValues, jobHeat, heatLevel, jobEtaMs, fmtRate, WatchTracker, isJobEndedState,
+  isJob, jobDisplayState, jobProgress, laneValue } from './job-core.mjs';
 import { t as tr } from './i18n.mjs';
+import { jobEstimated } from './planet-core.mjs'; // 예상 비율(추정) 판정 — 항로와 같은 규칙
 
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
@@ -271,4 +273,95 @@ export function watchLook(p) {
 
 /** 자동 작업 노드가 프로세스(분리 실행) 아래 진행 계기인가 */
 export function isProcMeter(n, parent) { return isAutoJob(n) && !!parent && isProc(parent); }
+
+// ───────────── 안 C — 외부 작업(src 'ext') = 채굴 플랫폼 승격 ─────────────
+// 외부 작업은 실제로 떼어 띄운 분리 프로세스라 드릴 플랫폼 + 계기 홀로그램 + 화물 링으로 그린다(노드 자신이 플랫폼, 계기는 데릭 위).
+// 규약·규칙 작업(일일 회차·자율 루프·PID 대기)은 탐사선 그대로, 자동 진행(src 'auto')은 예전대로 계기.
+
+/** 외부 작업 노드인가(서술 파일로 받은 작업) */
+export const isExtRig = (n) => isJob(n) && jobOf(n).src === 'ext';
+
+/**
+ * Planet 작업 노드의 몸체 갈래(3D·2D 같은 판정): 'rig' = 채굴 플랫폼(외부 작업) · 'meter' = 계기 홀로그램(자동 진행) ·
+ * 'probe' = 탐사선(규약·규칙 작업) · null = 작업 아님. 분리 프로세스 노드(meta.proc) 자체는 작업이 아니라 null.
+ */
+export function planetJobBody(n) {
+  if (!isJob(n)) return null;
+  const src = jobOf(n).src;
+  return src === 'ext' ? 'rig' : src === 'auto' ? 'meter' : 'probe';
+}
+
+/** 외부 작업 표시 상태 → 플랫폼 상태(PROC_LOOK 열쇠): 정체 · 끝 · 실패, 그 밖(진행·대기·줄 섬)은 running */
+export function extRigState(job, nowMs) {
+  const d = jobDisplayState(job, nowMs);
+  return d === 'stale' ? 'stale' : d === 'done' ? 'done' : d === 'failed' ? 'failed' : 'running';
+}
+
+/**
+ * 외부 작업의 레인(컨베이어·광석·화물 링용): 진행 줄 {n,total} 이 있으면 레인 하나(열쇠 'n', 처리율 = job.rate, 관측 시각 = 박동),
+ * 예상 비율·진행 없음이면 [](광석 없음 — 계기만). 결과는 작업 객체가 같으면 같은 배열(프레임마다 새로 만들지 않음).
+ */
+const _extLanes = new WeakMap();
+export function extLanes(job) {
+  if (!job) return [];
+  const hit = _extLanes.get(job);
+  if (hit) return hit;
+  const p = job.progress;
+  const out = p && Number.isFinite(p.n) && Number(p.total) > 0
+    ? [{ key: 'n', n: p.n, total: Number(p.total), rate: Number(job.rate) > 0 ? Number(job.rate) : null, at: job.beatAt || null, unit: null, pass: 1, heat: 0 }]
+    : [];
+  _extLanes.set(job, out);
+  return out;
+}
+/** 플랫폼이 쓰는 작업 꼴(lanes·primary 를 붙인 얕은 복사, 같은 작업이면 같은 객체) */
+const _extJob = new WeakMap();
+export function extRigJob(job) {
+  if (!job) return null;
+  let j = _extJob.get(job);
+  if (!j) { j = { ...job, lanes: extLanes(job), primary: 'n', heat: 0 }; _extJob.set(job, j); }
+  return j;
+}
+
+/**
+ * 외부 작업 계기 모델(meterModel 과 같은 꼴 — proc-meter.js 가 그대로 그림): 레인 줄 하나
+ *  · 진행 줄: `진행` · 오도미터 n / N · 처리율 · `경과 4:17:00` · 진행 막대
+ *  · 예상 비율: `예상` · `96% (예상)` · `예상 4:32 중 4:20`(초과면 `예상 초과 N분`) · 점선 막대(측정값과 모양으로 가름)
+ *  · 진행 없음: `경과` · 경과 시계
+ * 머리 = 진행 호 + `ETA 남은 시간`(job.eta 가 있을 때).
+ */
+export function extMeterModel(job, nowMs, light = false) {
+  if (!job) return null;
+  const ended = isJobEndedState(job.state);
+  const t0 = Date.parse(job.startedAt || ''), t1 = ended ? Date.parse(job.endedAt || '') : nowMs;
+  const elapsed = Number.isFinite(t0) && Number.isFinite(t1) ? Math.max(0, t1 - t0) : null;
+  const lanes = extLanes(job);
+  const ratio = jobProgress(job);
+  const est = jobEstimated(job);
+  let row;
+  if (lanes.length) {
+    const l = lanes[0];
+    const value = laneValue(l, nowMs, { ended, aheadSec: Number(job.staleSec) > 0 ? Number(job.staleSec) : null });
+    row = { key: tr('cards.ext.prog'), value, text: bigNum(value) + ' / ' + bigNum(l.total), frac: ended ? 0 : value - Math.floor(value), unit: '', rate: fmtRate(l.rate),
+      last: elapsed != null ? tr('cards.ext.elapsedV', { t: clockText(elapsed) }) : '', heat: 0, level: 'cool', ratio: Math.max(0, Math.min(1, value / l.total)), pass: 1, color: laneColor(0, light), bar: Math.max(0, Math.min(1, value / l.total)), est: false, noHeat: true };
+  } else if (ratio != null) {
+    const pct = Math.floor(ratio * 100);
+    const exp = Number(job.ext && job.ext.expectSec) * 1000;
+    const over = est && elapsed != null ? elapsed - exp : 0;
+    const hm = (ms) => { const m = Math.max(0, Math.round(ms / 60000)); return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`; };
+    const last = !est || elapsed == null ? '' : over >= 60000 ? tr('cards.track.over', { d: tr('cards.t.m', { n: Math.round(over / 60000) }) }) : tr('cards.track.est', { e: hm(exp), a: hm(elapsed) });
+    row = { key: tr(est ? 'cards.ext.est' : 'cards.ext.prog'), value: pct, text: est ? tr('cards.ext.estPct', { p: pct }) : pct + '%', frac: 0, unit: '', rate: '', last, heat: 0, level: 'cool', ratio, pass: 1, color: laneColor(0, light), bar: ratio, est, noHeat: true };
+  } else {
+    row = { key: tr('cards.ext.elapsed'), value: 0, text: elapsed != null ? clockText(elapsed) : '—', frac: 0, unit: '', rate: '', last: '', heat: 0, level: 'cool', ratio: null, pass: 1, color: laneColor(0, light), bar: null, est: false, noHeat: true };
+  }
+  const etaMs = ended ? null : jobEtaMs(job, nowMs);
+  const sig = [job.state, row.text, row.rate, row.last, etaMs != null ? Math.round(etaMs / 1000) : ''].join('#');
+  return { state: job.state, ended, rows: [row], primary: row, ratio, eta: etaMs != null ? clockText(etaMs) : '', heat: 0, level: 'cool', sig, est };
+}
+/** 먼 LOD 큰 숫자: 진행 줄이면 n, 예상 비율이면 `96%`, 없으면 경과 시계 */
+export function extMeterBig(job, nowMs) {
+  const m = extMeterModel(job, nowMs);
+  if (!m) return '';
+  const r = m.rows[0];
+  return extLanes(job).length ? bigNum(r.value) : r.bar != null ? Math.floor(r.bar * 100) + '%' : r.text;
+}
 export { isProc, procOf, procState, procJobId, jobOf };

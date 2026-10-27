@@ -7,7 +7,7 @@
 //    progress = 플랫폼 → 읽는 노드로 돌아오는 점.
 // 저사양: 프로세스가 없으면 아무것도 하지 않고(level 0), 있으면 15fps(level 1).
 import { PROC, procLook, drillSpin, drillHitch, heatTip, OreFeed, oreFlight, oreEase, conveyorBend, quadAt, cargoCount, cargoSlot,
-  meterModel, meterBig, laneColor, ProcWatch, watchLook, procName } from '../planet-proc-core.mjs';
+  meterModel, meterBig, laneColor, ProcWatch, watchLook, procName, isExtRig, extRigState, extRigJob, extMeterModel, extMeterBig } from '../planet-proc-core.mjs';
 import { isProc, procState, procJobId, isAutoJob, jobOf, laneValue, isJobEndedState } from '../job-core.mjs';
 import { hash01 } from '../planet-core.mjs';
 import { MeterCanvas } from '../proc-meter.js';
@@ -36,7 +36,7 @@ export class ProcFlat {
   /** 움직임 등급: 프로세스가 보이면 1(15fps) — 펄스·광석이 있으면 1 유지 */
   level() {
     let any = false;
-    for (const v of this.view.vis.values()) if (!v.gone && !v.hidden && v.node && isProc(v.node)) { any = true; break; }
+    for (const v of this.view.vis.values()) if (!v.gone && !v.hidden && v.node && (isProc(v.node) || isExtRig(v.node))) { any = true; break; } // 외부 작업 플랫폼도
     this.any = any;
     return any && !this.view.reduced ? 1 : 0;
   }
@@ -49,12 +49,13 @@ export class ProcFlat {
     if (!this.any) return;
     const view = this.view, reduced = !!view.reduced;
     for (const v of view.vis.values()) {
-      if (!v.node || !isProc(v.node)) continue;
+      const ext = !!v.node && isExtRig(v.node); // 외부 작업 = 플랫폼(레인은 그 작업의 진행 줄)
+      if (!v.node || !(ext || isProc(v.node))) continue;
       const r = v._pr || (v._pr = { feed: new OreFeed(), ores: [], cargo: [], ang: hash01(v.id, 'pr') * TAU, spin: 0, heatK: 0, state: null, seed: hash01(v.id, 'pr') });
-      const st = procState(v.node) || 'running';
+      const st = ext ? extRigState(jobOf(v.node), view.clock()) : procState(v.node) || 'running';
       if (r.state && r.state !== st && (st === 'done' || st === 'failed' || st === 'stopped')) { r.ores.length = 0; r.endAt = now; }
       r.state = st;
-      const jv = view.vis.get(procJobId(v.node)), job = jv ? jobOf(jv.node) : null;
+      const jv = ext ? null : view.vis.get(procJobId(v.node)), job = ext ? extRigJob(jobOf(v.node)) : jv ? jobOf(jv.node) : null;
       r.job = job;
       const heat = job ? Math.max(0, Math.min(1, Number(job.heat) || 0)) : 0;
       const pri = job && Array.isArray(job.lanes) ? (job.lanes.find((l) => l.key === job.primary) || job.lanes[0]) : null;
@@ -179,8 +180,8 @@ export class ProcFlat {
   /** 분리 프로세스 노드 하나(소행성 + 드릴 플랫폼). x,y = 화면 중심, R = 그린 반지름 px */
   drawRig(ctx, v, x, y, R, alpha, now, col, edge) {
     const view = this.view, t = view.tokens, L = !!t.isLight;
-    const r = v._pr || { ang: 0, spin: 0, heatK: 0, state: procState(v.node) || 'running', seed: 0 };
-    const st = procState(v.node) || 'running', look = procLook(st);
+    const st = isExtRig(v.node) ? extRigState(jobOf(v.node), view.clock()) : procState(v.node) || 'running', look = procLook(st);
+    const r = v._pr || { ang: 0, spin: 0, heatK: 0, state: st, seed: 0 };
     if (R < 2.5) { ctx.globalAlpha = alpha; ctx.fillStyle = col; ctx.fillRect(x - 1.5, y - 1.5, 3, 3); ctx.globalAlpha = 1; return; }
     // 바위
     const rock = L ? mixColor('#8b8378', col, 0.25) : mixColor('#3b3631', col, 0.16);
@@ -259,21 +260,22 @@ export class ProcFlat {
     ctx.globalAlpha = 1;
   }
 
-  /** 자동 진행 작업 = 계기 판(가까우면 전체, 멀면 큰 숫자). x,y = 작업 노드 화면 자리 */
-  drawMeter(ctx, v, x, y, R, alpha, now, s) {
+  /** 자동 진행 작업 = 계기 판(가까우면 전체, 멀면 큰 숫자). x,y = 작업 노드 화면 자리 · opts.rig = 외부 작업 플랫폼(데릭 위 계기, 투사기 없음) */
+  drawMeter(ctx, v, x, y, R, alpha, now, s, opts = {}) {
     const view = this.view, t = view.tokens, L = !!t.isLight;
     const job = jobOf(v.node);
     if (!job || alpha < 0.02) return;
     let e = this.meters.get(v.id);
     if (!e) { e = { mc: new MeterCanvas(), sig: '', at: -1e9, compact: null, light: null, flashAt: -1e9 }; this.meters.set(v.id, e); }
-    const m = meterModel(job, view.clock(), L);
+    const rig = !!opts.rig;
+    const m = (rig ? extMeterModel : meterModel)(job, view.clock(), L);
     const rows = Math.max(1, m.rows.length);
     const Hw = 0.36 + 0.34 * rows; // 3D 와 같은 판 높이(세계)
     const compact = Hw * s < PROC.METER_FULL_PX * 0.8; // 2D 캔버스 글자는 선명해 조금 일찍 전체 판
     const pid = v.node.parentId;
     const fl = this._flash.get(pid); if (fl != null && fl > e.flashAt) e.flashAt = fl;
     const flash = now - e.flashAt < 2.4 ? 1 - (now - e.flashAt) / 2.4 : 0;
-    const big = compact ? meterBig(job, view.clock()) : '';
+    const big = compact ? (rig ? extMeterBig : meterBig)(job, view.clock()) : '';
     const key = (compact ? 'c|' + big : m.sig) + '|' + L + '|' + (flash > 0 ? 'f' + Math.round(flash * 6) : '');
     if (compact !== e.compact || L !== e.light || (key !== e.sig && now - e.at > 0.08) || (!compact && MeterCanvas.rolling(m) && now - e.at > 0.083)) {
       e.compact = compact; e.light = L; e.sig = key; e.at = now;
@@ -282,15 +284,17 @@ export class ProcFlat {
     }
     const c = e.mc.canvas;
     const h = compact ? 22 : Hw * s, w = (h * c.width) / c.height;
-    const bx = x - w / 2, by = y - R * 1.6 - h;
-    // 투사선(전체 판일 때): 투사기 → 판 아래 두 모서리
+    const bx = x - w / 2, by = y - R * (rig ? PROC.TOP_Y + 0.45 : 1.6) - h;
+    // 투사선(전체 판일 때): 투사기(플랫폼이면 데릭 꼭대기) → 판 아래 두 모서리
     if (!compact) {
+      const y0 = rig ? y - R * PROC.TOP_Y : y - R * 0.5;
       ctx.globalAlpha = alpha * 0.35; ctx.strokeStyle = t.skill; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(x, y - R * 0.5); ctx.lineTo(bx + w * 0.08, by + h); ctx.moveTo(x, y - R * 0.5); ctx.lineTo(bx + w * 0.92, by + h); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(bx + w * 0.08, by + h); ctx.moveTo(x, y0); ctx.lineTo(bx + w * 0.92, by + h); ctx.stroke();
     }
-    // 투사기(작은 원판)
-    ctx.globalAlpha = alpha; ctx.fillStyle = L ? '#64748b' : '#2b3442'; ctx.strokeStyle = t.skill; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.ellipse(x, y, Math.max(2, R), Math.max(1.5, R * 0.55), 0, 0, TAU); ctx.fill(); ctx.stroke();
+    if (!rig) { // 투사기(작은 원판)
+      ctx.globalAlpha = alpha; ctx.fillStyle = L ? '#64748b' : '#2b3442'; ctx.strokeStyle = t.skill; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.ellipse(x, y, Math.max(2, R), Math.max(1.5, R * 0.55), 0, 0, TAU); ctx.fill(); ctx.stroke();
+    }
     ctx.globalAlpha = alpha * (m.ended ? 0.75 : 0.95);
     ctx.drawImage(c, bx, by, w, h);
     ctx.globalAlpha = 1;

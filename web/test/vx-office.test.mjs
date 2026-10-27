@@ -7,9 +7,11 @@ import { rotateOffice } from '../voxel/xf.mjs';
 import {
   STAND_CATS, OFFICE_FX, IX_FACILITY, roomPoint, ixSpot, breakSpot, BREAK_N, clientScreen, clientSpot, breakDecision, BREAK,
   idleAct, IDLE_SLOT, roleOf, floorRoute, routeCum, routeAt, dashStarts, lineStyle, monitorWanted, stepOpen, openShape, popShape, MON,
-  overseeSpot, SUPERVISE, superviseAct,
+  overseeSpot, SUPERVISE, superviseAct, VX_IX, vxIxScale, vxIxThin, vxIxAlpha,
 } from '../voxel/office-core.mjs';
 import { ClientDesk, clientOp, CLIENT } from '../voxel/client-core.mjs';
+import { IxModel, IXFX } from '../ix-core.mjs';
+import { readFileSync } from 'node:fs';
 import { Character } from '../voxel/character-core.mjs';
 
 const inside = (p, b, pad = 0) => p.x >= b.minX - pad - 1e-6 && p.x <= b.maxX + pad + 1e-6 && p.z >= b.minZ - pad - 1e-6 && p.z <= b.maxZ + pad + 1e-6;
@@ -291,4 +293,43 @@ test('지휘·감독 자리 = 볼 팀원 책상 앞 통로, 팀원과 마주 봄
   }
   assert.ok(posed > 40, '감독 자세가 나옴');
   assert.ok(spots.size >= 2, '칸마다 다른 팀원 책상');
+});
+
+// ── 흐름 연출 묶음 1의 복셀 판: 잔광 하한 · 화면 하한 배율 · 움직임 줄이기 배선 ──
+test('복셀 ix 잔광 하한: 흐름과 같은 LINGER(≥ 3초)가 IxModel 수명에 닿고, 잔광 60% 까지 그대로 · 끝에서 0', () => {
+  for (const cat of Object.keys(IX_FACILITY)) {
+    const lin = Math.max(IXFX.LINGER_MIN, IXFX.LINGER[cat]);
+    assert.ok(lin >= 3, cat);
+    assert.equal(vxIxAlpha(null, lin), 1, '진행 중');
+    assert.equal(vxIxAlpha(lin * VX_IX.HOLD, lin), 1, cat + ' 잔광 60% 까지 그대로');
+    assert.ok(vxIxAlpha(2.5, lin) > 0.15, cat + ' 끝나고 2.5초 뒤에도 보임(예전 원격 1.4초에 0)');
+    assert.equal(vxIxAlpha(lin, lin), 0, '끝');
+    // 장부 수명: 끝난 뒤 LINGER_MIN 직전까지 남고 LINGER 뒤 지워짐(복셀은 같은 IxModel 을 쓴다)
+    const m = new IxModel();
+    m.event({ type: 'tool-start', nodeId: 'n', toolUseId: 'q', ix: { v: 1, cat, op: 'x', n: 40, phase: 'start' } }, 0, 1, () => 'n');
+    m.event({ type: 'tool-end', nodeId: 'n', toolUseId: 'q', ix: { v: 1, cat, op: 'x', n: 40, i: 40, phase: 'end', ok: true } }, 2, 1, () => 'n');
+    m.step(2 + IXFX.LINGER_MIN - 0.05); assert.equal(m.size, 1, cat + ' 3초 안엔 남음');
+    m.step(2 + IXFX.LINGER[cat] + 0.05); assert.equal(m.size, 0, cat + ' 잔광 뒤 정리');
+  }
+  assert.ok(vxIxAlpha(1.2, 3 / 2) > 0, '배속 4 = 잔광 ÷ 2');
+});
+
+test('복셀 ix 화면 하한: clamp(48 / (시설 폭 × ppu), 1, 2) · 가는 조각 2～3px 하한', () => {
+  assert.equal(vxIxScale(0, 2), 1, 'ppu 모름');
+  assert.equal(vxIxScale(VX_IX.MIN_PX / 2, 2), 1, '경계 = 1');
+  assert.equal(vxIxScale(VX_IX.MIN_PX / 3, 2), 1.5);
+  assert.equal(vxIxScale(1, 2), VX_IX.SCALE_MAX, '상한(벽·방 밖으로 나가지 않게)');
+  assert.equal(vxIxThin(0.03, 0), 0.03);
+  assert.equal(vxIxThin(0.03, 10), VX_IX.LINE_PX.BASE / 10);
+  assert.equal(vxIxThin(0.03, 10, true), VX_IX.LINE_PX.VIP / 10);
+  assert.equal(vxIxThin(0.5, 10), 0.5, '이미 굵으면 그대로');
+});
+
+test('복셀 ix 배선: 움직임 줄이기(view.reduced) · 발송대 모서리 등은 활동 때만(글자 대조 — three 를 node 에서 못 부름)', () => {
+  const ix = readFileSync(new URL('../voxel/vx-ix.js', import.meta.url), 'utf8');
+  assert.match(ix, /this\.red = !!v\.reduced;/);
+  assert.match(ix, /_u\(u, fixed\) \{ return this\.red \? fixed : u; \}/);
+  const props = readFileSync(new URL('../voxel/props.js', import.meta.url), 'utf8');
+  assert.match(props, /if \(ix && \(ix\.github > 0\.02 \|\| ix\.ciFail\)\) \{/);
+  assert.doesNotMatch(props, /G\.box\(dx \+ sx \* 0\.66, 0\.11, dz \+ sz \* 0\.66/, '정적 그림에 늘 켜진 모서리 등 없음');
 });

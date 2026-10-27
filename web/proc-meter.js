@@ -79,7 +79,9 @@ export class MeterCanvas {
     if (m.ratio != null) {
       const cx = W - 18, cy = HEAD_H / 2 + 2, r = 7;
       x.lineWidth = 3; x.strokeStyle = P.track; x.beginPath(); x.arc(cx, cy, r, 0, TAU); x.stroke();
+      if (m.est) x.setLineDash([3, 3]); // 예상 비율 = 점선 호
       x.strokeStyle = laneColor(0, L); x.beginPath(); x.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + TAU * m.ratio); x.stroke();
+      if (m.est) x.setLineDash([]);
       rx = cx - 14;
     }
     if (m.eta) { x.font = '600 12px ui-monospace, Consolas, monospace'; x.fillStyle = P.dim; x.fillText('ETA ' + m.eta, rx, HEAD_H / 2 + 2); rx -= x.measureText('ETA ' + m.eta).width + 8; }
@@ -100,6 +102,14 @@ export class MeterCanvas {
       x.textAlign = 'right'; x.font = '600 12px ui-monospace, Consolas, monospace'; x.fillStyle = P.text;
       if (r.rate) x.fillText(r.rate, W - 12, y0 + 13);
       if (r.last) { x.font = '500 10px ui-monospace, Consolas, monospace'; x.fillStyle = P.dim; x.fillText(r.last, W - 12, y0 + 27); }
+      if (r.bar != null) { // 외부 작업: 진행 막대(예상 비율이면 점선 — 측정값과 추정값을 모양으로 가름)
+        const bx = 20, bw = W - 32, by = y0 + ROW_H - 7;
+        x.fillStyle = P.track; x.fillRect(bx, by, bw, 3);
+        x.fillStyle = r.color;
+        if (r.est) { const fw = bw * Math.max(0, Math.min(1, r.bar)); for (let k = 0; k < fw; k += 9) x.fillRect(bx + k, by, Math.min(5, fw - k), 3); }
+        else x.fillRect(bx, by, Math.max(2, bw * Math.max(0, Math.min(1, r.bar))), 3);
+      }
+      if (r.noHeat) return;
       // 그 레인 과열 막대: 호박 → 주홍
       const ht = heatTip(r.heat, L), bw = 64, bx = W - 12 - bw, by = y0 + ROW_H - 10;
       x.fillStyle = P.track; x.fillRect(bx, by, bw, 3);

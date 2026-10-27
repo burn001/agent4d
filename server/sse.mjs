@@ -1,5 +1,6 @@
 // SSE 송신·heartbeat
 import { externalEv, externalSnap } from './artifacts.mjs'; // 외부 링크: 작업 대상 경로 접기
+import { SseOut } from './sse-out.mjs'; // 이벤트 몰림 조절(병합·backpressure·넘치면 snapshot · 몰림 모드 정리·batch)
 const PING_MS = 15_000;
 
 export function sseHeaders(extra = {}) {
@@ -18,6 +19,12 @@ export function formatEvent(event, data, id) {
   if (id != null) s += `id: ${id}\n`;
   s += `data: ${JSON.stringify(data)}\n\n`; // JSON.stringify 는 줄바꿈을 \n 으로 이스케이프 → 한 줄
   return s;
+}
+
+/** 묶음 이벤트(`event: batch`, data {events:[…]}, id = 마지막 seq) — 받을 줄 아는 웹(`&batch=1`)에만. 아니면 이벤트마다 ev */
+function batchOf(url, X) {
+  if (url.searchParams.get('batch') !== '1') return null;
+  return (evs, id) => formatEvent('batch', { events: evs.map(X) }, id);
 }
 
 /**
@@ -47,15 +54,18 @@ export async function handleEvents(req, res, url, manager, opts = {}) {
 
   let closed = false;
   let unsub = null;
-  const write = (s) => { if (!closed) res.write(s); };
   const X = opts.external ? externalEv : (e) => e, XS = opts.external ? externalSnap : (s) => s;
+  const snapOf = (g) => formatEvent('snapshot', XS(g.snapshot()), g.lastSeq);
+  const out = new SseOut(res, { format: (e) => formatEvent('ev', X(e), e.seq), formatBatch: batchOf(url, X), resync: () => snapOf(rt.graph), ...(opts.sseOut || {}) });
+  const write = (s) => { if (!closed) out.raw(s); };
+  const send = (e) => { if (!closed) out.event(e); };
 
   const attach = (runtime, allowSince) => {
     const g = runtime.graph;
     const evs = allowSince ? g.eventsSince(since) : null;
-    if (evs) for (const e of evs) write(formatEvent('ev', X(e), e.seq));
-    else write(formatEvent('snapshot', XS(g.snapshot()), g.lastSeq));
-    unsub = g.subscribe((e) => write(formatEvent('ev', X(e), e.seq)));
+    if (evs) for (const e of evs) send(e);
+    else write(snapOf(g));
+    unsub = g.subscribe(send);
   };
   attach(rt, true);
   const limitsOff = attachLimits(write, opts.limits);
@@ -80,6 +90,7 @@ export async function handleEvents(req, res, url, manager, opts = {}) {
     if (closed) return;
     closed = true;
     clearInterval(ping);
+    out.close();
     unsub?.();
     autoUnsub?.();
     limitsOff();
@@ -112,16 +123,18 @@ export async function handleOverviewEvents(req, res, url, hub, opts = {}) {
   res.writeHead(200, sseHeaders(opts.headers));
   res.write('retry: 3000\n\n');
   let closed = false;
-  const write = (s) => { if (!closed) res.write(s); };
   const X = opts.external ? externalEv : (e) => e, XS = opts.external ? externalSnap : (s) => s;
+  const out = new SseOut(res, { format: (e) => formatEvent('ev', X(e), e.seq), formatBatch: batchOf(url, X), resync: () => formatEvent('snapshot', XS(hub.snapshot()), hub.hseq), ...(opts.sseOut || {}) });
+  const write = (s) => { if (!closed) out.raw(s); };
+  const send = (e) => { if (!closed) out.event(e); };
   const sub = {
     inactive: false,
-    onEvent: (e) => write(formatEvent('ev', X(e), e.seq)),
+    onEvent: send,
     onProjects: (p) => write(formatEvent('projects', p)),
   };
   // 스냅샷과 구독을 같은 틱에 해서 사이 이벤트를 놓치지 않는다
   const evs = hub.eventsSince(since);
-  if (evs) for (const e of evs) write(formatEvent('ev', X(e), e.seq));
+  if (evs) for (const e of evs) send(e);
   else write(formatEvent('snapshot', XS(hub.snapshot()), hub.hseq));
   const unsub = hub.subscribe(sub);
   if (evs) write(formatEvent('projects', { projects: hub.projectsState.projects, roots: hub.rootsPayload() }));
@@ -131,6 +144,7 @@ export async function handleOverviewEvents(req, res, url, hub, opts = {}) {
     if (closed) return;
     closed = true;
     clearInterval(ping);
+    out.close();
     unsub();
     limitsOff();
   };

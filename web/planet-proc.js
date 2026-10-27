@@ -9,7 +9,7 @@
 //  선·궤도·빔은 장면 전체 LineSegments 하나, 광석·화물·탐사선은 InstancedMesh 셋 — 프로세스가 없으면 아무것도 그리지 않는다.
 import * as THREE from 'three';
 import { PROC, procLook, drillSpin, drillHitch, heatTip, heatSparkRate, OreFeed, oreFlight, oreEase, conveyorBend, quadAt, cargoCount, cargoSlot,
-  procLod, meterModel, meterBig, laneColor, ProcWatch, watchLook, procName } from './planet-proc-core.mjs';
+  procLod, meterModel, meterBig, laneColor, ProcWatch, watchLook, procName, isExtRig, extRigState, extRigJob, extMeterModel, extMeterBig } from './planet-proc-core.mjs';
 import { isProc, procState, procJobId, isAutoJob, jobOf, laneValue, isJobEndedState } from './job-core.mjs';
 import { hash01 } from './planet-core.mjs';
 import { MeterCanvas } from './proc-meter.js';
@@ -119,6 +119,8 @@ class ProcRig {
   constructor(fx, v) {
     const g = geo();
     this.fx = fx; this.v = v;
+    this.ext = isExtRig(v.node); // 안 C: 외부 작업 노드 자신이 플랫폼 — 레인·계기는 그 작업에서
+    this.meter = this.ext ? new ProcMeter(fx, v, { body: false, lift: PROC.TOP_Y + 0.45, model: extMeterModel, big: extMeterBig }) : null;
     v.mesh.geometry = g.ast;
     v.mesh.rotation.set(0, hash01(v.id, 'ry') * TAU, 0);
     this.root = new THREE.Group(); v.group.add(this.root);
@@ -147,7 +149,7 @@ class ProcRig {
   /** 몸체·부품 색(_styleVis 뒤): 바위 = 종류 색을 회갈색 쪽으로, 끝(초록)·실패(빨강)·중지(회색)는 그 색으로 물듦 */
   style(tokens) {
     const v = this.v, L = !!tokens.isLight;
-    const st = procState(v.node), look = procLook(st);
+    const st = this.stateNow(), look = procLook(st);
     const base = _col.copy(v.mat.color);
     const rock = _col2.set(L ? 0x8b8378 : 0x3b3631).lerp(base, L ? 0.25 : 0.16);
     if (look.tint && tokens[look.tint]) rock.lerp(tokens[look.tint], st === 'stopped' ? 0.5 : 0.35);
@@ -159,18 +161,20 @@ class ProcRig {
     this.steel.emissive.set(0x000000);
     this.colKey = '';
   }
-  hide() {}
+  /** 플랫폼 상태: 분리 프로세스 = procState, 외부 작업 = 표시 상태(정체·끝·실패, 그 밖 running) */
+  stateNow() { return this.ext ? extRigState(jobOf(this.v.node), this.fx.view.clock()) : procState(this.v.node) || 'running'; }
+  hide() { if (this.meter) this.meter.hide(); }
   step(now, dt, s, px, op, ctx) {
     const v = this.v, fx = this.fx, t = fx.view.tokens, L = ctx.L;
-    const st = procState(v.node) || 'running', look = procLook(st);
+    const st = this.stateNow(), look = procLook(st);
     if (this.state && this.state !== st ) { // 끝: 초록 파동 · 실패 빨강 · 중지 회색 — 처음 본 상태엔 없음
       const c = st === 'done' ? t.ok : st === 'failed' ? t.error : st === 'stopped' ? t.stopped : null;
       if (c && fx.view.wave) fx.view.wave(v.id, c, st === 'done' ? 1.8 : 1.3);
       if (st !== 'running' && st !== 'stale') this.ores.length = 0;
     }
     if (this.state !== st) { this.state = st; fx.view._styleVis(v); }
-    const jv = fx.view.vis.get(procJobId(v.node));
-    const job = jv ? jobOf(jv.node) : null;
+    const jv = this.ext ? null : fx.view.vis.get(procJobId(v.node));
+    const job = this.ext ? extRigJob(jobOf(v.node)) : jv ? jobOf(jv.node) : null; // 외부 작업: 진행 줄 → 레인 하나
     this.lastJob = job;
     const heat = job ? Math.max(0, Math.min(1, Number(job.heat) || 0)) : 0;
     const pri = job && Array.isArray(job.lanes) ? (job.lanes.find((l) => l.key === job.primary) || job.lanes[0]) : null;
@@ -228,8 +232,10 @@ class ProcRig {
         this.ores.push({ lane: o.lane, t0: now, dur: 0, big: o.big, newPass: !!o.newPass, s: o.big ? 1 : 0.55 + 0.25 * Math.random(), spin: Math.random() * TAU });
       }
     }
+    if (this.meter) this.meter.step(now, dt, s, px, op, ctx); // 데릭 위 계기
   }
   dispose() {
+    if (this.meter) this.meter.dispose();
     this.root.removeFromParent();
     for (const m of [this.metal, this.steel, this.hot, this.lampMat, this.glowMat]) m.dispose();
   }
@@ -249,9 +255,11 @@ function glowTex() {
 // ---------- 계기 홀로그램(자동 진행 작업) — 판 그리기는 proc-meter.js(2D 와 공용) ----------
 const css = (c) => '#' + c.getHexString(THREE.SRGBColorSpace);
 class ProcMeter {
-  constructor(fx, v) {
+  /** opts: body = 노드 몸체를 투사기로(자동 진행 계기) · lift = 판 아래 끝 높이(몸체 반지름 배) · model·big = 모델 함수(외부 작업 플랫폼은 데릭 위에 extMeterModel) */
+  constructor(fx, v, opts = {}) {
     this.fx = fx; this.v = v;
-    v.mesh.geometry = geo().puck;
+    this.lift = opts.lift ?? 1.6; this.modelFn = opts.model || meterModel; this.bigFn = opts.big || meterBig; this.rig = opts.body === false;
+    if (!this.rig) v.mesh.geometry = geo().puck;
     this.mc = new MeterCanvas();
     this.mat = new THREE.SpriteMaterial({ transparent: true, depthWrite: false, depthTest: true });
     this._tex();
@@ -278,8 +286,8 @@ class ProcMeter {
     const job = jobOf(v.node);
     if (!job || op < 0.02) { this.hide(); return; }
     const L = ctx.L;
-    v.mesh.rotation.y += dt * 0.6 * (ctx.reduced ? 0.2 : 1);
-    const m = meterModel(job, ctx.clockMs, L);
+    if (!this.rig) v.mesh.rotation.y += dt * 0.6 * (ctx.reduced ? 0.2 : 1);
+    const m = this.modelFn(job, ctx.clockMs, L);
     const rows = Math.max(1, m.rows.length);
     v.group.getWorldPosition(_p);
     const dist = Math.max(0.01, _p.distanceTo(ctx.cam.position));
@@ -291,7 +299,7 @@ class ProcMeter {
     if (fx.flashOf(pid) > this.flashAt) this.flashAt = fx.flashOf(pid);
     const flash = now - this.flashAt < 2.4 ? 1 - (now - this.flashAt) / 2.4 : 0;
     // 다시 그림: 보이는 글자가 바뀌거나 끝자리가 굴러갈 때(최대 12Hz), 모양이 바뀌면 바로
-    const big = compact ? meterBig(job, ctx.clockMs) : '';
+    const big = compact ? this.bigFn(job, ctx.clockMs) : '';
     const rolling = !compact && MeterCanvas.rolling(m);
     const key = (compact ? 'c|' + big : m.sig) + '|' + L + '|' + (flash > 0 ? 'f' + Math.round(flash * 6) : '');
     if (compact !== this.compact || L !== this.light || (key !== this.sig && now - this.drawnAt > 0.08) || (rolling && now - this.drawnAt > 0.083)) {
@@ -305,12 +313,12 @@ class ProcMeter {
     let h = Hw, w = (Hw * cw) / ch;
     if (compact) { h = (22 * dist) / ctx.pxK; w = (h * cw) / ch; } // 먼 LOD: 화면에서 글자 높이 약 22px 고정
     this.sprite.scale.set(w, h, 1);
-    this.sprite.position.set(0, s * 1.6, 0);
+    this.sprite.position.set(0, s * this.lift, 0);
     this.sprite.visible = true;
     this.mat.opacity = op * (m.ended ? 0.75 : 0.95);
     this.w = w; this.h = h; this.s = s; this.op = op;
     // 화면 사각형(집기·툴팁)
-    _a.copy(_p).add(_e.set(0, s * 1.6 + h * 0.5, 0)).project(ctx.cam);
+    _a.copy(_p).add(_e.set(0, s * this.lift + h * 0.5, 0)).project(ctx.cam);
     if (_a.z < 1) { const cx = (_a.x * 0.5 + 0.5) * ctx.W, cy = (-_a.y * 0.5 + 0.5) * ctx.H; const pw = (w * ctx.pxK) / dist, ph = (h * ctx.pxK) / dist; this.rect = { x: cx - pw / 2, y: cy - ph / 2, w: pw, h: ph }; }
     else this.rect = null;
   }
@@ -352,12 +360,14 @@ export class ProcFx {
   clear() { this.watch.clear(); this._flash.clear(); this._seenPulse.clear(); for (const r of this.rigs.values()) { r.ores.length = 0; r.feed.clear(); r.cargo = []; } }
   /** 노드 연출 붙이기: 프로세스면 플랫폼, 자동 진행 작업이면 계기 — 붙였으면 deco 객체 */
   attach(v) {
-    if (isProc(v.node)) { const r = new ProcRig(this, v); this.rigs.set(v.id, r); this.watch.node(v.node); r.style(this.view.tokens || {}); return { type: 'proc', proc: r, root: r.root }; }
+    if (isProc(v.node) || isExtRig(v.node)) { // 외부 작업도 플랫폼(계기는 데릭 위 — 집기용으로 meters 에도)
+      const r = new ProcRig(this, v); this.rigs.set(v.id, r); if (r.meter) this.meters.set(v.id, r.meter); else this.watch.node(v.node); r.style(this.view.tokens || {}); return { type: 'proc', proc: r, root: r.root };
+    }
     if (isAutoJob(v.node)) { const m = new ProcMeter(this, v); this.meters.set(v.id, m); return { type: 'meter', meter: m, root: m.sprite }; }
     return null;
   }
   detach(v) {
-    const r = this.rigs.get(v.id); if (r) { r.dispose(); this.rigs.delete(v.id); this.watch.forget(v.id); }
+    const r = this.rigs.get(v.id); if (r) { r.dispose(); this.rigs.delete(v.id); this.watch.forget(v.id); if (r.meter) { this.meters.delete(v.id); return; } }
     const m = this.meters.get(v.id); if (m) { m.dispose(); this.meters.delete(v.id); }
   }
   /** 노드 갱신(meta.proc 이 바뀜 — 열린 들여다보기 맞추기) */
@@ -366,7 +376,7 @@ export class ProcFx {
   style(v) {
     const t = this.view.tokens || {};
     const r = this.rigs.get(v.id); if (r) r.style(t);
-    if (this.meters.has(v.id)) { // 계기 투사기: 어두운 금속 + 진행 색 은은한 발광(끝·실패는 그 색)
+    if (this.meters.has(v.id) && !this.meters.get(v.id).rig) { // 계기 투사기(플랫폼 위 계기는 몸체가 바위라 건너뜀): 어두운 금속 + 진행 색 은은한 발광(끝·실패는 그 색)
       const st = v.node.status, c = st === 'done' ? t.ok : st === 'error' ? t.error : t.skill;
       v.mat.color.set(t.isLight ? 0x64748b : 0x2b3442); if (c) v.mat.emissive.copy(c); v.baseEmissive = t.isLight ? 0.12 : 0.35;
     }
@@ -476,7 +486,7 @@ export class ProcFx {
     const camR = _c.setFromMatrixColumn(ctx.cam.matrixWorld, 0);
     for (const m of this.meters.values()) {
       if (!m.sprite.visible || m.compact || !m.w) continue;
-      const P = m.v.group.position, a = m.op * (L ? 0.35 : 0.3), y0 = P.y + m.s * 0.25, y1 = P.y + m.s * 1.6, hw = m.w * 0.42;
+      const P = m.v.group.position, a = m.op * (L ? 0.35 : 0.3), y0 = P.y + m.s * (m.rig ? PROC.TOP_Y : 0.25), y1 = P.y + m.s * m.lift, hw = m.w * 0.42;
       const lc = _col.copy(this.view.tokens.skill || _col.set(0xfacc15));
       this._line(P.x, y0, P.z, P.x + camR.x * hw, y1, P.z + camR.z * hw, lc, a, a * 0.3, -1, -1);
       this._line(P.x, y0, P.z, P.x - camR.x * hw, y1, P.z - camR.z * hw, lc, a, a * 0.3, -1, -1);

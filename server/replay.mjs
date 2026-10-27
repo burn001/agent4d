@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { setImmediate as nextTick } from 'node:timers/promises';
-import { RootRuntime } from './session.mjs';
+import { RootRuntime, fgHoldMs } from './session.mjs';
 import { redact } from './redact.mjs';
 // 하이라이트: 웹과 같은 순수 함수(서버·mock 재생이 같은 정의)
 import { computeHighlights } from '../web/replay/highlights.mjs';
@@ -228,17 +228,26 @@ export async function normalize(rt, { now = Date.now() } = {}) {
     const node = g.get(o.nodeId);
     if (!node || !o.chunks || !o.chunks.length) continue;
     if (node.kind === 'monitor' && hasOutputEv.has(o.nodeId)) continue; // 알림 <event> 가 진짜 시각을 가짐
-    const text = o.chunks.join('').replace(/\r/g, '');
-    const lines = text.split('\n');
-    if (lines.length && lines[lines.length - 1] === '') lines.pop();
-    if (!lines.length) continue;
+    // `\r` 덮어쓰기(tqdm 등): 줄마다 `\r` 조각을 배분 단위로 펼친다 — 진행 인식은 조각마다, 패널은 그 줄의 지금 조각(라이브 LineTail 과 같은 모양)
+    const rawLines = o.chunks.join('').split('\n');
+    if (rawLines.length && rawLines[rawLines.length - 1] === '') rawLines.pop();
+    const lines = [], units = [];
+    for (let i = 0; i < rawLines.length; i++) {
+      const l = rawLines[i].replace(/\r$/, '');
+      const segs = l.includes('\r') ? l.split('\r').filter((x) => x) : [l];
+      if (!segs.length) segs.push('');
+      lines.push(segs[segs.length - 1]);
+      segs.forEach((seg, k) => units.push({ text: seg, li: i, last: k === segs.length - 1 }));
+    }
+    if (!units.length) continue;
+    const unitText = units.map((u) => u.text);
     // 분리 프로세스 로그는 진행 레인이 줄마다 움직이게 잘게(조각 수 상한도 넉넉히)
     const isProc = !!node.meta?.proc;
     const pieceMax = isProc ? PROC_PIECE : OUTPUT_PIECE, piecesMax = isProc ? PROC_PIECES_MAX : OUTPUT_PIECES_MAX;
     let pieces = [];
     let cur = '', curEnd = 0;
-    for (let i = 0; i < lines.length; i++) {
-      const ln = lines[i];
+    for (let i = 0; i < units.length; i++) {
+      const ln = units[i].text;
       if (cur && cur.length + 1 + ln.length > pieceMax) { pieces.push({ text: cur, end: curEnd }); cur = ''; }
       cur = cur ? `${cur}\n${ln}` : ln;
       curEnd = i + 1;
@@ -262,11 +271,12 @@ export async function normalize(rt, { now = Date.now() } = {}) {
       end = Number.isFinite(mt) && mt >= start ? Math.min(sessionEnd, mt) : sessionEnd;
     }
     if (end < start) end = start;
-    const timeAt = lineTimer(lines, isProc && rt.procAnchors ? rt.procAnchors(o.nodeId) : null, start, end);
+    const timeAt = lineTimer(unitText, isProc && rt.procAnchors ? rt.procAnchors(o.nodeId) : null, start, end);
     for (const p of pieces) {
       if (!p.text.trim()) continue;
       const t = timeAt(p.end);
-      const panel = rt.replayOutputPanel ? rt.replayOutputPanel(o.nodeId, lines, p.end) : null; // 출력 꼬리(라이브와 같은 규칙)
+      const u = units[p.end - 1];
+      const panel = rt.replayOutputPanel ? rt.replayOutputPanel(o.nodeId, lines, u.li + 1, u.last ? null : u.text) : null; // 출력 꼬리(라이브와 같은 규칙)
       const ix = rt.outputIx ? rt.outputIx(o.nodeId, p.text + '\n') : null; // 진행(라이브와 같은 누적 규칙)
       const ev = g.emit({ ts: iso(t), type: 'output', nodeId: o.nodeId, text: p.text, synth: true, ...(panel ? { panel } : {}), ...(ix ? { ix } : {}) });
       items.push({ e: ev, t, o: (oSeq += 4), moved: false });
@@ -276,6 +286,17 @@ export async function normalize(rt, { now = Date.now() } = {}) {
         rt.jobFeed(o.nodeId, p.text + '\n', iso(t));
         for (let k = r0; k < ring.length; k++) { ring[k].synth = true; items.push({ e: ring[k], t, o: (oSeq += 4), moved: false }); }
       }
+      // meta.run.lastOut(라이브와 같은 5초 솎기)
+      if (rt.replayRunOut) {
+        const r0 = ring.length;
+        rt.replayRunOut(o.nodeId, t);
+        for (let k = r0; k < ring.length; k++) { ring[k].synth = true; items.push({ e: ring[k], t, o: (oSeq += 4), moved: false }); }
+      }
+    }
+    if (rt.replayRunEnd) {
+      const r0 = ring.length;
+      rt.replayRunEnd(o.nodeId);
+      for (let k = r0; k < ring.length; k++) { ring[k].synth = true; items.push({ e: ring[k], t: Date.parse(ring[k].ts), o: (oSeq += 4), moved: false }); }
     }
     // 배분을 마친 스트림의 자동 진행 작업 마무리(노드가 끝났으면 끝, 아니면 솎아 낸 마지막 레인 값)
     if (rt.jobFeedEnd) {
@@ -343,7 +364,13 @@ export async function normalize(rt, { now = Date.now() } = {}) {
     const id = node.id;
     if (node.meta?.job) continue; // 작업 노드 상태는 작업 상태가 정한다(대기 합성 없음 — 라이브 sweep 과 같음)
     // 분리 프로세스는 적응 정체 문턱(meta.proc.staleSec, 최소 60초)으로 대기 합성(라이브 _sweepProc 와 같은 생각)
-    const idleMs = node.meta?.proc ? Math.max(IDLE_MS, (Number(rt.procs?.get(id)?.staleSec ?? node.meta.procStaleSec) || 300) * 1000) : IDLE_MS;
+    // 일반 bash-bg 는 출력 간격 적응 정체 문턱(meta.run.staleAfter, 최소 120초)
+    const run = rt._runs?.get(id);
+    const idleMs = node.meta?.proc ? Math.max(IDLE_MS, (Number(rt.procs?.get(id)?.staleSec ?? node.meta.procStaleSec) || 300) * 1000)
+      : run && run.kind === 'bg' && !node.meta?.launcher && !node.meta?.runner ? Math.max(IDLE_MS, rt._runStaleMs(run)) : IDLE_MS;
+    // 열린 포그라운드 셸(그 상한 = timeout + 1분)이 있는 동안은 대기로 떨어뜨리지 않는다(라이브 sweep 과 같음)
+    const holds = new Map();
+    const holdUntil = () => { let h = -Infinity; for (const v of holds.values()) if (v > h) h = v; return h; };
     let list = per.get(id) || [];
     if (node.kind === 'workflow') {
       const extra = (childrenOf.get(id) || []).flatMap((c) => per.get(c) || []);
@@ -355,9 +382,12 @@ export async function normalize(rt, { now = Date.now() } = {}) {
       const own = it.e.nodeId === id;
       if (own && it.e.type === 'node-add') { status = it.e.node.status || 'active'; last = it.t; lastO = it.o; continue; }
       if (status == null) continue;
-      if (last != null && status === 'active' && it.t - last > idleMs && !(isSession && open > 0)) {
-        mkUpdate(id, last + idleMs, 'idle', lastO + 1);
-        status = 'idle'; pendingActive = true;
+      if (last != null && status === 'active' && !(isSession && open > 0)) {
+        const idleAt = Math.max(last + idleMs, holdUntil());
+        if (it.t > idleAt) {
+          mkUpdate(id, idleAt, 'idle', idleAt > last + idleMs ? it.o - 2 : lastO + 1);
+          status = 'idle'; pendingActive = true;
+        }
       }
       const isStatusUpdate = own && it.e.type === 'node-update' && it.e.patch && 'status' in it.e.patch;
       if (pendingActive && status === 'idle' && !isStatusUpdate) {
@@ -369,8 +399,11 @@ export async function normalize(rt, { now = Date.now() } = {}) {
           status = it.e.patch.status;
           pendingActive = status === 'idle' && !!it.e.synth;
         }
-        if (it.e.type === 'tool-start') open++;
-        else if (it.e.type === 'tool-end') open = Math.max(0, open - 1);
+        if (it.e.type === 'tool-start') {
+          open++;
+          const tu = it.e.toolUseId ? rt.tools.get(it.e.toolUseId) : null;
+          if (tu && (tu.name === 'Bash' || tu.name === 'PowerShell') && !tu.bg) holds.set(it.e.toolUseId, it.t + fgHoldMs(tu));
+        } else if (it.e.type === 'tool-end') { open = Math.max(0, open - 1); holds.delete(it.e.toolUseId); }
       }
       last = it.t; lastO = it.o;
     }
@@ -380,8 +413,9 @@ export async function normalize(rt, { now = Date.now() } = {}) {
     const busy = isSession && node.sessionId && rt.index?.liveStatus?.(node.sessionId) === 'busy';
     // 끝 구간은 라이브 sweep 과 같은 규칙: 세션 노드는 프로세스가 busy 일 때만 active 유지. 닫히지 않은 도구(중단·강제 종료로
     // tool_result 가 없는 호출)가 남아 있어도 대기로 바꾼다(예전: open > 0 이면 영영 '작업 중'으로 남아 라이브 /state 와 달랐다).
-    if (status === 'active' && last != null && tailRef - last > idleMs && !busy) {
-      mkUpdate(id, last + idleMs, 'idle', lastO + 1);
+    const tailIdle = last != null ? Math.max(last + idleMs, holdUntil()) : Infinity;
+    if (status === 'active' && last != null && tailRef > tailIdle && !busy) {
+      mkUpdate(id, tailIdle, 'idle', lastO + 1);
     }
   }
   for (const s of synthItems) items.push(s);

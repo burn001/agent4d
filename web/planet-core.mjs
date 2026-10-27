@@ -1,6 +1,7 @@
 // Planet 행성 연출 규칙(순수, three·DOM 없음).
 // 메인 = 기계 행성(패널 이음선·궤도 링·기어 띠·해치·안테나·이음선 사이 코어 광), 서브에이전트 = 대기층·구름 띠·작은 위성.
 // 3D(planet-deco.js)와 2D(flat/planet-deco2d.js)가 같은 값을 쓴다.
+import { t as tr } from './i18n.mjs'; // 항로 관문 글자
 
 /** 활동 상태 → 기계 행성 동작 세기. spin = 링 회전(rad/s), glow = 이음선 코어 광, lights = 표면 조명 점 속도·밝기,
  *  hatch = 해치 여닫이, ant = 안테나 펼침, pulse = 코어 맥동(Hz) */
@@ -160,15 +161,15 @@ export function orbitSpec(kind, id, opts = {}) {
     // 레이더: 거의 극궤도 끊긴 호가 빠르게 쓸고 지나감
     ring({ a: 1.75, e: 0, inc: 1.35, node: H('n') * 6.283, style: 'arcs', speed: 1.9, dir: 1, ph: H('p') * 6.283, lod: 1, trail: 0.4, alpha: 0.3, sats: [{ size: 0.1, off: 0, tint: 1, kind: 'spark' }] });
   } else if (kind === 'device') {
-    // 배치 장치: 납작한 회전목마 궤도 + 같은 간격 운반체 셋
-    ring({ a: 1.45, e: 0, inc: 0.1, node: 0, style: 'solid', speed: 0.6, dir: 1, ph: H('p') * 6.283, lod: 1, trail: 0.1, alpha: 0.35,
-      sats: [0, 2.094, 4.189].map((off) => ({ size: 0.07, off, tint: 0.9, kind: 'carrier' })) });
+    // 배치 장치: 납작한 회전목마 궤도 — G3 운반체 셋은 바깥 회차 고리(최근 회차 칸 + 이번 회차 진행 호, planet-deco DeckRing · 2D planet2d)가 대신한다
+    ring({ a: 1.45, e: 0, inc: 0.1, node: 0, style: 'solid', speed: 0.6, dir: 1, ph: H('p') * 6.283, lod: 1, trail: 0.1, alpha: 0.35, sats: [] });
   }
   let extent = 1;
   for (const r of R) extent = Math.max(extent, r.a * (1 + r.e) + Math.max(0, ...r.sats.map((s) => s.size)));
   if (belt) extent = Math.max(extent, belt.r1);
   if (type === 'ringed') extent = Math.max(extent, 2.2);
   if (type === 'comet') extent = Math.max(extent, 2.6);
+  if (kind === 'device') extent = Math.max(extent, 2.0); // G3 회차 고리(1.62～1.98)까지
   return { type, rings: R, belt, extent };
 }
 
@@ -310,4 +311,126 @@ export function ringAt(u, out = { x: 0, y: 0 }) {
   const a = u * Math.PI * 2;
   out.x = Math.sin(a); out.y = Math.cos(a);
   return out;
+}
+
+// ---------------- 장기 작업 연출 — 공통 바탕(글리프·무게) · 안 A 항로 궤도 (3D planet-deco.js · 2D flat/job2d.js 가 같은 값을 쓴다) ----------------
+
+/** G1 상태 글리프 번호(흐름 jobTop 과 같은 순서): 표시 상태 번호 그대로 — 0 점 셋 · 1 재생 삼각 · 2 모래시계 · 3 체크 · 4 엑스 · 5 느낌표 */
+export const JOB_GLYPH = { PX: 6, R: 0.62 }; // PX = 몸체 화면 반지름이 이만큼 넘으면 그림 · R = 글리프 판 반지름(몸체 반지름 배)
+
+/**
+ * G2 오래 돈 만큼 무게: 그림 배율(그리는 몸체 반지름 / RADIUS['bash-bg'] × NODE_SCALE). 경과 0 = JOB_BODY_K(0.42),
+ * 경과 log₂(1 + t / T0) 로 커져 FULL_MIN(2시간) 이상이면 백그라운드 명령 위성(0.74)에서 멈춘다. 끝난 작업은 끝난 때까지의 경과.
+ * 배치 반지름(v.r)은 그대로 — 메시·고리만 키운다(클릭·라벨·홀로그램 자리는 v.r).
+ */
+export const JOB_WEIGHT = { MIN: JOB_BODY_K, MAX: BODY_K['bash-bg'], T0_MIN: 2, FULL_MIN: 120 };
+export function jobWeightK(job, nowMs) {
+  const W = JOB_WEIGHT;
+  const t0 = tsMs(job && job.startedAt);
+  if (!Number.isFinite(t0) || !Number.isFinite(nowMs)) return W.MIN;
+  const end = job && (job.state === 'done' || job.state === 'failed') ? tsMs(job.endedAt) : NaN;
+  const ms = Math.max(0, (Number.isFinite(end) ? end : nowMs) - t0);
+  const k = Math.log2(1 + ms / 60000 / W.T0_MIN) / Math.log2(1 + W.FULL_MIN / W.T0_MIN);
+  return W.MIN + (W.MAX - W.MIN) * Math.max(0, Math.min(1, k));
+}
+
+/**
+ * 안 A 항로 궤도: 작업은 주인 둘레 항로를 나는 탐사선 — 지나온 항로 = 항적(진행), 남은 항로 = 점선, 끝 = 도착 관문.
+ * 탐사선은 배치 자리에 그대로 있고 항로가 진행만큼 뒤로 돈다(출발 관문 = −p·S, 도착 관문 = +(1−p)·S, 탐사선 자리 = 0).
+ *  SPAN_MAX = 호 각 상한(300°) · LEN_MAX = 호 세계 길이 상한 · PER_OWNER = 주인마다 항로를 그리는 끝나지 않은 작업 수 상한
+ *  REMAIN_A = 남은 항로 알파 상한 · PUSH_K = 주인 궤도계 겉(extentOf) × 이 값보다 안쪽이면 항로를 바깥으로 민다
+ *  LAP_MS = 비율 모름 작업의 한 바퀴(경과 10분) · DONE_S = 끝 연출(접혀 옅어짐) 길이 · SEG = 3D 꼭짓점 수
+ */
+export const TRACK = { SPAN_MAX: (300 * Math.PI) / 180, LEN_MAX: 14, PER_OWNER: 4, REMAIN_A: 0.3, PUSH_K: 1.15, LAP_MS: 600000, DONE_S: 3, SEG: 128, MIN_R: 0.4 };
+
+/** 진행 비율이 측정값이 아니라 추정(예상 소요 `expectSec` 의 경과 비율)인가 — 항적·계기를 점선으로 */
+export function jobEstimated(job) {
+  const p = job && job.progress;
+  if (!p || (Number.isFinite(p.n) && Number(p.total) > 0)) return false;
+  return Number.isFinite(p.ratio) && !!(job.ext && Number(job.ext.expectSec) > 0);
+}
+
+/**
+ * 항로를 그릴 작업 고르기: 주인(parentId)마다 끝나지 않은 작업을 시작이 이른 순(오래 돈 것 먼저)으로 PER_OWNER 개.
+ * items = [{ id, owner, job }] → Set(id). 끝난 작업은 세지 않는다(끝 연출은 따로).
+ */
+export function trackSlots(items, perOwner = TRACK.PER_OWNER) {
+  const by = new Map();
+  for (const it of items || []) {
+    if (!it || !it.job || it.job.state === 'done' || it.job.state === 'failed') continue;
+    const k = it.owner || '';
+    if (!by.has(k)) by.set(k, []);
+    by.get(k).push(it);
+  }
+  const out = new Set();
+  for (const arr of by.values()) {
+    arr.sort((a, b) => (tsMs(a.job.startedAt) || 0) - (tsMs(b.job.startedAt) || 0) || (a.id < b.id ? -1 : 1));
+    for (const it of arr.slice(0, perOwner)) out.add(it.id);
+  }
+  return out;
+}
+
+/** 항로 호 각(rad): 각 ≤ SPAN_MAX · 세계 길이 ≤ LEN_MAX. 너무 가까우면 0 */
+export function trackSpan(R) { return R > TRACK.MIN_R ? Math.min(TRACK.SPAN_MAX, TRACK.LEN_MAX / R) : 0; }
+/** 항로 반지름: 주인–작업 거리, 주인 궤도계 겉(ownerExt, 세계) × PUSH_K 보다 작으면 바깥으로 */
+export function trackRadius(dist, ownerExt = 0) { return Math.max(dist, (ownerExt || 0) * TRACK.PUSH_K); }
+
+/** 항로 모양 번호(셰이더 uMode 와 같음) */
+export const TRACK_MODE = { none: 0, progress: 1, spin: 2, est: 3, wait: 4, stale: 5, done: 6, failed: 7 };
+
+/**
+ * 항로 모델: 표시 상태 번호(code) · 진행(prog, jobProgress) · 시계(nowMs) · 반지름 R →
+ *  { mode, span, p(탐사선 자리 0..1), est, etaMs(남은), elapsedMs, startMs, overMs(예상 초과), expectMs, wait(대기 차오름 0..1|null), lap(0..1) }
+ * 줄 섬(0)은 'none'(항로 없음). 비율 모름은 탐사선을 가운데(p 0.5)에 두고 항로 전체를 점선으로.
+ */
+export function trackModel(job, code, nowMs, R, prog = null) {
+  const span = trackSpan(R);
+  const startMs = tsMs(job && job.startedAt);
+  const ended = code === 3 || code === 4;
+  const endMs = ended ? tsMs(job && job.endedAt) : NaN;
+  const elapsedMs = Number.isFinite(startMs) && Number.isFinite(nowMs) ? Math.max(0, (Number.isFinite(endMs) ? endMs : nowMs) - startMs) : null;
+  const est = jobEstimated(job);
+  const expectMs = est ? Number(job.ext.expectSec) * 1000 : null;
+  let mode = 'none', p = 0.5;
+  if (code === 1) { mode = prog == null ? 'spin' : est ? 'est' : 'progress'; p = prog == null ? 0.5 : prog; }
+  else if (code === 2) mode = 'wait';
+  else if (code === 3) { mode = 'done'; p = 1; }
+  else if (code === 4) { mode = 'failed'; p = prog == null ? 0.5 : prog; }
+  else if (code === 5) { mode = 'stale'; p = prog == null ? 0.5 : prog; }
+  let etaMs = null;
+  if (!ended && job && job.eta) { const e = tsMs(job.eta); if (Number.isFinite(e) && Number.isFinite(nowMs)) etaMs = Math.max(0, e - nowMs); }
+  const overMs = est && elapsedMs != null ? Math.max(0, elapsedMs - expectMs) : 0;
+  const wait = code === 2 ? jobWaitFill(job, nowMs) : null;
+  const lap = elapsedMs != null ? (elapsedMs % TRACK.LAP_MS) / TRACK.LAP_MS : 0;
+  return { mode, code: TRACK_MODE[mode], span, p: Math.max(0, Math.min(1, p)), est, etaMs, elapsedMs, startMs, overMs, expectMs, wait, lap };
+}
+
+/** 관문 각(탐사선 자리 = 0 기준, rad): 출발 = −p·S, 도착 = +(1−p)·S */
+export function trackGates(m) { return { a0: -m.p * m.span, a1: (1 - m.p) * m.span }; }
+
+const pad2 = (x) => String(x).padStart(2, '0');
+const hhmmOf = (ms) => { const d = new Date(ms); return Number.isFinite(d.getTime()) ? `${pad2(d.getHours())}:${pad2(d.getMinutes())}` : ''; };
+/** 시계 꼴 기간(분 단위): 4:32 · 0:07 · 32분 미만도 0:32 */
+const hmOf = (ms) => { const m = Math.max(0, Math.round(ms / 60000)); return `${Math.floor(m / 60)}:${pad2(m % 60)}`; };
+/** 짧은 기간 글자(분 단위): ~13분 · ~1시간 8분 */
+function durOf(ms) {
+  const m = Math.max(1, Math.round(ms / 60000));
+  if (m < 60) return tr('cards.t.m', { n: m });
+  const h = Math.floor(m / 60), r = m % 60;
+  return r ? tr('cards.t.h', { n: h }) + ' ' + tr('cards.t.m', { n: r }) : tr('cards.t.h', { n: h });
+}
+
+/**
+ * 관문 글자(분 단위로만 바뀜 — 움직임 줄이기도 같음): { from 출발 관문, to 도착 관문, key 다시 그릴지 비교할 열쇠 }.
+ *  진행 = 출발 `출발 12:01` · 도착 `~13분 · 16:32`(ETA 가 있을 때) / 예상 비율 = 도착 `예상 4:32 중 4:20` 또는 `예상 초과 N분`
+ *  대기 = 도착 `~16:30`(until) / 비율 모름·정체 = 출발만 / 끝·실패·줄 섬 = 없음
+ */
+export function trackLabels(job, m, nowMs) {
+  let from = '', to = '';
+  const live = m.mode === 'progress' || m.mode === 'est' || m.mode === 'spin' || m.mode === 'stale' || m.mode === 'wait';
+  if (live && Number.isFinite(m.startMs)) from = tr('cards.track.depart', { t: hhmmOf(m.startMs) });
+  if (m.mode === 'progress' && m.etaMs != null) to = tr('cards.track.eta', { d: durOf(m.etaMs), t: hhmmOf(nowMs + m.etaMs) });
+  else if (m.mode === 'est' && m.elapsedMs != null) to = m.overMs >= 60000 ? tr('cards.track.over', { d: durOf(m.overMs) }) : tr('cards.track.est', { e: hmOf(m.expectMs), a: hmOf(m.elapsedMs) });
+  else if (m.mode === 'wait' && job && job.until) { const u = tsMs(job.until); if (Number.isFinite(u)) to = tr('cards.track.until', { t: hhmmOf(u) }); }
+  return { from, to, key: from + '|' + to };
 }

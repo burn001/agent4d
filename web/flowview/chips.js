@@ -5,7 +5,7 @@
 // 아래로 흐르는 스캔라인, 방향광 음영. 기둥 1회 그리기(윗면+옆면, 뒤→앞 정렬) + 그림자 1회 그리기(바닥 그림자 원반 + 바닥까지 점선 기둥줄).
 // 거리 안개(장면 안개 색 = 배경)·아래층일수록 어둡게(tier-core tierDim). 배치 장치는 같은 자리에서 넓은 상자 기둥.
 import * as THREE from 'three';
-import { nodeVisualState, stateColor, kindIcon, paletteOf, breathe, NODE_STATE } from './flow-style.mjs';
+import { nodeVisualStateAt, runStaleOf, stateColor, kindIcon, paletteOf, breathe, NODE_STATE } from './flow-style.mjs';
 import { bandCode, cycleProgress } from '../batch-core.mjs';
 import { jobOf } from '../job-core.mjs';
 import { STAND, standYawStep, yawToward } from './tier-core.mjs'; // 세운 배치 장치
@@ -488,7 +488,7 @@ export class NodeChips {
     for (const v of ord) {
       if (n >= this.cap) break;
       const node = v.node;
-      const st = nodeVisualState(node.status, v.icons ? v.icons.size : 0);
+      const st = nodeVisualStateAt(node, v.icons ? v.icons.size : 0, nowMs); // 오래 도는 셸 = 도구 사용 모습
       // 작업 노드: 표시 상태(렌더러 시계 — 정체 판정)는 JOB_CHIP.REFRESH_MS 마다, 대기 차오름은 보관한 시각으로 산술만(객체 안 만듦)
       const job = jobOf(node);
       const jm = job ? jobChipModel(v._jobChip || (v._jobChip = newJobChipMemo()), job, nowMs) : null;
@@ -499,7 +499,7 @@ export class NodeChips {
       this.mesh.setMatrixAt(n, this._m);
       // 같은 프로젝트 live 메인이 여럿이면 메인 테두리(상태색 자리)를 그 세션 색으로 — 오류·중지·완료는 상태색 그대로
       const rg = !jm && v.procRig ? this._rigAttr(v, nowMs) : null; // 분리 프로세스 장치: 상태 번호·과열·색
-      const c = rg ? rg.col : jm ? this.jobColor(jm.code) : v.sessC && v.kind === 'main' && !node.parentId && (st === NODE_STATE.idle || st === NODE_STATE.thinking || st === NODE_STATE.tool) ? v.sessC : this._col(st), kc = view.kindColor(v.kind);
+      const c = rg ? rg.col : jm ? this.jobColor(jm.code) : runStaleOf(node, nowMs) ? this.jobColor(5) : v.sessC && v.kind === 'main' && !node.parentId && (st === NODE_STATE.idle || st === NODE_STATE.thinking || st === NODE_STATE.tool) ? v.sessC : this._col(st), kc = view.kindColor(v.kind);
       C[n * 3] = c.r; C[n * 3 + 1] = c.g; C[n * 3 + 2] = c.b;
       K[n * 3] = kc.r; K[n * 3 + 1] = kc.g; K[n * 3 + 2] = kc.b;
       const sk = v.scopeK ?? 1;

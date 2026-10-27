@@ -39,6 +39,14 @@ export class Vx2DExtra {
     this.ixModel = new IX.IxModel(); // 복셀 2D 특별 상호작용 장부(바탕 FlatIx 는 복셀에서 꺼져 있음)
   }
   clear() { this.pool.clear(); this.desks.clear(); this.routes.clear(); this._ver = -1; this.ixModel.clear(); }
+  /** 카메라 git 붙잡기가 함께 담을 발송대 자리(평면 세계 x·z) [{x,y:0,z,r}] | null */
+  holdPts(id) {
+    const v = this.view, ch = v.chars.get(id), m = !ch && v.machines.get(id);
+    const room = ch ? ch.room : m && m.pos ? v.roomsById.get(m.pos.roomId) : null;
+    const off = room && room.type === 'office' ? room : room && room.officeId ? v.roomsById.get(room.officeId) : null;
+    const sp = off && ixSpot(off, 'github');
+    return sp ? [{ x: sp.x, y: 0, z: sp.z, r: 1.4 }] : null;
+  }
   _nodes() { return this.view._nodeMap(); }
 
   // ---------------- 이벤트 ----------------

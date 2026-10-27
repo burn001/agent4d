@@ -200,3 +200,6 @@
 .hl-hot .ins-heat i { background: #f4511e; }
 .ins-lfoot { margin-top: 4px; }
 .ins-lfoot.hl-hot { color: color-mix(in srgb, #f4511e 70%, var(--text)); }
+/* 실행 중 셸: 정체면 경과 줄·정체 줄을 정체 주황(작업 정체 색)으로 */
+.ins-run.stale .k-stale, .ins-run.stale .k-elapsed { color: var(--jd-stale); font-weight: 600; }
+.ins-run .k-buffered { color: var(--muted); }

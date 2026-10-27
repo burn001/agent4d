@@ -304,3 +304,47 @@ test('데모: 실제 PlanTracker 로 메인 할 일·워크플로 단계(진행 
   todo = g.get('s:demo').meta.plans[0];
   assert.deepEqual(todo.items.slice(0, 2).map((x) => x.s), ['done', 'in_progress']);
 });
+
+test('단계 설계서 형식 넓힘: Phase N·1a·두 자리·표 줄·표식 없는 단계는 대기, 옛 **단계 N 상태** 그대로', () => {
+  const en = parsePlanMarkdown('# Rollout\n## Phase 1 — Measure\n**Phase 1 status**: ✅ done\n## Phase 2: Build\n## Phase 10 — Ship\n### Phase 2.1 sub\n');
+  assert.equal(en.kind, 'phases');
+  assert.deepEqual(en.items.map((x) => [x.k, x.t, x.s]), [['단계 1', 'Phase 1 — Measure', 'done'], ['단계 2', 'Phase 2 — Build', 'pending'], ['단계 10', 'Phase 10 — Ship', 'pending']]);
+  const sub = parsePlanMarkdown('# 축\n### 단계 1a — 앞\n**단계 1a 상태**: 🔧 진행 중\n### 단계 1b — 뒤\n### 단계 2 — 끝\n');
+  assert.deepEqual(sub.items.map((x) => [x.k, x.s, x.nos || 0]), [['단계 1a', 'in_progress', 0], ['단계 1b', 'pending', 1], ['단계 2', 'pending', 1]]);
+  const tb = parsePlanMarkdown('# 표\n| 단계 | 내용 | 상태 |\n|---|---|---|\n| 단계 0 | 재측정 | ✅ 닫힘 |\n| **단계 1** | 배선 | ⏸ 보류 |\n| 단계 2 | 배포 | |\n');
+  assert.deepEqual(tb.items.map((x) => [x.t, x.s, x.hold || 0]), [['단계 0 — 재측정', 'done', 0], ['단계 1 — 배선', 'pending', 1], ['단계 2 — 배포', 'pending', 0]]);
+  assert.equal(parsePlanMarkdown('# 글\n## Phase 1 — 하나뿐'), null, '표식 없는 단계 제목 하나는 계획 아님');
+  assert.equal(parsePlanMarkdown('## Phase 1\n## Phase 2\n- [ ] a\n- [ ] b').kind, 'checkbox', '체크박스 계획이 먼저');
+  // 옛 형식: 표식 줄 + 표식 없는 단계 제목도 항목(대기)
+  const d = parsePlanMarkdown(DESIGN(['✅', '◑ 미착지', '◑ 미착지']) + '### 단계 3 — 정리\n');
+  assert.deepEqual(d.items.map((x) => [x.k, x.s]), [['단계 0', 'done'], ['단계 1', 'pending'], ['단계 2', 'pending'], ['단계 3', 'pending']]);
+});
+
+test('러너: 부분 관찰(앞부분 sed·부분 Read·여러 파일 명령의 grep)은 아는 단계를 지우지 않고 합침', () => {
+  const { g, T, plans } = tree();
+  const pt = new PlanTracker({ graph: g });
+  const F = 'docs/plans/2026-10-26-x-execution-design.md';
+  const doc = DESIGN(['◑ 미착지', '◑ 미착지', '◑ 미착지']) + '### 단계 3 — 정리\n**단계 3 상태**: ◑ 미착지\n';
+  const head = doc.split('\n').slice(0, 4).join('\n'); // # 제목 · · 단계 0 제목 · 단계 0 표식
+  // 회차 2: 앞부분만 sed — 단계 0 만 보임
+  run(pt, 'Bash', { command: `sed -n 1,4p ${F}` }, 's:c2', T(10), { stdout: head });
+  assert.deepEqual(plans('b:L-r1')[0].items.map((x) => x.t), ['단계 0 — 재측정']);
+  // 회차 2: git status 와 SUPERVISOR.md 를 함께 본 명령 끝의 grep(경로 머리 없음) → 설계서 몫으로 나머지 단계
+  run(pt, 'Bash', { command: `git status -sb && wc -l .work/SUPERVISOR.md && grep -n "단계 [0-9] 상태" ${F}` }, 's:c2', T(5),
+    { stdout: '## main\n2313 .work/SUPERVISOR.md\n4:**단계 0 상태**: ◑ 미착지\n6:**단계 1 상태**: ◑ 미착지\n8:**단계 2 상태**: ✅ 닫힘\n11:**단계 3 상태**: ◑ 미착지' });
+  let p = plans('b:L-r1')[0];
+  assert.deepEqual(p.items.map((x) => [x.t, x.s]), [['단계 0 — 재측정', 'pending'], ['단계 1', 'pending'], ['단계 2', 'done'], ['단계 3', 'pending']]);
+  assert.equal(p.items[0].t, '단계 0 — 재측정', 'grep 의 맨 "단계 N" 이 제목을 덮지 않음');
+  // 회차 3: 부분 Read(중간) — 단계 1·2 제목이 보이고 단계 2 표식은 없음 → 단계 2 의 완료는 유지, 단계 0·3 도 유지
+  run(pt, 'Read', { file_path: 'D:/r/' + F, offset: 5, limit: 3 }, 's:c3', T(30), { file: { content: '### 단계 1 — ADR · 배선\n**단계 1 상태**: ✅ 닫힘\n### 단계 2 — 배포', startLine: 5, numLines: 3, totalLines: 11 } });
+  p = plans('b:L-r1')[0];
+  assert.deepEqual(p.items.map((x) => [x.t, x.s]), [['단계 0 — 재측정', 'pending'], ['단계 1 — ADR · 배선', 'done'], ['단계 2 — 배포', 'done'], ['단계 3', 'pending']]);
+  // 제목만 보는 grep(상태 없음)도 지우지 않고 맨 글에 제목 채움
+  run(pt, 'Bash', { command: `grep -n "^#" ${F}` }, 's:c3', T(40), { stdout: '1:# 축 설계\n2:## §3 단계\n3:### 단계 0 — 재측정\n10:### 단계 3 — 정리' });
+  p = plans('b:L-r1')[0];
+  assert.equal(p.n, 4);
+  assert.deepEqual(p.items.map((x) => [x.t, x.s]), [['단계 0 — 재측정', 'pending'], ['단계 1 — ADR · 배선', 'done'], ['단계 2 — 배포', 'done'], ['단계 3 — 정리', 'pending']]);
+  // 머리 없는 줄을 받을 파일이 모호하면(설계서 이름이 둘) 버림
+  run(pt, 'Bash', { command: 'grep -n "단계 . 상태" docs/plans/a-design.md && cat docs/plans/b-design.md' }, 's:c3', T(50), { stdout: '**단계 9 상태**: ✅' });
+  assert.equal(plans('b:L-r1').length, 1);
+});

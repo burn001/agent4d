@@ -301,6 +301,7 @@ export function isExternalReq(req) {
 }
 /** 이벤트 하나(art 가 있으면 접은 복사본) */
 export function externalEv(ev) {
+  if (ev && Array.isArray(ev.arts)) return { ...ev, arts: ev.arts.map((a) => (a && Array.isArray(a.art) ? { ...a, art: a.art.map(foldRef) } : a)) }; // tool-summary
   if (!ev || !Array.isArray(ev.art)) return ev;
   return { ...ev, art: ev.art.map(foldRef) };
 }

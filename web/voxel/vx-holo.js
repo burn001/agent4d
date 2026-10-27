@@ -69,6 +69,7 @@ export class VxHolo {
     this.view = view;
     const scene = view.scene;
     this.book = new HoloBook({ max: 256, perNode: 4, stack: 2 });
+    { const vw = view; this.book.nodeOf = (id) => { const x = vw.nodes && vw.nodes.get ? vw.nodes.get(id) : null; return x || null; }; this.book.clock = () => (typeof vw.clock === 'function' ? vw.clock() : Date.now()); } // 셸 머리줄 경과·꼬리 작은 상태
     this.aColor = new THREE.InstancedBufferAttribute(new Float32Array(CAP * 3), 3).setUsage(THREE.DynamicDrawUsage);
     this.aFlash = new THREE.InstancedBufferAttribute(new Float32Array(CAP * 3), 3).setUsage(THREE.DynamicDrawUsage);
     this.aA = new THREE.InstancedBufferAttribute(new Float32Array(CAP * 4), 4).setUsage(THREE.DynamicDrawUsage);
@@ -220,6 +221,7 @@ export class VxHolo {
         const pe = ch._monE || (ch._monE = { id: '', panel: null, pv: 0, shape: 0, asp: MON.ASP, label: { tool: '', target: '' }, res: 'ok', result: '', cat: 'other', tool: '', scrollAt: null, scrollN: 0 });
         if (pe.id !== main.id || pe.pv !== main.pv || pe.res !== main.res || pe.result !== main.result) {
           pe.id = main.id; pe.panel = main.panel; pe.pv = main.pv; pe.label = main.label; pe.res = main.res; pe.result = main.result; pe.cat = main.cat; pe.tool = main.tool;
+          pe.runHead = main.runHead; pe.runLong = main.runLong; pe.runMs = main.runMs; pe.runStale = main.runStale; // 셸 머리줄 경과
         }
         pe.scrollAt = main.scrollAt; pe.scrollN = main.scrollN;
         const c0 = this._cand(ntc++);

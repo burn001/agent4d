@@ -78,18 +78,20 @@ test('§83 보드 주인 = 세션 메인: 부모 사슬 → 부모 없는 기동
 test('§83.9 보드 크기 = 홀로그램 모니터 폭 × 높이 1.5배, 앵커 기준 고정 오프셋(카메라 무관) · 화면 투영은 끌어오지 않음 · 간략·숨김', () => {
   const w = boardWorld(2);
   const hh = 1.25 + 0.3 * 2;
-  assert.ok(Math.abs(w.w - hh * 1.5) < 1e-9 && Math.abs(w.h - hh * 1.5) < 1e-9, '흐름·Planet: 폭 = 모니터 폭(높이 × 1.5), 높이 = 모니터 높이 × 1.5');
+  const K = PLAN_UI.SIZE_K;
+  assert.equal(K, 2, '§106 크기 2배');
+  assert.ok(Math.abs(w.w - hh * 1.5 * K) < 1e-9 && Math.abs(w.h - hh * 1.5 * K) < 1e-9, '흐름·Planet: 폭 = 모니터 폭(높이 × 1.5) × 2, 높이 = 모니터 높이 × 1.5 × 2');
   assert.deepEqual(w.holo, holoMonitor(2));
-  assert.ok(Math.abs(w.w / w.holo.w - 1) < 1e-9 && Math.abs(w.h / w.holo.h - PLAN_UI.HOLO_H_K) < 1e-9);
+  assert.ok(Math.abs(w.w / w.holo.w - K) < 1e-9 && Math.abs(w.h / w.holo.h - PLAN_UI.HOLO_H_K * K) < 1e-9);
   const vx = boardWorld(2, 'voxel');
-  assert.ok(Math.abs(vx.w - MON.H * MON.ASP) < 1e-9 && Math.abs(vx.h - MON.H * 1.5) < 1e-9, '복셀: 모니터(MON) 기준');
+  assert.ok(Math.abs(vx.w - MON.H * MON.ASP * K) < 1e-9 && Math.abs(vx.h - MON.H * 1.5 * K) < 1e-9, '복셀: 모니터(MON) 기준');
   assert.equal(PLAN_UI.VX_MON_H, MON.H); assert.equal(PLAN_UI.VX_MON_ASP, MON.ASP);
   assert.deepEqual(PLAN_UI.BOOST.voxel, [MON.MIN_PX, MON.BOOST]); assert.deepEqual(PLAN_UI.BOOST.flow, [HOLO.MIN_PX_ACTIVE, HOLO.BOOST_MAX]);
   // 멀면 활동 모니터처럼 최소 높이까지 키움(상한까지)
   const far = boardScreen({ x: 500, y: 400 }, 10, w, 1440, 900); // 모니터 높이 18.5px < 30 → ×1.62
   assert.ok(Math.abs(far.box.w - w.w * 10 * (30 / (w.holo.h * 10))) < 1e-6);
   const own = boardWorld(2, 'planet', { w: 3, h: 2 });
-  assert.equal(own.w, 3); assert.equal(own.h, 3, '표현이 낸 모니터 크기(view.holoSize)가 우선');
+  assert.equal(own.w, 3 * K); assert.equal(own.h, 3 * K, '표현이 낸 모니터 크기(view.holoSize)가 우선');
   assert.ok(Math.abs(w.off - (2 * 1.3 + PLAN_UI.GAP_W)) < 1e-9, '원 바깥 오른쪽');
   assert.deepEqual(boardWorld(2), w, '결정적 — 화면·카메라 입력이 없다');
   // 화면 투영: 배율 = 월드 폭 × px/월드 / 기준 폭, 왼쪽 아래 모서리 = 투영 점, 높이 = 폭 × 비율
@@ -97,14 +99,15 @@ test('§83.9 보드 크기 = 홀로그램 모니터 폭 × 높이 1.5배, 앵커
   assert.ok(!sc.hidden && Math.abs(sc.s - (w.w * 60) / PLAN_UI.BASE_PX) < 1e-9);
   assert.equal(sc.box.x, 500); assert.ok(Math.abs(sc.box.y + sc.box.h - 400) < 1e-9, '아래 변 = 투영 점');
   assert.ok(Math.abs(sc.box.h / sc.box.w - w.aspect) < 1e-9); assert.equal(sc.lod, false);
-  assert.equal(boardScreen({ x: 500, y: 400 }, 20, w, 1440, 900).lod, true, '작으면 간략');
+  assert.equal(boardScreen({ x: 500, y: 400 }, 10, w, 1440, 900).lod, true, '작으면 간략');
+  assert.equal(boardScreen({ x: 500, y: 400 }, 20, w, 1440, 900).lod, false, '§106 2배라 같은 거리에서 간략이 덜 됨');
   // 화면 가장자리 너머: 안으로 밀어 넣지 않고 그 자리(일부만 보임) 또는 숨김
   const edge = boardScreen({ x: 1400, y: 400 }, 60, w, 1440, 900);
   assert.equal(edge.hidden, false); assert.equal(edge.box.x, 1400, '오른쪽 끝 너머로 나가도 x 그대로');
   assert.equal(boardScreen({ x: 1500, y: 400 }, 60, w, 1440, 900).hidden, true, '판 전체가 화면 밖이면 숨김(끌어오지 않음)');
   assert.equal(boardScreen({ x: -2000, y: 400 }, 60, w, 1440, 900).hidden, true);
   assert.equal(boardScreen({ behind: true }, 0, w, 1440, 900).hidden, true, '카메라 뒤');
-  assert.equal(boardScreen({ x: 500, y: 400 }, 0.5, w, 1440, 900).hidden, true, '너무 멀면(키움 상한 뒤에도 HIDE_PX 미만) 숨김');
+  assert.equal(boardScreen({ x: 500, y: 400 }, 0.2, w, 1440, 900).hidden, true, '너무 멀면(키움 상한 뒤에도 HIDE_PX 미만) 숨김');
   assert.equal(boardScreen({ x: 500, y: 400 }, 1000, w, 1440, 900).s, PLAN_UI.S_MAX, '아주 가까우면 크기만 상한(자리 그대로)');
   assert.equal(boardScreen({ x: 500, y: 400 }, 1000, w, 1440, 900).box.x, 500);
 });

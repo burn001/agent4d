@@ -26,6 +26,16 @@ export function stripAnsi(s) {
     .replace(CTRL, '');
 }
 
+/**
+ * `\r` 덮어쓰기만 풀기(ANSI·제어 문자는 그대로): 줄마다 `\r` 로 나눈 마지막 빈 아닌 조각, `\r\n` 은 줄 끝.
+ * tqdm 같은 진행 갱신은 출력 원문에 `\r` 을 살려 두고 LineTail·JobBook.feed·이벤트 글 단계에서 이렇게 접는다(이른 `\r` 제거 금지).
+ */
+export function collapseCR(s) {
+  const t = String(s ?? '');
+  if (!t.includes('\r')) return t;
+  return t.split('\n').map((l) => { const p = l.split('\r'); return p.length > 1 ? (p.filter((x) => x).pop() || '') : l; }).join('\n');
+}
+
 /** 사람이 읽을 수 없는 줄(바이너리·깨진 인코딩) */
 function looksBinary(l) {
   if (!l) return false;

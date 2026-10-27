@@ -13,6 +13,9 @@ const WHOLE = {
   '노드 배치 규칙을 황금각 기준으로 구현했습니다.': 'Implemented node placement using the golden angle.',
   '서버 SSE 형식을 확인했습니다. snapshot 다음 ev 가 이어집니다.': 'Checked the server SSE format: a snapshot, then events.',
   '테스트가 모두 통과했습니다.': 'All tests pass.',
+  '색인 다시 만들기': 'Rebuild search index', // run-mock
+  '데이터 이관': 'Data migration',
+  '백그라운드 실행': 'Running in background',
   '터널 주소를 KV 에 등록했습니다.': 'Registered the tunnel address in KV.',
   '카메라 자동 투어 점수를 계산합니다.': 'Scoring nodes for the automatic camera tour.',
   '빌드 결과를 검토하고 있습니다.': 'Reviewing the build output.',

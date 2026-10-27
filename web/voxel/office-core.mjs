@@ -53,6 +53,29 @@ export function ixSpot(room, cat) {
   return p;
 }
 
+/**
+ * 시설 효과 보이게(흐름 연출 묶음 1 F1·F2·F5 의 복셀 판). 사무실을 멀리서 보면 소포·카드·빔 점이 1～3px 이었다.
+ *   · 화면 하한 배율 = clamp(MIN_PX / (시설 폭 × ppu), 1, SCALE_MAX) — 상위 활동·포커스·호버 노드만. 시설(벽·바닥 가구)은 그대로 두고
+ *     움직이는 조각(소포·카드·드론·빔 점)과 벽에 걸린 등·막대의 면만 키운다. 상한 2 = 벽에서 떨어지거나 방 밖으로 나가지 않는 크기
+ *   · 가는 조각(안테나 빔 기둥·진행 막대)은 화면 폭 LINE_PX(기본 2px · 상위 3px)보다 가늘지 않게(vxIxThin)
+ *   · 잔광: 끝난 뒤 잔광 시간의 HOLD 비율까지 그대로, 나머지에서 흐려짐(vxIxAlpha). 잔광 시간은 흐름과 같은 IXFX.LINGER(하한 LINGER_MIN 3초, ÷√배속)
+ *     — 예전 복셀은 끝나자마자 선형으로 흐려져 원격(1.4초)은 0.7초 뒤 이미 반이었다
+ */
+export const VX_IX = { MIN_PX: 48, SCALE_MAX: 2, HOLD: 0.6, LINE_PX: { BASE: 2, VIP: 3 }, WIDTH: { github: 1.5, db: 1.4, remote: 1.0, batch: 3.1, tests: 2.0 } };
+export function vxIxScale(ppu, width) {
+  if (!(ppu > 0) || !(width > 0)) return 1;
+  return Math.min(VX_IX.SCALE_MAX, Math.max(1, VX_IX.MIN_PX / (width * ppu)));
+}
+/** 가는 조각의 굵기(세계): w 와 화면 LINE_PX 중 굵은 쪽. ppu 모르면 w */
+export function vxIxThin(w, ppu, vip = false) { return ppu > 0 ? Math.max(w, (vip ? VX_IX.LINE_PX.VIP : VX_IX.LINE_PX.BASE) / ppu) : w; }
+/** 잔광 세기(0..1): te = 끝난 뒤 초(null = 진행 중), lin = 잔광 초. HOLD 까지 1, 그 뒤 lin 에서 0 */
+export function vxIxAlpha(te, lin) {
+  if (te == null) return 1;
+  if (!(lin > 0)) return 0;
+  const h = lin * VX_IX.HOLD;
+  return te <= h ? 1 : Math.max(0, 1 - (te - h) / (lin - h));
+}
+
 /** 탕비실 쉬는 자리 i(세계, face 포함). 사무실이 아니면 null */
 export function breakSpot(room, i = 0) {
   if (!room || room.type !== 'office') return null;

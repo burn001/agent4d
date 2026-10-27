@@ -32,3 +32,6 @@ import './procs.test.mjs';
 import './jobs.test.mjs'; // (목록에서 빠져 있던 것)
 import './home.test.mjs';
 import './control.test.mjs'; // 화면 원격 조작
+import './longrun.test.mjs';
+import './sse-out.test.mjs'; // 이벤트 몰림 조절
+import './extjobs.test.mjs'; // 외부 작업 등록부

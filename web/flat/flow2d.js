@@ -6,7 +6,7 @@
 import { FlatView } from './flat-view.js';
 import { t } from '../i18n.mjs';
 import { FlatArt } from './art2d.js'; // 작업 대상 층(켤 때만 만든다)
-import { paletteOf, nodeVisualState, stateColor, kindIcon, breathe, NODE_STATE, BEAM, beamControls, beamPoint, beamAlpha, flowDash, FLOW_DASH, packetWobble } from '../flowview/flow-style.mjs';
+import { paletteOf, nodeVisualStateAt, runStaleOf, stateColor, kindIcon, breathe, NODE_STATE, BEAM, beamControls, beamPoint, beamAlpha, flowDash, FLOW_DASH, packetWobble } from '../flowview/flow-style.mjs';
 import { FLOW, PacketPool, planFlow, easeInOut, linkPackets } from '../flow-core.mjs';
 import { isGuessLink, isLauncher } from '../batch-core.mjs';
 import { DEG, degOf, degOfLink, packetGone, lineFlicker, brokenDash } from '../degrade-core.mjs';
@@ -305,14 +305,15 @@ export class Flow2DView extends FlatView {
     if (isJobVis(v)) { drawJobPill(this, ctx, v, v._sp.x, v._sp.y, v._R, (v.exitF ?? 1) * Math.min(1, (v.scopeK ?? 1) * 1.3), now); return; }
     if (v.procRig) { drawProcRig(this, ctx, v, v._sp.x, v._sp.y, v._R, (v.exitF ?? 1) * Math.min(1, (v.scopeK ?? 1) * 1.3), now); return; }
     const P = this.P, L = this.tokens.isLight;
-    const st = nodeVisualState(v.node.status, v.icons.size);
+    const cms = this.clock();
+    const st = nodeVisualStateAt(v.node, v.icons.size, cms); // 오래 도는 셸 = 도구 사용 모습(정체는 대기 + 주황)
     const R = v._R * (this.reduced ? 1 : breathe(st, now, v.seed));
     const { x, y } = v._sp;
     const sk = v.scopeK ?? 1;
     const endK = st === NODE_STATE.done ? 0.7 : st === NODE_STATE.stopped ? 0.6 : 1;
     const alpha = (v.exitF ?? 1) * Math.min(1, sk * 1.3) * endK * (v.stale ? 0.7 : 1);
     if (alpha < 0.01) return;
-    const col = v.sessC && v.kind === 'main' && !v.node.parentId && (st === NODE_STATE.idle || st === NODE_STATE.thinking || st === NODE_STATE.tool) ? v.sessC : this._stateCol[st]; // 메인 테두리 = 세션 색
+    const col = v.sessC && v.kind === 'main' && !v.node.parentId && (st === NODE_STATE.idle || st === NODE_STATE.thinking || st === NODE_STATE.tool) ? v.sessC : runStaleOf(v.node, cms) ? this.P.jobStale : this._stateCol[st]; // 메인 테두리 = 세션 색 · 정체 주황
     if (R < 1.6) { ctx.globalAlpha = alpha; ctx.fillStyle = col; ctx.fillRect(x - 1, y - 1, 2, 2); ctx.globalAlpha = 1; return; }
     const foc = v.id === this.focusId || v.id === this.hoverId;
     if (v.device) { this._drawDevice(ctx, v, x, y, R, col, alpha, now); return; }

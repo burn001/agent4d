@@ -30,6 +30,7 @@ import { ensureOverviewCss, islandLabelHtml } from '../overview/islands.js';
 import { pickRectAt, projectAreaPad } from '../overview/pick-core.mjs';
 import { ProjFade } from '../proj-fade.mjs';
 import { BATCH, batchFold, deviceInfo, deviceSummary, nodeTags, isLauncher, isCycle, rearmStandby, cycleProgress } from '../batch-core.mjs';
+import { runVis, runWorking, runVisStatus } from '../run-core.mjs'; // 실행 중 셸
 import { isJob, jobOf } from '../job-core.mjs'; // 작업 노드
 import { jobCardModel, jobLabelAlways, jobBoardYaw, JOBCARD } from './vx-job-core.mjs';
 import { drawJobCard } from './vx-jobs.js';
@@ -908,7 +909,7 @@ export class VoxelView {
 
     // 캐릭터 상태 머신
     const ctx = this._ctx;
-    ctx.now = now; ctx.dt = dt; ctx.ts = this.ts;
+    ctx.now = now; ctx.dt = dt; ctx.ts = this.ts; ctx.clockMs = this.clock(); // meta.run 판정 시계
     for (const ch of this.chars.values()) {
       if (ch.state === 'gone' || !ch.seat || !ch.room) continue;
       ctx.room = ch.room; ctx.seat = ch.seat;
@@ -1026,7 +1027,8 @@ export class VoxelView {
       if (m.type === 'job') { this._drawJob(m, now, clockMs, B); continue; } // 현황판 카드
       if (m.pos.type === 'proc') continue; // 생산 라인은 아래 procs.drawAll
       const st = this._mst || (this._mst = { status: '', flash: 0, t: 0, seed: 0, id: null, appear: 1, members: 0, doneMembers: 0 });
-      st.status = m.node.status; st.t = t; st.seed = m.seed; st.id = m.id;
+      st.status = runVisStatus(m.node, clockMs); st.t = t; st.seed = m.seed; st.id = m.id; // 실행 중이면 작업 중 LED
+      st.runStale = runVis(m.node, clockMs) === 'stale'; // 정체: 호박색 LED 가 느리게
       st.flash = Math.max(0, Math.min(1, (m.flashUntil - now) / 0.35));
       st.appear = m.appearT0 != null ? Math.min(1, Math.max(0.02, (now - m.appearT0) / 0.5)) : 1;
       if (m.type === 'batch') {
@@ -1072,7 +1074,7 @@ export class VoxelView {
       fx.focus = ch.id === this.focusId; fx.hover = ch.id === this.hoverId;
       fx.metaSkill = !!(n.meta && n.meta.skill) && ch.state !== 'leave';
       fx.doneLead = ch.lead && isEnded(n);
-      fx.idle = n.status === 'idle';
+      fx.idle = runVisStatus(n, clockMs) === 'idle'; // 전경 셸이 도는 중이면 대기(고개 기울임)가 아니라 작업
       fx.catColor = ch.workCat === 'skill' ? tok.skill : this.kindColor('main');
       drawCharacter(ch, this._look(ch), fx, L, G);
     }
@@ -1220,7 +1222,7 @@ export class VoxelView {
       const isF = ch.id === fid, isH = ch.id === hid;
       const n0 = ch.node;
       // 팀장 말고도 이름표: 진행 중 회차(장치 앞 작업자)·독립 claude -p(대기석·외부 작업) — 꼬리표와 함께
-      const named = ch.lead || (n0.meta && n0.meta.orphanSdk) || (ch.kind === 'claude-p' && !isEnded(n0) && isCycle(n0, this.nodes));
+      const named = ch.lead || (n0.meta && n0.meta.orphanSdk) || (ch.kind === 'claude-p' && !isEnded(n0) && isCycle(n0, this.nodes)) || !!runVis(n0, this.clock()); // 오래 도는 전경 셸: 경과·정체 꼬리표
       if ((!named || this._farAll) && !isF && !isH) continue;
       const name = esc(trunc(n0.label || n0.id, 16));
       const sub = isF || isH ? `<small>${esc((KIND_LABEL[ch.kind] || ch.kind) + ' · ' + (STATUS_LABEL[n0.status] || n0.status || ''))}</small>` : '';
@@ -1241,6 +1243,12 @@ export class VoxelView {
       const batch = m.type === 'batch';
       if (m.type === 'job') continue;
       if (m.pos && m.pos.type === 'proc' && !m.released) { this._procLabel(m, put, fid, hid); continue; } // 생산 라인 이름표(늘)
+      if (!batch && !m.released && m.pos && m.id !== fid && m.id !== hid && runVis(m.node, clockMs)) { // 오래 도는 백그라운드 셸: 늘 이름표(경과·조용함·정체)
+        const tags = nodeTags(m.node, this.nodes, clockMs);
+        const tg = tags.length ? `<span class="ntags">${tags.map((x) => `<i>${esc(x)}</i>`).join('')}</span>` : '';
+        put(m.id, esc(trunc(m.node.label || m.node.id, 16)) + tg, 'machine run', m.pos.x, m.type === 'rack' ? 2.25 : 0.02, m.pos.z + (m.type === 'rack' ? 0 : 0.6), null, true); // 랙은 위(바닥 이름표·현황판 이름표와 겹치지 않게)
+        continue;
+      }
       if (m.released || !m.pos || (m.id !== fid && m.id !== hid && !batch)) continue;
       if (batch && (this._isDim(m.id) || (this._farAll && m.id !== fid && m.id !== hid))) continue;
       const n0 = m.node;

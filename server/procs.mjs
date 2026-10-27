@@ -466,6 +466,171 @@ export function adaptiveStaleSec(gaps) {
   return Math.round(Math.min(PROC.STALE_MAX_SEC, Math.max(PROC.STALE_MIN_SEC, med * PROC.STALE_K)));
 }
 
+/**
+ * 출력 간격 하나를 넣고 적응 정체 문턱(초)을 돌려준다 — 분리 프로세스·장시간 실행 표시(meta.run) 공용.
+ * gaps 는 제자리에서 고친다(최근 PROC.GAPS 개). 첫 적재·밀린 조각(backlog — 시각이 파일 수정 시각 하나)은 간격으로 세지 않는다.
+ */
+export function pushGap(gaps, prevMs, tms, backlog = false) {
+  if (!backlog && Number.isFinite(prevMs) && Number.isFinite(tms) && tms > prevMs) {
+    gaps.push((tms - prevMs) / 1000);
+    if (gaps.length > PROC.GAPS) gaps.shift();
+  }
+  return adaptiveStaleSec(gaps);
+}
+
+/** 백그라운드 셸 출력 파일 끝 표지 `[exited with code N]`(Claude Code 가 붙임) → N, 없으면 null */
+export function exitMarkerOf(text) {
+  const m = /(?:^|\n)\[exited with code (-?\d{1,3})\]\s*$/.exec(String(text || '').replace(/\r/g, ''));
+  return m ? Number(m[1]) : null;
+}
+
+/** python 실행인데 출력 버퍼링을 끄지 않은 명령(`-u`·`PYTHONUNBUFFERED` 없음) — 파일·파이프로 보내면 끝에 몰아서 나온다 */
+export function pythonBuffered(command) {
+  const c = String(command || '');
+  if (!/(?:^|[\s;&|("'`\\/=])(?:python[\d.]*w?|py)(?:\.exe)?(?=[\s"'`;)|&]|$)/i.test(c)) return false;
+  if (/PYTHONUNBUFFERED/.test(c)) return false;
+  if (/(?:^|\s)-[A-Za-z]*u[A-Za-z]*(?=\s|$)/.test(c.replace(/(?:^|\s)-(?:-[\w-]+|[A-Za-z]*[^\sA-Za-z][^\s]*)/g, ' '))) return false;
+  return true;
+}
+
+const STEP_KW_RE_B = /^(?:do|then|else|elif|time|!)\s+/;
+// 출력을 끝까지 모으는 마지막 파이프 단계(Bash·PowerShell 별칭 포함). head·Select-Object -First 는 받는 대로 내보내므로 아님
+const HOLD_BASH = new Set(['sort', 'wc', 'tac', 'column']);
+const HOLD_PS = new Set(['sort-object', 'sort', 'measure-object', 'measure', 'group-object', 'group']);
+// 출력 대입·버림을 볼 필요가 없는 짧은 명령(앞쪽 준비 단계)
+const QUICK = new Set(['echo', 'printf', 'cd', 'pushd', 'popd', 'which', 'where', 'type', 'command', 'test', '[', '[[', 'export', 'set', 'unset', 'mkdir', 'rm', 'cp', 'mv',
+  'touch', 'true', 'false', 'exit', 'source', '.', 'write-host', 'write-output', 'set-location', 'sl', 'new-item', 'remove-item', 'test-path', 'get-command', 'date', 'sleep', 'start-sleep']);
+
+/** heredoc 본문(Bash `<<[-]EOF … EOF`)과 PowerShell here-string(`@' … '@`·`@" … "@`)을 지운다 — 그 안의 `|`·`>` 를 명령으로 보지 않게 */
+export function stripHeredocs(command, { ps = false } = {}) {
+  let s = String(command || '');
+  if (ps) return s.replace(/@(['"])[ \t]*\r?\n[\s\S]*?\r?\n\1@/g, "''");
+  const lines = s.split('\n');
+  const out = [];
+  const pend = [];
+  for (const line of lines) {
+    if (pend.length) {
+      const d = pend[0];
+      if ((d.tabs ? line.replace(/^\t+/, '') : line).replace(/\r$/, '') === d.word) pend.shift();
+      continue;
+    }
+    out.push(line);
+    const re = /(^|[^<])<<(-?)[ \t]*(?:'([^'\n]+)'|"([^"\n]+)"|\\?([A-Za-z_][\w.-]*))/g;
+    let m;
+    while ((m = re.exec(line))) pend.push({ tabs: m[2] === '-', word: m[3] ?? m[4] ?? m[5] });
+  }
+  return out.join('\n');
+}
+
+/**
+ * 출력이 늦게(끝에 몰아서)·아예 안 보일 이유 → 'devnull' | 'pipe' | 'python' | null.
+ * 기준 단위 = 최상위(`&&`·`||`·`;`·줄바꿈) 단위 중 마지막의 짧지 않은 명령(echo·cd 같은 마무리는 건너뜀).
+ *  · devnull: 표준 출력을 버림(`> /dev/null`·`&> /dev/null`·`> nul`·`> $null`·`| Out-Null`·`$null = …`·`[void]…`) 또는 출력을 변수로 받음(`X=$(…)`·`` X=`…` ``·PowerShell `$x = 명령`)
+ *  · pipe: 마지막 파이프 단계가 입력이 끝나야 내보내는 명령 — `tail`(`-f`·`-F`·`--follow`·`-n +N`/`+N` 제외)·`sort`·`wc`·`tac`·`column`·`uniq -c`,
+ *    PowerShell `Select-Object -Last`·`Sort-Object`·`Measure-Object`·`Group-Object`(별칭 sort·measure·group·select). `head`·`Select-Object -First` 는 받는 대로 바로 내보내므로 아님.
+ *  · python: 그 밖에 `pythonBuffered`(명령 전체).
+ * heredoc 본문·here-string·따옴표 안의 `|`·`>` 는 보지 않는다.
+ */
+export function bufferWhy(command, { tool = 'Bash' } = {}) {
+  if (typeof command !== 'string' || !command.trim()) return null;
+  const ps = tool === 'PowerShell';
+  const units = splitTop(stripHeredocs(command, { ps }), { ps }).filter((u) => u.sep !== '&');
+  let main = null;
+  for (const u of units) {
+    const t = u.text.trim().replace(STEP_KW_RE_B, '');
+    const toks = tokenize(t, { ps });
+    const first = toks.find((x) => !x.op);
+    const w0 = first ? base(first.w).toLowerCase() : '';
+    if (ps && /^\$[\w:]+$/.test(t)) continue; // 받아 둔 변수 내보내기(`$r`)
+    if (!w0 || (QUICK.has(w0) && !toks.some((x) => x.op && x.op[0] === '|'))) continue;
+    main = { t, toks };
+  }
+  if (main) {
+    const { t, toks } = main;
+    // 출력을 변수로 받음
+    if (!ps && /^(?:(?:local|export|declare|readonly)\s+(?:-\w+\s+)*)?[A-Za-z_]\w*=(?:"?\$\(|"?`)/.test(t)) return 'devnull';
+    if (ps && (/^\$null\s*=/i.test(t) || /^\[void\]/i.test(t))) return 'devnull';
+    if (ps && /^\$[\w:]+\s*[+]?=\s*(?:&\s*)?[A-Za-z.&(\\/]/.test(t) && !/^\$env:/i.test(t)) return 'devnull';
+    const red = redirects(toks);
+    if (red.stdout && isSink(red.stdout) && !/^\/dev\/std(?:out|err)$/i.test(red.stdout)) return 'devnull';
+    // 마지막 파이프 단계
+    let k = -1;
+    for (let i = 0; i < toks.length; i++) if (toks[i].op === '|' || toks[i].op === '|&') k = i;
+    if (k >= 0) {
+      const words = [];
+      for (let i = k + 1; i < toks.length; i++) { if (toks[i].op) { if (/[<>]/.test(toks[i].op)) i++; continue; } words.push(toks[i].w); }
+      const name = base(String(words[0] || '').replace(/[)}]+$/, '')).toLowerCase();
+      const args = words.slice(1);
+      if (ps) {
+        if (/^(?:out-null)$/.test(name)) return 'devnull';
+        if (HOLD_PS.has(name)) return 'pipe';
+        if (/^(?:select-object|select)$/.test(name) && args.some((a) => /^-l(?:a(?:s(?:t)?)?)?$/i.test(a))) return 'pipe';
+      } else {
+        if (name === 'tail') {
+          const follow = args.some((a) => /^-[A-Za-z]*[fF]/.test(a) || /^--follow/.test(a) || /^\+\d/.test(a) || /^--lines=\+/.test(a));
+          const plusN = args.some((a, i) => /^-n$/.test(a) && /^\+/.test(args[i + 1] || '')) || args.some((a) => /^-n\+/.test(a));
+          if (!follow && !plusN) return 'pipe';
+        }
+        if (HOLD_BASH.has(name)) return 'pipe';
+        if (name === 'uniq' && args.some((a) => /^-[A-Za-z]*c/.test(a) || a === '--count')) return 'pipe';
+      }
+    }
+  }
+  return pythonBuffered(command) ? 'python' : null;
+}
+
+const STEP_KW_RE = /^(?:do|then|else|elif|time)\s+/;
+
+/**
+ * `run_in_background` 명령이 출력을 파일로 돌리는 곳(리다이렉트·tee·Tee-Object·Out-File). 그 파일들을 같은 bg 노드의 둘째 출력 줄기로 읽는다.
+ * 103.4 와 같은 리다이렉트 규칙이되 분리 실행(&·nohup) 여부는 보지 않는다. echo·cat 같은 짧은 명령(DENY)은 뺀다. 최대 2개, 절대 경로.
+ */
+export function redirectLogs(command, { tool = 'Bash', cwd = null } = {}) {
+  if (typeof command !== 'string' || !command.trim()) return [];
+  const ps = tool === 'PowerShell';
+  const out = [];
+  const add = (cw, f) => { if (isSink(f)) return; const r = resolvePath(cw, f); if (r && !/\.output$/i.test(r) && !out.includes(r)) out.push(r); };
+  const visit = (cmd, cw, depth) => {
+    if (depth > 4) return cw;
+    let cur = cw;
+    for (const { text } of splitTop(cmd, { ps })) {
+      const t = text.trim().replace(STEP_KW_RE, '');
+      const cdm = /^(?:cd|pushd|Set-Location|sl|chdir)(?:\s+\/d)?\s+(?:"([^"]+)"|'([^']+)'|(\S+))\s*$/i.exec(t);
+      if (cdm) { const r = resolvePath(cur, cdm[1] || cdm[2] || cdm[3]); if (r) cur = r; continue; }
+      const g = /^[({]([\s\S]*)[)}]([^)}]*)$/.exec(t);
+      if (g && (t[0] === '(' || t[0] === '{')) {
+        const red = redirects(tokenize(g[2], { ps }));
+        visit(g[1], cur, depth + 1);
+        add(cur, red.stdout); add(cur, red.tee);
+        continue;
+      }
+      const toks = tokenize(t, { ps });
+      const red = redirects(toks);
+      const { rest } = unwrap(red.words);
+      const first = rest.length ? base(rest[0]).toLowerCase() : '';
+      if (!first || DENY.has(first)) continue;
+      add(cur, red.stdout);
+      if (!red.stdout) add(cur, red.stderr);
+      add(cur, red.tee);
+      if (ps) {
+        // … | Tee-Object [-FilePath] f · … | Out-File [-FilePath] f
+        for (let i = 0; i < toks.length; i++) {
+          const w = toks[i].w;
+          if (!w || !/^(?:tee-object|tee|out-file)$/i.test(w) || !toks[i - 1]?.op) continue;
+          const args = [];
+          for (let k = i + 1; k < toks.length && !toks[k].op; k++) args.push(toks[k].w);
+          const f = psParam(args, ['filepath', 'literalpath']) || args.find((a) => !/^-/.test(a));
+          if (f) add(cur, f);
+        }
+      }
+      if (out.length >= 2) break;
+    }
+    return cur;
+  };
+  visit(command, cwd, 0);
+  return out.slice(0, 2);
+}
+
 /** 장시간 무성장 끝 문턱(초) */
 export const quietEndSec = (staleSec) => Math.min(PROC.QUIET_END_MAX_SEC, Math.max(PROC.QUIET_END_MIN_SEC, (staleSec || PROC.STALE_DEFAULT_SEC) * PROC.QUIET_END_K));
 

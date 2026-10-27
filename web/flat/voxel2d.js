@@ -15,8 +15,9 @@ import { computeCampus } from '../voxel/campus.mjs';
 import { packView, packStale } from '../overview/pack-view.js';
 import { Character, crewSpots } from '../voxel/character-core.mjs';
 import { DARK, LIGHT, SKIN } from '../voxel/palette-hex.mjs';
-import { BATCH, batchFold, isLauncher, isCycle, rearmStandby } from '../batch-core.mjs';
-import { isJob, jobOf, jobLabelKey } from '../job-core.mjs'; // 작업 노드
+import { BATCH, batchFold, isLauncher, isCycle, rearmStandby, clockLabelKey } from '../batch-core.mjs';
+import { isJob } from '../job-core.mjs'; // 작업 노드
+import { runLabelOrder } from '../run-core.mjs'; // 실행 중 셸
 import { JOBCARD, jobCardModel, jobFlatPos, jobLabelAlways, jobColorHex, mixHex } from '../voxel/vx-job-core.mjs';
 import { catColor } from '../flow-core.mjs';
 import { pickRectAt, projectAreaPad } from '../overview/pick-core.mjs';
@@ -110,7 +111,7 @@ export class Voxel2DView extends FlatView {
     return charRadius(k === 'main' || k === 'claude-p');
   }
   /** 배치 장치(복합기) 이름표는 위 — 팀장 책상 바로 옆이라 아래면 팀장 이름표와 겹친다(3D 도 장치 위·뒤) */
-  labelUp(v) { return !!v.device; }
+  labelUp(v) { if (v.device) return true; const m = this.machines.get(v.id); return !!(m && m.type === 'rack' && v.node.meta && v.node.meta.run); } // 실행 중 셸 랙: 벽 쪽(위)이 비어 있어 위로 — 아래는 생산 라인·현황판이 차지
   /** 계획 보드 앵커의 제자리: 캐릭터는 걸어 다녀도 자기 책상 자리(seat), 장치(기동기 등)는 그 자리 */
   planHome(id) { const v = this.vis.get(id); if (!v) return null; const ch = this.chars.get(id); return ch && ch.seat ? { x: ch.seat.x, z: ch.seat.z } : { x: v.target.x, z: v.target.z }; }
   /** 이름표는 캐릭터 바로 아래 */
@@ -528,11 +529,7 @@ export class Voxel2DView extends FlatView {
     if (t - (this._jobAt || 0) >= 0.25) {
       this._jobAt = t;
       const cm = this.clock();
-      for (const m of this.machines.values()) {
-        if (m.type !== 'job') continue;
-        const v = this.vis.get(m.id);
-        if (v && v._jobKey != null && jobLabelKey(jobOf(v.node), cm) !== v._jobKey) this._labelText(v);
-      }
+      for (const v of this.vis.values()) if (v._jobKey != null && clockLabelKey(v.node, cm) !== v._jobKey) this._clockRefresh(v); // 작업· 실행 중 셸(기계·직원)
     }
   }
 
@@ -554,7 +551,7 @@ export class Voxel2DView extends FlatView {
     if (this.vsess.livePlanes(now).length) level = 2;
     // 캐릭터 상태 머신(3D 와 같음)
     const ctx = this._ctx;
-    ctx.now = now; ctx.dt = dt; ctx.ts = this.ts;
+    ctx.now = now; ctx.dt = dt; ctx.ts = this.ts; ctx.clockMs = this.clock(); // meta.run 판정 시계
     for (const ch of this.chars.values()) {
       if (ch.state === 'gone' || !ch.seat || !ch.room) continue;
       ctx.room = ch.room; ctx.seat = ch.seat;
@@ -623,6 +620,7 @@ export class Voxel2DView extends FlatView {
       const n = ch.node;
       if ((n.meta && n.meta.orphanSdk) || (ch.kind === 'claude-p' && !isEnded(n) && isCycle(n, nm))) push(ch.id, false);
     }
+    for (const id of runLabelOrder(this.vis.values(), cm)) push(id, false, 'soft'); // 오래 도는 셸: 직원(전경)·랙(백그라운드) 이름표에 경과·정체(작업 중 직원보다 먼저)
     for (const v of actives.slice(0, maxLabels)) if (this.chars.has(v.id)) push(v.id, false);
     if (this.chars.size <= 12) for (const id of this.chars.keys()) push(id, false);
   }

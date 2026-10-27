@@ -11,7 +11,7 @@ import { CAT_LABEL } from '../icons.js';
 import { HoloBook, HOLO, actLine, sayBrief, pushHist } from '../holo-core.mjs';
 import { EXIT, exitPolicy, exitPose } from '../exit-core.mjs';
 import { nodeSubtitle } from '../node-title.mjs';
-import { BATCH, batchFold, isLauncher, deviceInfo, deviceSummary, nodeTags, rearmStandby } from '../batch-core.mjs';
+import { BATCH, batchFold, isLauncher, deviceInfo, deviceSummary, nodeTags, rearmStandby, clockLabelKey } from '../batch-core.mjs';
 import { escapeHtml } from '../html-util.mjs';
 import { pickIslandAt } from '../overview/pick-core.mjs';
 import { ensureOverviewCss, islandLabelHtml } from '../overview/island-label.mjs';
@@ -23,10 +23,12 @@ import { sessionColorMap, nodeSessIdx } from '../multi-core.mjs';
 import { sessBadgeHtml, branchOf } from '../session-core.mjs';
 import { FlatSessions } from './flat-sessions.js';
 import { FlatIx } from './ix2d.js';
+import { ixSeedEvent } from '../ix-core.mjs';
 import { ProjFade, nodeFade } from '../proj-fade.mjs';
 import { projectAreaPad } from '../overview/pick-core.mjs';
 import { t } from '../i18n.mjs';
-import { isJob, jobOf, jobLabelKey } from '../job-core.mjs'; // 작업 노드
+import { isJob, jobLabelNear } from '../job-core.mjs'; // 작업 노드 · 가까운 작업 라벨
+import { RUNW, runOf, runTagTip, runStatusText, runLabelOrder } from '../run-core.mjs'; // 실행 중 셸
 
 const TOKEN_NAMES = ['bg', 'fog', 'grid', 'link', 'text', 'muted', 'k-main', 'k-subagent', 'k-workflow',
   'k-workflow-agent', 'k-claude-p', 'k-bash-bg', 'k-monitor', 'ok', 'error', 'skill', 'stopped', 'flow-call', 'link-spawn',
@@ -100,7 +102,10 @@ function ensureCss() {
 
 /** 도구 장부(HoloBook) 얇은 껍데기 — 3D HoloLayer 와 같은 이름(app.js·view 가 부름). 그리기는 하위 클래스 */
 class FlatHolo {
-  constructor(view) { this.view = view; this.book = new HoloBook(); }
+  constructor(view) {
+    this.view = view; this.book = new HoloBook();
+    { const vw = view; this.book.nodeOf = (id) => { const x = vw.vis && vw.vis.get(id); return x ? x.node : (vw.nodes && vw.nodes.get ? vw.nodes.get(id) : null); }; this.book.clock = () => (typeof vw.clock === 'function' ? vw.clock() : Date.now()); } // 셸 머리줄 경과·꼬리 작은 상태
+  }
   start(nodeId, ev, { quiet = false, speed = 1 } = {}) { this.view.invalidate(); return this.book.start(nodeId, ev, performance.now() / 1000, { quiet, minShow: HOLO.MIN_SHOW / Math.min(4, Math.max(1, Math.sqrt(speed || 1))) }); }
   end(nodeId, toolUseId, res, result = '') { this.view.invalidate(); return this.book.end(nodeId, toolUseId, res, performance.now() / 1000, result); }
   endAll(nodeId, res) { this.book.endAll(nodeId, res, performance.now() / 1000); }
@@ -350,6 +355,7 @@ export class FlatView {
     this._labelText(v);
     for (const t of node.openTools || []) this.toolStart(node.id, { ...t, toolUseId: t.toolUseId, ts: t.startedAt }, true);
     this._touchDevice(node.parentId);
+    if (this.ix) { const se = ixSeedEvent(node); if (se) this.ix.event(se); } // 외부 작업 진행 띠를 스냅샷에서 바로
     this.layoutDirty = true;
     this.invalidate();
   }
@@ -459,21 +465,23 @@ export class FlatView {
   }
 
   // ---------------- 라벨(scene.js 와 같은 문구) ----------------
+  /** 시계로만 바뀌는 표시(정체· 실행 경과·정체 모습)가 바뀜: 라벨 다시, 실행 중 셸이면 모습(색 캐시)도 + 다시 그림 */
+  _clockRefresh(v) { this._labelText(v); if (runOf(v.node)) { this._styleVis(v); this.invalidate(); } }
   _labelText(v) {
     const n = v.node;
     const name = trunc(n.label || n.id, 24);
     const waiting = n.status === 'idle' && (v.kind === 'main' || v.kind === 'claude-p') && this._activeBelow(v.id);
     const job = isJob(n); // 작업 노드(scene.js 와 같은 문구)
     const kindName = v.device ? t('flat.kind.device') : v.dockK ? t('flat.kind.dock') : job ? t('cards.job.kind') : (KIND_LABEL[v.kind] || v.kind);
-    const sub = job ? kindName : `${kindName} · ${waiting ? t('flat.sub.waiting') : v.standby ? t('flat.sub.standby') : statusLabel(n.status)}`;
+    const sub = job ? kindName : `${kindName} · ${waiting ? t('flat.sub.waiting') : v.standby ? t('flat.sub.standby') : runStatusText(n, this.clock(), statusLabel)}`; // 실행 중 셸: 정체·작업 중
     const tools = v.icons.size > 1 ? ' · ' + t('flat.sub.tools', { n: v.icons.size }) : '';
     const st = nodeSubtitle(n);
     v.subTitle = st;
     const stHtml = st ? `<span class="ntitle" title="${escapeHtml(st)}">${escapeHtml(st)}</span>` : '';
     const tags = nodeTags(n, this._nodeMap(), this.clock());
-    if (job) v._jobKey = jobLabelKey(jobOf(n), this.clock()); // 시계로만 바뀌는 정체 표시를 _exitPass 가 다시 그림
+    v._jobKey = clockLabelKey(n, this.clock()); // 시계로만 바뀌는 정체·실행 경과 표시를 _exitPass 가 다시 그림
     const spt = spawnTag(n); if (spt) tags.push(spt); // 띄움 꼬리표
-    const tgHtml = tags.length ? `<span class="ntags">${tags.map((x) => `<i>${escapeHtml(x)}</i>`).join('')}</span>` : '';
+    const tgHtml = tags.length ? `<span class="ntags">${tags.map((x) => { const tp = runTagTip(x, n); return `<i${tp ? ` title="${escapeHtml(tp)}"` : ''}>${escapeHtml(x)}</i>`; }).join('')}</span>` : ''; // 버퍼링? 꼬리표는 툴팁(이유별: python -u 권고·파이프·출력 버림)
     const devHtml = v.device && v.devInfo ? `<span class="ndev">${escapeHtml(deviceSummary(v.devInfo))}</span>` : '';
     v._extraH = (tgHtml ? 13 : 0) + (devHtml ? 13 : 0);
     const sb = v.sessIdx != null && v.kind === 'main' && !n.parentId ? sessBadgeHtml(v.sessIdx, n.meta && n.meta.ctx, branchOf(n)) : '';
@@ -563,7 +571,7 @@ export class FlatView {
       const cm = this.clock();
       for (const v of this.vis.values()) {
         if (v.exiting != null || v.gone) this._unexit(v);
-        if (v._jobKey != null && jobLabelKey(jobOf(v.node), cm) !== v._jobKey) this._labelText(v); // 정체 표시(시계)
+        if (v._jobKey != null && clockLabelKey(v.node, cm) !== v._jobKey) this._clockRefresh(v); // 정체· 실행 경과(시계)
       }
       return;
     }
@@ -580,7 +588,7 @@ export class FlatView {
       const ago = v.node.endedAt ? (clockMs - Date.parse(v.node.endedAt)) / 1000 : -1;
       const standby = v.kind === 'monitor' && !v.foldHidden && rearmStandby(v.node, nodes.get(v.node.parentId), ago);
       if (standby !== !!v.standby) { v.standby = standby; this._labelText(v); }
-      if (v._jobKey != null && jobLabelKey(jobOf(v.node), clockMs) !== v._jobKey) this._labelText(v); // 정체 표시(시계)
+      if (v._jobKey != null && clockLabelKey(v.node, clockMs) !== v._jobKey) this._clockRefresh(v); // 정체· 실행 경과(시계)
       let want = elig.has(id) && v.endWall != null && now - v.endWall >= linger && !standby;
       if (v.foldHidden && elig.has(id) && v.endWall != null) want = true;
       if (want && v.foldHidden && !v.gone) { if (v.exiting != null) this._exitingN = Math.max(0, this._exitingN - 1); v.exiting = null; v.gone = true; v.exitF = 0; this._syncHidden(v); continue; }
@@ -961,8 +969,12 @@ export class FlatView {
     if (this.scope.mode === 'all') for (const c of this._clusters) for (const m of c.mains) push(m.nodeId, false);
     for (const v of this.vis.values()) if (v.device) push(v.id, false);
     for (const v of actives) if (this.holo.hasOpenCat(v.id, 'skill')) push(v.id, false, 'soft');
+    const runIds = runLabelOrder(this.vis.values(), this.clock()); // 오래 도는 셸(정체 포함): 오래 돈 몇 개는 최근 활동보다 먼저, 나머지도 후보
+    for (const id of runIds.slice(0, RUNW.LABEL_FIRST)) push(id, false, 'soft');
     for (const v of actives.slice(0, maxLabels)) push(v.id, false, 'soft'); // 작업 중 노드: 줄임 → 이름만 → 먼 자리(리더선), 그래도 없으면 숨김
+    for (const id of runIds) push(id, false, 'soft');
     for (const v of this.vis.values()) if (v.exiting != null && v.labelOn) push(v.id, false);
+    for (const v of this.vis.values()) if (!v.hidden && !v.gone && v._on && jobLabelNear(v.node, v._R || 0)) push(v.id, false); // 가까운 작업(끝났어도) 라벨 후보
     if (this.vis.size <= 12) for (const id of this.vis.keys()) push(id, false);
     else {
       const nowMs = this.clock();

@@ -35,6 +35,7 @@ export const ART = {
   PITCH: 5,                    // 구역(폴더) 기준점 간격(칸)
   FLOOR_Y: -2.2,               // 바닥층 높이: 섬 원판(ISLAND_Y −2.5) 바로 위 — 깊으면 비스듬한 카메라에서 옆 섬으로 투영돼 겹쳐 보였다
   LOD_SCALE: 0.5,              // 대상별 배치를 이보다 더 줄여야 섬에 들면 폴더 묶음(집계) 배치로(섬을 키우지 않음)
+  LOD_COUNT: 150,              // 배치할 대상(임시 폴더 접은 뒤)이 이보다 많으면 섬 크기와 무관하게 폴더 묶음 배치로 — 흐름·Planet 이 섬 모양 때문에 갈리지 않게
   LOD_PX: 5,                   // 한 칸이 화면에서 이보다 작으면(멀리) 폴더 묶음 외곽선만
   DETAIL_PX: 9,                // 한 칸이 이보다 크면 하위 종류 무늬·옆 모서리까지
   LIT_MAX: 8,                  // 동시에 점등(최근 접촉으로 밝아짐)되는 대상 상한
@@ -893,7 +894,7 @@ export function aggregateItems(items) {
 
 /**
  * 한 표현(view)이 갖는 작업 대상 층 상태: 앱이 준 장부·연출 큐 + 이 표현의 배치·섬 중심·발자국·선택.
- * 섬 안 보장: 축척 k = 바닥층 경계가 섬 슈퍼타원 안(지수 3·여유 0.86)에 들도록. k 가 ART.LOD_SCALE 보다 작아야 하면
+ * 섬 안 보장: 축척 k = 바닥층 경계가 섬 슈퍼타원 안(지수 3·여유 0.86)에 들도록. 대상이 ART.LOD_COUNT 보다 많거나 k 가 ART.LOD_SCALE 보다 작아야 하면
  * 폴더 묶음(집계) 배치로 바꾸고 다시 맞춘다(섬을 키우지 않음). 섬 중심은 바로 따라감(섬이 움직이면 같이), k 는 줄 때 바로·늘 때 부드럽게.
  */
 export class ArtState {
@@ -927,7 +928,7 @@ export class ArtState {
       const t = targetOf ? targetOf(p) : null;
       if (t) this.boxes.set(p, { hw: t.hw, hd: t.hd });
       let L = full;
-      if (t && fitScale(full.bounds, t) < ART.LOD_SCALE) { // 폴더 LOD: 묶어서 다시
+      if (needsAgg(items.length, full.bounds, t)) { // 폴더 LOD: 묶어서 다시(대상 수 문턱 또는 섬에 안 듦)
         const ag = aggregateItems(items);
         L = this.aggLayout.sync(p, ag);
         L.agg = new Map(ag.filter((x) => x.k === 'zone').map((x) => [x.id, x])); // 접힌 임시 폴더도 k 'zone' 이라 그대로 지나와 여기 듦
@@ -992,6 +993,11 @@ export class ArtState {
     const k = a.k || 1;
     return { x: a.x + p.x * k, y: y + 0.6, z: a.z + p.z * k };
   }
+}
+/** 폴더 묶음(집계) 배치로 갈지(표현 공용): 대상 수가 ART.LOD_COUNT 를 넘거나(섬 크기 무관) 섬에 넣으려면 ART.LOD_SCALE 보다 줄여야 할 때 */
+export function needsAgg(n, bounds, t) {
+  if (n > ART.LOD_COUNT) return true;
+  return !!t && fitScale(bounds, t) < ART.LOD_SCALE;
 }
 /** 경계 상자(섬 로컬, 원점 = 섬 중심) 네 모서리가 섬 슈퍼타원 안에 들도록 하는 축척(≤1) */
 export function fitScale(B, t) {

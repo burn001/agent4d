@@ -4,6 +4,7 @@
 // 라이브·재생·mock 은 모두 app.onEvent → view.toolStart/toolEnd 를 지나므로 같은 장부를 쓴다. node --test 로 시험(web/test/holo.test.mjs).
 import { t as tr } from './i18n.mjs';
 import { jobOf, jobCode } from './job-core.mjs';
+import { runState, runHead, toMs, RUNW } from './run-core.mjs'; // 실행 중 셸 — 셸 패널 머리줄 경과·백그라운드 꼬리 작은 상태
 
 export const HOLO = {
   MAX: 512,           // 화면 전체 동시에 그리는 패널 상한(인스턴싱) — 넘으면 대기열
@@ -27,6 +28,7 @@ export const HOLO = {
   TOP_ACTIVE: 6,      // 최근 활동 상위 노드: 거리 무관 최소 크기·라벨
   MIN_PX_ACTIVE: 30,  // 상위·포커스·카메라 대상 노드 패널의 최소 화면 높이(px)
   BOOST_MAX: 10,      // 최소 크기를 맞추려 세계 크기를 키우는 배율 상한
+  MINI_K: 0.55,       // 백그라운드 셸 꼬리 패널 작은 상태(마지막 줄 + 경과)의 크기 배율
 };
 
 // ---- 패널 안 실제 글(서버 panel → 웹) ----
@@ -381,6 +383,11 @@ export class HoloBook {
     this.stack = stack;
     this.byNode = new Map(); // nodeId → [항목…](시작 순)
     this.shown = 0;          // slot ≥ 0 인 항목 수
+    // 렌더러가 붙이는 고리: nodeOf(id) → 노드(meta.run 을 읽음) · clock → 렌더러 시계 ms(라이브 = 지금, 재생 = 가상 시계).
+    // 없으면 머리줄 경과·꼬리 작은 상태를 쓰지 않는다(예전 그대로)
+    this.nodeOf = null;
+    this.clock = null;
+    this._runAt = -Infinity;
   }
   get size() { let n = 0; for (const a of this.byNode.values()) n += a.length; return n; }
   list(nodeId) { return this.byNode.get(nodeId) || []; }
@@ -415,7 +422,7 @@ export class HoloBook {
     if (lg) {
       Object.assign(lg, { id, cat, tool: ev.tool || '', label: holoLabel({ ...ev, cat }), mode: k.mode, glyph: k.glyph, shape: k.shape, asp: k.asp,
         t0: now - HOLO.OPEN - 1e-3, endAt: null, minShow: 0, res: 'ok', result: '', swapAt: now, soft: false,
-        panel, pv: (lg.pv || 0) + 1, touchAt: null, scrollAt: null, scrollN: 0, jobOwner: null });
+        panel, pv: (lg.pv || 0) + 1, touchAt: null, scrollAt: null, scrollN: 0, jobOwner: null, startMs: toMs(ev.ts ?? ev.startedAt), runHead: '', runLong: false, runMs: 0, runStale: false, _rk: '' });
       // 배열 끝으로(가장 최근)
       arr.splice(arr.indexOf(lg), 1); arr.push(lg);
       return lg;
@@ -426,6 +433,7 @@ export class HoloBook {
       seed: hashUnit(id), t0: quiet ? now - HOLO.OPEN - 1 : now, endAt: null, minShow, res: 'ok', slot: -1,
       foldAt: null, swapAt: null, soft: false, result: '',
       panel, pv: 1, touchAt: null, scrollAt: null, scrollN: 0, sticky: null, jobOwner: null,
+      startMs: toMs(ev.ts ?? ev.startedAt), runHead: '', runLong: false, runMs: 0, runStale: false, mini: false, _rk: '', // 머리줄 경과(셸)
     };
     e.slot = this._freeSlot(arr, e.dir);
     if (e.slot >= 0) this.shown++;
@@ -496,6 +504,7 @@ export class HoloBook {
       id, node: nodeId, cat, tool: name, label: { tool: name, target: p.title || '' }, mode: k.mode, glyph: k.glyph, shape: k.shape, asp: k.asp, dir: k.dir,
       seed: hashUnit(id), t0, endAt: t0, minShow: 0, res: 'ok', slot: -1, foldAt: null, swapAt: null, soft: true, result: '',
       panel: p, pv: 1, touchAt: now, scrollAt: null, scrollN: 0, sticky: kind, jobOwner: kind === 'tail' ? nodeId : null,
+      startMs: NaN, runHead: '', runLong: false, runMs: 0, runStale: false, mini: false, _rk: '',
     };
     e.slot = this._freeSlot(arr, e.dir);
     if (e.slot < 0) { if (!arr.length) this.byNode.delete(nodeId); return null; } // 자리가 없으면 기다리지 않는다(다음 갱신 때 다시)
@@ -555,6 +564,41 @@ export class HoloBook {
     return ph;
   }
 
+  /** 이 노드의 꼬리 패널을 작은 상태로 남길까: 끝나지 않은 백그라운드 셸(meta.run kind 'bg') */
+  _keepTail(nid) {
+    if (!this.nodeOf || !this.clock) return false;
+    const s = runState(this.nodeOf(nid), this.clock());
+    return !!s && s.kind === 'bg' && !s.ended;
+  }
+  /**
+   * 머리줄 경과: 열린 셸 패널(전경 meta.run.since, 없으면 도구 시작 ts) · 백그라운드 셸의 꼬리 패널(meta.run.since)에
+   * e.runHead('3:42')·runLong(30초↑)·runMs·runStale. 글자가 바뀔 때만 판(pv)을 올려 글 칸을 다시 그린다(10분 미만 초마다, 그 위 분마다).
+   * 짧은 도구(HEAD_MIN_MS 미만)는 붙이지 않는다(다시 그리기 줄임).
+   */
+  _runPass(clockMs, changed) {
+    for (const [nid, arr] of this.byNode) {
+      let rs;
+      for (const e of arr) {
+        if (e.slot < 0) continue;
+        let since = NaN, stale = false;
+        if (!e.sticky && e.cat === 'shell' && e.endAt == null) {
+          if (rs === undefined) rs = runState(this.nodeOf(nid), clockMs);
+          since = rs && rs.kind === 'fg' && !rs.ended && rs.since != null ? rs.since : e.startMs;
+          stale = !!(rs && rs.kind === 'fg' && rs.stale);
+        } else if (e.sticky === 'tail' && e.foldAt == null) {
+          if (rs === undefined) rs = runState(this.nodeOf(nid), clockMs);
+          if (rs && rs.kind === 'bg' && !rs.ended && rs.since != null) { since = rs.since; stale = rs.stale; }
+        }
+        const h = Number.isFinite(since) && clockMs - since >= RUNW.HEAD_MIN_MS ? runHead(since, clockMs) : null;
+        const key = h ? h.key + (h.long ? 'L' : '') + (stale ? 'S' : '') : '';
+        if (key === e._rk) continue;
+        e._rk = key; e.runHead = h ? h.text : ''; e.runLong = !!(h && h.long); e.runMs = h ? h.ms : 0; e.runStale = stale;
+        e.pv = (e.pv || 0) + 1;
+        changed.add(nid);
+      }
+    }
+  }
+
   /**
    * 사라진 항목 정리 + 남길 모니터 고르기 + 대기열에 자리 주기. active(nodeId) → 노드가 작업 중인가.
    * 남김 규칙: 방향마다 맨 안쪽(쌓임 0) 패널이 끝난 뒤 최소 LINGER 초 결과를 보이며 남는다(짧은 도구도 화면에 남게).
@@ -563,6 +607,7 @@ export class HoloBook {
    */
   step(now, active = null) {
     const changed = new Set();
+    if (this.nodeOf && this.clock && now - this._runAt >= 0.25) { this._runAt = now; this._runPass(this.clock(), changed); } // 시계로 바뀌는 머리줄 경과
     for (const [nid, arr] of this.byNode) {
       let dirty = false;
       const anyOpen = arr.some((e) => e.endAt == null);
@@ -572,7 +617,14 @@ export class HoloBook {
       for (const e of arr) {
         if (e.slot < 0 || e.endAt == null || e.foldAt != null) continue;
         // 말·꼬리 패널: 마지막 갱신 뒤 SAY_LINGER·TAIL_LINGER 초 머물다 접힘(쌓임 자리와 무관)
-        if (e.sticky) { if (now - e.touchAt > (e.sticky === 'say' ? PANEL.SAY_LINGER : PANEL.TAIL_LINGER)) e.foldAt = now; continue; }
+        if (e.sticky) {
+          if (now - e.touchAt > (e.sticky === 'say' ? PANEL.SAY_LINGER : PANEL.TAIL_LINGER)) {
+            // 끝나지 않은 백그라운드 셸(meta.run bg)의 꼬리는 접지 않고 작은 상태(마지막 줄 + 경과)로 남김
+            if (e.sticky === 'tail' && this._keepTail(nid)) { if (!e.mini) { e.mini = true; e.pv++; dirty = true; } }
+            else e.foldAt = now;
+          } else if (e.mini) { e.mini = false; e.pv++; dirty = true; }
+          continue;
+        }
         if (e.slot > 0) { e.foldAt = now; continue; }
         // 백그라운드 출력·서브에이전트 진행이 갱신 중인 패널은 그 시각부터 다시 셈(touchAt)
         const since = now - Math.max(e.endAt, e.t0 + e.minShow, e.touchAt ?? -Infinity);

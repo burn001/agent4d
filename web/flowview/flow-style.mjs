@@ -5,6 +5,7 @@
 
 // 다크: agent-flow 팔레트 그대로에 가깝게, 라이트: 같은 색상을 진하게(밝은 바탕에서 읽히게)
 import { t as _t } from '../i18n.mjs';
+import { runVis } from '../run-core.mjs'; // 실행 중 셸
 export const FLOW_PALETTE = {
   dark: {
     void: '#050510', grid: '#16204a', holo: '#66ccff', holoBright: '#aaeeff',
@@ -32,6 +33,18 @@ export function nodeVisualState(status, openTools = 0) {
   if (status === 'active') return openTools > 0 ? NODE_STATE.tool : NODE_STATE.thinking;
   return NODE_STATE.idle;
 }
+/**
+ * 실행 중 셸(meta.run)까지 본 표시 상태: 오래 도는 셸(정체 아님)은 '도구 사용'(대기 모습이 아님), 정체는 대기 모습(색은 runStaleOf 로 정체 주황).
+ * meta.run 이 없거나 끝났으면 nodeVisualState 와 같다. nowMs = 렌더러 시계(재생 = 가상 시계)
+ */
+export function nodeVisualStateAt(node, openTools, nowMs) {
+  const rv = node && node.meta && node.meta.run ? runVis(node, nowMs) : null;
+  if (rv === 'run') return NODE_STATE.tool;
+  if (rv === 'stale') return NODE_STATE.idle;
+  return nodeVisualState(node && node.status, openTools);
+}
+/** 실행 중 셸이 정체인가(흐름 칩·2D 칩 테두리 = jobStale 주황) */
+export const runStaleOf = (node, nowMs) => !!(node && node.meta && node.meta.run) && runVis(node, nowMs) === 'stale';
 const STATE_KEY = ['idle', 'thinking', 'tool', 'done', 'error', 'stopped'];
 export function stateColor(state, isLight = false) { return paletteOf(isLight)[STATE_KEY[state] || 'idle']; }
 export const STATE_TEXT = ['idle', 'thinking', 'tool', 'done', 'error', 'stopped'].map((k) => _t('scene.state.' + k));

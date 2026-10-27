@@ -194,7 +194,8 @@ export class SessionIndex {
     const live = new Map();
     const procs = new Map();
     let files = [];
-    try { files = await fs.promises.readdir(this.sessionsDir); } catch {}
+    let ok = false; // 세션 폴더를 읽었는지 — 못 읽었으면 '프로세스 없음'으로 판정하지 않는다
+    try { files = await fs.promises.readdir(this.sessionsDir); ok = true; } catch {}
     for (const f of files) {
       if (!f.endsWith('.json')) continue; // *.key 는 절대 읽지 않음
       try {
@@ -214,6 +215,8 @@ export class SessionIndex {
     }
     this.live = live;
     this.procs = procs;
+    this.sessionsOk = ok;
+    this.procsAt = Date.now();
   }
 
   /** 3차: pid 가 살아 있고 transcript 가 있는 세션들 → [{sessionId, pid, status, entrypoint, cwd, entry}] */

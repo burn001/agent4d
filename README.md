@@ -147,6 +147,8 @@ The first run creates a config file with random tokens (see [Configuration](#con
 
 `start` stays local unless you ask otherwise. It opens a public Cloudflare tunnel only with `--tunnel`, or when the config has `"remote": true` or a deployed `workerUrl`. `--no-tunnel` always forces local-only. Add `--watch` to keep a small watchdog that restarts the server if it dies.
 
+**Long jobs started outside Claude Code** (a detached measurement run, a batch script) can be shown next to their project: `node bin/agent4d.mjs job add --log run.log [--pid N] [--pattern RE] [--end done.flag] [--expect 2h]`. The server tails the log and draws the job with its progress, rate and time left (live only). Manage them with `job list`, `job find`, `job rm` and `job prune`.
+
 **Try it without your own data:**
 
 ```bash

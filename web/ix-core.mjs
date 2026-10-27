@@ -158,7 +158,9 @@ export function ixMark(ev) {
 // ───────────────────────── 효과 장부 ─────────────────────────
 export const IXFX = {
   MAX: 48, PER_NODE: 3,
-  LINGER: { github: 3.6, db: 2.4, remote: 1.4, batch: 2.0, tests: 5.0, user: 3.0 },
+  // 잔광(초, ÷√배속). 하한 LINGER_MIN(F5) — 예전 remote 1.4·db 2.4·batch 2.0 은 끝나고 1～2초 뒤 이미 없었다
+  LINGER: { github: 3.6, db: 3.5, remote: 3.0, batch: 3.0, tests: 5.0, user: 3.0 },
+  LINGER_MIN: 3,
   USER_PER_NODE: 4,      // 사용자 효과는 따로 센다(다른 범주를 밀어내지 않게)
   CONSOLE_DIM_S: 900,    // 답변 뒤 이만큼 지나면 콘솔이 가장 어두워짐
   GATE_S: 1.2,           // 반복·병렬·진행은 이만큼 이어질 때만 보인다(짧은 for 는 조용히)
@@ -275,6 +277,43 @@ export class IxModel {
 
 // ───────────────────────── 도형 목록 ─────────────────────────
 export const IXGEO = { LINES: 3000, QUADS: 900, LABELS: 10, CLABELS: 24 };
+/** 굵은 선 화면 폭(px, F1): 기본 · 상위 활동·포커스·카메라 대상(env.vip) */
+export const IX_LINE_PX = { BASE: 2, VIP: 3 };
+/** F2 스테이션 화면 하한: 상위 활동·포커스·카메라 대상의 스테이션 폭이 화면에서 MIN_PX 보다 작으면 앵커 중심으로 키움(최대 MAX 배) */
+export const IX_MIN_PX = 48;
+export const IX_SCALE_MAX = 3;
+/** 스테이션 배율 = clamp(IX_MIN_PX / (폭 × ppu), 1, IX_SCALE_MAX). ppu 0(vip 아님)·폭 0 이면 1 */
+export function ixScale(ppu, width) {
+  if (!(ppu > 0) || !(width > 0)) return 1;
+  return Math.min(IX_SCALE_MAX, Math.max(1, IX_MIN_PX / (width * ppu)));
+}
+/**
+ * F3 흐름 3D 바닥 스테이션(env.floorY 가 있을 때): 노드 발밑 무대(그린 반지름 R × FOOT_K ≈ 칩 반지름 × 1.8) 둘레의 정해진 세계 방위.
+ * 각도 = +x 에서 +z 쪽으로(라디안). 기본 카메라는 +z 쪽에서 −z 를 본다 — db 오른쪽 뒤 · tests 왼쪽 뒤 · batch 앞 호 · remote(메인) 콘솔(−x,−z) 반대쪽.
+ * 홀로그램 패널(노드 높이 · 화면 평면 8방향)과 높이가 달라 겹치지 않는다. LIFT = 바닥에서 띄움(대상 판·격자와 z 싸움 없음)
+ */
+export const IX_FLOOR = {
+  FOOT_K: 2.4, LIFT: 0.06,
+  ANG: { db: -0.6, tests: Math.PI + 0.6, batch: Math.PI / 2, remote: 0.22 },
+  TEST: { CS: 0.55, GAP: 0.12 }, BATCH: { CS: 0.6, GAP: 0.12, ROW: 20 }, DB: { R: 0.7 }, HOST: 1.8,
+  REMOTE_L: 7.5, REMOTE_MAX: 13,
+};
+/**
+ * Planet 3D 갑판 스테이션(env.deck 이 있을 때 — IxLayer 의 Planet 만 준다, 2D Planet 은 예전 자리): 흐름 F3 와 같은 바닥 판·띠·실린더·터널을
+ * 행성 아래 갑판(본체 밑 DROP_K × 반지름)에 둔다. 예전 Planet 자리(본체 둘레 적도면 소행성대·점 구름·노드 높이 점프 게이트)는
+ * 본체·궤도 고리·노드 라벨 위에 1～3px 점으로 흩어져 읽히지 않았다(2026-10-27 캡처 after-p0-planet).
+ * 갑판 반지름 = 반지름 × max(FOOT_K, EXT_K × 궤도계 겉 반지름 배(env.ext)) — 궤도 고리 밖. 방위는 카메라 쪽(+z) 반원만 쓴다:
+ * 셸 패널(0°, 오른쪽 · ix 는 늘 셸이라 늘 열림)·라벨(위)·뒤쪽 궤도 원반을 피해 화면에서 행성 아래로 온다.
+ */
+export const IX_PLANET = {
+  DROP_K: 1.6, FOOT_K: 1.3, EXT_K: 0.6,
+  K: 0.7, // 기본 크기(흐름 판 × K) — 행성 사이가 흐름 노드 사이보다 좁아 흐름 크기면 이웃 행성·라벨을 덮었다. 화면 하한(F2)은 K 를 곱한 폭으로 잰다
+  ANG: { db: Math.PI / 2 - 0.85, tests: Math.PI / 2 + 0.85, batch: Math.PI / 2, remote: Math.PI / 2 - 0.35 },
+};
+/** 바닥 스테이션 자리: 발밑 중심 F 에서 범주 방위로 dist 만큼(fl.ang = 화면 종류별 방위표) */
+function floorAt(fl, cat, dist) { const a = (fl.ang || IX_FLOOR.ANG)[cat]; return { x: fl.x + Math.cos(a) * dist, y: fl.y, z: fl.z + Math.sin(a) * dist, dx: Math.cos(a), dz: Math.sin(a) }; }
+/** 스테이션 배율 = 화면 종류 기본 크기 k(흐름 1 · Planet IX_PLANET.K) × 화면 하한 배율(k 를 곱한 폭으로 잼 — 하한 48px 은 그대로) */
+function flScale(fl, width) { const k = fl.k || 1; return k * ixScale(fl.ppu, width * k); }
 /** 흐름 3D 입체 사용자 단말: 화면 반폭·반높이·뒤로 기운 각(rad)·베젤 두께·글줄을 화면 면 앞으로 띄우는 거리·빔 출발점 */
 export const CON3D = { W: 1.2, H: 0.72, TILT: 0.3, BEZEL: 0.13, TEXT_OUT: 0.05, FACE_OUT: 0.16 };
 /** 방위 yaw(0 = 앞이 +z) → 기운 화면 기저 {r 오른쪽, v 화면 위(뒤로 기울어짐), n 화면 법선(앞·약간 위)} */
@@ -289,15 +328,16 @@ const hash = (s) => { let h = 2166136261 >>> 0; s = String(s); for (let i = 0; i
 
 /** 도형 버퍼(재사용): 선 = [x1,y1,z1,x2,y2,z2,색,알파], 사각 = [x,y,z,크기,색,알파], 라벨 = {x,y,z,text,key,alpha,cls} */
 export class IxGeo {
-  constructor() { this.L = new Float32Array(IXGEO.LINES * 6); this.LC = new Uint8Array(IXGEO.LINES); this.LA = new Float32Array(IXGEO.LINES); this.Q = new Float32Array(IXGEO.QUADS * 4); this.QC = new Uint8Array(IXGEO.QUADS); this.QA = new Float32Array(IXGEO.QUADS); this.labels = []; this.cons = []; this.clabels = []; this.reset(); }
-  reset() { this.nl = 0; this.nq = 0; this.labels.length = 0; this.dropped = 0; this.ka = 1; this.cons.length = 0; this.clabels.length = 0; }
+  constructor() { this.L = new Float32Array(IXGEO.LINES * 6); this.LC = new Uint8Array(IXGEO.LINES); this.LA = new Float32Array(IXGEO.LINES); this.LW = new Uint8Array(IXGEO.LINES); this.Q = new Float32Array(IXGEO.QUADS * 4); this.QC = new Uint8Array(IXGEO.QUADS); this.QA = new Float32Array(IXGEO.QUADS); this.labels = []; this.cons = []; this.clabels = []; this.reset(); }
+  reset() { this.nl = 0; this.nq = 0; this.labels.length = 0; this.dropped = 0; this.ka = 1; this.lw = IX_LINE_PX.BASE; this.cons.length = 0; this.clabels.length = 0; this.st = this.st || []; this.st.length = 0; this.stl = this.stl || []; this.stl.length = 0; }
   // ka = 지금 그리는 뿌리·노드의 프로젝트 페이드 투명도(env.fade) — 선·사각·라벨이 모두 곱한다
+  // lw = 지금 그리는 선의 화면 폭(px, F1 — 3D 굵은 선만 쓰고 2D 는 무시)
   line(x1, y1, z1, x2, y2, z2, key, a) {
     a *= this.ka;
     if (a <= 0.004) return;
     if (this.nl >= IXGEO.LINES) { this.dropped++; return; }
     const o = this.nl * 6, L = this.L; L[o] = x1; L[o + 1] = y1; L[o + 2] = z1; L[o + 3] = x2; L[o + 4] = y2; L[o + 5] = z2;
-    this.LC[this.nl] = IX_KEYS.indexOf(key); this.LA[this.nl] = Math.min(1, a); this.nl++;
+    this.LC[this.nl] = IX_KEYS.indexOf(key); this.LA[this.nl] = Math.min(1, a); this.LW[this.nl] = this.lw; this.nl++;
   }
   quad(x, y, z, s, key, a) {
     a *= this.ka;
@@ -332,6 +372,19 @@ export class IxGeo {
   }
 }
 
+/** github 포털 자리: 흐름 = 뿌리 노드 위 하늘(오프셋·반지름), Planet = 뿌리 행성 둘레 통신 위성 궤도(뿌리 반지름 + ro, 높이 y) */
+export const PORTAL = { flow: { x: 0.6, y: 6.5, z: -3.2, r: 1.9 }, planet: { ro: 3.4, y: 1.6, r: 0.9 } };
+/**
+ * 카메라 붙잡기가 화면에 함께 담을 포털 점 [{x,y,z,r}]: 흐름 = 포털 고리, Planet = 위성이 도는 궤도 네 점(위성이 어디 있든 담김).
+ * rp = 뿌리 노드 세계 자리, rootR = 그린 반지름(ixGeometry 의 R 과 같은 값)
+ */
+export function ixPortalPts(theme, rp, rootR = 0.8) {
+  if (!rp) return null;
+  if (theme !== 'planet') { const F = PORTAL.flow; return [{ x: rp.x + F.x, y: (rp.y || 0) + F.y, z: rp.z + F.z, r: F.r + 0.4 }]; }
+  const P = PORTAL.planet, ro = Math.max(0.4, rootR || 0.8) + P.ro, y = (rp.y || 0) + P.y;
+  return [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([a, b]) => ({ x: rp.x + a * ro, y, z: rp.z + b * ro, r: P.r }));
+}
+
 /**
  * IxModel → 도형. env:
  *   pos(id) → {x,y,z}|null (세계 좌표, 숨김·퇴장이면 null)  rad(id) → 그린 반지름  root(id) → 뿌리 노드 id
@@ -348,8 +401,9 @@ export function ixGeometry(model, now, env, geo = new IxGeo()) {
     const rp = rootId != null ? env.pos(rootId) : null;
     if (!rp) { portalPos.set(rootId, null); return null; }
     let c;
-    if (flow) c = { x: rp.x + 0.6, y: rp.y + 6.5, z: rp.z - 3.2, r: 1.9 };
-    else { const a = now * 0.35 + hash(rootId) * 6.28, ro = R(rootId) + 3.4; c = { x: rp.x + Math.cos(a) * ro, y: rp.y + 1.6 + Math.sin(a * 0.5) * 0.4, z: rp.z + Math.sin(a) * ro, r: 0.9, rp, ro }; }
+    const F = PORTAL.flow, P = PORTAL.planet;
+    if (flow) c = { x: rp.x + F.x, y: rp.y + F.y, z: rp.z + F.z, r: F.r };
+    else { const a = (env.reduced ? 0 : now * 0.35) + hash(rootId) * 6.28, ro = R(rootId) + P.ro; c = { x: rp.x + Math.cos(a) * ro, y: rp.y + P.y + Math.sin(a * 0.5) * 0.4, z: rp.z + Math.sin(a) * ro, r: P.r, rp, ro }; }
     portalPos.set(rootId, c);
     return c;
   };
@@ -362,10 +416,11 @@ export function ixGeometry(model, now, env, geo = new IxGeo()) {
     for (const f of model.fx.values()) if (f.cat === 'github' && f.root === rootId && now >= f.showAt) busy = Math.max(busy, f.tEnd == null ? 0.55 : 0.55 * (1 - clamp01((now - f.tEnd) / 2.5)));
     const ciFail = p.ciFailAt != null ? now - p.ciFailAt : Infinity;
     const failA = ciFail < 4 ? 0.35 + 0.35 * Math.abs(Math.sin(ciFail * 7)) : ciFail < 4 + IXFX.CI_AFTERGLOW ? 0.35 * (1 - (ciFail - 4) / IXFX.CI_AFTERGLOW) : 0;
-    const base = 0.07 + busy;
-    if (flow) {
-      geo.circle(c.x, c.y, c.z, c.r, failA > 0.05 ? 'err' : 'github', Math.max(base, failA), 36);
-      geo.circle(c.x, c.y, c.z, c.r * 0.82, 'github', base * 0.5, 30, now * 0.4, now * 0.4 + Math.PI * 1.4);
+    if (flow) { // F4 평소엔 안 그림 — github 활동(busy) 중이거나 CI 실패 잔광 때만(예전 평소 알파 0.07 은 1px 선이라 사실상 안 보이고 화면만 흐렸다)
+      if (busy <= 0.01 && failA <= 0.05) continue;
+      const spin = env.reduced ? 0 : now * 0.4;
+      geo.circle(c.x, c.y, c.z, c.r, failA > 0.05 ? 'err' : 'github', Math.max(busy, failA), 36);
+      geo.circle(c.x, c.y, c.z, c.r * 0.82, 'github', busy * 0.5, 30, spin, spin + Math.PI * 1.4);
     } else {
       geo.circle(c.rp.x, c.rp.y + 1.6, c.rp.z, c.ro, 'github', 0.05 + busy * 0.25, 40, 0, Math.PI * 2, 0.12); // 궤도
       geo.quad(c.x, c.y, c.z, 0.34, failA > 0.05 ? 'err' : 'github', 0.35 + busy);
@@ -454,24 +509,116 @@ export function ixGeometry(model, now, env, geo = new IxGeo()) {
     const P = env.pos(id);
     if (!P) continue;
     geo.ka = fadeOf(id);
+    geo.lw = env.vip && env.vip(id) ? IX_LINE_PX.VIP : IX_LINE_PX.BASE;
     const r = R(id);
     const t = now - f.t0, te = f.tEnd != null ? now - f.tEnd : null;
-    const fade = te == null ? 1 : 1 - clamp01((te - ((IXFX.LINGER[f.cat] || 2) / f.k) * 0.6) / (((IXFX.LINGER[f.cat] || 2) / f.k) * 0.4));
+    const lin = (IXFX.LINGER[f.cat] || 2) / f.k;
+    const fade = te == null ? 1 : 1 - clamp01((te - lin * 0.6) / (lin * 0.4));
     const appear = ease(t / 0.4);
     const A = appear * fade;
     if (A <= 0.01) continue;
     const ix = f.ix;
+    // F3 바닥 스테이션 자리(흐름 3D): 발밑 중심 · 무대 반지름 · 화면 하한용 ppu(F2) · 섬 가장자리까지 거리(remote)
+    //    Planet 3D(env.deck)는 같은 스테이션을 행성 아래 갑판에(IX_PLANET) — 흐름 값은 그대로
+    const st = f.cat !== 'github' && f.cat !== 'user';
+    const fl = st && flow && env.floorY != null
+      ? { x: P.x, y: env.floorY + IX_FLOOR.LIFT, z: P.z, R: r * IX_FLOOR.FOOT_K, ppu: env.ppu ? env.ppu(id) : 0, edge: env.edge ? (dx, dz) => env.edge(id, dx, dz) : null, lin, ang: IX_FLOOR.ANG }
+      : st && !flow && env.deck
+        ? { x: P.x, y: P.y - r * IX_PLANET.DROP_K, z: P.z, R: r * Math.max(IX_PLANET.FOOT_K, IX_PLANET.EXT_K * ((env.ext && env.ext(id)) || 1)), ppu: env.ppu ? env.ppu(id) : 0, edge: env.edge ? (dx, dz) => env.edge(id, dx, dz) : null, lin, ang: IX_PLANET.ANG, k: IX_PLANET.K }
+        : null;
+    const nl0 = geo.nl, nq0 = geo.nq, nb0 = geo.labels.length; // 스테이션(바닥·갑판) 도형 범위 — 노드 라벨 아래 칸을 옅게(ixDimUnderLabels) · 글자(점수 배지 등) 범위
     switch (f.cat) {
       case 'github': drawGithub(geo, f, ix, P, r, portalAt(f.root), t, te, A, now, flow, env); break;
-      case 'db': drawDb(geo, f, ix, P, r, t, te, A, now, flow); break;
-      case 'remote': drawRemote(geo, f, ix, P, r, t, te, A, now, flow, env); break;
-      case 'batch': drawBatch(geo, f, ix, P, r, t, te, A, now, flow, env); break;
-      case 'tests': drawTests(geo, f, ix, P, r, t, te, A, now, flow, env); break;
+      case 'db': if (fl) drawDbFloor(geo, f, ix, P, r, t, te, A, now, env, fl); else drawDb(geo, f, ix, P, r, t, te, A, now, flow); break;
+      case 'remote': drawRemote(geo, f, ix, P, r, t, te, A, now, flow, env, lin, fl); break;
+      case 'batch': drawBatch(geo, f, ix, P, r, t, te, A, now, flow, env, fl); break;
+      case 'tests': drawTests(geo, f, ix, P, r, t, te, A, now, flow, env, fl); break;
       case 'user': drawUser(geo, f, ix, P, r, consoleAt(f.root), t, te, A, now, flow, env, model); break;
     }
+    if (fl && (geo.nl > nl0 || geo.nq > nq0)) geo.st.push(nl0, geo.nl, nq0, geo.nq);
+    if (fl && geo.labels.length > nb0) geo.stl.push(nb0, geo.labels.length);
   }
-  geo.ka = 1;
+  geo.ka = 1; geo.lw = IX_LINE_PX.BASE;
   return geo;
+}
+
+/**
+ * 스냅샷 씨앗: 외부 작업(meta.job.src 'ext') 노드가 진행을 들고 들어오면 그 바닥·갑판 진행 띠를 바로 세울 output 이벤트
+ * (서버 `extJobIx` 와 같은 꼴 — 진행 줄 i/N 또는 예상 비율 pct). 끝난 작업·진행 없음·다른 작업은 null.
+ * 원인: 진행 띠는 output 이벤트(ix)로만 그려 화면을 연 직후(스냅샷에는 ix 가 없다) 다음 진행 이벤트(≤1분)까지 비어 있었다.
+ */
+export function ixSeedEvent(node) {
+  const job = node && node.meta && node.meta.job;
+  if (!job || job.src !== 'ext' || job.state === 'done' || job.state === 'failed') return null;
+  const p = job.progress;
+  let core = null;
+  if (p && Number.isFinite(p.n) && Number(p.total) > 0) core = { i: p.n, n: Number(p.total) };
+  else if (p && Number.isFinite(p.ratio) && job.ext && Number(job.ext.expectSec) > 0) core = { pct: Math.min(99, Math.floor(p.ratio * 100)) };
+  if (!core) return null;
+  return { type: 'output', ts: job.beatAt || null, nodeId: node.id, text: '', ix: { v: 1, cat: 'batch', op: 'progress', bg: 1, ...core, phase: 'progress' }, seed: true };
+}
+
+/** 노드 라벨 아래 스테이션 칸의 알파 배율(라벨 글자가 밝은 칸 위에 얹혀 안 읽히던 것 — 흐름 바닥·Planet 갑판 공통)
+ *  LAB = 스테이션 글자(점수 배지·진행 눈금·호스트 이름)가 노드 라벨과 겹칠 때의 불투명도 배율 */
+export const IX_UNDER_LABEL = { K: 0.12, PAD: 4, LAB: 0.2 };
+/** 스테이션 글자 크기 추정(px, 아직 재지 않은 첫 프레임용): 글자 수 × 6.6(배지 7.2) + 여백, 높이 15(배지 19) */
+export function ixLabelSizeGuess(text, cls = '') { const b = /ix-badge/.test(cls); return [String(text || '').length * (b ? 7.2 : 6.6) + (b ? 14 : 4), b ? 19 : 15]; }
+/** 화면 사각형(가운데 x,y · 반폭 hw · 반높이 hh)이 상자들([x0,y0,x1,y1], 여백 pad) 가운데 하나와 겹치는지 */
+export function ixRectHits(x, y, hw, hh, boxes, pad = IX_UNDER_LABEL.PAD) {
+  for (const b of boxes) if (x + hw >= b[0] - pad && x - hw <= b[2] + pad && y + hh >= b[1] - pad && y - hh <= b[3] + pad) return true;
+  return false;
+}
+/** 화면 선분 (ax,ay)–(bx,by) 가 상자 [x0,y0,x1,y1] 를 지나는지(Liang–Barsky) */
+export function segHitsBox(ax, ay, bx, by, x0, y0, x1, y1) {
+  let t0 = 0, t1 = 1;
+  const dx = bx - ax, dy = by - ay;
+  const P = [-dx, dx, -dy, dy], Qv = [ax - x0, x1 - ax, ay - y0, y1 - ay];
+  for (let i = 0; i < 4; i++) {
+    if (P[i] === 0) { if (Qv[i] < 0) return false; continue; }
+    const r = Qv[i] / P[i];
+    if (P[i] < 0) { if (r > t1) return false; if (r > t0) t0 = r; } else { if (r < t0) return false; if (r < t1) t1 = r; }
+  }
+  return t0 <= t1;
+}
+/**
+ * 스테이션(바닥·갑판 — geo.st 범위) 점·선이 화면에서 노드 라벨 상자에 걸치면 알파를 IX_UNDER_LABEL.K 배로.
+ * toScreen(x, y, z, out) → true/false(카메라 뒤), out{x,y} 화면 px, out.k(있으면) = 그 깊이의 세계 1단위당 px.
+ * 예전엔 점·선 **가운데**만 봤다 — 화면 하한(F2)으로 커진 점수판 칸(지름 수십 px)은 가운데가 상자 밖이어도 라벨 글자를 덮었다.
+ * 이제 점은 화면 반지름(크기/2 × k), 선은 두 끝을 이은 선분(화면 폭 절반)으로 상자와 겹치는지 본다(k 가 없으면 예전처럼 가운데만).
+ * labSize(i) → [w, h](px) 를 주면 스테이션 글자(geo.stl 범위, 화면 가운데 정렬)도 상자에 걸칠 때 alpha × LAB.
+ * boxes = [[x0,y0,x1,y1], …](화면 px). 옅게 한 개수를 돌려준다.
+ */
+export function ixDimUnderLabels(geo, toScreen, boxes, k = IX_UNDER_LABEL.K, pad = IX_UNDER_LABEL.PAD, labSize = null) {
+  if (!geo.st || !boxes || !boxes.length) return 0;
+  const o = { x: 0, y: 0, k: 0 }, o2 = { x: 0, y: 0, k: 0 };
+  const hitRect = (x, y, hw, hh) => ixRectHits(x, y, hw, hh, boxes, pad);
+  let n = 0;
+  for (let i = 0; i < geo.st.length; i += 4) {
+    for (let j = geo.st[i]; j < geo.st[i + 1]; j++) {
+      const q = j * 6, L = geo.L, hw = (geo.LW ? geo.LW[j] : 2) / 2;
+      let hit = false;
+      if (toScreen(L[q], L[q + 1], L[q + 2], o) && toScreen(L[q + 3], L[q + 4], L[q + 5], o2)) {
+        for (const b of boxes) if (segHitsBox(o.x, o.y, o2.x, o2.y, b[0] - pad - hw, b[1] - pad - hw, b[2] + pad + hw, b[3] + pad + hw)) { hit = true; break; }
+      } else if (toScreen((L[q] + L[q + 3]) / 2, (L[q + 1] + L[q + 4]) / 2, (L[q + 2] + L[q + 5]) / 2, o)) hit = hitRect(o.x, o.y, 0, 0);
+      if (hit) { geo.LA[j] *= k; n++; }
+    }
+    for (let j = geo.st[i + 2]; j < geo.st[i + 3]; j++) {
+      const q = j * 4;
+      o.k = 0;
+      if (!toScreen(geo.Q[q], geo.Q[q + 1], geo.Q[q + 2], o)) continue;
+      const r = o.k > 0 ? (geo.Q[q + 3] / 2) * o.k : 0;
+      if (hitRect(o.x, o.y, r, r)) { geo.QA[j] *= k; n++; }
+    }
+  }
+  if (labSize && geo.stl) for (let i = 0; i < geo.stl.length; i += 2) {
+    for (let j = geo.stl[i]; j < geo.stl[i + 1]; j++) {
+      const d = geo.labels[j];
+      if (!d || !toScreen(d.x, d.y, d.z, o)) continue;
+      const sz = labSize(j, d);
+      if (sz && hitRect(o.x, o.y, sz[0] / 2, sz[1] / 2)) { d.alpha *= IX_UNDER_LABEL.LAB; n++; }
+    }
+  }
+  return n;
 }
 
 function drawUser(geo, f, ix, P, r, C, t, te, A, now, flow, env, model) {
@@ -659,27 +806,82 @@ function drawDb(geo, f, ix, P, r, t, te, A, now, flow) {
     if (ix.rows != null && te != null) geo.label(P.x, P.y + r + 1.3, P.z, tr('cards.ix.rows', { n: fmtN(Math.round(ix.rows * ease(te / 0.8))) }), w ? 'write' : 'read', A, 'ix-tick');
   }
 }
-function dbBeams(geo, f, ix, node, store, t, te, A, w, rw) {
+/** F3 흐름 3D db: 발밑 무대 오른쪽 뒤 바닥에 선 속 찬 실린더(높이 ∝ log 행 수). 읽기 = 실린더 → 노드(하늘색 방울), 쓰기 = 노드 → 실린더(주황) */
+function drawDbFloor(geo, f, ix, P, r, t, te, A, now, env, fl) {
+  const w = ix.rw === 'w', rw = ix.rw === 'rw';
+  const s = flScale(fl, IX_FLOOR.DB.R * 2);
+  const cr = IX_FLOOR.DB.R * s;
+  const Q = floorAt(fl, 'db', fl.R + 0.5 * s + cr);
+  const h0 = 1.4, hT = ix.rows != null ? Math.min(4, 0.9 + 0.55 * Math.log10(Math.max(0, ix.rows) + 1)) : h0;
+  const h = (te != null && ix.rows != null ? h0 + (hT - h0) * ease(te / 0.8) : h0) * s;
+  const n = Math.max(3, Math.min(8, Math.ceil(h / (0.3 * s))));
+  for (let i = 0; i <= n; i++) { const y = Q.y + (h * i) / n; geo.circle(Q.x, y, Q.z, cr, 'db', A * (i === 0 || i === n ? 0.6 : 0.2), 14); } // 속 찬 몸통 = 촘촘한 수평 고리
+  for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; geo.line(Q.x + Math.cos(a) * cr, Q.y, Q.z + Math.sin(a) * cr, Q.x + Math.cos(a) * cr, Q.y + h, Q.z + Math.sin(a) * cr, 'db', A * 0.3); }
+  for (const k of [0.33, 0.66]) geo.circle(Q.x, Q.y + h, Q.z, cr * k, 'db', A * 0.3, 10); // 윗면
+  if (te == null && t > 1.5) { // 긴 쿼리: 띠 회전(움직임 줄이기면 멈춘 띠)
+    const a0 = env.reduced ? 0 : now * 2.5;
+    geo.circle(Q.x, Q.y + h * 0.5, Q.z, cr * 1.35, 'db', A * 0.45, 20, a0, a0 + Math.PI * 0.9);
+  }
+  const node = { x: P.x, y: P.y - r * 0.5, z: P.z }, top = { x: Q.x, y: Q.y + h, z: Q.z };
+  dbBeams(geo, f, ix, node, top, t, te, A, w, rw, 0.2 * Math.min(2, s));
+  if (ix.rows != null && te != null) geo.label(Q.x, Q.y + h + 0.45, Q.z, tr('cards.ix.rows', { n: fmtN(Math.round(ix.rows * ease(te / 0.8))) }), w ? 'write' : 'read', A, 'ix-tick');
+  else if (ix.db && te == null && t > 0.6) geo.label(Q.x, Q.y + h + 0.45, Q.z, ix.db, 'db', A * 0.7, 'ix-tick');
+}
+function dbBeams(geo, f, ix, node, store, t, te, A, w, rw, sz = 0.13) {
   // 읽기 = 차가운 색이 저장소 → 노드(아래로), 쓰기 = 따뜻한 색이 노드 → 저장소(위로)
-  const go = (u, write) => travel(geo, write ? node : store, write ? store : node, u, write ? 'write' : 'read', A * 0.9, 0.13, 0.15);
+  const go = (u, write) => travel(geo, write ? node : store, write ? store : node, u, write ? 'write' : 'read', A * 0.9, sz, 0.15);
   if (te == null) { const u = (t / 0.55) % 1; go(u, w || (rw && Math.floor(t / 0.55) % 2 === 1)); if (t > 0.3) go((u + 0.5) % 1, w); }
   else for (let k = 0; k < 3; k++) { const u = (te - k * 0.12) / 0.5; if (u > 0 && u < 1) go(u, w); }
   geo.line(node.x, node.y, node.z, store.x, store.y, store.z, w ? 'write' : 'read', A * 0.12);
 }
 
-function remoteDir(f, P, env) {
+/** 터널 방향: 뿌리에서 바깥쪽. 뿌리 자신(메인)은 기본 방향 — 바닥 모드(F3)는 콘솔(−x,−z) 반대 사분면, 그 밖은 예전 그대로 */
+function remoteDir(f, P, env, floor = false, ang = IX_FLOOR.ANG) {
   const rootId = env.root ? env.root(f.nodeId) : null;
   const rp = rootId ? env.pos(rootId) : null;
-  let dx = rp ? P.x - rp.x : -1, dz = rp ? P.z - rp.z : -0.6;
-  if (Math.hypot(dx, dz) < 0.5) { dx = -1; dz = -0.6; }
+  const a0 = ang.remote, dx0 = floor ? Math.cos(a0) : -1, dz0 = floor ? Math.sin(a0) : -0.6;
+  let dx = rp ? P.x - rp.x : dx0, dz = rp ? P.z - rp.z : dz0;
+  if (Math.hypot(dx, dz) < 0.5) { dx = dx0; dz = dz0; }
   const a = Math.atan2(dz, dx) + (hash(f.ix.host || f.key) - 0.5) * 0.9; // 호스트마다 조금씩 다른 방향
   return { x: Math.cos(a), z: Math.sin(a) };
 }
-function drawRemote(geo, f, ix, P, r, t, te, A, now, flow, env) {
+/** F3 흐름 3D remote: 바닥 높이 터널(발밑 무대 가장자리 → 섬 가장자리), 끝에 호스트 표지 */
+function drawRemoteFloor(geo, f, ix, P, r, t, te, A, now, env, open, fl) {
+  const d = remoteDir(f, P, env, true, fl.ang || IX_FLOOR.ANG);
+  const s = flScale(fl, IX_FLOOR.HOST);
+  const e = fl.edge ? fl.edge(d.x, d.z) : null;
+  const L = Math.max(fl.R + 4, Math.min(fl.R + IX_FLOOR.REMOTE_MAX, Number.isFinite(e) && e > 0 ? e : fl.R + IX_FLOOR.REMOTE_L));
+  const S = { x: fl.x + d.x * fl.R, y: fl.y, z: fl.z + d.z * fl.R };
+  const G = { x: fl.x + d.x * L, y: fl.y, z: fl.z + d.z * L };
+  const key = te != null && f.ok === false ? 'err' : 'remote';
+  for (let i = 0; i < 16; i += 2) { const u1 = i / 16, u2 = (i + 1) / 16; if (u2 > open) break; geo.line(S.x + (G.x - S.x) * u1, S.y, S.z + (G.z - S.z) * u1, S.x + (G.x - S.x) * u2, S.y, S.z + (G.z - S.z) * u2, key, A * 0.4); } // 바닥 점선 항로
+  for (let i = 1; i <= 5; i++) { // 바닥에 선 고리(웜홀 게이트)
+    const u = i / 5; if (u > open + 0.05) break;
+    const rr = (0.3 + 0.45 * u) * open * s;
+    geo.ring(S.x + (G.x - S.x) * u, S.y + rr, S.z + (G.z - S.z) * u, d.x, d.z, rr, key, A * (0.2 + 0.3 * u), 12);
+  }
+  const far = { x: G.x + d.x * 0.9 * s, y: fl.y, z: G.z + d.z * 0.9 * s };
+  geo.circle(far.x, far.y, far.z, 0.9 * s * open, key, A * 0.6, 18); // 호스트 표지(바닥 원 + 점)
+  geo.circle(far.x, far.y, far.z, 0.5 * s * open, key, A * 0.35, 12);
+  geo.quad(far.x, far.y + 0.45 * s, far.z, 0.5 * s * open, key, A * 0.9);
+  if (open > 0.6) geo.label(far.x, far.y + 1.0 * s, far.z, ix.host || tr('cards.ix.remote'), key, A * open, 'ix-host');
+  if (te == null) {
+    const pu = env.reduced ? 0.5 : (t % 1.4) / 0.7;
+    const hi = { x: far.x, y: far.y + 0.45 * s, z: far.z };
+    if (pu < 1) travel(geo, S, hi, pu, 'remote', A * 0.6, 0.18 * s, 0.4); else if (pu < 2) travel(geo, hi, S, pu - 1, 'remote', A * 0.45, 0.15 * s, 0.4);
+    if (ix.transfer) {
+      const m = ix.bytes || ix.size ? Math.min(10, Math.max(3, Math.round(Math.log2((ix.bytes || ix.size) / 1024 + 2)))) : 5;
+      const up = ix.transfer === 'up';
+      for (let k = 0; k < m; k++) { const u = ((t * 0.8 + k / m) % 1); travel(geo, up ? S : hi, up ? hi : S, u, up ? 'write' : 'read', A * 0.75, 0.16 * s, 0.1); }
+    }
+  }
+}
+function drawRemote(geo, f, ix, P, r, t, te, A, now, flow, env, lin = IXFX.LINGER.remote, fl = null) {
+  const open = ease(t / 0.6) * (te == null ? 1 : 1 - ease(te / (lin * 0.9))); // F5 닫힘도 잔광에 맞춤(예전 0.9초 고정)
+  if (open <= 0.01) return;
+  if (fl) { drawRemoteFloor(geo, f, ix, P, r, t, te, A, now, env, open, fl); return; }
   const d = remoteDir(f, P, env);
   const L = r + 7.5;
-  const open = ease(t / 0.6) * (te == null ? 1 : 1 - ease(te / 0.9));
-  if (open <= 0.01) return;
   const G = { x: P.x + d.x * L, y: P.y + 1.2, z: P.z + d.z * L };
   const S = { x: P.x + d.x * r, y: P.y + 0.2, z: P.z + d.z * r };
   const key = te != null && f.ok === false ? 'err' : 'remote';
@@ -715,7 +917,35 @@ function drawRemote(geo, f, ix, P, r, t, te, A, now, flow, env) {
 }
 
 function gridCells(n) { const D = Math.max(1, Math.min(40, n)); const cols = Math.ceil(Math.sqrt(D * 2.2)); return { D, cols, rows: Math.ceil(D / cols) }; }
-function drawBatch(geo, f, ix, P, r, t, te, A, now, flow, env) {
+/** F3 흐름 3D batch: 발밑 무대 앞쪽 바닥 진행 띠(호, 한 줄 ROW 칸 · 최대 40칸) + i/N · n/s 라벨, 끝에 초록 섬광 */
+function drawBatchFloor(geo, f, ix, t, te, A, env, fl, total, frac) {
+  const B = IX_FLOOR.BATCH, D = Math.max(1, Math.min(40, total)), per = Math.min(D, B.ROW), rows = Math.ceil(D / per);
+  const s = flScale(fl, per * (B.CS + B.GAP));
+  const cs = B.CS * s, pitch = (B.CS + B.GAP) * s;
+  const fold = te == null ? 0 : ease(te / 0.5);
+  const lit = frac == null ? -1 : te != null && f.ok ? D : Math.floor(D * frac + 1e-6);
+  const sweep = frac == null ? (env.reduced ? -1 : (t * 6) % D) : -1;
+  const flash = te != null && f.ok ? clamp01(1 - Math.abs(te - 0.55) / 0.25) : 0;
+  const a0 = (fl.ang || IX_FLOOR.ANG).batch;
+  let endA = a0, endR = fl.R;
+  for (let j = 0; j < D; j++) {
+    const row = Math.floor(j / per), col = j % per;
+    const rad = fl.R + 0.5 * s + cs / 2 + row * pitch * (1 - fold);
+    const dA = Math.min(pitch / rad, (Math.PI * 1.4) / per);
+    const a = a0 - (col - (per - 1) / 2) * dA; // 카메라(+z)에서 보아 왼쪽 → 오른쪽으로 채움
+    const x = fl.x + Math.cos(a) * rad, z = fl.z + Math.sin(a) * rad;
+    const on = j < lit || (sweep >= 0 && Math.abs(j - sweep) < 1.5);
+    geo.quad(x, fl.y + cs * 0.5, z, cs, flash > 0 ? 'ok' : on ? 'batch' : 'dim', A * (on ? 0.85 : 0.22) * (1 - fold * 0.5) + flash * 0.5 * A);
+    if (row === 0 && col === per - 1) { endA = a - dA; endR = rad; }
+  }
+  // 띠 테두리(안·바깥 호) — 칸이 흩어진 점이 아니라 한 장치로 읽히게
+  const span = Math.min(pitch / (fl.R + 0.5 * s + cs / 2), (Math.PI * 1.4) / per) * (per / 2 + 0.3);
+  for (const rr of [fl.R + 0.5 * s - 0.08 * s, fl.R + 0.5 * s + cs + (rows - 1) * pitch * (1 - fold) + 0.08 * s]) geo.circle(fl.x, fl.y, fl.z, rr, te != null && f.ok ? 'ok' : 'batch', A * 0.3, 20, a0 - span, a0 + span);
+  const rate = IxModel.rate(f);
+  const lab = ix.op === 'streak' ? `${ix.tool || ''} ×${ix.i || 0}` : ix.n ? `${ix.i ?? 0}/${ix.n}${rate && rate > 0 && te == null ? ` · ${rate >= 10 ? Math.round(rate) : rate.toFixed(1)}/s` : ''}` : ix.pct != null ? `${ix.pct}%` : ix.par ? `×${ix.par}` : '';
+  if (lab) geo.label(fl.x + Math.cos(endA) * endR, fl.y + 0.3, fl.z + Math.sin(endA) * endR, lab, te != null && f.ok ? 'ok' : 'batch', A * 0.9, 'ix-tick');
+}
+function drawBatch(geo, f, ix, P, r, t, te, A, now, flow, env, fl = null) {
   if (ix.op === 'fan' || ix.op === 'workflow') { // 부채꼴 파도
     const waves = ix.op === 'fan' ? f.pulses.concat([f.t0]).slice(-5) : [f.t0, f.t0 + 0.4, f.t0 + 0.8];
     for (const w0 of waves) {
@@ -729,6 +959,7 @@ function drawBatch(geo, f, ix, P, r, t, te, A, now, flow, env) {
   }
   const total = ix.n || (ix.op === 'streak' ? Math.max(12, (ix.i || 0) + 4) : 24);
   const frac = ix.n ? clamp01((ix.i || 0) / ix.n) : ix.pct != null ? clamp01(ix.pct / 100) : ix.op === 'streak' ? clamp01((ix.i || 0) / total) : null;
+  if (fl) { drawBatchFloor(geo, f, ix, t, te, A, env, fl, total, frac); return; }
   const { D, cols, rows } = gridCells(total);
   const cs = 0.3, gap = 0.08, W = cols * (cs + gap);
   const fold = te == null ? 0 : ease(te / 0.5);
@@ -757,13 +988,44 @@ function drawBatch(geo, f, ix, P, r, t, te, A, now, flow, env) {
   if (lab) geo.label(flow ? P.x + W / 2 + 0.6 : P.x, P.y, flow ? P.z + r + 1.2 : P.z + r + 2.2, lab, te != null && f.ok ? 'ok' : 'batch', A * 0.9, 'ix-tick');
 }
 
-function drawTests(geo, f, ix, P, r, t, te, A, now, flow, env) {
+/** F3 흐름 3D tests: 발밑 무대 왼쪽 뒤 바닥 점수판(≤64타일, 타일 0.55·간격 0.12) · 실패 타일 붉은 잔광 · 점수 배지 */
+function drawTestsFloor(geo, f, ix, t, te, A, now, env, fl, T, pT, fT, sT, known, fail, pass) {
+  const C0 = IX_FLOOR.TEST, cols = Math.ceil(Math.sqrt(T)), rowsN = Math.ceil(T / cols);
+  const s = flScale(fl, cols * (C0.CS + C0.GAP));
+  const cs = C0.CS * s, pitch = (C0.CS + C0.GAP) * s, W = cols * pitch, Dp = rowsN * pitch;
+  const C = floorAt(fl, 'tests', fl.R + 0.4 * s + Math.hypot(W, Dp) / 2);
+  const shake = te != null && fail && !env.reduced ? Math.max(0, 1 - te / 1.2) : 0;
+  const x0 = C.x - W / 2, z0 = C.z - Dp / 2;
+  for (let j = 0; j < T; j++) {
+    const cx = j % cols, cy = Math.floor(j / cols);
+    let key = 'dim', al = 0.2;
+    if (j < pT) { key = 'ok'; al = 0.8; } else if (j < pT + fT) { key = 'err'; al = 0.95; } else if (j < pT + fT + sT) { key = 'skip'; al = 0.6; }
+    if (te == null && ix.pass == null && j === (env.reduced ? -1 : Math.floor(t * 8) % T)) { key = 'tests'; al = 0.6; } // 아직 결과 없음: 훑기
+    let x = x0 + cx * pitch + pitch / 2;
+    const z = z0 + cy * pitch + pitch / 2;
+    if (key === 'err' && shake) x += Math.sin(now * 38 + j) * 0.06 * s * shake;
+    geo.quad(x, C.y + cs * 0.5, z, cs, key, A * al);
+    if (key === 'err' && te != null) geo.quad(x, C.y + cs * 0.5 + 0.01, z, cs * 1.9, 'err', A * 0.18 * Math.max(0, 1 - te / 5)); // 붉은 잔광
+  }
+  // 판 테두리
+  const k = te != null ? (fail ? 'err' : 'ok') : 'tests', m = 0.1 * s;
+  geo.line(x0 - m, C.y, z0 - m, x0 + W + m, C.y, z0 - m, k, A * 0.35); geo.line(x0 + W + m, C.y, z0 - m, x0 + W + m, C.y, z0 + Dp + m, k, A * 0.35);
+  geo.line(x0 + W + m, C.y, z0 + Dp + m, x0 - m, C.y, z0 + Dp + m, k, A * 0.35); geo.line(x0 - m, C.y, z0 + Dp + m, x0 - m, C.y, z0 - m, k, A * 0.35);
+  if (te != null && !fail && pass && !env.reduced) { // 전부 통과: 짧은 축하 반짝임
+    const q = te / 0.9;
+    if (q < 1) for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; const rr = (0.6 + q * 2.2) * s; geo.quad(C.x + Math.cos(a) * rr, C.y + 0.3 + q * 0.6, C.z + Math.sin(a) * rr, 0.18 * s * (1 - q), 'ok', A * (1 - q)); }
+  }
+  if (te != null && known) geo.label(C.x, C.y + 0.3, z0 - m - 0.2, testScore(ix), fail ? 'err' : 'ok', A, 'ix-badge');
+  else if (known) geo.label(C.x, C.y + 0.3, z0 - m - 0.2, testScore(ix) + ' …', 'tests', A * 0.8, 'ix-tick');
+}
+function drawTests(geo, f, ix, P, r, t, te, A, now, flow, env, fl = null) {
   const pass = ix.pass || 0, fail = ix.fail || 0, skip = ix.skip || 0;
   const known = pass + fail + skip;
   const total = Math.max(ix.total || 0, known);
   const T = total ? Math.min(64, total) : Math.min(64, Math.max(16, known + 4));
   const per = total > 64 ? total / 64 : 1;
   const pT = Math.round(pass / per), fT = fail ? Math.max(1, Math.round(fail / per)) : 0, sT = Math.round(skip / per);
+  if (fl) { drawTestsFloor(geo, f, ix, t, te, A, now, env, fl, T, pT, fT, sT, known, fail, pass); return; }
   const cols = Math.ceil(Math.sqrt(T)), cs = 0.24, gap = 0.06, W = cols * (cs + gap);
   const shake = te != null && fail && !env.reduced ? Math.max(0, 1 - te / 1.2) : 0;
   for (let j = 0; j < T; j++) {

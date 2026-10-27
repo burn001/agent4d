@@ -249,7 +249,7 @@ export function mountPlans(h) {
         const an = boardAnchor(entries, mid, nodes, (id) => shownNode(view, id));
         const pj = shownNode(view, an.id) ? boardProject(view, an.id) : null;
         const sc = pj ? boardScreen(pj.p, pj.ppw, pj.wb, W, H) : null;
-        if (sc && !sc.hidden && sc.box) openBox = { x: sc.box.x + sc.box.w / 2, y: sc.box.y + sc.box.h / 2, r: Math.min(240, Math.max(sc.box.w, sc.box.h) / 2) };
+        if (sc && !sc.hidden && sc.box) openBox = { x: sc.box.x + sc.box.w / 2, y: sc.box.y + sc.box.h / 2, r: Math.min(480, Math.max(sc.box.w, sc.box.h) / 2) };
         const ob = boards.get(mid); if (ob && !ob.el.hidden) ob.el.hidden = true;
         continue;
       }

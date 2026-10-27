@@ -5,6 +5,7 @@ import { _setLangForTest } from '../i18n.mjs';
 import {
   PROC, procLook, drillSpin, drillHitch, heatTip, heatSparkRate, oreInterval, oreFlight, OreFeed, conveyorBend, quadAt, oreEase,
   cargoCount, cargoSlot, procLod, bigNum, clockText, meterModel, meterBig, procName, superviseLine, ProcWatch, watchLook, laneColor, isProcMeter,
+  isExtRig, planetJobBody, extRigState, extLanes, extRigJob, extMeterModel, extMeterBig,
 } from '../planet-proc-core.mjs';
 import { rollK } from '../proc-meter.js';
 
@@ -146,4 +147,61 @@ test('들여다보기 장부: 이벤트 열림·닫힘 펄스, meta.proc.watch �
   assert.equal(w.pulses(T0 + 20_000).length, 0, '펄스는 사라짐');
   w.forget('b:toolu_p'); w.clear();
   assert.equal(w.pulses(T0).length, 0);
+});
+
+// ───────────── 안 C — 외부 작업 = 채굴 플랫폼 승격 ─────────────
+const EXT = (job = {}) => ({ id: 'j:s:sid:x:arm', parentId: 's:sid', kind: 'bash-bg', status: 'active', label: '153 단계2 고친 팔',
+  meta: { job: { v: 1, id: 'x:arm', state: 'running', src: 'ext', progress: { n: 119254, total: 125712 }, rate: 7.8, eta: iso(780), beatAt: iso(-2),
+    startedAt: iso(-15420), endedAt: null, staleSec: 900, stale: false, ext: { pid: 55024, alive: true, expectSec: null }, ...job } } });
+
+test('§110 플랫폼 승격 대상 판정: 외부 작업 = 플랫폼 · 자동 진행 = 계기 · 규약·규칙 작업 = 탐사선 · 작업 아님(분리 프로세스 포함) = null', () => {
+  assert.equal(planetJobBody(EXT()), 'rig');
+  assert.equal(isExtRig(EXT()), true);
+  const J = (src) => ({ id: 'j:x', meta: { job: { v: 1, id: 'x', state: 'running', src } } });
+  assert.equal(planetJobBody(J('auto')), 'meter');
+  for (const src of ['protocol', 'rule', undefined, null]) assert.equal(planetJobBody(J(src)), 'probe', String(src));
+  assert.equal(planetJobBody(PROCN()), null);
+  assert.equal(isExtRig(PROCN()), false);
+  assert.equal(planetJobBody({ id: 'a', meta: {} }), null);
+  assert.equal(planetJobBody(null), null);
+});
+
+test('§110 외부 작업 플랫폼 상태·레인: 진행·대기 = running · 정체 · 끝 · 실패 / 진행 줄이면 레인 하나(처리율·관측 시각), 예상·없음이면 광석 없음', () => {
+  const j = EXT().meta.job;
+  assert.equal(extRigState(j, T0), 'running');
+  assert.equal(extRigState({ ...j, beatAt: iso(-3600) }, T0), 'stale'); // 박동 끊김(staleSec 900) → 드릴 0.35·호박 등
+  assert.equal(extRigState({ ...j, state: 'done' }, T0), 'done');
+  assert.equal(extRigState({ ...j, state: 'failed' }, T0), 'failed');
+  const L = extLanes(j);
+  assert.equal(L.length, 1);
+  assert.deepEqual([L[0].n, L[0].total, L[0].rate, L[0].at], [119254, 125712, 7.8, j.beatAt]);
+  assert.equal(extLanes(j), L, '같은 작업이면 같은 배열(프레임마다 새로 안 만듦)');
+  assert.deepEqual(extLanes({ ...j, progress: { ratio: 0.96 } }), []);
+  assert.deepEqual(extLanes({ ...j, progress: null }), []);
+  const rj = extRigJob(j);
+  assert.equal(rj.lanes, L); assert.equal(rj.primary, 'n'); assert.equal(rj.heat, 0);
+  assert.equal(extRigJob(j), rj);
+});
+
+test('§110 외부 작업 계기: 진행 줄 = n / N · 처리율 · 경과 · 막대 / 예상 = 점선 막대 `96% (예상)` · 예상 4:32 중 4:20 / 없음 = 경과', () => {
+  const j = EXT().meta.job;
+  const m = extMeterModel(j, T0);
+  const r = m.rows[0];
+  assert.equal(m.rows.length, 1);
+  assert.match(r.text, /^119,2\d\d \/ 125,712$/);
+  assert.equal(r.rate, '7.8/초');
+  assert.match(r.last, /^경과 4:17:00$/);
+  assert.ok(r.bar > 0.94 && r.bar < 0.96 && r.est === false && r.noHeat === true);
+  assert.equal(m.eta, '13:00');
+  assert.equal(m.est, false);
+  const e = extMeterModel({ ...j, progress: { ratio: 0.956 }, rate: null, eta: null, ext: { expectSec: 16320 }, startedAt: iso(-15600) }, T0);
+  assert.equal(e.est, true); assert.equal(e.rows[0].est, true);
+  assert.equal(e.rows[0].text, '95% (예상)');
+  assert.equal(e.rows[0].last, '예상 4:32 중 4:20');
+  const n = extMeterModel({ ...j, progress: null, rate: null, eta: null }, T0);
+  assert.equal(n.rows[0].bar, null); assert.equal(n.rows[0].text, '4:17:00');
+  assert.equal(extMeterBig(j, T0).replace(/\d{3}$/, 'xxx'), '119,xxx');
+  assert.equal(extMeterBig({ ...j, progress: { ratio: 0.956 }, ext: { expectSec: 16320 } }, T0), '95%');
+  // 끝나면 진행 막대 그대로 · ETA 없음
+  assert.equal(extMeterModel({ ...j, state: 'done', endedAt: iso(0) }, T0).eta, '');
 });

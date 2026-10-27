@@ -1,7 +1,7 @@
 // 특별 상호작용 연출 — 2D 캔버스 그리기. 3D 와 같은 IxModel·ixGeometry(세계 좌표 도형)를
 // 위에서 본 평면으로 투영한다: 높이(y)는 화면 위쪽(−z)으로 0.55 배 기울여 포털·실린더가 '위'에 보이게.
 // three.js 를 불러오지 않는다. Flow 2D·Planet 2D 만 그리고 복셀 2D 는 그리지 않는다.
-import { IxModel, IxGeo, ixGeometry, IX_KEYS, ixKeyColor } from '../ix-core.mjs';
+import { IxModel, IxGeo, ixGeometry, IX_KEYS, ixKeyColor, ixPortalPts, ixRectHits, IX_UNDER_LABEL } from '../ix-core.mjs';
 import { toScreen, camScale } from './flat-core.mjs';
 import { userBook, consoleLines, wantsConsole, hitRect } from '../user-core.mjs'; // 사용자 콘솔
 
@@ -43,6 +43,13 @@ export class FlatIx {
       cur = p;
     }
     return cur;
+  }
+  /** 카메라 git 붙잡기가 함께 담을 포털 점 — 평면 세계(x, z, 높이는 화면 위로 TILT 배 기울인 자리) [{x,y:0,z,r}] | null(복셀 2D 는 vx2d-extra) */
+  holdPts(id) {
+    if (this.off) return null;
+    const root = this.rootOf(id), rp = this._env.pos(root);
+    const pts = rp ? ixPortalPts(this.theme, { x: rp.x, y: rp.y || 0, z: rp.z }, Math.max(0.4, this._env.rad(root) || 0.8)) : null;
+    return pts ? pts.map((q) => ({ x: q.x, y: 0, z: q.z - q.y * TILT, r: q.r })) : null;
   }
   event(ev, opts = {}) { if (!this.off) this.model.event(ev, performance.now() / 1000, opts.speed || 1, this._rootOf); }
   clear() { this.model.clear(); }
@@ -147,10 +154,13 @@ export class FlatIx {
     // 라벨: 작은 알약
     ctx.font = '600 10.5px system-ui, "Segoe UI", sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    // 효과 글자(점수 배지·진행 눈금)가 노드 라벨 상자에 걸치면 옅게 — 라벨 판독이 먼저
+    const labs = g.labels.length && this.view.labelScreenBoxes ? this.view.labelScreenBoxes(this._labs || (this._labs = [])) : null;
     for (const d of g.labels) {
       this._xy(d.x, d.y, d.z, a);
       const c = ixKeyColor(d.key, isLight);
       const w = ctx.measureText(d.text).width + 12;
+      if (labs && labs.length && ixRectHits(a.x, a.y - 9, w / 2, 8, labs)) d.alpha *= IX_UNDER_LABEL.LAB;
       ctx.globalAlpha = d.alpha * (d.cls === 'ix-badge' ? 0.9 : 0.75);
       if (d.cls === 'ix-badge' || d.cls === 'ix-ribbon') {
         ctx.fillStyle = isLight ? 'rgba(255,255,255,.9)' : 'rgba(5,5,16,.75)';
@@ -161,6 +171,7 @@ export class FlatIx {
       ctx.fillStyle = c;
       ctx.fillText(d.text, a.x, a.y - 3);
     }
+    if (labs) labs.length = 0;
     this._drawConsoles(ctx, g, isLight);
     ctx.restore();
     this.stats.lines = g.nl; this.stats.quads = g.nq; this.stats.labels = g.labels.length; this.stats.fx = m.fx.size;

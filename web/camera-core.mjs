@@ -1,5 +1,7 @@
 // 자동 카메라의 순수 부분: 후보 판정·대상 고르기·대상 잃음 판정·대체 대상·프레임 점 맞추기.
 // three·DOM 에 의존하지 않는다(좌표는 {x,y,z} 만 읽음) — node --test 로 시험한다.
+import { runCamBonus, runWorking } from './run-core.mjs'; // 오래 도는 셸 가산점
+import { IXFX } from './ix-core.mjs'; // git 붙잡기 잔광 = github 효과 잔광
 
 export const WINDOW = 20;       // 점수 창(초)
 export const STALE_DWELL = 3;   // 대상이 끝나거나 조용해졌을 때 이 시간(초)은 머문 뒤(비행 1.6초 포함) 일하는 노드로 넘어간다
@@ -36,12 +38,13 @@ export function isShown(v, dim = false) {
 }
 
 /** 지금 활동 중인가: 열린 도구가 있거나, 끝나지 않은 노드가 active 이거나 최근 WINDOW 초 안에 이벤트 */
-export function isLive(v, lastEventAt, now) {
+export function isLive(v, lastEventAt, now, clockMs = Date.now()) {
   const open = v.icons ? v.icons.size || 0 : 0;
   if (open > 0) return true;
   const st = v.node && v.node.status;
   if (ENDED(st)) return false; // 끝난 노드는 곧 퇴장하므로 후보에서 뺀다(마지막 이벤트가 최근이어도)
   if (st === 'active') return true;
+  if (runningShell(v, clockMs)) return true; // 조용히 오래 도는 셸(이벤트 없음)
   return lastEventAt != null && now - lastEventAt < WINDOW;
 }
 
@@ -82,9 +85,9 @@ export function shotLost(view, shot, dim) {
 export const QUIET = 4;        // 이 시간(초) 동안 이벤트·열린 도구가 없으면 '조용함'
 
 /** 지금 일하는 중인가: 열린 도구가 있거나 QUIET 초 안에 이벤트 */
-export function isBusy(v, lastAt, now) {
+export function isBusy(v, lastAt, now, clockMs = Date.now()) {
   const open = v && v.icons ? v.icons.size || 0 : 0;
-  return open > 0 || (lastAt != null && now - lastAt < QUIET);
+  return open > 0 || (lastAt != null && now - lastAt < QUIET) || runningShell(v, clockMs); // 조용히 도는 셸도 일하는 중
 }
 
 /**
@@ -92,11 +95,26 @@ export function isBusy(v, lastAt, now) {
  * 예전엔 WINDOW(20초) 창의 이벤트 수를 그대로 써서, 짧은 알림 턴이 끝나 쉬는 섬이 잦은 이벤트 몫으로 20초 넘게 뽑혔다
  * (계속 도는 다른 프로젝트 러너는 열린 도구 ×2 뿐이라 졌다)
  */
-export function workScore(v, times, addedAt, lastAt, now) {
+export function workScore(v, times, addedAt, lastAt, now, clockMs = Date.now()) {
   const open = v && v.icons ? v.icons.size || 0 : 0;
   const st = v && v.node && v.node.status;
-  if (!(open > 0 || st === 'active' || (lastAt != null && now - lastAt < QUIET))) return 0;
-  return scoreOf(times, open, addedAt, now);
+  const run = runningShell(v, clockMs);
+  if (!(open > 0 || st === 'active' || run || (lastAt != null && now - lastAt < QUIET))) return 0;
+  return scoreOf(times, open, addedAt, now) + (run ? runBonus(v, clockMs) : 0);
+}
+
+/**
+ * 실행 중 셸(meta.run, 정체 아님)인가 — 박동 이벤트가 없어 이벤트 수 점수로는 늘 0 에 가깝다.
+ * clockMs = 렌더러 시계(라이브 = 지금, 재생 = 가상 시계)
+ */
+export function runningShell(v, clockMs = Date.now()) {
+  const n = v && v.node;
+  return !!(n && n.meta && n.meta.run) && runWorking(n, clockMs);
+}
+/** 실행 중 셸 가산점: 경과 30초마다 +1, 상한 6(정체·끝남 0) — run-core runCamBonus */
+export function runBonus(v, clockMs = Date.now()) {
+  const n = v && v.node;
+  return n && n.meta && n.meta.run ? runCamBonus(n, clockMs) : 0;
 }
 
 /**
@@ -117,9 +135,9 @@ export function busyAlt(list, id, pid) {
  * 대상이 끝났거나 조용해졌는데(STALE_DWELL 이상 머묾) 다른 노드가 지금 일하고 있으면 넘어간다.
  * 예전엔 8초 박자가 올 때까지 조용한 대상만 확대해 비추고, 일하는 노드는 화면 밖에 있었다.
  */
-export function shotStale(v, lastAt, since, now, otherBusy) {
+export function shotStale(v, lastAt, since, now, otherBusy, clockMs = Date.now()) {
   if (!v || !otherBusy || now - since < STALE_DWELL) return false;
-  if (isBusy(v, lastAt, now)) return false;
+  if (isBusy(v, lastAt, now, clockMs)) return false;
   return true;
 }
 
@@ -211,10 +229,10 @@ export function flightPose(fromTgt, fromPos, toCenter, toDir, toDist, e) {
 export const FIT = { M: 0.06, NODE_K: 1.1, NODE_PAD: 0.35, MIN_R_K: 0.6, PANEL_KEEP: 4, LABEL_KEEP: 1, PANEL_PAD: 0.12, GROW: 1.03, HEADROOM: 1.0, SHRINK: 0.9, FAST_SHRINK: 0.62, FAST_HOLD: 0.8 };
 
 /** 맞춤에서 '활성' 노드: 끝나지 않았고(done·stopped 아님) 작업 중(active)이거나 열린 도구가 있다 */
-export function isFitActive(v, open = 0) {
+export function isFitActive(v, open = 0, clockMs = Date.now()) {
   const st = v && v.node && v.node.status;
   if (ENDED(st)) return false;
-  return open > 0 || st === 'active';
+  return open > 0 || st === 'active' || runningShell(v, clockMs); // 오래 도는 셸도 활성
 }
 
 /** 맞춤 대상 고르기: list = [[id, active]](이미 보이는·범위 안 노드만). 활성이 하나라도 있으면 활성만, 없으면 전부 */
@@ -442,4 +460,121 @@ export function promptCamPlan({ follow = true, enabled = true, manual = false, h
   const no = { move: false, dur: 0, hold: 0 };
   if (!follow || !enabled || manual || hold || dragging || !has || paused || speed >= 8) return no;
   return { move: true, dur: speed > 2 ? PROMPT_CAM.short : PROMPT_CAM.dur, hold: PROMPT_CAM.hold };
+}
+
+// ---------------- git 동작 붙잡기 ----------------
+/**
+ * commit·push 같은 git 동작이 시작되면(서버 ix {cat:'github'}) 그 동작이 끝나고 효과 잔광(github 3.6초 ÷ √배속,
+ * 실패의 붉은 깜빡임도 이 안)이 끝날 때까지 자동 카메라가 그 노드를 잡고 있는다. 연출은 늘리지 않는다.
+ * - OPS: 붙잡는 op(조회성 pr-view·api·repo·run·release·CI pr-checks 는 제외 — 기다리기만 길다)
+ * - MAX: 끝(tool-end 등)을 기다리는 상한(초, 렌더러 시계 = 재생이면 가상 시간). 끝난 뒤 잔광은 상한과 무관하게 마저
+ * - SKIP_SPEED: 재생 배속이 이 이상이면 붙잡지 않음(2～8배속은 잔광이 ÷√배속으로 짧아짐)
+ * - N: '구도: 전체'에서 동시에 담는 수(최근 순). '따라가기'는 가장 최근 하나
+ * - FLY: 붙잡을 때 비행 시간(초). 풀릴 때는 원래 규칙의 복귀 비행(맞춤 1.6초)
+ * - KEEP: 기억하는 최대 수(오래된 것부터 버림)
+ */
+export const GIT_HOLD = { OPS: ['commit', 'push', 'pull', 'fetch', 'clone', 'merge', 'rebase', 'tag', 'pr-create', 'pr-merge'], MAX: 20, SKIP_SPEED: 8, N: 3, FLY: 1.0, KEEP: 8 };
+const GIT_OPS = new Set(GIT_HOLD.OPS);
+const ENDED3 = (s) => s === 'done' || s === 'error' || s === 'stopped';
+
+/** 붙잡은 뒤 끝나고 머무는 잔광(초, 실시간) — IxModel 의 github 잔광과 같은 식 */
+export const gitLinger = (speed = 1) => IXFX.LINGER.github / Math.max(1, Math.sqrt(speed || 1));
+
+/** 이 이벤트가 붙잡기를 시작하나: github 범주 tool-start(대상 op) · quiet(스크럽·밀린 이벤트)·서버 묶음(batch)·몰림 정리(coalesced)·8배속↑ 아님 */
+export function gitHoldStarts(ev, { quiet = false, batch = false, speed = 1 } = {}) {
+  if (!ev || ev.type !== 'tool-start' || !ev.ix || ev.ix.cat !== 'github' || !GIT_OPS.has(ev.ix.op)) return false;
+  if (ev.ix.phase && ev.ix.phase !== 'start') return false;
+  if (quiet || batch || ev.coalesced > 1 || !((speed || 1) < GIT_HOLD.SKIP_SPEED)) return false;
+  return !!(ev.nodeId && ev.toolUseId);
+}
+
+/**
+ * git 붙잡기 장부(순수). 열쇠 = 도구 호출 id. now = 실시간 초(잔광), vnow = 렌더러 시계 ms(상한 — 재생이면 가상 시계).
+ * 끝: 같은 호출의 tool-end(백그라운드로 띄운 것은 그 출력의 phase 'end'·띄운 노드가 끝날 때) · tool-summary(몰림 정리) · 호출한 노드가 끝남.
+ * node-remove 면 지움.
+ */
+export class GitHold {
+  constructor() { this.m = new Map(); this.seq = 0; }
+  clear() { this.m.clear(); }
+  get size() { return this.m.size; }
+  /** 반환: 장부가 바뀌었나 */
+  event(ev, now, vnow, opts = {}) {
+    if (!ev) return false;
+    const m = this.m;
+    if (gitHoldStarts(ev, opts)) {
+      m.delete(ev.toolUseId);
+      m.set(ev.toolUseId, { key: ev.toolUseId, id: ev.nodeId, op: ev.ix.op, t0: now, v0: vnow, seq: ++this.seq, tEnd: null, ok: null, bg: false, bgNode: null, lin: gitLinger(opts.speed) });
+      while (m.size > GIT_HOLD.KEEP) m.delete(m.keys().next().value);
+      return true;
+    }
+    if (!m.size) return false;
+    const end = (h, ok) => { if (!h || h.tEnd != null) return false; h.tEnd = now; h.ok = ok; return true; };
+    let hit = false;
+    switch (ev.type) {
+      case 'tool-end': {
+        const h = m.get(ev.toolUseId);
+        if (!h) return false;
+        if (ev.ix && ev.ix.bg && ev.ix.phase !== 'end') { h.bg = true; return false; } // 백그라운드로 띄움: 끝은 나중(출력·노드)
+        return end(h, ev.ok !== false && !(ev.ix && ev.ix.ok === false));
+      }
+      case 'tool-summary':
+        for (const id of ev.ids || []) hit = end(m.get(id), true) || hit;
+        return hit;
+      case 'output':
+        if (ev.ix && ev.ix.phase === 'end' && ev.ix.ref) return end(m.get(ev.ix.ref), ev.ix.ok !== false);
+        return false;
+      case 'node-add': {
+        const tu = ev.node && ev.node.meta && ev.node.meta.toolUseId, h = tu && m.get(tu);
+        if (h) { h.bgNode = ev.node.id; h.bg = true; }
+        return false;
+      }
+      case 'node-update':
+        if (!ev.patch || !ENDED3(ev.patch.status)) return false;
+        for (const h of m.values()) if (h.bgNode === ev.nodeId || (h.id === ev.nodeId && !h.bg)) hit = end(h, ev.patch.status !== 'error') || hit;
+        return hit;
+      case 'node-remove': {
+        const ids = new Set(ev.ids || [ev.nodeId]);
+        for (const [k, h] of m) if (ids.has(h.id)) { m.delete(k); hit = true; }
+        return hit;
+      }
+    }
+    return false;
+  }
+  /** 지금 붙잡는 것(최근 순). 끝난 뒤 잔광이 지났거나, 끝을 MAX 초(렌더러 시계) 넘게 못 받았으면 지운다 */
+  active(now, vnow) {
+    const out = [];
+    for (const [k, h] of this.m) {
+      const gone = h.tEnd != null ? now - h.tEnd >= h.lin : (vnow - h.v0) / 1000 > GIT_HOLD.MAX;
+      if (gone) { this.m.delete(k); continue; }
+      out.push(h);
+    }
+    return out.sort((a, b) => b.seq - a.seq);
+  }
+}
+
+/**
+ * 이번 프레임에 붙잡을 것(우선순위): 자동 카메라 꺼짐·수동 조작(10초 규칙)·상세 팝업 머묾·입력 따라가기 중이면 없음.
+ * list = GitHold.active 결과, ok(id) = 화면에 보이고 지금 범위(프로젝트·세션 선택) 안인가. follow = '구도: 따라가기'(가장 최근 하나).
+ * 겹침: 가장 최근 것이 기준이고, '구도: 전체'면 그것과 같은 무리(group(id) — 같은 세션 트리)의 다른 동작만 함께 담는다(최대 N)
+ * 서브에이전트 commit 과 메인 push 처럼 한 일의 단계는 같이, 다른 섬·세션의 동작은 넣지 않아(넣으면 구도가 넓어져 붙잡는 뜻이 없다) 가장 최근 것으로
+ */
+export function gitHoldPick(list, { enabled = true, auto = true, inspect = false, prompt = false, follow = false } = {}, ok = () => true, group = null) {
+  if (!enabled || !auto || inspect || prompt || !list || !list.length) return [];
+  const out = [];
+  let g0;
+  for (const h of list) {
+    if (!ok(h.id)) continue;
+    if (out.length) { if (follow) break; if (!group || group(h.id) !== g0) continue; }
+    else g0 = group ? group(h.id) : null;
+    out.push(h);
+    if (out.length >= (follow ? 1 : GIT_HOLD.N)) break;
+  }
+  return out;
+}
+
+/** 칩에 쓸 짧은 이름: 'git push' · PR 생성·병합은 사전 열쇠(t 함수) */
+export function gitHoldLabel(op, tr = null) {
+  if (op === 'pr-create') return tr ? tr('prCreate') : 'PR create';
+  if (op === 'pr-merge') return tr ? tr('prMerge') : 'PR merge';
+  return 'git ' + op;
 }

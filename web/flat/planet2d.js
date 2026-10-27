@@ -19,13 +19,15 @@ import { drawCards, drawRings, drawDeviceFace, drawIslands } from './flat-draw.j
 import { drawPlanetIslands } from './planet-islands2d.js'; // 섬 = 원형 궤도계
 import { drawMechPlanet, drawSubPlanet, drawTourb2D } from './planet-deco2d.js'; // 행성 연출 · 뚜르비용
 import { TOURB_GEO } from '../tourbillon-core.mjs'; // 코어 축소 몫
-import { stepOrbits, drawOrbits, drawBursts, emitTool, nearestSat, orbitExtent } from './planet-orbits2d.js'; // 궤도계
+import { stepOrbits, drawOrbits, drawBursts, emitTool, nearestSat, orbitExtent, ELEV } from './planet-orbits2d.js'; // 궤도계
 import { bodyK } from '../planet-core.mjs';
+import { runVis, runVisStatus } from '../run-core.mjs'; // 실행 중 셸
 import { FLAT, JOB2D } from './flat-core.mjs';
-import { isJobVis, drawJobMoon, jobLevel } from './job2d.js'; // 작업 = 주인 둘레 작은 위성
+import { isJobVis, drawJobMoon, jobLevel, drawJobTracks } from './job2d.js'; // 작업 = 주인 둘레 작은 위성 · 항로
 import { ProcFlat, isProc, isAutoJob } from './planet-proc2d.js'; // 분리 프로세스 = 채굴 드릴 플랫폼 · 계기 · 컨베이어 · 들여다보기
-import { PROC, superviseLine } from '../planet-proc-core.mjs';
+import { PROC, superviseLine, isExtRig } from '../planet-proc-core.mjs'; // 외부 작업 = 플랫폼 승격
 import { procJobId, procState, jobOf } from '../job-core.mjs';
+import { cycleProgress } from '../batch-core.mjs'; // G3 회차 고리
 import { escapeHtml } from '../html-util.mjs';
 
 const TOP_ACTIVE = 6;
@@ -54,8 +56,9 @@ export class Planet2DView extends FlatView {
   /** 노드 그린 반지름(세계): scene.js 와 같음 — RADIUS × 0.68, 배치 장치는 2배, 본체 축소 bodyK(둘레는 궤도계) */
   _nodeR(node, kind) {
     const dev = isLauncher(node);
-    const r = RADIUS[kind] * NODE_SCALE * (dev ? 2 * BATCH.DEVICE_K : 1) * (isProc(node) ? PROC.BODY_K : bodyK(kind, dev)); // 분리 프로세스는 조금 크게
-    return node && node.meta && node.meta.job ? r * JOB2D.PLANET_R_K : r; // 작업 = 아주 작은 위성
+    const rig = isProc(node) || isExtRig(node); // 분리 프로세스 · 외부 작업 플랫폼은 조금 크게
+    const r = RADIUS[kind] * NODE_SCALE * (dev ? 2 * BATCH.DEVICE_K : 1) * (rig ? PROC.BODY_K : bodyK(kind, dev));
+    return node && node.meta && node.meta.job && !rig ? r * JOB2D.PLANET_R_K : r; // 작업 = 아주 작은 위성
   }
   /** 라벨 거리: scene.js CSS2D 라벨 자리(반지름 × 1.2 + 0.5, 아래 붙는 종류는 + 0.4) */
   _labelGap(v, s, k) {
@@ -73,10 +76,13 @@ export class Planet2DView extends FlatView {
   }
   _styleVis(v) { super._styleVis(v); v._col = null; }
   _colorOf(v) {
-    if (v._col && v._colSt === v.node.status) return v._col;
-    v._colSt = v.node.status;
+    const rs = !!(v.node.meta && v.node.meta.run) && runVis(v.node, this.clock()) === 'stale'; // 실행 중 셸 정체
+    const key = v.node.status + (rs ? '!' : '');
+    if (v._col && v._colSt === key) return v._col;
+    v._colSt = key;
     // 같은 프로젝트 live 메인 여럿이면 메인은 그 세션 색
-    return (v._col = planetColor(v.sessC && v.kind === 'main' && !v.node.parentId ? v.sessC : this.kindColor(v.kind), v.node.status, this.tokens));
+    const c = planetColor(v.sessC && v.kind === 'main' && !v.node.parentId ? v.sessC : this.kindColor(v.kind), v.node.status, this.tokens);
+    return (v._col = rs ? mixColor(c, this.P.jobStale, 0.65) : c);
   }
 
   // ---------- 흐름 패킷(flow.js FlowLayer 의 2D판: 직선 위 머리 + 잔광 2) ----------
@@ -200,6 +206,8 @@ export class Planet2DView extends FlatView {
     }
     this._drawSpawnLinks(ctx); // 띄움 점선
     this._drawLinks(ctx, now, s);
+    // 안 A 항로(노드 아래 층) — 분리 프로세스 아래 계기는 그대로
+    drawJobTracks(this, ctx, now, s, (ov) => (ov._po ? Math.min(orbitExtent(ov), 3.4) * ov._R : ov._R || 0), (v) => { const pv = this.vis.get(v.node.parentId); return !!(pv && isProc(pv.node)); });
     this.proc2d.step(now); this.proc2d.beginFrame(); this.proc2d.drawFlows(ctx, now, s); // 컨베이어·광석·화물·들여다보기
     this._drawPackets(ctx, now, s);
     this.sess.drawUnder(ctx, now); // 충돌 곡선·세션 간 메시지
@@ -292,17 +300,58 @@ export class Planet2DView extends FlatView {
     return null;
   }
 
+  /**
+   * G3 기동기 회차 고리(3D DeckRing 과 같은 규칙 — 납작한 타원 위 최근 회차 칸 + 안쪽 이번 회차 진행 호) · G4 Monitor 재무장 눈금(12칸 중 rearmCount)
+   */
+  _deckRing(ctx, v, x, y, R, alpha, now) {
+    if (R < 4) return;
+    const t = this.tokens, P = this.P, SE = Math.sin(ELEV), TOP = -Math.PI / 2;
+    if (v.device) {
+      const info = v.devInfo; if (!info) return;
+      const band = info.band || [], n = Math.max(1, band.length), rx = R * 1.8, rot = this.reduced ? 0 : (now * 0.075) % (Math.PI * 2);
+      ctx.lineWidth = Math.max(2, R * 0.16);
+      for (let i = 0; i < n; i++) {
+        const b = band[i] | 0, a0 = TOP + rot + (i / n) * Math.PI * 2 + 0.06, a1 = TOP + rot + ((i + 1) / n) * Math.PI * 2 - 0.06;
+        ctx.globalAlpha = alpha * (band.length ? (b ? 0.85 : 0.25) : 0.15);
+        ctx.strokeStyle = b === 1 ? P.tool : b === 2 ? P.done : b === 3 ? P.stopped : b === 4 ? P.error : P.textDim;
+        ctx.beginPath(); ctx.ellipse(x, y, rx, rx * SE, 0, a0, a1); ctx.stroke();
+      }
+      const cur = info.running > 0 && info.currentId ? this.vis.get(info.currentId) : null;
+      const pr = cur ? cycleProgress(info, cur.node, this.clock()) : null;
+      if (info.running > 0) {
+        const ri = R * 1.55; ctx.lineWidth = Math.max(1.2, R * 0.07); ctx.strokeStyle = P.tool;
+        ctx.globalAlpha = alpha * 0.18; ctx.beginPath(); ctx.ellipse(x, y, ri, ri * SE, 0, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = alpha * 0.95; ctx.beginPath();
+        if (pr != null) ctx.ellipse(x, y, ri, ri * SE, 0, TOP, TOP + Math.max(0.02, pr) * Math.PI * 2);
+        else { const h = this.reduced ? TOP : now * 2.2; ctx.ellipse(x, y, ri, ri * SE, 0, h, h + 1.1); }
+        ctx.stroke();
+      }
+    } else {
+      const m = v.node.meta || {}, cnt = Math.min(12, Number(m.rearmCount) || (m.rearmOf ? 1 : 0));
+      if (!cnt) return;
+      const rx = R * 2.1, c = this._colorOf(v);
+      ctx.lineWidth = Math.max(1.5, R * 0.1); ctx.strokeStyle = c;
+      for (let k = 0; k < 12; k++) {
+        const a = TOP + (k / 12) * Math.PI * 2;
+        ctx.globalAlpha = alpha * (k < cnt ? 0.9 : 0.15);
+        ctx.beginPath(); ctx.ellipse(x, y, rx, rx * SE, 0, a - 0.11, a + 0.11); ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
   _drawNode(ctx, v, now) {
     const t = this.tokens, L = t.isLight;
-    const st = v.node.status;
+    const st = v.node.meta && v.node.meta.run ? runVisStatus(v.node, this.clock()) : v.node.status; // 오래 도는 셸 = 작업 중 맥동(정체는 멈춤)
     const active = st === 'active' && !v.scopeRecent;
     const pulse = active && !this.reduced ? 0.5 - 0.5 * Math.cos((2 * Math.PI * (now + v.seed)) / 1.2) : 0;
     const R = v._R * (1 + 0.08 * pulse);
     const { x, y } = v._sp;
-    if (isProc(v.node)) { // 분리 프로세스 = 채굴 드릴 플랫폼
+    if (isProc(v.node) || isExtRig(v.node)) { // 분리 프로세스 = 채굴 드릴 플랫폼 · 외부 작업도(계기는 데릭 위)
       const a = (v.baseOpacity ?? 1) * (v.exitF ?? 1);
       if (a < 0.01) return;
       this.proc2d.drawRig(ctx, v, x, y, v._R, a, now, this._colorOf(v));
+      if (isExtRig(v.node)) this.proc2d.drawMeter(ctx, v, x, y, v._R, a * (v.scopeK ?? 1) * (v.projA ?? 1), now, this._s, { rig: true });
       if (v.id === this.focusId || v.id === this.hoverId) { ctx.globalAlpha = 0.85; ctx.strokeStyle = t.text; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(x, y - v._R * 0.6, v._R * 1.6 + 2, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1; }
       return;
     }
@@ -384,6 +433,7 @@ export class Planet2DView extends FlatView {
       drawDeviceFace(this, ctx, v, x, y, w, h, R, alpha, now);
     }
     drawOrbits(this, ctx, v, x, y, R, alpha, now, col, 1, oOpt); // 궤도계 앞 반쪽
+    if (v.device || v.kind === 'monitor') this._deckRing(ctx, v, x, y, R, alpha, now); // G3 회차 고리 · G4 재무장 눈금
     if (active && v.icons && v.icons.size) emitTool(this, v, R, this._emitTarget(v), col);
     // 오류 고리: 처음 1.8초 깜빡, 10분 지난 오류는 옅게
     if (v.errorSince != null) {

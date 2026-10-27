@@ -8,6 +8,7 @@ import { legacyPack } from './overview/pack-view.js';
 
 import { t } from './i18n.mjs';
 import { promptCamPlan } from './camera-core.mjs'; // 입력 때 메인으로(Follow my prompts)
+import { GitHold, gitHoldPick, gitHoldLabel, GIT_HOLD } from './camera-core.mjs'; // git 동작 붙잡기
 const HAS = (view, id) => { const v = view && view.vis && view.vis.get(id); return !!(v && !v.gone && !v.hidden); };
 const SWITCH_EVERY = 8;      // 초
 const RESUME_AFTER = 10;     // 초
@@ -62,6 +63,9 @@ export class CameraDirector {
     this.camMode = 'fit';
     this.fit = new FitHold();
     this.shotFit = new FitHold(); // 조망 샷(전체 조망·프로젝트 섬)의 노드 맞춤 유지 — 샷이 바뀔 때마다 새로
+    this.git = new GitHold(); // git 동작 붙잡기 장부
+    this.gitHold = null;      // 이번 프레임에 붙잡는 것(최근 순) | null
+    this._gitSig = '';
 
     this._onManual = () => this._manual();
     this._bindDom();
@@ -206,9 +210,11 @@ export class CameraDirector {
   }
 
   // ---------- 이벤트 기록 ----------
-  noteEvent(ev) {
+  /** opts = {quiet, batch, speed}(app.onEvent) — 스크럽·밀린 이벤트·서버 묶음·몰림 정리·8배속↑ 의 git 동작은 붙잡지 않음 */
+  noteEvent(ev, opts = {}) {
     const now = performance.now() / 1000;
     this.lastEventAt = now;
+    this.git.event(ev, now, this._clk(), opts);
     if (CALM_EV.has(ev.type)) {
       const tl = this._evT || (this._evT = []);
       tl.push(now);
@@ -222,7 +228,7 @@ export class CameraDirector {
     if (ev.type === 'node-add') this.added.set(ev.nodeId, now);
   }
 
-  resetActivity() { this.activity.clear(); this.added.clear(); this.prevTarget = null; this.lastSwitch = -1e9; this.shot = { type: this.camMode === 'fit' ? 'fit' : 'overview' }; this.fit.reset(); this.prevCluster = null; this.curCluster = null; }
+  resetActivity() { this.git.clear(); this.gitHold = null; this._gitSig = ''; this.activity.clear(); this.added.clear(); this.prevTarget = null; this.lastSwitch = -1e9; this.shot = { type: this.camMode === 'fit' ? 'fit' : 'overview' }; this.fit.reset(); this.prevCluster = null; this.curCluster = null; }
 
   /** 전체 보기 범위. focusProject 가 바뀌면 1.6초에 걸쳐 그 클러스터로 이동하고 순환을 그 안으로 좁힌다 */
   // focusSession(루트 세션 id)·focusNode('s:<세션>')를 주면 순환 후보를 그 세션 트리로 더 좁히고 그 메인 노드부터 비춘다
@@ -283,11 +289,52 @@ export class CameraDirector {
     const n = this.getNode(id);
     return n ? n.parentId || null : null;
   }
-  _busyId(id, now) { return isBusy(this.view.vis.get(id), this._lastAt(id), now); }
+  /** 렌더러 시계(라이브 = 지금, 재생 = 가상 시계) — 실행 중 셸 경과·정체 판정 */
+  _clk() { const v = this.view; return v && typeof v.clock === 'function' ? v.clock() : Date.now(); }
+  _busyId(id, now) { return isBusy(this.view.vis.get(id), this._lastAt(id), now, this._clk()); }
   /** 조용해진 대상(id, 섬 pid)에서 넘어갈 일하는 노드: 'same'(같은 섬) | 'other'(섬이 통째로 쉼, 다른 섬) | null */
   _busyAlt(now, id, pid) { return busyAlt(this._collect(now).map((x) => ({ id: x.id, pid: x.pid, busy: this._busyId(x.id, now) })), id, pid); }
   /** 화면에 보이고 지금 활동 중인 노드인가(숨김·퇴장·희미·끝난 노드 제외) */
-  _liveId(id, now) { const v = this.view.vis.get(id); return !!v && this._shownId(id) && isLive(v, this._lastAt(id), now); }
+  _liveId(id, now) { const v = this.view.vis.get(id); return !!v && this._shownId(id) && isLive(v, this._lastAt(id), now, this._clk()); }
+
+  /** 지금 범위(세션 선택 = 그 트리, 프로젝트 선택 = 그 섬, 전체 = 섬이 있는 노드)에 드는가 — _collect 와 같은 규칙 */
+  _inScope(id, v) {
+    if (this.scope.mode !== 'all') return true;
+    const fp = this.scope.focusProject, fsid = this.scope.focusSession;
+    if (fsid) return !!(v && v.node && v.node.rootSessionId === fsid);
+    const pid = this._clusterOf(id);
+    return !!pid && (!fp || pid === fp);
+  }
+
+  /**
+   * git 동작 붙잡기: 이번 프레임에 붙잡을 것을 정하고(우선순위 gitHoldPick), 바뀌면 비행 — 시작 = 그 노드로(맞춤은 그 노드·패널·라벨·포털,
+   * 따라가기는 그 노드 샷), 풀림 = 원래 규칙으로 복귀 비행. 반환 = 붙잡는 중인가
+   */
+  _gitStep(now, prompting) {
+    const all = this.git.active(now, this._clk());
+    const follow = this.camMode === 'follow';
+    const list = gitHoldPick(all, { enabled: this.enabled, auto: this.mode === 'auto', inspect: !!this.hold, prompt: prompting, follow }, (id) => HAS(this.view, id) && this._shownId(id) && this._inScope(id, this.view.vis.get(id)), (id) => { const n = this.getNode(id); return (n && n.rootSessionId) || this._clusterOf(id) || ''; });
+    const ids = [...new Set(list.map((h) => h.id))];
+    const sig = ids.length ? (follow ? 'f|' : 'a|') + ids.join(',') : '';
+    const was = this._gitSig;
+    this.gitHold = list.length ? list : null;
+    if (sig === was) return !!list.length;
+    this._gitSig = sig;
+    if (list.length) {
+      this.shot = follow ? { type: 'node', id: ids[0], git: true } : { type: 'fit' };
+      if (follow) this.prevTarget = ids[0];
+      this.fit.reset();
+      this._startTransition(GIT_HOLD.FLY);
+      return true;
+    }
+    if (this.shot.git) this.shot = { type: this.camMode === 'fit' ? 'fit' : 'overview' };
+    if (was && this.mode === 'auto') { // 풀림: 원래 규칙으로 부드럽게(맞춤은 다시 맞춰 날고, 따라가기는 바로 다시 고름)
+      this.fit.reset();
+      this.lastSwitch = -1e9;
+      this._flyNext = true;
+    }
+    return false;
+  }
 
   /** 지금 범위(세션 선택·프로젝트 선택·전체)에 드는 활동 노드 [{id, s, pid}] */
   _collect(now) {
@@ -428,7 +475,7 @@ export class CameraDirector {
 
   // ---------- 선택 ----------
   _score(id, now) { // 지금 일하는 노드만 점수(쉬는 노드는 0 — 짧은 알림 턴이 끝난 섬이 20초 창 동안 뽑히지 않게)
-    return workScore(this.view.vis.get(id), this.activity.get(id), this.added.get(id), this._lastAt(id), now);
+    return workScore(this.view.vis.get(id), this.activity.get(id), this.added.get(id), this._lastAt(id), now, this._clk());
   }
 
   _pick(now) {
@@ -451,6 +498,12 @@ export class CameraDirector {
     return (dmax * Math.sin(fov / 2) * aspect) / scale;
   }
 
+  /** 그 노드의 git 효과 소품 자리(표현이 주는 대상 점: 흐름 포털·Planet 위성 궤도·복셀 발송대) [{x,y,z,r}] */
+  _ixPts(id) {
+    const v = this.view;
+    try { return (v.ix && v.ix.holdPts && v.ix.holdPts(id)) || (v.vx && v.vx.holdPts && v.vx.holdPts(id)) || []; } catch { return []; }
+  }
+
   /** 노드 샷의 점: 대상(늘 포함) + 활동 중인 자손(깊이 무관, 우선) + 보이는 자식(넓은 구도면 전부, 아니면 24개) */
   _nodePts(shot, now) {
     const view = this.view, id = shot.id;
@@ -458,11 +511,12 @@ export class CameraDirector {
     const seen = new Set([id]);
     let kids = view.children(id).filter((k) => this._shownId(k));
     if (!shot.wide) kids = nearestKids(kids, (k) => view.nodeTarget(k), pts[0].p || { x: 0, y: 0, z: 0 }, ZOOM.NODE_KIDS); // 가까운 자식 몇 개만
-    if (shot.prompt) kids = []; // 입력 받은 메인: 메인 자체를 가운데 크게(자식·하위 활동 노드 훑기 없음)
+    if (shot.prompt || shot.git) kids = []; // 입력 받은 메인 · git 붙잡기: 그 노드 자체를 크게(자식·하위 활동 노드 훑기 없음)
+    if (shot.git) for (const q of this._ixPts(id)) pts.push({ p: { x: q.x, y: q.y, z: q.z }, r: q.r, must: true }); // + 포털(Planet 위성 궤도·복셀 발송대)
     const lim = kids.length;
     for (let i = 0; i < lim; i++) { seen.add(kids[i]); pts.push({ p: view.nodeTarget(kids[i]), r: view.nodeRadius(kids[i]) + 1.2, must: this._liveId(kids[i], now) }); }
     // 하위의 하위에서 일하는 노드(서브에이전트의 서브에이전트·claude -p 자식 등)도 들어오게
-    const stack = shot.prompt ? [] : view.children(id).slice();
+    const stack = shot.prompt || shot.git ? [] : view.children(id).slice();
     for (let n = 0; stack.length && n < 400; n++) {
       const k = stack.pop();
       if (!seen.has(k) && this._liveId(k, now)) { seen.add(k); pts.push({ p: view.nodeTarget(k), r: view.nodeRadius(k) + 1.2, must: true }); }
@@ -503,9 +557,10 @@ export class CameraDirector {
       if (!this._shownId(id)) continue;
       if (fsid && (!v.node || v.node.rootSessionId !== fsid)) continue;
       if (fp && !fsid && this._clusterOf(id) !== fp) continue;
-      list.push([id, isFitActive(v, v.icons ? v.icons.size || 0 : 0)]);
+      list.push([id, isFitActive(v, v.icons ? v.icons.size || 0 : 0, this._clk())]);
     }
-    const ids = pickFitIds(list);
+    const gh = !sc && this.gitHold ? [...new Set(this.gitHold.map((h) => h.id))].filter((id) => this._shownId(id)) : null; // 붙잡은 노드만
+    const ids = gh && gh.length ? gh : pickFitIds(list);
     const now = this._now || performance.now() / 1000;
     const B = basis || this._fitBasis(this._fitDir());
     const pan = view.fitPanels ? view.fitPanels(this._panMap || (this._panMap = new Map())) : null;
@@ -543,6 +598,7 @@ export class CameraDirector {
       const b = memo.get(id, now);
       if (b) { const w = ((b.x1 - b.x0) * (b.y1 - b.y0)) / 4; for (const q of boxCorners(p, b, B.R, B.U)) { q.aux = true; q.w = w; pts.push(q); } } // 패널 = 보조 점, 넓이를 네 모서리에 나눠 무게중심에
     }
+    if (gh && gh.length) for (const id of gh) for (const q of this._ixPts(id)) pts.push({ p: { x: q.x, y: q.y, z: q.z }, r: q.r, aux: true }); // 원격 저장소 포털·발송대
     return pts;
   }
 
@@ -552,7 +608,7 @@ export class CameraDirector {
    */
   _fitFrame(sc = null, hold = this.fit) {
     const now = this._now || performance.now() / 1000;
-    const key = sc ? (sc.pid || '') + '|' + (sc.sid || '') : '';
+    const key = sc ? (sc.pid || '') + '|' + (sc.sid || '') : 'g' + this._gitSig;
     if (this._fitCache && this._fitCache.at === now && this._fitCache.key === key) return this._fitCache.f;
     const pr = this._prefs();
     const fov = (this.camera.fov * Math.PI) / 180;
@@ -575,7 +631,7 @@ export class CameraDirector {
       // 띠 가운데(덮개 위)를 맞춤 식 안에서(vOff): 시선점은 화면 가운데 그대로, 띠 위·아래 끝까지 각각 잰다 — 예전처럼 맞춘 뒤 시선점을
       // 옮기면 원근 때문에 가까운(화면 아래) 점이 더 많이 올라가 아래가 비었다
       const vOff = band.yc * t;
-      const want = refineFit(pts, boxCenter(pts), R, U, F, tanH, tanV, 4, vOff, this.view.fitMass !== false); // + 시각 무게중심 // 투영 상자 가운데로 3～4회 보정 — 가로나 세로 한쪽이 여백 끝까지
+      const want = refineFit(pts, boxCenter(pts), R, U, F, tanH, tanV, 4, vOff, this.view.fitMass !== false && !(this.gitHold && !sc)); // 붙잡는 동안은 노드·포털 상자 가운데(무게중심은 노드 쪽으로 쏠려 포털이 가장자리로) // + 시각 무게중심 // 투영 상자 가운데로 3～4회 보정 — 가로나 세로 한쪽이 여백 끝까지
       const here = hold.c ? requiredDist(pts, hold.c, R, U, F, tanH, tanV, vOff) : Infinity;
       hold.step(now, want, here, dmin, dmax, { freeze: !!this.view.exitSettling }); // 퇴장 연출 중엔 줄이지 않고, 끝난 뒤 한 번만
       f = { center: new THREE.Vector3(hold.c.x, hold.c.y, hold.c.z), dist: hold.D, r: want.D * t, n: pts.length };
@@ -794,8 +850,13 @@ export class CameraDirector {
       this._flyNext = true; // 같은 대상을 다시 골라도 손으로 옮긴 자리에서 날아 돌아온다
     }
 
-    if (this._promptStep(now)) {
+    const prompting = this._promptStep(now);
+    const holding = this._gitStep(now, prompting);
+    if (prompting) {
       // 입력 받은 메인을 비추는 중 — 대상 고르기를 쉰다(비행·머묾은 아래 공용 경로)
+    } else if (holding) {
+      // git 동작 붙잡기 — 고르기·순환을 쉰다(맞춤은 _fitPts 가 붙잡은 노드만, 따라가기는 그 노드 샷)
+      this._flyNext = false;
     } else if (this.mode === 'auto' && this.camMode === 'fit') {
       // 전체 맞춤: 대상을 바꾸지 않는다. 처음·복귀·표현 전환 뒤에만 날아가고, 그 뒤는 경계가 크게 바뀔 때만 부드럽게
       if (this.shot.type !== 'fit') { this.shot = { type: 'fit' }; this._startTransition(); this._pose(); }
@@ -812,11 +873,11 @@ export class CameraDirector {
       let stale = false;
       if (!lost && this.shot.type === 'node' && !this.shot.wide) { // 넓은 구도(메인·세션 전체)는 활동 자손을 함께 담으므로 제외
         const v = this.view.vis.get(this.shot.id);
-        if (v && !isBusy(v, this._lastAt(this.shot.id), now) && now - (this.shotAt || 0) >= STALE_DWELL) {
+        if (v && !isBusy(v, this._lastAt(this.shot.id), now, this._clk()) && now - (this.shotAt || 0) >= STALE_DWELL) {
           // 전체 보기: 같은 섬에 일하는 노드가 있으면 그 섬 안에서, 섬이 통째로 쉬면 다른 섬의 일하는 노드로(— 예전엔 다른 섬은 8초 박자에 맡겨
           // 알림 턴이 끝난 섬을 계속 비췄다)
           const pid = this.scope.mode === 'all' ? this._clusterOf(this.shot.id) : null;
-          stale = shotStale(v, this._lastAt(this.shot.id), this.shotAt || 0, now, !!this._busyAlt(now, this.shot.id, pid));
+          stale = shotStale(v, this._lastAt(this.shot.id), this.shotAt || 0, now, !!this._busyAlt(now, this.shot.id, pid), this._clk());
         }
       } else if (!lost && this.shot.type === 'cluster' && this.scope.mode === 'all' && !this.scope.focusProject && now - (this.shotAt || 0) >= STALE_DWELL) {
         stale = this._busyAlt(now, null, this.shot.pid) === 'other'; // 섬 샷: 그 섬이 쉬고 다른 섬이 일하면 넘어감
@@ -912,7 +973,8 @@ export class CameraDirector {
       s = { mode: 'manual', text: this.dragging ? t('app.cam.manual') : t('app.cam.manualResume', { n: left }) };
     } else {
       let what = this.scope.mode === 'all' ? t('app.cam.overviewAll') : t('app.cam.overview');
-      if (this.shot.type === 'fit') {
+      if (this.gitHold) what = gitHoldLabel(this.gitHold[0].op, (k) => t('app.cam.' + k)); // 'git push'
+      else if (this.shot.type === 'fit') {
         const sc = this.scope;
         if (sc.focusSession) what = t('app.cam.wholeSession');
         else if (sc.focusProject) {

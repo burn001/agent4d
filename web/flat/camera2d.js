@@ -5,6 +5,7 @@ import { isShown, isLive, pickBest, shotLost, FitHold, safeBand, ZOOM, autoFloor
 import { stageInsets } from '../screen-insets.js';
 import { t } from '../i18n.mjs';
 import { promptCamPlan } from '../camera-core.mjs'; // 입력 때 메인으로(Follow my prompts)
+import { GitHold, gitHoldPick, gitHoldLabel, GIT_HOLD } from '../camera-core.mjs'; // git 동작 붙잡기
 import { FLAT, toWorld, zoomAt, panBy, boxCenterXZ, fitNeed, refineFit2D, fitMinD, flyPose, dampTo, clampD } from './flat-core.mjs';
 const HAS = (view, id) => { const v = view && view.vis && view.vis.get(id); return !!(v && !v.gone && !v.hidden); };
 
@@ -33,6 +34,9 @@ export class Director2D {
     this.camMode = 'fit';
     this.fit = new FitHold();
     this.shotFit = new FitHold(); // 프로젝트 섬 샷의 노드 맞춤 유지
+    this.git = new GitHold(); // git 동작 붙잡기(3D 와 같은 장부·규칙)
+    this.gitHold = null;
+    this._gitSig = '';
     this.active = true;
     this._ptrs = new Map();
     this._onKey = (e) => this._key(e);
@@ -178,9 +182,10 @@ export class Director2D {
     this.lastSwitch = -1e9; this.tour = 0;
     if (this.mode === 'auto') this._startTransition();
   }
-  noteEvent(ev) {
+  noteEvent(ev, opts = {}) {
     const now = performance.now() / 1000;
     this.lastEventAt = now;
+    this.git.event(ev, now, this._clk(), opts);
     if (!ev.nodeId) return;
     let a = this.activity.get(ev.nodeId);
     if (!a) { a = []; this.activity.set(ev.nodeId, a); }
@@ -188,7 +193,7 @@ export class Director2D {
     if (a.length > 200) a.splice(0, a.length - 200);
     if (ev.type === 'node-add') this.added.set(ev.nodeId, now);
   }
-  resetActivity() { this.activity.clear(); this.added.clear(); this.prevTarget = null; this.lastSwitch = -1e9; this.shot = { type: this.camMode === 'fit' ? 'fit' : 'overview' }; this.fit.reset(); }
+  resetActivity() { this.git.clear(); this.gitHold = null; this._gitSig = ''; this.activity.clear(); this.added.clear(); this.prevTarget = null; this.lastSwitch = -1e9; this.shot = { type: this.camMode === 'fit' ? 'fit' : 'overview' }; this.fit.reset(); }
   setScope({ mode = 'session', focusProject = null, focusSession = null, focusNode = null } = {}) {
     const m = mode === 'all' ? 'all' : 'session';
     const fp = m === 'all' ? focusProject || null : null;
@@ -265,9 +270,10 @@ export class Director2D {
     const view = this.view, list = [];
     for (const [id, v] of view.vis) {
       if (!this._shown(id) || !this._inScope(id, v, sc)) continue;
-      list.push([id, isFitActive(v, v.icons ? v.icons.size || 0 : 0)]);
+      list.push([id, isFitActive(v, v.icons ? v.icons.size || 0 : 0, this._clk())]);
     }
-    const ids = pickFitIds(list);
+    const gh = !sc && this.gitHold ? [...new Set(this.gitHold.map((h) => h.id))].filter((id) => this._shown(id)) : null; // 붙잡은 노드만
+    const ids = gh && gh.length ? gh : pickFitIds(list);
     const memo = this._panMemo || (this._panMemo = new PanelMemo());
     const lmemo = this._labMemo || (this._labMemo = new PanelMemo(FIT.LABEL_KEEP));
     // 지난 프레임 카드(px) → 노드별 {기준점 세계 오프셋, 기준점 기준 px 상자}. 카드 크기·노드와의 간격은 화면 px 로 그려지고, 기준점(복셀은 책상)은 세계 자리
@@ -296,6 +302,7 @@ export class Director2D {
       const b = memo.get(id, now), a = b && anc.get(id);
       if (b && a) pts.push({ p: { x: v.target.x + a.dx, y: 0, z: v.target.z + a.dz }, r: 0, e: pxToE(b, unit), panel: true, aux: true });
     }
+    if (gh && gh.length) for (const id of gh) for (const q of this._ixPts(id)) pts.push({ p: { x: q.x, y: 0, z: q.z }, r: q.r, aux: true }); // 원격 저장소 포털·발송대
     return pts;
   }
   _fitFrame(now, sc = null, hold = this.fit) {
@@ -309,7 +316,7 @@ export class Director2D {
     const band = this._band(H, true);
     const mv = (1 - FIT.M) * band.k, mh = 1 - FIT.M;
     // 평행 투영: 화면 상자(반지름·카드·라벨 포함) 가운데로, 가로·세로 중 한쪽이 여백 끝까지
-    const want = refineFit2D(pts, boxCenterXZ(pts), aspect, mh, mv, 3, this.view.fitMass !== false); // + 시각 무게중심
+    const want = refineFit2D(pts, boxCenterXZ(pts), aspect, mh, mv, 3, this.view.fitMass !== false && !(this.gitHold && !sc)); // 붙잡는 동안은 상자 가운데 // + 시각 무게중심
     const here = hold.c ? fitNeed(pts, hold.c, aspect, mh, mv) : Infinity;
     hold.step(now, want, here, dmin, FLAT.D_MAX, { freeze: !!this.view.exitSettling });
     // 시선점을 아래로(내용이 띠 가운데, 덮개 위로 올라감)
@@ -325,11 +332,17 @@ export class Director2D {
     const labB = Math.max(v.labelBelow ? 46 : 0, lr ? lr.bottom : 0), labT = Math.max(v.labelBelow ? 0 : 30, lr ? lr.top : 0);
     return safeBand(ins.H || H, ins.top + labT, ins.bottom + labB);
   }
-  _nodeFrame(id, wide) {
+  /** 그 노드의 git 효과 소품 자리(평면 세계: 흐름 포털·Planet 위성 궤도·복셀 발송대) [{x,y,z,r}] */
+  _ixPts(id) {
+    const v = this.view;
+    try { return (v.ix && v.ix.holdPts && v.ix.holdPts(id)) || (v.vx && v.vx.holdPts && v.vx.holdPts(id)) || []; } catch { return []; }
+  }
+  _nodeFrame(id, wide, git = false) {
     const view = this.view, v = view.vis.get(id);
     if (!v) return null;
     const pts = [{ p: v.target, r: v.r * FLAT.FIT_PAD_K + FLAT.FIT_PAD }];
-    let kids = view.children(id).filter((k) => view.vis.get(k) && this._shown(k));
+    if (git) for (const q of this._ixPts(id)) pts.push({ p: { x: q.x, y: 0, z: q.z }, r: q.r }); // + 포털·발송대(자식은 담지 않음)
+    let kids = git ? [] : view.children(id).filter((k) => view.vis.get(k) && this._shown(k));
     if (!wide) kids = nearestKids(kids, (k) => view.vis.get(k).target, v.target, ZOOM.NODE_KIDS); // 가까운 자식 몇 개만
     for (const kid of kids) { const k = view.vis.get(kid); pts.push({ p: k.target, r: k.r + 1.2 }); }
     const { W, H } = this._size();
@@ -345,7 +358,7 @@ export class Director2D {
         const f = this._nodeFrame(shot.id, false), v = this.view.vis.get(shot.id);
         if (f && v) { const D = Math.min(f.D, shot.maxD || f.D); return { x: v.target.x, z: v.target.z + D * this._band(this._size().H).yc, D }; }
       }
-      return this._nodeFrame(shot.id, shot.wide) || this._fitFrame(now);
+      return this._nodeFrame(shot.id, shot.wide, !!shot.git) || this._fitFrame(now);
     }
     if (shot.type === 'cluster' && this.view.clusterTarget) {
       const c = this.view.clusterTarget(shot.pid);
@@ -365,19 +378,44 @@ export class Director2D {
     }
     return this._fitFrame(now);
   }
+  /** 렌더러 시계(라이브 = 지금, 재생 = 가상 시계) — 실행 중 셸 경과·정체 판정 */
+  _clk() { const v = this.view; return v && typeof v.clock === 'function' ? v.clock() : Date.now(); }
   /** '따라가기'(간이): 8초마다 지금 범위의 활동 노드 중 최고 점수, 4번에 1번·한가하면 전체 */
   _pickFollow(now) {
     this.tour++;
     if (now - this.lastEventAt > IDLE_OVERVIEW || this.tour % 4 === 0) return { type: 'fit' };
     const list = [];
     for (const [id, v] of this.view.vis) {
-      if (!this._shown(id) || !this._inScope(id, v) || !isLive(v, this._lastAt(id), now)) continue;
-      list.push([id, workScore(v, this.activity.get(id), this.added.get(id), this._lastAt(id), now)]); // 쉬는 노드는 0
+      if (!this._shown(id) || !this._inScope(id, v) || !isLive(v, this._lastAt(id), now, this._clk())) continue;
+      list.push([id, workScore(v, this.activity.get(id), this.added.get(id), this._lastAt(id), now, this._clk())]); // 쉬는 노드는 0
     }
     const id = pickBest(list, this.prevTarget);
     if (!id) return { type: 'fit' };
     this.prevTarget = id;
     return { type: 'node', id };
+  }
+  /** git 붙잡기(3D camera.js _gitStep 과 같은 규칙): 반환 = 붙잡는 중인가 */
+  _inScopeNow(id) { const v = this.view.vis.get(id); return !!v && this._inScope(id, v) && (this.scope.mode !== 'all' || !!this._clusterOf(id) || !!this.scope.focusSession); }
+  _gitStep(now, prompting) {
+    const all = this.git.active(now, this._clk());
+    const follow = this.camMode === 'follow';
+    const list = gitHoldPick(all, { enabled: this.enabled, auto: this.mode === 'auto', inspect: !!this.hold, prompt: prompting, follow }, (id) => HAS(this.view, id) && this._shown(id) && this._inScopeNow(id), (id) => { const n = this.getNode(id); return (n && n.rootSessionId) || this._clusterOf(id) || ''; });
+    const ids = [...new Set(list.map((h) => h.id))];
+    const sig = ids.length ? (follow ? 'f|' : 'a|') + ids.join(',') : '';
+    const was = this._gitSig;
+    this.gitHold = list.length ? list : null;
+    if (sig === was) return !!list.length;
+    this._gitSig = sig;
+    if (list.length) {
+      this.shot = follow ? { type: 'node', id: ids[0], git: true } : { type: 'fit' };
+      if (follow) this.prevTarget = ids[0];
+      this.fit.reset();
+      this._startTransition(GIT_HOLD.FLY);
+      return true;
+    }
+    if (this.shot.git) this.shot = { type: 'fit' };
+    if (was && this.mode === 'auto') { this.fit.reset(); this.lastSwitch = -1e9; this._flyNext = true; } // 풀림: 원래 규칙으로 부드럽게
+    return false;
   }
   _startTransition(dur = TRANSITION) {
     if (!this.cam) return;
@@ -394,8 +432,12 @@ export class Director2D {
     if (this.mode === 'manual' && this.enabled && !this.hold && !this.dragging && now - this.lastInput >= RESUME_AFTER) {
       this.mode = 'auto'; this.lastSwitch = -1e9; this._flyNext = true;
     }
-    if (this._promptStep(now)) {
+    const prompting = this._promptStep(now);
+    const holding = this._gitStep(now, prompting);
+    if (prompting) {
       // 입력 받은 메인을 비추는 중
+    } else if (holding) {
+      this._flyNext = false; // git 동작 붙잡기 — 고르기·순환을 쉰다
     } else if (this.mode === 'auto' && this.camMode === 'fit') {
       if (this.shot.type !== 'fit') { this.shot = { type: 'fit' }; this._startTransition(); }
       else if (this._flyNext) this._startTransition();
@@ -447,7 +489,8 @@ export class Director2D {
     } else {
       let what;
       const sc = this.scope;
-      if (this.shot.type === 'node') {
+      if (this.gitHold) what = gitHoldLabel(this.gitHold[0].op, (k) => t('flat.cam.' + k)); // 'git push'
+      else if (this.shot.type === 'node') {
         const n = this.getNode(this.shot.id);
         what = n ? (n.label || n.id) : '';
         if (what.length > 22) what = what.slice(0, 21) + '…';

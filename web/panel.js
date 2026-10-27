@@ -15,7 +15,7 @@ const MAX_LINES = 1000;
 const NATIVE_ANCHOR = typeof CSS !== 'undefined' && !!CSS.supports && CSS.supports('overflow-anchor', 'auto');
 const STATUS_TXT = Object.fromEntries(['active', 'idle', 'done', 'error', 'stopped'].map((k) => [k, t('app.panel.st.' + k)]));
 // '중지됨' 사유(서버 meta.stopReason)
-export const STOP_REASON_TXT = Object.fromEntries(['taskstop', 'kill-cmd', 'signal', 'time-limit', 'killed', 'orphan', 'parent-stopped']
+export const STOP_REASON_TXT = Object.fromEntries(['taskstop', 'kill-cmd', 'signal', 'time-limit', 'killed', 'orphan', 'session-end', 'parent-stopped']
   .map((k) => [k, t('app.panel.stop.' + k)]));
 const trunc = (s, n) => { s = String(s ?? ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
 
@@ -291,7 +291,12 @@ export class Panel {
         break;
       }
       case 'result': msg = `<span class="tag ${ev.ok === false ? 'err' : 'ok'}">${t('app.panel.tag.result')}</span>${escapeHtml(ev.text || '')}`; break;
-      case 'output': msg = `<span class="tag">${t('app.panel.tag.output')}</span><pre>${escapeHtml(ev.text || '')}</pre>`; break;
+      case 'output': msg = `<span class="tag">${t('app.panel.tag.output')}</span>${ev.coalesced > 1 ? `<span class="dim">${t('app.panel.outLines', { n: Number(ev.lineCount || 0), s: fmtNum(Number(ev.lineCount || 0)) })}</span>` : ''}<pre>${escapeHtml(ev.text || '')}</pre>`; break;
+      case 'tool-summary': { // 서버 몰림 정리 — 짝이 맞은 짧은 도구 n건을 한 줄로
+        const cats = Object.entries(ev.cats || {}).sort((a, b) => b[1] - a[1]).map(([c, k]) => `${escapeHtml(CAT_LABEL[c] || c)} ${k}`).join(' · ');
+        msg = `<span class="tag">${t('app.panel.tag.tools')}</span>${t('app.panel.toolSummary', { n: Number(ev.n || 0), s: fmtNum(Number(ev.n || 0)) })}${cats ? ` <span class="dim">${cats}</span>` : ''}${ev.fail ? ` <span class="tag err">${t('app.panel.tag.failed')} ${Number(ev.fail)}</span>` : ''}`;
+        break;
+      }
       case 'conflict': { // 같은 파일(다른 live 세션)
         const peer = this.getNode(ev.peer);
         const pn = escapeHtml(trunc((peer && peer.label) || ev.peer || '', 30));

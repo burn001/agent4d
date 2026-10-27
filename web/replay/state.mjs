@@ -58,6 +58,12 @@ export function applyEvent(state, ev) {
     case 'tool-end':
       if (n) n.openTools = (n.openTools || []).filter((t) => t.toolUseId !== ev.toolUseId);
       break;
+    case 'tool-summary': // 서버 몰림 정리: 짝이 맞은 도구 n건(시작·끝을 대신함) — 열려 있던 같은 id 는 닫음
+      if (n && Array.isArray(ev.ids) && ev.ids.length) { const ids = new Set(ev.ids); n.openTools = (n.openTools || []).filter((t) => !ids.has(t.toolUseId)); }
+      break;
+    case 'node-remove': // 전체 보기 전용: 서브트리 제거
+      for (const id of (Array.isArray(ev.ids) && ev.ids.length ? ev.ids : [ev.nodeId])) state.nodes.delete(id);
+      return true;
     default:
       break;
   }
