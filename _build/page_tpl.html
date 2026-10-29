@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="{lang}"{fixed}>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+<meta name="description" content="{desc}">
+<link rel="canonical" href="{url}">
+<link rel="alternate" hreflang="en" href="{B}">
+<link rel="alternate" hreflang="ko" href="{B}ko/">
+<link rel="alternate" hreflang="x-default" href="{B}">
+
+<meta property="og:type" content="video.other">
+<meta property="og:site_name" content="Agent4D">
+<meta property="og:locale" content="{locale}">
+<meta property="og:locale:alternate" content="{alt}">
+<meta property="og:title" content="{title}">
+<meta property="og:description" content="{ogdesc}">
+<meta property="og:url" content="{url}">
+<meta property="og:image" content="{B}og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="{imgalt}">
+<meta property="og:video" content="{B}intro.mp4">
+<meta property="og:video:secure_url" content="{B}intro.mp4">
+<meta property="og:video:type" content="video/mp4">
+<meta property="og:video:width" content="1280">
+<meta property="og:video:height" content="720">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{title}">
+<meta name="twitter:description" content="{twdesc}">
+<meta name="twitter:image" content="{B}og.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap">
+<style>
+:root {{ --bg: #080a16; --fg: #e8ecf8; --mute: #9aa4c4; --line: #23284a; --accent: #7aa2ff; --box: #0e1226; }}
+@media (prefers-color-scheme: light) {{
+  :root {{ --bg: #f5f6fb; --fg: #141830; --mute: #4c5677; --line: #d4d8ea; --accent: #2f5bd8; --box: #ffffff; }}
+}}
+* {{ box-sizing: border-box; }}
+body {{ margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }}
+html:lang(ko) body {{ word-break: keep-all; overflow-wrap: anywhere; }}
+main {{ max-width: 960px; margin: 0 auto; padding: 32px 16px 48px; position: relative; }}
+.lang {{ position: absolute; top: 10px; right: 16px; font-size: 13px; display: flex; gap: 2px; }}
+.lang a {{ color: var(--mute); text-decoration: none; padding: 2px 8px; border-radius: 6px; border: 1px solid transparent; }}
+.lang a.on {{ color: var(--fg); border-color: var(--line); }}
+h1 {{ font-size: clamp(28px, 5vw, 44px); margin: 0 0 4px; letter-spacing: -0.01em; }}
+.tagline {{ color: var(--accent); margin: 0 0 8px; font-size: clamp(17px, 2.6vw, 22px); font-weight: 600; font-style: italic; }}
+html:lang(ko) .tagline {{ font-style: normal; }}
+.sub {{ color: var(--mute); margin: 0 0 24px; font-size: 18px; }}
+video {{ width: 100%; aspect-ratio: 16 / 9; border-radius: 12px; border: 1px solid var(--line); background: #000; display: block; }}
+.cta {{ display: flex; flex-wrap: wrap; gap: 12px; margin: 24px 0; }}
+.btn {{ display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 10px; text-decoration: none; font-weight: 600; border: 1px solid var(--line); color: var(--fg); }}
+.btn.primary {{ background: var(--accent); border-color: var(--accent); color: #fff; }}
+.tell {{ border: 1px solid var(--line); border-radius: 10px; background: var(--box); padding: 12px 14px; margin: 0 0 20px; }}
+.tell-head {{ display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 6px; }}
+.tell-head span {{ font-size: 14px; font-weight: 600; color: var(--mute); }}
+.tell button {{ font: inherit; font-size: 13px; color: var(--fg); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 2px 10px; cursor: pointer; flex: none; }}
+.tell p {{ margin: 0; font: 14px/1.6 ui-monospace, SFMono-Regular, Consolas, "Noto Sans KR", "Malgun Gothic", monospace; overflow-wrap: anywhere; }}
+ul {{ padding-left: 20px; color: var(--mute); }}
+li {{ margin: 4px 0; }}
+.ver {{ color: var(--mute); margin: 0 0 8px; font-size: 14px; }}
+footer {{ margin-top: 32px; color: var(--mute); font-size: 13px; }}
+footer a {{ color: var(--mute); }}
+</style>
+</head>
+<body>
+<main>
+  <nav class="lang" aria-label="Language"><a href="{en_href}" data-lang="en" hreflang="en" lang="en">EN</a><a href="{ko_href}" data-lang="ko" hreflang="ko" lang="ko">한국어</a></nav>
+  <h1>Agent4D</h1>
+  <p class="tagline" data-i18n="tagline">{tagline}</p>
+  <p class="sub" data-i18n="sub">{sub}</p>
+  <video src="{base}intro.mp4" poster="{base}og.png" controls autoplay muted loop playsinline></video>
+  <div class="cta">
+    <a class="btn primary" href="https://github.com/burn001/agent4d" data-i18n="gh">{gh}</a>
+    <a class="btn" id="rel" href="https://github.com/burn001/agent4d/releases/latest">{rel}</a>
+  </div>
+  <p class="ver" id="ver" hidden></p>
+  <div class="tell">
+    <div class="tell-head"><span data-i18n="tell">{tell}</span><button type="button" id="copy" data-i18n="copy">{copy}</button></div>
+    <p id="prompt" data-i18n="prompt">{prompt}</p>
+  </div>
+  <ul>
+    <li data-i18n="f1">{f1}</li>
+    <li data-i18n="f2">{f2}</li>
+    <li data-i18n="f3">{f3}</li>
+  </ul>
+  <footer><span data-i18n="foot">{foot}</span> <a href="https://github.com/burn001/agent4d">github.com/burn001/agent4d</a></footer>
+</main>
+<script src="{base}i18n.js"></script>
+</body>
+</html>
