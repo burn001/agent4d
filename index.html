@@ -6,9 +6,14 @@
 <title>Agent4D · Visual Companion for Lonely Vibecoders — your coding agents in 3D space + time</title>
 <meta name="description" content="A local, read-only live 3D viewer and replayer for Claude Code sessions. Watch the main agent, subagents, background commands and tool calls as they happen.">
 <link rel="canonical" href="https://burn001.github.io/agent4d/">
+<link rel="alternate" hreflang="en" href="https://burn001.github.io/agent4d/">
+<link rel="alternate" hreflang="ko" href="https://burn001.github.io/agent4d/ko/">
+<link rel="alternate" hreflang="x-default" href="https://burn001.github.io/agent4d/">
 
 <meta property="og:type" content="video.other">
 <meta property="og:site_name" content="Agent4D">
+<meta property="og:locale" content="en_US">
+<meta property="og:locale:alternate" content="ko_KR">
 <meta property="og:title" content="Agent4D · Visual Companion for Lonely Vibecoders — your coding agents in 3D space + time">
 <meta property="og:description" content="A local, read-only live 3D viewer and replayer for Claude Code sessions. Open source (Apache-2.0).">
 <meta property="og:url" content="https://burn001.github.io/agent4d/">
@@ -27,21 +32,34 @@
 <meta name="twitter:description" content="A local, read-only live 3D viewer and replayer for Claude Code sessions. Open source.">
 <meta name="twitter:image" content="https://burn001.github.io/agent4d/og.png">
 
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700&display=swap">
 <style>
-:root { --bg: #080a16; --fg: #e8ecf8; --mute: #9aa4c4; --line: #23284a; --accent: #7aa2ff; }
+:root { --bg: #080a16; --fg: #e8ecf8; --mute: #9aa4c4; --line: #23284a; --accent: #7aa2ff; --box: #0e1226; }
 @media (prefers-color-scheme: light) {
-  :root { --bg: #f5f6fb; --fg: #141830; --mute: #4c5677; --line: #d4d8ea; --accent: #2f5bd8; }
+  :root { --bg: #f5f6fb; --fg: #141830; --mute: #4c5677; --line: #d4d8ea; --accent: #2f5bd8; --box: #ffffff; }
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
-main { max-width: 960px; margin: 0 auto; padding: 32px 16px 48px; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+html:lang(ko) body { word-break: keep-all; overflow-wrap: anywhere; }
+main { max-width: 960px; margin: 0 auto; padding: 32px 16px 48px; position: relative; }
+.lang { position: absolute; top: 10px; right: 16px; font-size: 13px; display: flex; gap: 2px; }
+.lang a { color: var(--mute); text-decoration: none; padding: 2px 8px; border-radius: 6px; border: 1px solid transparent; }
+.lang a.on { color: var(--fg); border-color: var(--line); }
 h1 { font-size: clamp(28px, 5vw, 44px); margin: 0 0 4px; letter-spacing: -0.01em; }
 .tagline { color: var(--accent); margin: 0 0 8px; font-size: clamp(17px, 2.6vw, 22px); font-weight: 600; font-style: italic; }
+html:lang(ko) .tagline { font-style: normal; }
 .sub { color: var(--mute); margin: 0 0 24px; font-size: 18px; }
 video { width: 100%; aspect-ratio: 16 / 9; border-radius: 12px; border: 1px solid var(--line); background: #000; display: block; }
 .cta { display: flex; flex-wrap: wrap; gap: 12px; margin: 24px 0; }
 .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 10px; text-decoration: none; font-weight: 600; border: 1px solid var(--line); color: var(--fg); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tell { border: 1px solid var(--line); border-radius: 10px; background: var(--box); padding: 12px 14px; margin: 0 0 20px; }
+.tell-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 6px; }
+.tell-head span { font-size: 14px; font-weight: 600; color: var(--mute); }
+.tell button { font: inherit; font-size: 13px; color: var(--fg); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 2px 10px; cursor: pointer; flex: none; }
+.tell p { margin: 0; font: 14px/1.6 ui-monospace, SFMono-Regular, Consolas, "Noto Sans KR", "Malgun Gothic", monospace; overflow-wrap: anywhere; }
 ul { padding-left: 20px; color: var(--mute); }
 li { margin: 4px 0; }
 .ver { color: var(--mute); margin: 0 0 8px; font-size: 14px; }
@@ -51,36 +69,27 @@ footer a { color: var(--mute); }
 </head>
 <body>
 <main>
+  <nav class="lang" aria-label="Language"><a href="./" data-lang="en" hreflang="en" lang="en">EN</a><a href="ko/" data-lang="ko" hreflang="ko" lang="ko">한국어</a></nav>
   <h1>Agent4D</h1>
-  <p class="tagline">Visual Companion for Lonely Vibecoders</p>
-  <p class="sub">Your coding agents in 3D space + time — a live viewer and replayer for Claude Code sessions.</p>
+  <p class="tagline" data-i18n="tagline">Visual Companion for Lonely Vibecoders</p>
+  <p class="sub" data-i18n="sub">Your coding agents in 3D space + time — a live viewer and replayer for Claude Code sessions.</p>
   <video src="intro.mp4" poster="og.png" controls autoplay muted loop playsinline></video>
   <div class="cta">
-    <a class="btn primary" href="https://github.com/burn001/agent4d">★ View on GitHub</a>
+    <a class="btn primary" href="https://github.com/burn001/agent4d" data-i18n="gh">★ View on GitHub</a>
     <a class="btn" id="rel" href="https://github.com/burn001/agent4d/releases/latest">Latest release</a>
   </div>
   <p class="ver" id="ver" hidden></p>
+  <div class="tell">
+    <div class="tell-head"><span data-i18n="tell">Tell Claude Code</span><button type="button" id="copy" data-i18n="copy">Copy</button></div>
+    <p id="prompt" data-i18n="prompt">Install Agent4D from https://github.com/burn001/agent4d — clone it to ~/agent4d, link its skills/agent4d folder into ~/.claude/skills/agent4d (a junction on Windows), then start it and give me the link.</p>
+  </div>
   <ul>
-    <li>Main agent, subagents, workflows, <code>claude -p</code> sessions and background commands, streamed live from local transcripts (read-only).</li>
-    <li>Three views — Flow, Planet and Voxel Office — in 3D or lightweight 2D.</li>
-    <li>Replay past sessions, see context usage and plan limits, and follow every project on your machine at once.</li>
+    <li data-i18n="f1">Main agent, subagents, workflows, <code>claude -p</code> sessions and background commands, streamed live from local transcripts (read-only).</li>
+    <li data-i18n="f2">Three views — Flow, Planet and Voxel Office — in 3D or lightweight 2D.</li>
+    <li data-i18n="f3">Replay past sessions, see context usage and plan limits, and follow every project on your machine at once.</li>
   </ul>
-  <footer>Apache-2.0 · © burn001 (Dr. Cho, Sangkyu) · Not affiliated with Anthropic. <a href="https://github.com/burn001/agent4d">github.com/burn001/agent4d</a></footer>
+  <footer><span data-i18n="foot">Apache-2.0 · © burn001 (Dr. Cho, Sangkyu) · Not affiliated with Anthropic.</span> <a href="https://github.com/burn001/agent4d">github.com/burn001/agent4d</a></footer>
 </main>
-<script>
-// 최신 Release 를 그때그때 읽어 버전·날짜 표시(실패하면 정적 링크 그대로)
-fetch('https://api.github.com/repos/burn001/agent4d/releases/latest', { headers: { Accept: 'application/vnd.github+json' } })
-  .then((r) => r.ok ? r.json() : Promise.reject(r.status))
-  .then((d) => {
-    const v = d.tag_name, day = (d.published_at || '').slice(0, 10);
-    document.getElementById('rel').textContent = 'Latest release · ' + v;
-    document.getElementById('rel').href = d.html_url;
-    const t = (d.name || '').replace(/^v[\d.]+:\s*/, '');
-    const el = document.getElementById('ver');
-    el.textContent = v + (day ? ' · ' + day : '') + (t ? ' — ' + t : '');
-    el.hidden = false;
-  })
-  .catch(() => {});
-</script>
+<script src="i18n.js"></script>
 </body>
 </html>
