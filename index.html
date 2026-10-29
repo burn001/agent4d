@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Agent4D — your coding agents in 3D space + time</title>
+<title>Agent4D · Visual Companion for Lonely Vibecoders — your coding agents in 3D space + time</title>
 <meta name="description" content="A local, read-only live 3D viewer and replayer for Claude Code sessions. Watch the main agent, subagents, background commands and tool calls as they happen.">
 <link rel="canonical" href="https://burn001.github.io/agent4d/">
 
 <meta property="og:type" content="video.other">
 <meta property="og:site_name" content="Agent4D">
-<meta property="og:title" content="Agent4D — your coding agents in 3D space + time">
+<meta property="og:title" content="Agent4D · Visual Companion for Lonely Vibecoders — your coding agents in 3D space + time">
 <meta property="og:description" content="A local, read-only live 3D viewer and replayer for Claude Code sessions. Open source (Apache-2.0).">
 <meta property="og:url" content="https://burn001.github.io/agent4d/">
 <meta property="og:image" content="https://burn001.github.io/agent4d/og.png">
@@ -23,7 +23,7 @@
 <meta property="og:video:height" content="720">
 
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Agent4D — your coding agents in 3D space + time">
+<meta name="twitter:title" content="Agent4D · Visual Companion for Lonely Vibecoders — your coding agents in 3D space + time">
 <meta name="twitter:description" content="A local, read-only live 3D viewer and replayer for Claude Code sessions. Open source.">
 <meta name="twitter:image" content="https://burn001.github.io/agent4d/og.png">
 
@@ -36,6 +36,7 @@
 body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
 main { max-width: 960px; margin: 0 auto; padding: 32px 16px 48px; }
 h1 { font-size: clamp(28px, 5vw, 44px); margin: 0 0 4px; letter-spacing: -0.01em; }
+.tagline { color: var(--accent); margin: 0 0 8px; font-size: clamp(17px, 2.6vw, 22px); font-weight: 600; font-style: italic; }
 .sub { color: var(--mute); margin: 0 0 24px; font-size: 18px; }
 video { width: 100%; aspect-ratio: 16 / 9; border-radius: 12px; border: 1px solid var(--line); background: #000; display: block; }
 .cta { display: flex; flex-wrap: wrap; gap: 12px; margin: 24px 0; }
@@ -51,6 +52,7 @@ footer a { color: var(--mute); }
 <body>
 <main>
   <h1>Agent4D</h1>
+  <p class="tagline">Visual Companion for Lonely Vibecoders</p>
   <p class="sub">Your coding agents in 3D space + time — a live viewer and replayer for Claude Code sessions.</p>
   <video src="intro.mp4" poster="og.png" controls autoplay muted loop playsinline></video>
   <div class="cta">
