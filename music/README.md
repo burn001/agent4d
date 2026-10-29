@@ -47,8 +47,28 @@ python music/compose.py --wav 미리듣기.wav          # WAV 사본도(레포�
 | jazz | 재즈 | 모퉁이 카페 (5분 편곡) | `compose_jazz.py` | `bgm-jazz.mp3`·`.json` | 96 · Bb major | 이전 프로젝트 `music.js` cafe |
 | city | 작은 도시 | 작은 도시 | `compose_city.py` | `bgm-city.mp3`·`.json` | 104 · G major | 이전 프로젝트 `music.js` city |
 | chillhop | 칠홉 | Slow Pour | `compose_chillhop.py` | `bgm-chillhop.mp3`·`.json` | 80 · F major | 자체 작곡 |
+| pulse | 어두운 펄스 | 심야 컴파일 | `compose_pulse.py` | `bgm-pulse.mp3`·`.json` | 100 · C minor | 자체 작곡 |
+| circuit | 회로 펄스 | 회로 기판 | `compose_circuit.py` | `bgm-circuit.mp3`·`.json` | 116 · E minor | 자체 작곡 |
+| overclock | 오버클록 | 오버클록 | `compose_overclock.py` | `bgm-overclock.mp3`·`.json` | 140 · G minor | 자체 작곡 |
+| stardust | 별빛 항로 | 별빛 항로 | `compose_stardust.py` | `bgm-stardust.mp3`·`.json` | 72 · E lydian | 자체 작곡 |
+| nebula | 성운 맥동 | 성운 맥동 | `compose_nebula.py` | `bgm-nebula.mp3`·`.json` | 80 · C dorian | 자체 작곡 |
+| pulsar | 펄서 시퀀스 | 펄서 시퀀스 | `compose_pulsar.py` | `bgm-pulsar.mp3`·`.json` | 112 · A minor | 자체 작곡 |
+| warp | 워프 항해 | 워프 항해 | `compose_warp.py` | `bgm-warp.mp3`·`.json` | 128 · D minor | 자체 작곡 |
+| bossa | 아침 보사노바 | 아침 카페 보사노바 | `compose_bossa.py` | `bgm-bossa.mp3`·`.json` | 116 · D major | 자체 작곡 |
+| swing | 점심 빅밴드 | 점심시간 빅밴드 | `compose_swing.py` | `bgm-swing.mp3`·`.json` | 192 · F major | 자체 작곡 |
+| caper | 오피스 소동 | 오피스 소동 | `compose_caper.py` | `bgm-caper.mp3`·`.json` | 160 · C major (추격 구간 A minor) | 자체 작곡 |
 
-자동 선곡 단계(임시 배정): 0 한가 = 앰비언트(energy 0.1) · 1 보통 = 로파이(0.35)·칠홉(0.4)·재즈(0.45) · 2 활발·3 매우 활발 = 작은 도시(`stage: [2, 3]`, 0.7).
+표에 없는 곡(dawn·orbit·drive·deephouse·funk·liquid·uplift)은 매니페스트 참고. 새 10곡(pulse～caper, 2026-10-28)은 표현별 세 에이전트가 만든 곡입니다.
+
+**테마별 풀**: 곡마다`views`(표현별 단계)를 두고, 자동 선곡은 지금 보고 있는 표현의 풀에서만 고릅니다(그 단계에 곡이 없으면 `stage` 전체 풀로 폴백).
+
+| 표현 | 0 한가 | 1 보통 | 2 활발 | 3 매우 활발 |
+|---|---|---|---|---|
+| flow (Intense 코딩) | lofi·pulse | lofi·deephouse·circuit | drive·deephouse | liquid·uplift·overclock |
+| planet (Cosmic Ambient) | orbit·ambient | stardust·nebula | drive·pulsar | uplift·warp |
+| voxel (카페·사무실) | dawn·bossa | jazz·chillhop·lofi | city·funk | swing·caper |
+
+`python music/tracks.py copy <id> --from <폴더> --stage 1 --energy 0.4 --views "flow:0,1;voxel:1" [--key-en "…"]` 로 넣거나, 이미 있는 곡은 매니페스트 `views` 를 고친 뒤 `manifest` 를 돌립니다.
 
 원곡 출처: 작성자의 이전 프로젝트 `music.js` 의 deep·cafe·city 곡(화음 진행·동기·리듬 규칙)을 numpy 결정적 합성
 5분 편곡으로 옮겼습니다. 모두 300초, 128kbps CBR, −16 LUFS, 처음과 끝이 이어지는 루프입니다. 외부 샘플은 쓰지 않습니다.

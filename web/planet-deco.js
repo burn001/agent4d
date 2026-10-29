@@ -18,7 +18,9 @@ import { isJob, jobOf, jobCode, jobProgress, isProc, jobStale } from './job-core
 import { jobLook, jobRingFill, jobBlink, jobLod, jobTether, ringAt, JOB_RING_GEO, JOB_BODY_K } from './planet-core.mjs';
 import { JOB_GLYPH, jobWeightK, TRACK, trackSlots, trackRadius, trackModel, trackGates, trackLabels } from './planet-core.mjs'; // 글리프·무게·항로
 import { cycleProgress } from './batch-core.mjs'; // G3 기동기 회차 고리
-import { ProcFx } from './planet-proc.js'; // 분리 프로세스 = 채굴 드릴 플랫폼 · 자동 진행 = 계기 홀로그램 · 컨베이어 · 들여다보기
+import { ProcFx } from './planet-proc.js';
+import { VariantField, makeVariant, unmakeVariant, stepVariant, emitterWorld } from './planet-variants.js'; // 서브·claude -p 시안 궤도계
+import { variantFamily, variantOfVis, variantMode, VARIANT_EXTENT, VARIANT_CORE } from './planet-core.mjs'; // 분리 프로세스 = 채굴 드릴 플랫폼 · 자동 진행 = 계기 홀로그램 · 컨베이어 · 들여다보기
 
 const TAU = Math.PI * 2;
 let GEO = null;
@@ -718,6 +720,7 @@ export class PlanetDeco {
     this.cages = new SubCages(view.scene, 256, view.renderer); // 서브 단일 케이지(장면 전체 인스턴싱)
     this.proc = new ProcFx(view, this.sparks);
     this.gates = new GateField(view.world); // 항로 관문(장면 공용 인스턴싱)
+    this.vf = new VariantField(view.scene); // 시안 부품(장면 공용 인스턴싱)
     this._res = { value: new THREE.Vector2(1, 1) }; this._dpr = { value: 1 }; // 항로 띠 화면 폭(모든 JobTrack 이 같은 uniform 객체)
     this._slots = new Set(); this._slotAt = -1e9; // 항로 자리(주인마다 끝나지 않은 작업 TRACK.PER_OWNER 개 — 0.5초마다)
   }
@@ -733,6 +736,12 @@ export class PlanetDeco {
       d.root = d.job.root;
       this.map.set(v.id, d);
       this.jobStyle(v);
+      return;
+    }
+    if (!v.device && variantFamily(k)) { // 서브에이전트·claude -p = 시안 궤도계(시안은 첫 프레임에 형제를 보고 정함 — 스냅샷이 다 들어온 뒤)
+      d = { type: 'var', fam: variantFamily(k), root: this._root(v), var: null, cur: {}, ocur: {}, emitAcc: 0, mode: null };
+      if (d.fam === 'sub') { d.esc = new Escapement(hash01(v.id, 'tourb')); d.tbx = (hash01(v.id, 'tbx') - 0.5) * 0.9; d.tbz = (hash01(v.id, 'tbz') - 0.5) * 0.9; }
+      this.map.set(v.id, d);
       return;
     }
     if (v.device) d = { type: 'plain', root: this._root(v) };
@@ -753,9 +762,9 @@ export class PlanetDeco {
   }
   _root(v) { const r = new THREE.Group(); v.group.add(r); return r; }
   /** 궤도계 바깥 반지름(본체 반지름 배) — 홀로그램 자리 */
-  extentOf(id) { const d = this.map.get(id); return d ? (d.orbits ? d.orbits.spec.extent : d.proc ? 2.6 : d.meter ? 1.6 : JOB_RING_GEO.extent) : 1; }
+  extentOf(id) { const d = this.map.get(id); return d ? (d.type === 'var' ? (d.var ? VARIANT_EXTENT[d.var.name] : 2.3) : d.orbits ? d.orbits.spec.extent : d.proc ? 2.6 : d.meter ? 1.6 : JOB_RING_GEO.extent) : 1; }
   /** 홀로그램 빔 출발점: i 번째 보이는 위성(없으면 false) */
-  satWorld(id, i, out) { const d = this.map.get(id); if (!d || !d.orbits) return false; const n = d.orbits.satCount(); return n > 0 && d.orbits.satWorld(i % n, out); }
+  satWorld(id, i, out) { const d = this.map.get(id); if (d && d.var) { const v = this.view.vis.get(id); return !!v && emitterWorld(d.var, v, v.mesh.scale.x, i, out); } if (!d || !d.orbits) return false; const n = d.orbits.satCount(); return n > 0 && d.orbits.satWorld(i % n, out); }
 
   _mech(v) {
     const G = geo();
@@ -801,6 +810,7 @@ export class PlanetDeco {
     if (d.deck) d.deck.dispose();
     if (d.proc || d.meter) { this.proc.detach(v); return; }
     d.root.removeFromParent();
+    if (d.type === 'var') { unmakeVariant(v, d.var); return; }
     if (d.job) { d.job.dispose(); return; }
     for (const m of [d.metal, d.light, d.atmoMat]) if (m) m.dispose();
     if (d.tb) d.tb.dispose();
@@ -844,6 +854,7 @@ export class PlanetDeco {
     }
     if (this.sparks) this.sparks.setLight(L);
     if (this.cages) this.cages.theme(L);
+    if (this.vf) this.vf.setLight(L);
   }
 
   /** 매 프레임(SceneView._frame 끝, 렌더 직전) */
@@ -859,6 +870,7 @@ export class PlanetDeco {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const pxK = H / (2 * Math.tan((fov * Math.PI) / 360)); // 세계 1 이 거리 1 에서 몇 px
     this.cages.begin();
+    this.vf.begin(cam, pxK, dpr); st.var = 0;
     const pctx = { L, reduced, clockMs, cam, pxK, W: view.container.clientWidth || 1, H };
     // 항로: 자리(주인마다 끝나지 않은 작업 TRACK.PER_OWNER 개)는 0.5초마다, 관문은 장면 공용 인스턴싱
     if (now - this._slotAt > 0.5 || now < this._slotAt) { this._slotAt = now; this._slots = this._trackSlots(); }
@@ -877,6 +889,7 @@ export class PlanetDeco {
       else if (d.meter) d.meter.step(now, dt, s, px, v.mat.opacity, pctx);
       if (d.track) { jctx.lab = px >= JOB_GLYPH.PX; const job = jobOf(v.node); if (job) d.track.step(job, jobCode(job, clockMs), jobProgress(job), this._slots.has(id), s, px >= 3 ? 2 : 0, v.mat.opacity, jctx); else d.track.hide(); } // 외부 작업 플랫폼·계기의 항로
       if (d.proc || d.meter) continue;
+      if (d.type === 'var') { st.var++; this._stepVar(v, d, now, dt, s, px, _wp, reduced, L); continue; }
       const lod = planetLod(px);
       const olod = orbitLod(px);
       st.lod[lod]++; st.olod[olod]++;
@@ -949,9 +962,44 @@ export class PlanetDeco {
     }
     this.cages.end();
     this.gates.end();
+    this.vf.end();
     this.proc.update(now, dt, pctx);
     this.sparks.update(dt, pxK * 0.12 * dpr);
     st.ms = performance.now() - t0;
+  }
+
+  /** 시안 노드 한 프레임: (처음이면 형제를 보고 시안을 정함) → 부품 → 작은 본체 질감 → 도구 입자 → 서브 단일 케이지(작은 본체 둘레) */
+  _stepVar(v, d, now, dt, s, px, wp, reduced, L) {
+    const view = this.view;
+    if (!d.var) {
+      const pid = v.node.parentId;
+      const name = variantOfVis(v, () => { const out = []; for (const w of view.vis.values()) if (w.node.parentId === pid) out.push({ id: w.id, kind: w.kind, startMs: Date.parse(w.node.startedAt) }); return out; });
+      d.var = makeVariant(v, name, (mat, skin) => injectSubType(mat, mkSubU(skin)));
+      v._pvar = name;
+    }
+    const icons = v.icons ? v.icons.size : 0;
+    const mode = variantMode(v.node.status, icons, !!v.scopeRecent);
+    const pm = planetMode(v.node.status, icons, !!v.scopeRecent);
+    const op = v.mat.opacity, t = view.tokens || {};
+    stepVariant(this.vf, d.var, v, { dt, now, mode, s, px, op, L, reduced, col: v.mat.color, red: t.error, green: t.ok });
+    const oc = approach(d.ocur, ORBIT[pm], dt, 2.5);
+    const act = pm === 'tool' ? 1 : 0;
+    d.act = (d.act || 0) + (act - (d.act || 0)) * Math.min(1, dt * 3);
+    const U = d.var.U;
+    if (U) { // 작은 본체 질감(유형 셰이더 재사용)
+      const c = approach(d.cur, SUB[pm], dt, 2.5);
+      U.uT.value = now % 3600; U.uGlow.value = c.glow; U.uSpin.value = reduced ? 0.1 : c.spin; U.uDetail.value = Math.min(1, Math.max(0, (px * VARIANT_CORE[d.var.name] - 2) / 5));
+      U.uAct.value = reduced ? 0 : d.act; U.uDim.value = pm === 'wait' ? 1 : pm === 'off' ? 0.5 : 0; U.uLight.value = L ? 1 : 0; U.uSettle.value = 0;
+    }
+    if (oc.emit > 0.5 && d.var.lod >= 2 && !reduced && op > 0.3 && d.var.emN) {
+      d.emitAcc += dt * oc.emit;
+      while (d.emitAcc >= 1) { d.emitAcc -= 1; this._emit(v, d, s); }
+    } else d.emitAcc = 0;
+    if (d.esc) {
+      d.esc.step(dt, pm, { reduced });
+      const k = VARIANT_CORE[d.var.name];
+      if (px * k >= TOURB_LOD.SUB_PX) this.cages.put(wp, s * k, d.tbx, d.tbz, d.esc.cage, op, v.mat.color); // 단일 케이지 = 작은 본체 둘레
+    }
   }
 
   /** 항로 자리: 보이는 작업 노드(탐사선·외부 작업 플랫폼·계기) → trackSlots */
@@ -974,10 +1022,10 @@ export class PlanetDeco {
     if (pv) { out.copy(v.group.position).sub(pv.group.position); out.y = Math.max(out.y, 0) * 0.3; if (out.lengthSq() > 1e-6) return out.normalize(); }
     return out.set(1, 0.15, 0).normalize();
   }
-  /** 도구 입자 하나: 보이는 위성(없으면 궤도 둘레 아무 점)에서 부모 쪽 연결선 방향으로 */
+  /** 도구 입자 하나: 보이는 위성(시안이면 그 시안의 발사점, 없으면 궤도 둘레 아무 점)에서 부모 쪽 연결선 방향으로 */
   _emit(v, d, s) {
-    const n = d.orbits.satCount();
-    if (n > 0) d.orbits.satWorld(Math.floor(Math.random() * n), _p2);
+    const n = d.var ? d.var.emN : d.orbits.satCount();
+    if (n > 0) { if (d.var) emitterWorld(d.var, v, s, Math.floor(Math.random() * n), _p2); else d.orbits.satWorld(Math.floor(Math.random() * n), _p2); }
     else { v.group.getWorldPosition(_p2); _p2.x += (Math.random() - 0.5) * s * 3; _p2.z += (Math.random() - 0.5) * s * 3; }
     const pid = v.node.parentId;
     let tv = pid && this.view.vis.get(pid);
@@ -992,5 +1040,5 @@ export class PlanetDeco {
     this.sparks.emit(_p2, _dir, reach * 1.6, 0.12, 0.85, _c.copy(v.mat.color).lerp(_c2.set(0xffffff), 0.45), 1.6);
   }
 
-  dispose() { for (const id of [...this.map.keys()]) { const v = this.view.vis.get(id); if (v) this.detach(v); } this.map.clear(); if (this.sparks) { this.sparks.dispose(); this.sparks = null; } if (this.cages) { this.cages.dispose(); this.cages = null; } if (this.proc) { this.proc.dispose(); this.proc = null; } if (this.gates) { this.gates.dispose(); this.gates = null; } }
+  dispose() { for (const id of [...this.map.keys()]) { const v = this.view.vis.get(id); if (v) this.detach(v); } this.map.clear(); if (this.vf) { this.vf.dispose(); this.vf = null; } if (this.sparks) { this.sparks.dispose(); this.sparks = null; } if (this.cages) { this.cages.dispose(); this.cages = null; } if (this.proc) { this.proc.dispose(); this.proc = null; } if (this.gates) { this.gates.dispose(); this.gates = null; } }
 }

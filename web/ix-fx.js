@@ -7,6 +7,8 @@ import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { IxModel, IxGeo, ixGeometry, IXGEO, IX_KEYS, ixKeyColor, ensureIxCss, ixPortalPts, ixDimUnderLabels, ixLabelSizeGuess } from './ix-core.mjs';
 import { userBook, consoleLines, wantsConsole, hitRect } from './user-core.mjs'; // 사용자 콘솔
+import { DESK } from './flowview/shape-core.mjs'; // 홀로그램 콘솔 글 문턱
+import { t as tr } from './i18n.mjs';
 
 // 굵은 선분: 인스턴스마다 두 끝(세계) + 색·화면 폭(px). 사각 네 꼭짓점(position.x = 0|1 끝, y = ±1 옆)을 화면 px 공간에서 펼치고
 // 조각 셰이더가 선분까지 거리로 둥근 끝·가장자리 1px 부드럽게. 화면 공간에서 선형 보간하려고 NDC(w = 1)로 낸다.
@@ -41,6 +43,9 @@ void main() {
 export class IxLayer {
   static CON_MIN_PX = 26; // 콘솔 화면이 이만큼(px) 넘을 때만 이름표
   static CON_SHOW = 8;
+  static BADGE_PX = DESK.BADGE_PX; // '나' 배지 하한
+  static TEXT_PX = DESK.TEXT_PX;   // 이 폭(px) 이상이면 화면 글이 읽혀 배지 없음
+  static get BADGE() { return tr('cards.user.me'); }
   constructor(scene, view) {
     ensureIxCss();
     this.scene = scene;
@@ -336,16 +341,19 @@ export class IxLayer {
       c.px = x1 - x0; // 화면 폭(px) — 흐름 3D 단말 LOD(console3d.js)
     }
     sized.sort((a, b) => b.px - a.px);
-    const show = new Set(sized.filter((x) => x.px >= IxLayer.CON_MIN_PX).slice(0, IxLayer.CON_SHOW).map((x) => x.root));
+    // 흐름 3D 홀로그램 콘솔(입체 모드): 글이 화면에 바로 뜨므로 이름표 대신 — 글이 안 읽힐 만큼 작을 때만 '나' 배지(BADGE_PX～TEXT_PX)
+    const solid = !!this._env.solid;
+    const show = new Set(sized.filter((x) => (solid ? x.px >= IxLayer.BADGE_PX && x.px < IxLayer.TEXT_PX : x.px >= IxLayer.CON_MIN_PX)).slice(0, IxLayer.CON_SHOW).map((x) => x.root));
     let k = 0;
     for (const d of g.clabels) {
       if (!show.has(d.root) || k >= this.conLabels.length) continue;
       const L = this.conLabels[k++];
       L.o.position.set(d.x, d.y, d.z);
       L.root = d.root;
-      if (L.text !== d.text) { L.b.textContent = d.text; L.b.hidden = !d.text; L.text = d.text; }
-      if (L.status !== d.status) { L.sp.textContent = d.status; L.status = d.status; }
-      const cls = 'ix-con st-' + d.state;
+      const text = solid ? IxLayer.BADGE : d.text, status = solid ? '' : d.status;
+      if (L.text !== text) { L.b.textContent = text; L.b.hidden = !text; L.text = text; }
+      if (L.status !== status) { L.sp.textContent = status; L.status = status; }
+      const cls = 'ix-con st-' + d.state + (solid ? ' badge' : '');
       if (L.cls !== cls) { L.el.className = cls; L.cls = cls; }
       if (L.key !== d.key) { L.el.style.setProperty('--ix-c', ixKeyColor(d.key, this.isLight)); L.key = d.key; }
       const op = (Math.round(d.alpha * 20) / 20).toFixed(2);

@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { Sound, loadSoundOn, urlSoundOverride, KEY } from '../sound.mjs';
+import { Sound, loadSoundOn, urlSoundOverride, KEY, PARTS_KEY } from '../sound.mjs';
 
 const mem = (init = {}) => { const m = new Map(Object.entries(init)); return { m, getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)) }; };
 const broken = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); } };
@@ -265,4 +265,57 @@ test('정지: 소리가 꺼져 있으면 재개해도 켜지 않음, 정지 중 
   f.log.length = 0;
   s.setHold(false);
   assert.ok(!f.log.includes('music.start') && !f.log.includes('music.resume'));
+});
+
+test('부분 토글(§85): 음악만 끄면 음악 정지·효과음 유지, 저장(ccviz.sound.parts) 후 새로고침·복원·일시정지 해제에도 안 켜짐', async () => {
+  const f = fakes(); realSfx(f); f.nav.userActivation.hasBeenActive = true;
+  const storage = mem({ [KEY]: j({ on: true }) });
+  const s = new Sound({ ...f, storage, search: '' });
+  await flush();
+  assert.equal(f.music.on, true); assert.equal(f.sfx.enabled, true);
+  f.log.length = 0;
+  s.setMusicOn(false);
+  assert.deepEqual(f.log, ['music.stop']);
+  assert.equal(f.sfx.enabled, true, '효과음은 그대로');
+  assert.equal(s.on, true, '마스터는 켜진 채');
+  assert.equal(storage.getItem(PARTS_KEY), j({ music: false, sfx: true }));
+  assert.equal(f.music.wantOn, false);
+  assert.match(f.button.title, /음악 끔/);
+  s.restore(true); f.doc.listeners.get('visibilitychange')();
+  f.music.paused = true; s.setHold(true); s.setHold(false);
+  assert.ok(!f.log.includes('music.start'), '복원·탭 복귀·재개가 음악을 다시 켜지 않음');
+  // 새로고침: 저장값 유지
+  const g = fakes(); realSfx(g); g.nav.userActivation.hasBeenActive = true;
+  const s2 = new Sound({ ...g, storage, search: '' });
+  assert.equal(s2.musicOn, false); assert.equal(s2.sfxOn, true);
+  assert.ok(!g.log.includes('music.start'));
+  assert.ok(g.log.includes('sfx.on'));
+  assert.equal(s2.status(), 'on');
+  // 다시 켜면 음악 시작
+  s2.setMusicOn(true);
+  assert.ok(g.log.includes('music.start'));
+  assert.equal(storage.getItem(PARTS_KEY), j({ music: true, sfx: true }));
+});
+
+test('부분 토글(§85): 효과음만 끄면 효과음 끔·음악 유지, 마스터를 껐다 켜도 효과음은 꺼진 채, 둘 다 꺼도 마스터 유지', async () => {
+  const f = fakes(); realSfx(f); f.nav.userActivation.hasBeenActive = true;
+  const storage = mem({ [KEY]: j({ on: true }) });
+  const s = new Sound({ ...f, storage, search: '' });
+  await flush();
+  s.setSfxOn(false);
+  assert.equal(f.sfx.enabled, false); assert.equal(f.music.on, true);
+  f.button._h(); // 마스터 끔
+  assert.equal(f.music.on, false);
+  f.log.length = 0;
+  f.button._h(); // 마스터 켬
+  assert.deepEqual(f.log, ['sfx.off', 'music.start'], '효과음은 켜지 않고 확인음(chime)도 없음');
+  s.setMusicOn(false);
+  assert.equal(s.on, true);
+  assert.equal(s.status(), 'on');
+  assert.match(f.button.title, /모두 끔/);
+  // 마스터가 꺼져 있을 때 부분 토글은 선택만 저장
+  f.button._h(); f.log.length = 0;
+  s.setSfxOn(true); s.setMusicOn(true);
+  assert.deepEqual(f.log, []);
+  assert.equal(storage.getItem(PARTS_KEY), j({ music: true, sfx: true }));
 });

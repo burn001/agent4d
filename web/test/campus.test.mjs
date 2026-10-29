@@ -148,3 +148,25 @@ test('성능: 동 6 · 노드 80 < 10ms', () => {
   }
   assert.ok(ms < 10, `평균 ${ms.toFixed(2)}ms`);
 });
+
+test('§74.9 복셀: /clear 승계로 spawnedBy 가 새(live) 메인이면 기동기 사슬이 옛(recent) 메인 사무실과 함께 숨지 않는다', () => {
+  ord = 0;
+  const pid = 'D--atlas';
+  const OLD = 'old00000-0000-4000-8000-000000000000', NEW = 'new00000-0000-4000-8000-000000000000';
+  const nodes = [
+    N('s:' + NEW, null, 'main', pid, { status: 'idle', sessionId: NEW, rootSessionId: NEW, meta: { live: true, tier: 'live' } }),
+    N('s:' + OLD, null, 'main', pid, { status: 'idle', sessionId: OLD, rootSessionId: OLD, meta: { live: false, tier: 'recent' } }),
+    N('b:toolu_L', null, 'bash-bg', pid, { sessionId: OLD, rootSessionId: OLD, meta: { background: true, detached: true, spawnedBy: 's:' + NEW, launcher: { script: 'relaunch.sh' } } }),
+    N('b:toolu_L-r1', 'b:toolu_L', 'bash-bg', pid, { sessionId: OLD, rootSessionId: OLD, meta: { runner: { script: 'autopilot.sh' } } }),
+    N('s:cyc', 'b:toolu_L-r1', 'claude-p', pid, { sessionId: 'cyc', rootSessionId: OLD, meta: {} }),
+    N('a:sub', 's:cyc', 'subagent', pid, { sessionId: 'cyc', rootSessionId: OLD, meta: {} }),
+  ];
+  const roots = [{ sessionId: NEW, projectId: pid, nodeId: 's:' + NEW }, { sessionId: OLD, projectId: pid, nodeId: 's:' + OLD }];
+  const projects = [{ projectId: pid, name: 'atlas', live: true, active: true, liveSessions: 1 }];
+  const c = computeCampus(nodes, roots, projects, null, {});
+  for (const id of ['s:' + NEW, 'b:toolu_L', 'b:toolu_L-r1', 's:cyc', 'a:sub']) assert.ok(!c.hidden.has(id), id + ' 보여야 함');
+  assert.ok(c.hidden.has('s:' + OLD));
+  const kept = nodes.map((n) => (n.id === 'b:toolu_L' ? { ...n, meta: { ...n.meta, spawnedBy: 's:' + OLD } } : n));
+  const c2 = computeCampus(kept, roots, projects, null, {});
+  for (const id of ['b:toolu_L', 's:cyc', 'a:sub']) assert.ok(c2.hidden.has(id), id + ' 넘기지 않은 기동기는 옛 메인과 숨음');
+});

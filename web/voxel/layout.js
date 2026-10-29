@@ -370,9 +370,10 @@ export function computeOffice(nodesIn, rootId, prev) {
       const dz = d.front ? ext : 0;
       st[cat] = d.spots.map((p) => ({ x: origin.x + p.x, z: origin.z + p.z + dz, face: d.face }));
       const s0 = d.spots[0];
+      // 대기 자리 3: 접근점 뒤 한 걸음씩. 접근점이 둘인 시설은 셋째가 첫째 뒤 두 걸음(예전엔 첫째 대기 자리와 같은 점)
       qu[cat] = [0, 1, 2].map((k) => {
-        const b = d.spots[k % d.spots.length] || s0;
-        return { x: origin.x + b.x + d.inward[0] * 1.0, z: origin.z + b.z + dz + d.inward[1] * 1.0, face: d.face };
+        const b = d.spots[k % d.spots.length] || s0, back = 1.0 + 0.9 * Math.floor(k / d.spots.length);
+        return { x: origin.x + b.x + d.inward[0] * back, z: origin.z + b.z + dz + d.inward[1] * back, face: d.face };
       });
     }
     return { stations: st, queues: qu };

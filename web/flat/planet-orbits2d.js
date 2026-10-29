@@ -4,7 +4,7 @@
 //  · 궤도선 무늬(solid·dash·dots·arcs) · 위성 점(크기·tint) · 위성 뒤 잔광 꼬리 · 메인 소행성대 · 도구 호출 때 연결선 쪽으로 튀어 나가는 입자 ·
 //    완료 때 settleK 정리 연출(잠깐 밝아지며 안쪽으로 모였다 진정).
 //  · 상태 세기 ORBIT(속도·밝기), LOD orbitLod(본체 화면 반지름) + ring.lod / belt.lod. 궤도 모양(단위 원)은 노드마다 한 번 계산해 둔다.
-import { ORBIT, orbitSpec, orbitLod, keplerRate, orbitPoint, ringPattern, settleK, planetMode, approach, hash01 } from '../planet-core.mjs';
+import { ORBIT, orbitSpec, orbitLod, keplerRate, orbitPoint, ringPattern, settleK, planetMode, approach, hash01, variantFamily, variantOfVis, VARIANT_EXTENT } from '../planet-core.mjs';
 import { mixColor } from './flat-core.mjs';
 
 const TAU = Math.PI * 2;
@@ -45,7 +45,9 @@ export function orbitKind(v) { return v.device ? 'device' : v.kind; }
 export function stepOrbits(view, v, now) {
   let po = v._po;
   if (!po) {
-    const spec = orbitSpec(orbitKind(v), v.id);
+    // 서브에이전트·claude -p = 시안 궤도계(planet-variants2d.js) — 궤도 고리 없이 겉 반지름·발사점만(3D 와 같은 시안 규칙·메모)
+    const vname = !v.device && variantFamily(v.kind) ? variantOfVis(v, () => { const pid = v.node.parentId, out = []; for (const w of view.vis.values()) if (w.node.parentId === pid) out.push({ id: w.id, kind: w.kind, startMs: Date.parse(w.node.startedAt) }); return out; }) : null;
+    const spec = vname ? { type: null, rings: [], belt: null, extent: VARIANT_EXTENT[vname], variant: vname } : orbitSpec(orbitKind(v), v.id);
     po = v._po = { spec, last: now, cur: {}, mode: null, settleT: -1e9, emitAcc: 0, geo: new Map(),
       th: spec.rings.map((r) => r.ph), sat: [], beltA: 0, belt: null };
     if (spec.belt) {

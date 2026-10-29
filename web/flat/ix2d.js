@@ -4,6 +4,8 @@
 import { IxModel, IxGeo, ixGeometry, IX_KEYS, ixKeyColor, ixPortalPts, ixRectHits, IX_UNDER_LABEL } from '../ix-core.mjs';
 import { toScreen, camScale } from './flat-core.mjs';
 import { userBook, consoleLines, wantsConsole, hitRect } from '../user-core.mjs'; // 사용자 콘솔
+import { DESK, sendPhase } from '../flowview/shape-core.mjs'; // 홀로그램 콘솔 데스크(2D 판)
+import { t as tr } from '../i18n.mjs';
 
 const TILT = 0.55;
 const ABUCKET = 10; // 선 알파를 10단계로 묶어 Path2D 몇 개로
@@ -30,6 +32,7 @@ export class FlatIx {
       consoleRoots: () => { const out = new Set(); for (const v of view.vis.values()) if (wantsConsole(v.node)) out.add(this.rootOf(v.id)); return out; },
       consoleInfo: (root) => consoleLines(userBook.get(root), view.clock ? view.clock() : Date.now()),
     };
+    if (this.mode === 'flow') this._env.solid = true; // 흐름 2D 도 데스크(글줄 선 대신 화면 글 — 아래 _drawDesks)
     this.conHits = []; // 그린 콘솔 화면 사각형(px) {root, x0,y0,x1,y1}
     this._cons = [];
     this._rootOf = (id) => this.rootOf(id);
@@ -68,10 +71,12 @@ export class FlatIx {
       this.conHits.push(h); list.push(h);
     }
     this._cons = g.cons.map((c) => ({ root: c.root, x: c.x, z: c.z - c.y * TILT }));
-    const show = new Set(list.filter((h) => h.px >= 22).sort((p, q) => q.px - p.px).slice(0, 8).map((h) => h.root));
+    const desk = this.mode === 'flow';
+    const show = new Set(list.filter((h) => (desk ? h.px >= DESK.BADGE_PX && h.px < DESK.TEXT_PX : h.px >= 22)).sort((p, q) => q.px - p.px).slice(0, 8).map((h) => h.root));
     ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-    for (const d of g.clabels) {
-      if (!show.has(d.root)) continue;
+    for (const d0 of g.clabels) {
+      if (!show.has(d0.root)) continue;
+      const d = desk ? { ...d0, text: '', status: tr('cards.user.me') } : d0; // 흐름: 글이 화면에 있으므로 작을 때만 '나' 배지
       const h = list.find((x) => x.root === d.root);
       const col = ixKeyColor(d.key, isLight);
       ctx.font = '600 10.5px system-ui, "Segoe UI", sans-serif';
@@ -92,6 +97,56 @@ export class FlatIx {
       h.y0 = Math.min(h.y0, y - lh); h.x0 = Math.min(h.x0, x - w / 2); h.x1 = Math.max(h.x1, x + w / 2); // 이름표도 집기 범위
     }
     ctx.globalAlpha = 1;
+  }
+  /** 흐름 2D 홀로그램 콘솔 데스크: 반달 책상 + 사다리꼴 빛(투사기 → 화면) + 글 상자(마지막 입력 · 상태). 3D 와 같은 문구·같은 문턱 */
+  _drawDesks(ctx, g, isLight, now) {
+    const a = this._p, b = this._q, reduced = !!this.view.reduced;
+    const gold = isLight ? '#a16207' : '#fcd34d';
+    const stc = { idle: isLight ? '#5b6680' : '#7b88a8', working: isLight ? '#1f7fc4' : '#66ccff', answered: isLight ? '#0f9e6a' : '#66ffaa', asking: gold, alert: isLight ? '#d4313f' : '#ff5566' };
+    ctx.save(); ctx.globalCompositeOperation = 'source-over';
+    for (const c of g.cons) {
+      this._xy(c.x - c.w, c.y + c.h, c.z, a); this._xy(c.x + c.w, c.y - c.h, c.z, b);
+      const x0 = Math.min(a.x, b.x), y0 = Math.min(a.y, b.y), w = Math.abs(b.x - a.x), h = Math.abs(b.y - a.y);
+      if (w < 4) continue;
+      const fa = this._env.fade(c.root), cx = x0 + w / 2, info = this._env.consoleInfo(c.root), st = (info && info.state) || 'idle', col = stc[st] || stc.idle;
+      const e = userBook.get(c.root), ph = e && e.promptAt != null ? sendPhase(((this.view.clock ? this.view.clock() : Date.now()) - e.promptAt) / 1000) : -1;
+      // 반달 책상(화면 아래, 사용자 쪽으로 휜 띠) — 안쪽 금빛 호 · 바깥 상태색 호
+      const dy = y0 + h + h * 0.75, R1 = w * 0.62, R0 = w * 0.36, A = 0.95;
+      ctx.globalAlpha = 0.9 * fa;
+      ctx.beginPath(); ctx.ellipse(cx, dy - R1 * 0.35, R1, R1 * 0.42, 0, Math.PI / 2 - A, Math.PI / 2 + A); ctx.ellipse(cx, dy - R1 * 0.35, R0, R0 * 0.42, 0, Math.PI / 2 + A, Math.PI / 2 - A, true); ctx.closePath();
+      ctx.fillStyle = isLight ? '#d3dae5' : '#1d2740'; ctx.fill();
+      ctx.lineWidth = Math.max(1, w * 0.02);
+      ctx.globalAlpha = 0.8 * fa; ctx.strokeStyle = col; ctx.beginPath(); ctx.ellipse(cx, dy - R1 * 0.35, R1, R1 * 0.42, 0, Math.PI / 2 - A, Math.PI / 2 + A); ctx.stroke();
+      ctx.strokeStyle = gold; ctx.beginPath(); ctx.ellipse(cx, dy - R1 * 0.35, R0, R0 * 0.42, 0, Math.PI / 2 - A, Math.PI / 2 + A); ctx.stroke();
+      // 자판(보낼 때 번쩍)
+      const kf = ph >= 0 && ph < 0.35 && !reduced && Math.sin(now * 40) > 0;
+      ctx.globalAlpha = (kf ? 0.75 : 0.28) * fa; ctx.fillStyle = gold; ctx.fillRect(cx - w * 0.2, dy - R1 * 0.35 + R0 * 0.42 + h * 0.06, w * 0.4, Math.max(2, h * 0.12));
+      // 사다리꼴 빛: 투사기(책상 뒤 가운데, 좁음) → 화면 아랫변(넓음)
+      const ey = dy - R1 * 0.35 + R0 * 0.42, fanK = (st === 'idle' ? 0.08 : st === 'asking' ? 0.3 : 0.2) + (ph > 0.2 && ph < 0.6 ? 0.2 : 0);
+      const gr = ctx.createLinearGradient(0, ey, 0, y0 + h);
+      gr.addColorStop(0, st === 'asking' || ph >= 0 ? gold : col); gr.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.globalAlpha = fanK * fa * (isLight ? 0.8 : 1); ctx.fillStyle = gr;
+      ctx.beginPath(); ctx.moveTo(cx - w * 0.17, ey); ctx.lineTo(cx + w * 0.17, ey); ctx.lineTo(x0 + w, y0 + h); ctx.lineTo(x0, y0 + h); ctx.closePath(); ctx.fill();
+      // 글 상자(떠 있는 화면)
+      ctx.globalAlpha = 0.85 * fa; ctx.fillStyle = isLight ? 'rgba(255,250,240,.9)' : 'rgba(10,16,38,.82)'; ctx.fillRect(x0, y0, w, h);
+      ctx.globalAlpha = (st === 'asking' && !reduced ? 0.6 + 0.4 * Math.sin(now * 5) : 0.8) * fa; ctx.strokeStyle = gold; ctx.lineWidth = Math.max(1, w * 0.012);
+      const k = w * 0.08;
+      for (const [px, py, sx, sy] of [[x0, y0, 1, 1], [x0 + w, y0, -1, 1], [x0 + w, y0 + h, -1, -1], [x0, y0 + h, 1, -1]]) { ctx.beginPath(); ctx.moveTo(px + sx * k, py); ctx.lineTo(px, py); ctx.lineTo(px, py + sy * k); ctx.stroke(); }
+      if (w >= DESK.TEXT_PX) {
+        const u = Math.min(h / 6.2, w / 11), pad = u * 0.7, mw = w - pad * 2;
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.globalAlpha = 0.85 * fa; ctx.fillStyle = gold; ctx.font = `600 ${u * 0.62}px ui-monospace, Consolas, monospace`;
+        ctx.fillText(tr('cards.user.title'), x0 + pad, y0 + pad + u * 0.3, mw);
+        ctx.globalAlpha = fa; ctx.fillStyle = st === 'idle' ? stc.idle : (isLight ? '#7a4a00' : '#fde68a'); ctx.font = `700 ${u * 0.9}px system-ui, "Segoe UI", sans-serif`;
+        ctx.fillText((info && info.text) || '—', x0 + pad, y0 + pad + u * 1.6, mw);
+        ctx.fillStyle = col; ctx.font = `500 ${u * 0.74}px system-ui, "Segoe UI", sans-serif`;
+        ctx.fillText((info && info.status) || '', x0 + pad, y0 + pad + u * 2.9, mw);
+        if (st === 'working') { const p = reduced ? 0.5 : (now * 0.5) % 1; ctx.globalAlpha = 0.3 * fa; ctx.fillRect(x0 + pad, y0 + h - pad - 2, mw, 3); ctx.globalAlpha = fa; ctx.beginPath(); ctx.arc(x0 + pad + mw * p, y0 + h - pad - 0.5, Math.max(1.5, u * 0.18), 0, Math.PI * 2); ctx.fill(); }
+      }
+      // 질문 카드 '?'(화면 오른쪽 위 바깥)
+      if (c.asking) { const r = Math.max(5, h * 0.22); ctx.globalAlpha = fa; ctx.fillStyle = isLight ? 'rgba(255,248,225,.95)' : 'rgba(40,30,0,.8)'; ctx.beginPath(); ctx.arc(x0 + w + r * 1.3, y0 + r * 0.6, r, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = gold; ctx.lineWidth = Math.max(1, r * 0.12); ctx.stroke(); ctx.fillStyle = gold; ctx.font = `700 ${r * 1.3}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.fillText('?', x0 + w + r * 1.3, y0 + r * 0.7); }
+    }
+    ctx.restore();
   }
   /** 화면 px(캔버스 기준) → 콘솔 뿌리 id | null */
   consoleAt(x, y) { const h = hitRect(this.conHits, x, y, 5); return h ? h.root : null; }
@@ -120,7 +175,8 @@ export class FlatIx {
     const paths = new Map();
     const a = this._p, b = this._q;
     // 콘솔 화면 바탕(선보다 먼저 — 2D 에선 선만으로는 빈 틀처럼 보여 옅은 화면을 깐다)
-    if (g.cons.length) {
+    if (g.cons.length && this.mode === 'flow') this._drawDesks(ctx, g, isLight, now);
+    else if (g.cons.length) {
       ctx.save(); ctx.globalCompositeOperation = 'source-over';
       for (const c of g.cons) {
         this._xy(c.x - c.w, c.y + c.h, c.z, a); this._xy(c.x + c.w, c.y - c.h, c.z, b);

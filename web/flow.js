@@ -111,12 +111,12 @@ export class FlowLayer {
       const a = view.linkEnd ? view.linkEnd(fv, true) : fv.group.position, b = view.linkEnd ? view.linkEnd(tv, false) : tv.group.position; // 흐름 3D 세운 장치 변
       const col = this._colorOf(s);
       const lp = view.linkPath || linkPoint; // 흐름 표현은 곡선 빔 위로
-      lp(pt, a, b, e, s.arc);
+      lp(pt, a, b, e, s.arc, fv, tv); // Planet 관계선은 fv·tv 로 궤도계 바깥 끝을 잡는다
       this._p.set(pt.x, pt.y, pt.z);
       this._put(this.heads, nh++, this._p, HEAD_R * 1.35 * s.size * (u > 0.88 ? (1 - u) / 0.12 * 0.6 + 0.4 : 1), col);
       const us = trailUs(e);
       for (let i = 0; i < us.length && nt < this.trail.instanceMatrix.count; i++) {
-        lp(pt, a, b, us[i], s.arc);
+        lp(pt, a, b, us[i], s.arc, fv, tv);
         this._p.set(pt.x, pt.y, pt.z);
         const f = (i + 1) / (FLOW.TRAIL + 1);
         this._put(this.trail, nt++, this._p, HEAD_R * 1.1 * s.size * (1 - f * 0.75), this._c2.copy(col).lerp(bg, f));

@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { LimitsCollector, mergeLimits, normWindow, parseOauthUsage, parseStatuslineFile, OAUTH_URL } from '../limits.mjs';
-import { UsagePoller, USAGE_URL, nextSaturday13Kst, parseUsageBody } from '../usage.mjs';
+import { UsagePoller, USAGE_URL, nextSaturday13Kst, parseUsageBody, parseRetryAfter, backoffMs } from '../usage.mjs';
 import { main as limitsCli } from '../../bin/limits.mjs';
 import { normLimits } from '../config.mjs';
 
@@ -183,6 +183,103 @@ test('60초 캐시: 메모리·파일 캐시 적중이면 HTTP 없음, force 는
   assert.equal(f.calls.length, 3, '60초 지나면 다시 부름');
   const text = fs.readFileSync(cacheFile, 'utf8');
   assert.ok(!text.includes('FAKE') && !/token|Bearer/i.test(text));
+  fs.rmSync(cacheFile, { force: true });
+});
+
+test('재시작 시드: 파일 캐시의 마지막 성공 값은 나이와 무관하게 읽어 stale 로라도 보여 준다(429 여도)', async () => {
+  writeCred();
+  const cacheFile = path.join(home, 'usage-cache.json');
+  let now = Date.parse('2026-10-28T05:34:41Z');
+  // 옛 형식(공유 상태 필드 없음), 6분 전 성공 값
+  fs.writeFileSync(cacheFile, JSON.stringify({ v: 1, value: { capturedAt: '2026-10-28T05:28:37.474Z',
+    five_hour: { pct: 1, resetsAt: '2026-10-28T10:19:59.591Z', estimated: false }, seven_day: { pct: 98, resetsAt: '2026-10-31T03:59:59.591Z', estimated: false } }, plan: 'max' }));
+  const f = fakeFetch([{ status: 429, body: '{"error":{"type":"rate_limit_error","message":"Rate limited. Please try again later."}}' }]);
+  const c = mk({ fetchImpl: f, now: () => now, source: 'oauth', useFileCache: true });
+  const L = await c.get();
+  assert.equal(f.calls.length, 1);
+  assert.equal(L.five_hour.pct, 1, '5h 시드 값');
+  assert.equal(L.seven_day.pct, 98, '7d 시드 값');
+  assert.equal(L.stale, true);
+  assert.equal(L.error.status, 429);
+  assert.equal(L.capturedAt, '2026-10-28T05:28:37.474Z');
+  assert.ok(!/권한|permission/i.test(L.error.message));
+  const j = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+  assert.equal(j.value.seven_day.pct, 98, '실패해도 파일의 마지막 성공 값은 지킨다');
+  assert.equal(j.backoffStep, 1);
+  assert.ok(!fs.readFileSync(cacheFile, 'utf8').includes('FAKE'));
+  // 아주 오래된 값(하루 전)도 시드로 쓴다
+  now += 86400e3;
+  const c2 = mk({ fetchImpl: fakeFetch([{ status: 500 }]), now: () => now, source: 'oauth', useFileCache: true });
+  const L2 = await c2.get();
+  assert.equal(L2.seven_day.pct, 98);
+  assert.equal(L2.stale, true);
+  fs.rmSync(cacheFile, { force: true });
+});
+
+test('429 물러서기: Retry-After 를 따르고, 없으면 2분→4분→8분…최대 30분, 성공하면 원래 주기', async () => {
+  assert.equal(parseRetryAfter('90'), 90_000);
+  assert.equal(parseRetryAfter(new Date(Date.parse('2026-10-28T05:05:00Z')).toUTCString(), Date.parse('2026-10-28T05:00:00Z')), 300_000);
+  assert.equal(parseRetryAfter('x'), null);
+  assert.deepEqual([1, 2, 3, 4, 5, 6, 9].map((n) => backoffMs(n) / 60e3), [2, 4, 8, 16, 30, 30, 30]);
+  assert.equal(backoffMs(3, 45_000), 45_000, 'Retry-After 우선');
+  assert.equal(backoffMs(1, 3600_000), 30 * 60e3, '상한 30분');
+  writeCred();
+  let now = Date.parse('2026-10-28T05:00:00Z');
+  const R = { status: 429, body: '{"error":{"type":"rate_limit_error"}}' };
+  const f = fakeFetch([{ status: 200, body: usageBody(1, 98) }, R, R, R, { status: 429, headers: { 'retry-after': '300' } }, { status: 200, body: usageBody(2, 98) }]);
+  const p = mkPoller({ fetchImpl: f, now: () => now });
+  await p.refresh();
+  assert.equal(p.nextDelayMs(), 60_000, '7d 98% → 60초');
+  const expect = [120_000, 240_000, 480_000, 300_000];
+  for (const ms of expect) {
+    now += p.nextDelayMs();
+    await p.refresh();
+    assert.equal(p.lastError.status, 429);
+    assert.equal(p.nextDelayMs(), ms);
+    const n = f.calls.length;
+    now += ms - 1000; await p.refresh(); now -= ms - 1000;
+    assert.equal(f.calls.length, n, '물러서기 안에는 부르지 않음');
+  }
+  assert.equal(p.value.seven_day.pct, 98, '마지막 값 유지');
+  now += p.nextDelayMs();
+  await p.refresh();
+  assert.equal(p.failed, false);
+  assert.equal(p.backoffStep, 0);
+  assert.equal(p.nextDelayMs(), 60_000, '성공하면 원래 주기');
+  assert.equal(f.calls.length, 6);
+});
+
+test('프로세스 사이 공유: 다른 수집기의 물러서기·최근 시도를 파일로 보고 겹쳐 부르지 않는다', async () => {
+  writeCred();
+  const cacheFile = path.join(home, 'usage-cache.json');
+  fs.rmSync(cacheFile, { force: true });
+  let now = Date.parse('2026-10-28T05:00:00Z');
+  const fa = fakeFetch([{ status: 200, body: usageBody(5, 90) }, { status: 429 }]);
+  const a = mkPoller({ fetchImpl: fa, now: () => now, useFileCache: true });
+  await a.refresh();
+  now += 61e3; await a.refresh();
+  assert.equal(fa.calls.length, 2);
+  assert.equal(a.lastError.status, 429);
+  // 서버 재시작·CLI·limits --watch 같은 새 수집기: 물러서기 중이면 HTTP 없이 시드 값 + stale + 원인
+  const fb = fakeFetch([{ status: 200, body: usageBody(6, 91) }]);
+  const b = mkPoller({ fetchImpl: fb, now: () => now, useFileCache: true });
+  now += 30e3;
+  const s = await b.refresh();
+  assert.equal(fb.calls.length, 0, '공유 물러서기 안');
+  assert.equal(s.value.seven_day.pct, 90);
+  assert.equal(s.stale, true);
+  assert.equal(s.lastError.status, 429);
+  assert.ok(b.nextDelayMs() >= 89_000, '다음 예약도 물러서기 끝 뒤로');
+  // 물러서기가 끝나면 한 수집기만 부르고, 다른 수집기는 그 시도가 cacheSec 안이라 기다린다
+  now += 91e3;
+  await b.refresh();
+  assert.equal(fb.calls.length, 1);
+  const fc = fakeFetch([{ status: 200, body: usageBody(7, 92) }]);
+  const c = mkPoller({ fetchImpl: fc, now: () => now + 10e3, useFileCache: true });
+  const sc = await c.refresh();
+  assert.equal(fc.calls.length, 0, '방금 성공한 값 캐시 적중');
+  assert.equal(sc.value.seven_day.pct, 91);
+  assert.equal(sc.stale, false);
   fs.rmSync(cacheFile, { force: true });
 });
 

@@ -286,8 +286,10 @@ export class Panel {
       case 'text': msg = (ev.role === 'system' ? `<span class="tag">${t('app.panel.tag.summary')}</span>` : '') + escapeHtml(ev.text || ''); break;
       case 'thinking': msg = `<span class="dim">${t('app.panel.thinking', { n: Number(ev.chars || 0), s: fmtNum(Number(ev.chars || 0)) })}</span>`; break;
       case 'user': {
-        const o = ev.origin === 'human' ? t('app.panel.tag.user') : ev.origin === 'task-notification' ? t('app.panel.tag.notify') : t('app.panel.tag.system');
-        msg = `<span class="tag">${o}</span>${escapeHtml(ev.text || '')}`;
+        const o = ev.origin === 'human' ? t('app.panel.tag.user') : ev.origin === 'task-notification' ? t('app.panel.tag.notify') : ev.origin === 'schedule' ? t('app.panel.tag.schedule') : t('app.panel.tag.system');
+        // Monitor 출력으로 시작한 턴은 그 출력 한 줄을 덧붙임(알림 요약은 'Monitor event: 이름' 뿐)
+        const xt = ev.ix && ev.ix.op === 'auto' && ev.ix.src === 'monitor' && ev.ix.text ? ` <span class="dim">› ${escapeHtml(ev.ix.text)}</span>` : '';
+        msg = `<span class="tag${ev.origin === 'schedule' ? ' sched' : ''}">${o}</span>${escapeHtml(ev.text || '')}${xt}`;
         break;
       }
       case 'result': msg = `<span class="tag ${ev.ok === false ? 'err' : 'ok'}">${t('app.panel.tag.result')}</span>${escapeHtml(ev.text || '')}`; break;

@@ -1,6 +1,8 @@
 /* 계획 보드 — 러너(없으면 메인) 옆 월드 고정 자리에 세운 작은 판(일반 홀로그램 모니터의 약 2배): 불투명 판·굵은 테·큰 진행률·상태별 색과 기호.
    기준 폭 280px 로 짜고 원근 배율을 transform scale 로(왼쪽 위 기준). 누르면 카드로 크게 보기(.ins-wide). */
 #plan-boards { position: fixed; inset: 0; z-index: 0; pointer-events: none; } /* v0.4.1: #stage 안·#labels 앞 — 장면 DOM(이름표)·모든 UI 아래 */
+#plan-boards.under { z-index: -1; } /* 흐름·Planet 3D: 캔버스 아래 — WebGL 구멍 사각형으로만 비쳐 보임(앞 노드·선이 판을 가림) */
+#plan-boards.under .pb { box-shadow: none; }
 #plan-links { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 0; pointer-events: none; overflow: visible; }
 .pb {
   --pb-ok: var(--ok); --pb-run: var(--warn); --pb-hold: #a78bfa; --pbk: 1;
@@ -96,6 +98,7 @@
 .ins-plan-big + .ins-plan-big { border-top: 1px solid var(--border); padding-top: 10px; }
 /* 선: 앵커(러너·메인) → 보드 한 줄 */
 .pl-lead { fill: none; stroke: color-mix(in srgb, var(--accent) 70%, transparent); stroke-width: 1.5; }
+.pl-lead.pl-own { stroke-dasharray: 4 4; stroke: color-mix(in srgb, var(--accent) 50%, transparent); } /* 판 → 계획 주인(러너 등) */
 /* 복셀: 기동기·팀장 옆에 세운 게시판(나무 테·코르크 빛 머리) */
 #plan-boards.vx .pb { border: 3px solid #8b5a2b; border-radius: 4px; box-shadow: 0 6px 16px rgba(0, 0, 0, .4), inset 0 0 0 1px rgba(255, 220, 170, .18); }
 #plan-boards.vx .pb-h { margin: calc(-7px * var(--pbk)) calc(-9px * var(--pbk)) 0; padding: calc(6px * var(--pbk)) calc(9px * var(--pbk)) calc(4px * var(--pbk)); background: color-mix(in srgb, #c8995c 22%, transparent); }
@@ -132,3 +135,31 @@
 .pb.lod .pc.st-pending, .pb.lod .pc.st-hold { border-width: 6px; }
 /* v0.4.1 3D 앞뒤: 앞에 선 노드 자리만 구멍(plan-ui holesMask) — 원마다 한 겹을 교집합, 판 밖으로는 넘지 않음 */
 .pb.occ { mask-repeat: no-repeat; -webkit-mask-repeat: no-repeat; mask-composite: intersect; -webkit-mask-composite: source-in; mask-size: 100% 100%; -webkit-mask-size: 100% 100%; }
+
+/* 계획판 일반화 표시: 지금 항목 단계 막대 · 메모 · 앞서 끝난 칸 · 크게 보기 부가 줄·접기·스크롤 */
+.pb-sb { display: flex; align-items: center; gap: .45em; margin: -.05em 0 .25em 1.5em; font-size: .82em; color: var(--muted); min-width: 0; }
+.pb-sb small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pb-sbar { flex: none; position: relative; display: inline-block; width: 4.2em; height: .42em; border-radius: 3px; background: color-mix(in srgb, var(--muted) 26%, transparent); overflow: hidden; vertical-align: middle; }
+.pb-sbar > i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--pb-ok, var(--ok)); }
+.pr-note { flex: none; font-size: .78em; font-weight: 700; padding: 0 .45em; border-radius: 9px; color: var(--pb-hold, #a78bfa); background: color-mix(in srgb, var(--pb-hold, #a78bfa) 16%, transparent); }
+.pb-x.pre { color: var(--pb-ok, var(--ok)); font-weight: 700; margin-right: .2em; }
+.pc.st-skipped { border: 1.5px dotted color-mix(in srgb, var(--muted) 70%, transparent); opacity: .7; }
+.ins-plan-big .ipb-list { max-height: min(60vh, 560px); overflow: auto; }
+.ins-plan-big .ipb-list .ipb-list { max-height: none; overflow: visible; padding-left: 0; }
+.ins-plan-big li.pr { flex-wrap: wrap; }
+.ins-plan-big li.pr.emph .pr-t { font-weight: 700; }
+.ins-plan-big li.pr.emph .pr-t::before { content: '★ '; color: var(--warn); }
+.ipb-sub { flex-basis: 100%; margin-left: 3.2em; font-size: .8em; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ipb-st { flex: none; display: inline-flex; align-items: center; gap: .35em; font-size: .8em; color: var(--muted); }
+.ins-plan-big li.pr-fold { list-style: none; }
+.ins-plan-big li.pr-fold summary { cursor: pointer; color: var(--pb-ok, var(--ok)); font-weight: 600; font-size: .9em; padding: .2em 0; }
+.ins-plan-big li.pr.st-skipped .pr-t { text-decoration: line-through; color: var(--muted); }
+.ipb-steps { flex-basis: 100%; list-style: none; margin: .25em 0 .1em 3.2em; padding: 0; font-size: .84em; display: grid; gap: .1em; }
+.ipb-steps li { display: flex; gap: .45em; color: var(--muted); }
+.ipb-steps li i { flex: none; width: 1.1em; font-style: normal; text-align: center; }
+.ipb-steps li.st-done i { color: var(--pb-ok, var(--ok)); }
+.ipb-steps li.st-current { color: var(--text); font-weight: 600; }
+.ipb-steps li.st-current i { color: var(--pb-run, var(--warn)); }
+.ipb-steps li.st-blocked i { color: var(--pb-hold, #a78bfa); }
+.pb-chip.auto { border-style: dashed; color: var(--muted); font-style: italic; } /* 자동 추정 — 확인된 설정과 구분 */
+.ipb-auto { margin: .1em 0 .3em; font-size: .82em; color: var(--muted); font-style: italic; }

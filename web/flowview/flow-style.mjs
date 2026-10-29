@@ -147,21 +147,22 @@ export function breathe(state, t, seed = 0) {
 export const BUBBLE = { MAX: 4, HOLD: 10, FADE: 1.5, LINES: 3, CHARS: 140 };
 export class BubbleBook {
   constructor(max = BUBBLE.MAX) { this.max = max; this.items = []; }
-  push(nodeId, role, text, now) {
+  /** hold·fade(초)·pri 는 복셀 생각·말풍선용(없으면 예전 값) */
+  push(nodeId, role, text, now, hold = BUBBLE.HOLD, pri = 1, fade = BUBBLE.FADE) {
     const clean = String(text ?? '').replace(/\s+/g, ' ').trim();
     if (!clean) return null;
     const body = clean.length > BUBBLE.CHARS ? clean.slice(0, BUBBLE.CHARS - 1) + '…' : clean;
     const i = this.items.findIndex((x) => x.nodeId === nodeId);
     if (i >= 0) this.items.splice(i, 1);
-    const it = { nodeId, role, text: body, at: now };
+    const it = { nodeId, role, text: body, at: now, hold, fade, pri };
     this.items.push(it);
     while (this.items.length > this.max) this.items.shift();
     return it;
   }
   /** 살아 있는 항목과 불투명도 */
   live(now) {
-    this.items = this.items.filter((x) => now - x.at < BUBBLE.HOLD + BUBBLE.FADE);
-    return this.items.map((x) => ({ ...x, alpha: now - x.at < BUBBLE.HOLD ? 1 : 1 - (now - x.at - BUBBLE.HOLD) / BUBBLE.FADE }));
+    this.items = this.items.filter((x) => now - x.at < (x.hold ?? BUBBLE.HOLD) + (x.fade ?? BUBBLE.FADE));
+    return this.items.map((x) => { const h = x.hold ?? BUBBLE.HOLD, f = x.fade ?? BUBBLE.FADE; return { ...x, alpha: now - x.at < h ? 1 : 1 - (now - x.at - h) / f }; });
   }
   drop(nodeId) { this.items = this.items.filter((x) => x.nodeId !== nodeId); }
   clear() { this.items = []; }

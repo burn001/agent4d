@@ -14,6 +14,7 @@ import { ProgressLanes } from './progress.mjs'; // 진행 줄 자동 인식(레�
 export const JOB = {
   STALE_SEC: 600,        // 박동이 이만큼 끊기면 정체(설정·규약 staleSec 로 바꿈)
   KEEP_ENDED: 3,         // 주인 노드마다 남겨 둘 끝난 작업 수(웹 접기, 회차 접기와 같은 방식)
+  FAIL_LINGER_SEC: 600,  // (참고값) '완료 표시' 끔일 때 실패 작업이 끝난 뒤 남는 기본 시간 — 웹 EXIT_ERR.LINGER_SEC 와 같은 값
   MAX_PER_OWNER: 64,     // 주인 노드 하나에 세울 작업 노드 상한(넘는 새 id 는 버림)
   ID_MAX: 80, TITLE_MAX: 80, PHASE_MAX: 120, LINE_MAX: 160, HOST_MAX: 60,
   BEAT_EMIT_MS: 30_000,  // 박동만 바뀐 갱신은 이 간격에 한 번만 낸다
@@ -113,7 +114,7 @@ const PROTO_RE = /(?:^|[\s\]>|:])::agent4d\s+(\{.*?)\s*$/;
 
 /**
  * 한 줄에서 규약 이벤트를 읽는다. 줄 앞에 중계 접두어(`[회차] ` 같은 것)가 있어도 된다.
- * → { id, title?, state?, phase?, progress?, host?, heartbeat?, until?, rc?, staleSec?, note? } 또는 null(규약 줄 아님)
+ * → { id, title?, state?, phase?, progress?, host?, heartbeat?, until?, started?, rc?, staleSec?, note? } 또는 null(규약 줄 아님)
  *   규약 꼴인데 JSON 이 깨졌거나 id 가 없으면 { bad: true }
  */
 export function parseProtocolLine(line) {
@@ -135,6 +136,8 @@ export function parseProtocolLine(line) {
   if (o.host != null) ev.host = o.host;
   if (o.heartbeat != null) ev.heartbeat = o.heartbeat; // ISO·시각 문자열·true(지금)
   if (o.until != null) ev.until = o.until;
+  const sa = o.started ?? o.startedAt ?? o.started_at; // 작업이 실제로 시작한 시각(수집기가 늦게 붙거나 서버가 다시 떠도 같은 값)
+  if (sa != null && sa !== '') ev.started = sa;
   if (o.rc != null && Number.isFinite(+o.rc)) ev.rc = Math.trunc(+o.rc);
   const ss = o.staleSec ?? o.stale_sec ?? o.stale_after;
   if (ss != null && +ss > 0) ev.staleSec = +ss;
@@ -159,13 +162,14 @@ function fill(tpl, m) {
 
 /**
  * 설정 원본 → 정규화한 규칙 묶음. 잘못된 규칙은 errors 에 남기고 건너뛴다.
- * @returns {{ staleSec, keepEnded, sets: [{ name, project, streams, files, staleSec, rules:[{on, re, job, title, ...}] }], errors: string[] }}
+ * @returns {{ staleSec, keepEnded, failLingerSec, sets: [{ name, project, streams, files, staleSec, failLingerSec, rules:[{on, re, job, title, ...}] }], errors: string[] }}
  */
 export function compileJobRules(raw, { source = 'config' } = {}) {
   const errors = [];
   const o = raw && typeof raw === 'object' ? raw : {};
   const staleSec = +o.staleSec > 0 ? +o.staleSec : JOB.STALE_SEC;
   const keepEnded = Number.isInteger(o.keepEnded) && o.keepEnded >= 0 ? o.keepEnded : JOB.KEEP_ENDED;
+  const failLingerSec = lingerSec(o.failLingerSec); // 실패 작업이 남는 시간(초). null = 웹 기본값(config errorLingerSec → 600초)
   const sets = [];
   for (const [si, s] of (Array.isArray(o.sets) ? o.sets : []).entries()) {
     if (!s || typeof s !== 'object') continue;
@@ -189,10 +193,14 @@ export function compileJobRules(raw, { source = 'config' } = {}) {
     }
     const files = (Array.isArray(s.files) ? s.files : []).filter((f) => f && typeof f.path === 'string' && f.path)
       .map((f) => ({ path: f.path, owner: ['runner', 'launcher', 'main'].includes(f.owner) ? f.owner : 'runner', backlogKB: +f.backlogKB > 0 ? Math.min(+f.backlogKB, 1024) : 64 }));
-    sets.push({ name, project: s.project ? String(s.project) : null, streams, files, staleSec: +s.staleSec > 0 ? +s.staleSec : null, rules });
+    sets.push({ name, project: s.project ? String(s.project) : null, streams, files, staleSec: +s.staleSec > 0 ? +s.staleSec : null,
+      failLingerSec: lingerSec(s.failLingerSec) ?? failLingerSec, rules });
   }
-  return { staleSec, keepEnded, sets, errors };
+  return { staleSec, keepEnded, failLingerSec, sets, errors };
 }
+
+/** 실패 작업 퇴장 문턱(초): 0 이상 유한수만, 아니면 null */
+function lingerSec(v) { const n = v == null || v === '' ? NaN : +v; return Number.isFinite(n) && n >= 0 ? n : null; }
 
 /** 프로젝트 조건: 루트 cwd·프로젝트 폴더 이름에 대소문자 무시 부분 일치(빈 조건은 모두) */
 export function setMatchesProject(set, { cwd = null, projectDir = null } = {}) {
@@ -263,7 +271,7 @@ export function loadJobRules({ stateDir = null, cwd = null } = {}) {
   const ok = parts.filter(Boolean);
   if (!ok.length) return null;
   return {
-    staleSec: ok[0].staleSec, keepEnded: ok[0].keepEnded,
+    staleSec: ok[0].staleSec, keepEnded: ok[0].keepEnded, failLingerSec: ok[0].failLingerSec ?? null,
     sets: ok.flatMap((p) => p.sets), errors: ok.flatMap((p) => p.errors),
   };
 }
@@ -321,7 +329,7 @@ export class JobBook {
         s.protocol = true;
         ev = { ...p, on: 'protocol', src: 'protocol' };
       } else if (!s.protocol) {
-        for (const set of sets) { ev = matchRules(line, set); if (ev) { ev.src = 'rule:' + set.name; ev.setStale = set.staleSec; s.ruled = true; break; } }
+        for (const set of sets) { ev = matchRules(line, set); if (ev) { ev.src = 'rule:' + set.name; ev.setStale = set.staleSec; ev.setFailLinger = set.failLingerSec; s.ruled = true; break; } }
       }
       if (!ev) { if (auto) autoLines.push(line); continue; }
       const r = this._apply(ownerKey, ev, line, tsIso, tsMs);
@@ -442,6 +450,9 @@ export class JobBook {
     if (ev.host != null) job.host = minimal ? null : clean(ev.host, JOB.HOST_MAX);
     const staleSec = ev.staleSec || ev.setStale || null;
     if (staleSec) job.staleSec = staleSec;
+    // 실패 작업 퇴장 문턱: 규칙 묶음 > 설정 맨 위(규약 줄도 설정 맨 위를 따른다). 없으면 싣지 않음(웹 기본)
+    const failLinger = ev.setFailLinger ?? (this.rules && this.rules.failLingerSec != null ? this.rules.failLingerSec : null);
+    if (failLinger != null) job.failLingerSec = failLinger;
     const revive = () => { if (isJobEnded(job.state)) { job.rc = null; job.endedAt = null; job.startedAt = at; job.progress = null; } };
     let state = ev.state || null;
     switch (ev.on) {
@@ -456,6 +467,7 @@ export class JobBook {
         if (state && !isJobEnded(state)) revive();
         if (state == null && ev.rc != null) state = ev.rc === 0 ? 'done' : 'failed';
         if (ev.stale) job.stale = true;
+        if (ev.started != null) { const t = resolveClock(ev.started, tsMs, 'past'); if (t) job.startedAt = t; }
         break;
       default: break;
     }

@@ -3,8 +3,9 @@
 //        도구 없이 생각할 땐 턱을 괸다. 모니터가 접힌 대기 중에는 커피 마시기·기지개·둘러보기·생각을 돌아가며 하고, 팀장이 사람 입력을
 //        오래(3분 이상) 기다리면 탕비실에서 커피를 든다(한 번 다녀오면 15분 쉼). 자율 루프 팀장은 가끔 책상 옆으로 나와
 //        팀원 쪽을 가리키며 둘러본다. 퇴장(완료)은 가방을 들고 문으로 걸어 나간다.
-//   복장 = 역할(office-core roleOf): 팀장 정장+넥타이 · 별관 팀장 보라 정장+모자 · 팀원 종류 색 셔츠 · 기동기 운영자 형광 조끼+모자 · 손님 외투.
-//   세션 색은 사원증(목걸이 카드, 빛남)과 팀원 조끼 앞판.
+//   복장 = 역할 계열(appearance-core): 팀장·별관 팀장 formal(정장·넥타이/나비/스카프/터틀넥·구두, 포켓스퀘어 = 종류 색, 별관은 모자)
+//   · 팀원 casual(티·후디·맨투맨·카디건·폴로·체크 + 청바지·반바지·면바지·조거·운동화, 로고·소매 끝·캡 = 종류 색, 백팩·헤드폰)
+//   · 기동기 운영자 형광 조끼+모자 · 손님 긴 외투. 머리·피부·안경·수염·체형은 노드 id 시드. 세션 색은 사원증과 팀원 조끼 앞판.
 // 그리기는 InstancedMesh 묶음(BoxBatch)에 상자를 밀어 넣는다(캐릭터당 draw call 0, 전체 1).
 import * as THREE from 'three';
 import { partBox } from './props.js';
@@ -155,8 +156,75 @@ function pose(ch, fx, t) {
   return P;
 }
 
+// 부위 그리기 도우미(모듈 상태 — 프레임마다 클로저를 만들지 않는다)
+let _L = null, _id = null, _lean = 0, _nY = 0, _nZ = 0, _hp = 0, _hy = 0;
+const NOAP = { cls: 'casual', hairStyle: 'short', top: 'tee', bottom: 'jeans', shoe: 'sneaker', h: 1, w: 1 };
+/** 몸통(허리 관절, 기울기 lean) 기준 상자 */
+function T(ox, oy, oz, sx, sy, sz, c) { partBox(_L, _B, 0, HIP, 0, _lean, 0, 0, ox, oy, oz, sx, sy, sz, c, _id); }
+/** 머리(목 관절, 끄덕 hp·도리 hy) 기준 상자 */
+function Hd(ox, oy, oz, sx, sy, sz, c) { partBox(_L, _B, 0, _nY, _nZ, _hp, _hy, 0, ox, oy, oz, sx, sy, sz, c, _id); }
+
+/** 머리 모양 — 민머리 없음. 모자를 쓰면 정수리는 가리고 뒷머리·묶음·긴 머리만 */
+const LONGISH = new Set(['long', 'bangs', 'lob', 'bob', 'curlylong']);
+function hairTails(st, c, det, tieC) {
+  if (st === 'pony') Hd(0, 0.2, -0.29, 0.11, 0.3, 0.1, c);
+  else if (st === 'braid') { Hd(0, 0.18, -0.27, 0.11, 0.12, 0.1, c); Hd(0, 0.06, -0.285, 0.1, 0.12, 0.09, c); if (det) Hd(0, -0.05, -0.295, 0.08, 0.1, 0.08, c); if (det) Hd(0, -0.12, -0.3, 0.09, 0.04, 0.09, tieC); }
+  else if (st === 'twin') for (const s of [-1, 1]) { Hd(s * 0.27, 0.2, -0.12, 0.1, 0.34, 0.1, c); if (det) Hd(s * 0.27, 0.38, -0.12, 0.12, 0.05, 0.12, tieC); }
+}
+function longBack(st, c, det) {
+  if (st === 'curlylong') { Hd(0, 0.15, -0.22, 0.58, 0.56, 0.14, c); for (const s of [-1, 1]) Hd(s * 0.27, 0.25, -0.02, 0.08, 0.34, 0.38, c); return; }
+  if (st === 'bob') { Hd(0, 0.24, -0.22, 0.5, 0.36, 0.08, c); for (const s of [-1, 1]) Hd(s * 0.24, 0.24, 0, 0.05, 0.34, 0.44, c); return; }
+  if (st === 'lob') { Hd(0, 0.2, -0.22, 0.5, 0.46, 0.08, c); for (const s of [-1, 1]) Hd(s * 0.24, 0.21, 0, 0.05, 0.42, 0.44, c); return; }
+  Hd(0, 0.17, -0.215, 0.5, 0.52, 0.1, c); // long·bangs: 어깨까지(사원증·몸통 뒤)
+  if (det) for (const s of [-1, 1]) Hd(s * 0.235, 0.28, -0.05, 0.05, 0.32, 0.34, c);
+}
+function drawHair(st, c, hatOn, det, tieC) {
+  if (hatOn) {
+    if (LONGISH.has(st)) longBack(st, c, det);
+    else Hd(0, 0.3, -0.2, 0.48, 0.24, 0.08, c);
+    hairTails(st, c, det, tieC);
+    return;
+  }
+  switch (st) {
+    case 'crew': // 짧은 스포츠머리 — 정수리까지 덮는다
+      Hd(0, 0.455, -0.01, 0.47, 0.06, 0.47, c); Hd(0, 0.32, -0.215, 0.47, 0.24, 0.05, c);
+      if (det) for (const s of [-1, 1]) Hd(s * 0.228, 0.36, -0.05, 0.02, 0.14, 0.26, c);
+      return;
+    case 'mohawk': Hd(0, 0.455, -0.01, 0.46, 0.05, 0.46, c); Hd(0, 0.53, -0.02, 0.1, 0.14, 0.46, c); Hd(0, 0.32, -0.215, 0.46, 0.22, 0.04, c); return;
+    case 'slick': Hd(0, 0.455, -0.04, 0.47, 0.075, 0.44, c); Hd(0, 0.32, -0.215, 0.47, 0.24, 0.06, c); return;
+    case 'curly':
+      Hd(0, 0.48, -0.02, 0.56, 0.16, 0.56, c); Hd(0, 0.28, -0.21, 0.56, 0.32, 0.14, c);
+      if (det) for (const s of [-1, 1]) Hd(s * 0.16, 0.57, 0.06, 0.16, 0.08, 0.16, c);
+      return;
+    case 'curlylong':
+      Hd(0, 0.48, -0.02, 0.56, 0.16, 0.56, c); longBack(st, c, det);
+      if (det) for (const s of [-1, 1]) Hd(s * 0.16, 0.57, 0.06, 0.16, 0.08, 0.16, c);
+      return;
+    case 'shaggy':
+      Hd(0, 0.47, -0.02, 0.5, 0.12, 0.5, c); Hd(0, 0.28, -0.21, 0.5, 0.32, 0.1, c);
+      for (const s of [-1, 1]) Hd(s * 0.24, 0.3, -0.02, 0.04, 0.22, 0.4, c);
+      if (det) Hd(0, 0.41, 0.225, 0.44, 0.07, 0.04, c);
+      return;
+    case 'pixie':
+      Hd(0, 0.465, -0.01, 0.48, 0.08, 0.48, c); Hd(0, 0.33, -0.215, 0.48, 0.2, 0.05, c); Hd(-0.08, 0.41, 0.222, 0.3, 0.07, 0.05, c);
+      for (const s of [-1, 1]) Hd(s * 0.235, 0.29, 0.0, 0.04, 0.24, 0.3, c); // 귀를 덮는 옆머리(짧은 단발 느낌)
+      Hd(0, 0.24, -0.22, 0.46, 0.14, 0.05, c);
+      return;
+    case 'bob': case 'lob':
+      Hd(0, 0.46, -0.02, 0.5, 0.1, 0.5, c); longBack(st, c, det); if (det) Hd(0, 0.4, 0.225, 0.44, 0.06, 0.04, c);
+      return;
+  }
+  Hd(0, 0.46, -0.03, 0.48, 0.1, 0.48, c); // 정수리(기본)
+  if (LONGISH.has(st)) longBack(st, c, det); else Hd(0, 0.3, -0.2, 0.48, 0.24, 0.08, c);
+  if (st === 'side') Hd(0.09, 0.4, 0.215, 0.28, 0.08, 0.05, c);
+  else if (st === 'bangs' || st === 'twin') Hd(0, 0.4, 0.225, 0.44, 0.08, 0.04, c);
+  else if (st === 'bun') Hd(0, 0.54, -0.17, 0.17, 0.15, 0.17, c); // 뒤통수 위 — 앞에서 모자처럼 보이지 않게
+  hairTails(st, c, det, tieC);
+}
+
 /**
- * 캐릭터 그리기. look = { role, shirt, jacket?, pants, tie?, vest?, stripe?, skin, hair, hat?, cap?, badge, sessVest?, markKind, mark? }
+ * 캐릭터 그리기. look = { role, ap(appearance-core 외형), shirt, jacket?, top2, pants, pants2?, legC?, shoe, neck?, hatC?, glasses?, lens, lip, hairAcc?, phones?, pack?,
+ *   accent(종류 색), vest?, stripe?, skin, hair, hat?(별관 왕관), cap?(운영자), badge, sessVest?, markKind, mark? }
  * fx = { t, now, skill, error, ok, text, focus, hover, metaSkill, doneLead, idle, catColor, monK, mugC, coffeeC, bagC, shoeC }
  * 손 위치(세계)를 ch._hand[0..1] 에 남긴다(홀로그램 손끝 빛줄기용)
  */
@@ -164,6 +232,7 @@ export function drawCharacter(ch, look, fx, lit, glow) {
   const t = fx.t;
   const k = ch.scale(fx.now);
   if (k <= 0.002) return;
+  const A = look.ap || NOAP;
   const walking = ch.state === 'walk' || ch.state === 'leave' || ch.state === 'enter';
   const bob = walking ? Math.abs(Math.sin(ch.phase)) * 0.05 : 0;
   // 옆 오프셋(시설 앞에서만, 겹침 완화)
@@ -172,12 +241,14 @@ export function drawCharacter(ch, look, fx, lit, glow) {
   const rootY = bob;
   _q.setFromAxisAngle(_yAxis, ch.yaw + (ch.workCat === 'search' && ch.target && ch.target.type === 'station' ? 0.25 * Math.sin(t * 3) : 0));
   _p.set(px, rootY, pz);
-  _B.compose(_p, _q, _one.set(k, k, k));
+  // 체형: 키 h·어깨 w — 정장은 조금 크고 반듯하게, 캐주얼은 조금 작고 다양하게
+  const bw = A.w || 1, bh = A.h || 1;
+  _B.compose(_p, _q, _one.set(k * bw, k * bh, k * bw));
   const id = ch.id;
   const P = pose(ch, fx, t);
+  _L = lit; _id = id; _lean = P.lean;
 
   // 색
-  const role = look.role;
   const shirt = _cT.copy(look.shirt);
   const leaving = ch.state === 'leave' || ch.vanishT0 != null;
   if (leaving) shirt.lerp(GREY, 0.35);
@@ -187,43 +258,144 @@ export function drawCharacter(ch, look, fx, lit, glow) {
   if (ch.state === 'work' && ch.workCat === 'skill') shirt.lerp(fx.skill, 0.35 + 0.15 * Math.sin(t * 6));
   const jacket = look.jacket ? _cJ.copy(look.jacket) : null;
   if (jacket && errOn) jacket.lerp(fx.error, 0.4);
-  const sleeve = jacket || _cA.copy(shirt).multiplyScalar(0.9);
+  if (jacket && leaving) jacket.lerp(GREY, 0.25);
+  const sleeve = jacket || _cA.copy(shirt).multiplyScalar(0.92);
   const skin = look.skin;
+  const accent = look.accent || look.badge;
+  const shoe = look.shoe || fx.shoeC;
+  const top = A.top;
+  const F = A.sex === 'f';
+  const skirt = A.bottom === 'skirt' || A.bottom === 'dress';
+  const det = fx.detail !== false; // 멀면 잔 장식 생략(상자 수 절약 — 색·실루엣·종류 색 로고는 그대로)
 
-  // 다리 + 신발
-  for (const [sx, a] of [[-0.13, P.legL], [0.13, P.legR]]) {
-    partBox(lit, _B, sx, HIP, 0, a, 0, 0, 0, -0.3, 0, 0.2, 0.6, 0.22, look.pants, id);
-    partBox(lit, _B, sx, HIP, 0, a, 0, 0, 0, -0.6, 0.05, 0.22, 0.08, 0.32, fx.shoeC, id);
+  // 다리 + 신발(반바지면 무릎 아래 맨다리, 청바지 밑단 접기·조거 발목 고무단)
+  for (let li = 0; li < 2; li++) {
+    const sx = li ? 0.13 : -0.13, a = li ? P.legR : P.legL;
+    if (skirt) partBox(lit, _B, sx, HIP, 0, a, 0, 0, 0, -0.3, 0, 0.19, 0.6, 0.2, look.legC || skin, id);
+    else if (A.bottom === 'shorts') {
+      partBox(lit, _B, sx, HIP, 0, a, 0, 0, 0, -0.16, 0, 0.21, 0.32, 0.23, look.pants, id);
+      partBox(lit, _B, sx, HIP, 0, a, 0, 0, 0, -0.44, 0, 0.16, 0.28, 0.16, skin, id);
+    } else {
+      partBox(lit, _B, sx, HIP, 0, a, 0, 0, 0, -0.3, 0, 0.2, 0.6, 0.22, look.pants, id);
+      if (look.pants2 && det) partBox(lit, _B, sx, HIP, 0, a, 0, 0, 0, -0.52, 0, 0.215, 0.05, 0.235, look.pants2, id);
+    }
+    if (A.shoe === 'sneaker' && det) {
+      partBox(lit, _B, sx, HIP, 0, a, 0, 0, 0, -0.585, 0.05, 0.22, 0.07, 0.32, shoe, id);
+      partBox(lit, _B, sx, HIP, 0, a, 0, 0, 0, -0.63, 0.05, 0.23, 0.03, 0.33, fx.cardC || fx.mugC, id);
+    } else if (A.shoe === 'boot' && det) {
+      partBox(lit, _B, sx, HIP, 0, a, 0, 0, 0, -0.56, 0.04, 0.23, 0.14, 0.3, shoe, id);
+      partBox(lit, _B, sx, HIP, 0, a, 0, 0, 0, -0.63, 0.04, 0.24, 0.03, 0.31, fx.shoeC, id);
+    } else if (A.shoe === 'pumps') {
+      partBox(lit, _B, sx, HIP, 0, a, 0, 0, 0, -0.6, 0.06, 0.18, 0.07, 0.28, shoe, id);
+      if (det) partBox(lit, _B, sx, HIP, 0, a, 0, 0, 0, -0.615, -0.07, 0.06, 0.07, 0.05, shoe, id);
+    } else partBox(lit, _B, sx, HIP, 0, a, 0, 0, 0, -0.6, 0.05, 0.22, 0.08, 0.32, shoe, id);
   }
-  // 몸통(허리 관절 기준 기울기) + 옷
+  // 몸통 + 옷
   const breathe = 1 + 0.015 * Math.sin(t * 1.6 + ch.phase);
-  partBox(lit, _B, 0, HIP, 0, P.lean, 0, 0, 0, TORSO / 2, 0, 0.54, TORSO * breathe, 0.3, shirt, id);
+  const baseC = top === 'cardigan' ? look.top2 : shirt;
+  if (F) { T(0, TORSO * 0.62, 0, 0.52, TORSO * 0.76 * breathe, 0.3, baseC); T(0, TORSO * 0.13, 0, 0.44, TORSO * 0.3, 0.27, baseC); }
+  else T(0, TORSO / 2, 0, 0.54, TORSO * breathe, 0.3, baseC);
+  // 치마·원피스: 엉덩이(허리 관절)에 붙은 블록 — 다리는 그대로 움직인다
+  if (A.bottom === 'skirt' && A.cls === 'formal') T(0, -0.17, 0, 0.48, 0.38, 0.3, look.pants);
+  else if (skirt) {
+    const sc = A.bottom === 'dress' ? shirt : look.pants;
+    T(0, -0.12, 0, 0.5, 0.3, 0.32, sc); T(0, -0.25, 0, 0.56, 0.07, 0.36, sc);
+    if (A.bottom === 'dress') T(0, 0.03, 0, 0.46, 0.045, 0.29, accent); // 원피스 허리띠 = 종류 색
+  }
+  let wrap = false; // 앞판이 0.16 까지 나온 겉옷(정장·외투·카디건)
   if (jacket) {
-    // 정장·외투: 몸통을 감싸고 앞가슴만 셔츠(+넥타이)가 보인다
-    partBox(lit, _B, 0, HIP, 0, P.lean, 0, 0, 0, TORSO / 2 - 0.01, -0.005, 0.58, TORSO * 0.98, 0.32, jacket, id);
-    partBox(lit, _B, 0, HIP, 0, P.lean, 0, 0, 0, TORSO - 0.16, 0.162, 0.16, 0.26, 0.012, look.shirtFront || look.shirt, id);
-    if (look.tie) partBox(lit, _B, 0, HIP, 0, P.lean, 0, 0, 0, TORSO - 0.2, 0.17, 0.07, 0.32, 0.012, look.tie, id);
+    wrap = true;
+    if (top === 'coat') {
+      // 손님: 허벅지까지 내려오는 긴 외투 + 단추 두 줄, 앞가슴 = 안 셔츠(종류 색)
+      T(0, TORSO / 2 - 0.1, -0.005, 0.6, TORSO + 0.22, 0.33, jacket);
+      T(0, TORSO - 0.16, 0.167, 0.14, 0.26, 0.012, shirt);
+      if (det) for (const yy of [0.12, 0.3]) for (const s of [-1, 1]) T(s * 0.1, yy, 0.168, 0.04, 0.04, 0.012, fx.shoeC);
+    } else {
+      // 정장: 몸통을 감싸고 앞가슴만 셔츠(+넥타이)가 보인다. 세 벌 정장이면 조끼 아랫단, 포켓스퀘어 = 종류 색
+      if (F) { T(0, TORSO * 0.6, -0.005, 0.56, TORSO * 0.8 + 0.02, 0.32, jacket); T(0, TORSO * 0.12 - 0.02, -0.005, 0.5, TORSO * 0.3 + 0.04, 0.3, jacket); }
+      else T(0, TORSO / 2 - 0.03, -0.005, 0.58, TORSO * 0.98 + 0.06, 0.32, jacket);
+      T(0, TORSO - 0.16, 0.162, 0.16, 0.26, 0.012, A.neck === 'turtle' ? look.neck : shirt);
+      if (top === 'suit3') T(0, TORSO * 0.42, 0.163, 0.17, 0.2, 0.012, look.pants);
+      T(-0.17, TORSO - 0.22, 0.165, 0.08, 0.05, 0.012, accent);
+    }
+    const nc = look.neck || look.tie;
+    if (nc && (A.neck === 'tie' || (!A.neck && look.tie))) { T(0, TORSO - 0.2, 0.17, 0.07, 0.32, 0.012, nc); T(0, TORSO - 0.05, 0.172, 0.09, 0.06, 0.014, nc); }
+    else if (A.neck === 'bow') T(0, TORSO - 0.06, 0.172, 0.17, 0.07, 0.014, nc);
+    else if (A.neck === 'turtle') T(0, TORSO + 0.03, 0, 0.32, 0.09, 0.26, nc);
+    else if (A.neck === 'brooch') T(0.16, TORSO - 0.17, 0.168, 0.06, 0.06, 0.014, nc);
+    else if (A.neck === 'necklace') { T(0, TORSO - 0.09, 0.166, 0.16, 0.025, 0.01, nc); T(0, TORSO - 0.12, 0.168, 0.04, 0.04, 0.012, nc); }
+  } else {
+    switch (top) {
+      case 'hoodie':
+        T(0, TORSO + 0.02, -0.16, 0.44, 0.17, 0.12, sleeve);
+        T(0, 0.17, 0.153, 0.34, 0.15, 0.012, look.top2);
+        if (det) for (const s of [-1, 1]) T(s * 0.06, TORSO - 0.14, 0.155, 0.025, 0.16, 0.01, fx.cardC || fx.mugC);
+        break;
+      case 'sweat':
+        T(0, 0.035, 0, F ? 0.47 : 0.56, 0.07, F ? 0.29 : 0.32, look.top2);
+        T(0, TORSO - 0.15, 0.152, 0.545, 0.06, 0.012, accent); // 가슴 띠 = 종류 색
+        break;
+      case 'cardigan':
+        wrap = true;
+        T(-0.17, TORSO / 2, -0.005, 0.24, TORSO * 0.98, 0.32, shirt); T(0.17, TORSO / 2, -0.005, 0.24, TORSO * 0.98, 0.32, shirt);
+        T(0, TORSO / 2, -0.06, 0.2, TORSO * 0.98, 0.2, shirt);
+        T(0, TORSO - 0.12, 0.155, 0.07, 0.07, 0.012, accent);
+        break;
+      case 'polo':
+        T(0, TORSO - 0.01, 0.1, 0.3, 0.05, 0.13, look.top2);
+        T(0, TORSO - 0.1, 0.152, 0.05, 0.12, 0.012, look.top2);
+        T(-0.14, TORSO - 0.18, 0.152, 0.07, 0.07, 0.012, accent);
+        break;
+      case 'flannel':
+        for (const yy of [0.17, 0.39]) T(0, yy, 0, 0.555, 0.045, 0.305, look.top2);
+        if (det) for (const s of [-1, 1]) T(s * 0.13, TORSO / 2, 0, 0.045, TORSO * 0.98, 0.305, look.top2);
+        T(0, TORSO - 0.01, 0.1, 0.28, 0.05, 0.12, shirt);
+        break;
+      case 'knit': // 니트: 가슴 무늬 띠(안 색) + 고무단, 로고 = 종류 색
+        T(0, TORSO - 0.2, 0.152, F ? 0.5 : 0.54, 0.05, 0.012, look.top2);
+        T(0, 0.035, 0, F ? 0.47 : 0.56, 0.07, F ? 0.29 : 0.32, look.top2);
+        T(-0.14, TORSO - 0.3, 0.152, 0.08, 0.07, 0.012, accent);
+        break;
+      case 'dress': break; // 원피스: 허리띠(위)·반팔
+      default: // tee·longtee: 가슴 로고 = 종류 색
+        if (!look.vest) T(-0.14, TORSO - 0.2, 0.152, 0.11, 0.1, 0.012, accent); // 사원증과 안 겹치게 왼가슴
+    }
   }
   if (look.vest) {
     // 형광 조끼 + 반사띠 두 줄(기동기 운영자)
-    partBox(lit, _B, 0, HIP, 0, P.lean, 0, 0, 0, TORSO / 2 + 0.03, 0, 0.58, TORSO * 0.82, 0.33, look.vest, id);
-    for (const yy of [0.22, 0.4]) partBox(lit, _B, 0, HIP, 0, P.lean, 0, 0, 0, yy, 0, 0.59, 0.045, 0.335, look.stripe, id);
+    T(0, TORSO / 2 + 0.03, 0, 0.58, TORSO * 0.82, 0.33, look.vest);
+    for (const yy of [0.22, 0.4]) T(0, yy, 0, 0.59, 0.045, 0.335, look.stripe);
   } else if (look.sessVest) {
     // 세션 색 조끼 앞판(— 같은 프로젝트 여러 세션일 때 팀원)
-    for (const s of [-1, 1]) partBox(lit, _B, 0, HIP, 0, P.lean, 0, 0, s * 0.16, TORSO / 2 + 0.02, 0.158, 0.17, TORSO * 0.78, 0.014, look.sessVest, id);
+    for (const s of [-1, 1]) T(s * 0.16, TORSO / 2 + 0.02, wrap ? 0.168 : 0.158, 0.17, TORSO * 0.78, 0.014, look.sessVest);
+  }
+  if (A.neck === 'scarf') { T(0, TORSO, 0, 0.44, 0.1, 0.34, look.neck); T(0.1, TORSO - 0.2, 0.175, 0.08, 0.3, 0.014, look.neck); }
+  if (look.pack && !look.vest) { // 백팩(캐주얼) + 앞 어깨끈
+    T(0, TORSO / 2 + 0.04, -0.23, 0.4, 0.46, 0.16, look.pack);
+    if (det) T(0, TORSO / 2 - 0.02, -0.315, 0.3, 0.18, 0.02, look.pack);
+    if (det) for (const s of [-1, 1]) T(s * 0.17, TORSO - 0.14, 0.172, 0.06, 0.3, 0.012, look.pack);
   }
   // 사원증(목걸이 카드) — 세션 색(없으면 종류 색), 빛남
-  partBox(lit, _B, 0, HIP, 0, P.lean, 0, 0, 0, TORSO - 0.06, 0.165, 0.035, 0.2, 0.01, fx.shoeC);
+  T(0, TORSO - 0.06, 0.165, 0.035, 0.2, 0.01, fx.shoeC);
   partBox(glow, _B, 0, HIP, 0, P.lean, 0, 0, look.vest ? 0.14 : 0, TORSO - 0.3, 0.18, 0.11, 0.14, 0.015, look.badge);
-  if (look.markKind === 'necklace') partBox(lit, _B, 0, HIP, 0, P.lean, 0, 0, 0, TORSO - 0.04, 0, 0.4, 0.05, 0.36, look.mark, id);
+  if (look.markKind === 'necklace') T(0, TORSO - 0.04, 0, 0.4, 0.05, 0.36, look.mark);
 
   const sl = Math.sin(P.lean), cl = Math.cos(P.lean);
   const shY = HIP + (SHOULDER - HIP) * cl, shZ = (SHOULDER - HIP) * sl;
-  // 팔 + 손
+  // 팔 + 손: 반팔(티·폴로)은 아래팔 맨살, 정장은 흰 셔츠 소맷부리, 캐주얼 긴팔은 소매 끝 = 종류 색
   const hands = ch._hand || (ch._hand = [new THREE.Vector3(), new THREE.Vector3()]);
-  const arms = [[-0.36, P.armL, -P.rollL, 0], [0.36, P.armR, P.rollR * 0.9, 1]];
-  for (const [sx, ax, rz, hi] of arms) {
-    partBox(lit, _B, sx, shY, shZ, ax, 0, rz, 0, -0.26, 0, 0.16, 0.54, 0.16, sleeve, id);
+  const short = !jacket && !look.vest && (top === 'tee' || top === 'polo' || top === 'dress');
+  for (let hi = 0; hi < 2; hi++) {
+    const sx = hi ? 0.36 : -0.36, ax = hi ? P.armR : P.armL, rz = hi ? P.rollR * 0.9 : -P.rollL;
+    if (short) {
+      partBox(lit, _B, sx, shY, shZ, ax, 0, rz, 0, -0.13, 0, 0.17, 0.27, 0.17, sleeve, id);
+      partBox(lit, _B, sx, shY, shZ, ax, 0, rz, 0, -0.4, 0, 0.14, 0.28, 0.14, skin, id);
+    } else {
+      partBox(lit, _B, sx, shY, shZ, ax, 0, rz, 0, -0.26, 0, 0.16, 0.54, 0.16, look.vest ? shirt : sleeve, id);
+      if (!det) { /* 소맷부리·소매 끝 생략 */ }
+      else if (jacket && top !== 'coat') partBox(lit, _B, sx, shY, shZ, ax, 0, rz, 0, -0.515, 0, 0.165, 0.035, 0.165, shirt, id);
+      else if (!jacket && !look.vest) partBox(lit, _B, sx, shY, shZ, ax, 0, rz, 0, -0.505, 0, 0.168, 0.05, 0.168, top === 'cardigan' || top === 'flannel' || top === 'knit' ? look.top2 : accent, id);
+    }
     partBox(lit, _B, sx, shY, shZ, ax, 0, rz, 0, -0.58, 0, 0.13, 0.12, 0.13, skin, id);
     jointPoint(_B, sx, shY, shZ, ax, 0, rz, 0, -0.6, 0, hands[hi]);
   }
@@ -244,21 +416,45 @@ export function drawCharacter(ch, look, fx, lit, glow) {
   const hp = P.headP + P.lean * 0.5;
   // 오류: 고개 젓기
   const hy = P.headY + (ch.errUntil > fx.now ? Math.sin(t * 16) * 0.4 : 0);
-  partBox(lit, _B, 0, nY, nZ, hp, hy, 0, 0, 0.22, 0, 0.44, 0.44, 0.44, skin, id);
+  _nY = nY; _nZ = nZ; _hp = hp; _hy = hy;
+  Hd(0, 0.22, 0, 0.44, 0.44, 0.44, skin);
+  const hatOn = look.markKind === 'crown' || !!look.cap || !!A.hat;
+  drawHair(A.hairStyle, look.hair, hatOn, det, look.hairAcc || fx.shoeC);
+  if (A.hairAcc === 'band' && !hatOn) Hd(0, 0.515, 0.05, 0.5, 0.04, 0.09, look.hairAcc);
+  else if (A.hairAcc === 'pin' && !hatOn) Hd(0.15, 0.47, 0.13, 0.11, 0.035, 0.035, look.hairAcc);
   if (look.markKind === 'crown') {
-    partBox(lit, _B, 0, nY, nZ, hp, hy, 0, 0, 0.46, 0, 0.64, 0.06, 0.64, look.hat, id);
-    partBox(lit, _B, 0, nY, nZ, hp, hy, 0, 0, 0.56, 0, 0.42, 0.18, 0.42, look.hat, id);
-  } else if (look.cap) {
-    partBox(lit, _B, 0, nY, nZ, hp, hy, 0, 0, 0.47, -0.01, 0.47, 0.12, 0.47, look.cap, id);
-    partBox(lit, _B, 0, nY, nZ, hp, hy, 0, 0, 0.42, 0.27, 0.4, 0.03, 0.16, look.cap, id);
-  } else {
-    partBox(lit, _B, 0, nY, nZ, hp, hy, 0, 0, 0.46, -0.03, 0.48, 0.1, 0.48, look.hair, id);
-    partBox(lit, _B, 0, nY, nZ, hp, hy, 0, 0, 0.3, -0.2, 0.48, 0.24, 0.08, look.hair, id); // 뒷머리
+    Hd(0, 0.46, 0, 0.64, 0.06, 0.64, look.hat);
+    Hd(0, 0.56, 0, 0.42, 0.18, 0.42, look.hat);
+  } else if (look.cap || A.hat === 'cap' || A.hat === 'capBack') {
+    const cc = look.cap || look.hatC;
+    Hd(0, 0.47, -0.01, 0.47, 0.12, 0.47, cc);
+    Hd(0, 0.42, A.hat === 'capBack' && !look.cap ? -0.27 : 0.27, 0.4, 0.03, 0.16, cc);
+  } else if (A.hat === 'beanie') {
+    Hd(0, 0.5, -0.01, 0.5, 0.17, 0.5, look.hatC);
+    Hd(0, 0.42, -0.01, 0.52, 0.07, 0.52, look.hatC);
+    if (det) Hd(0, 0.62, -0.01, 0.11, 0.08, 0.11, look.hatC);
   }
-  // 눈(작은 점 둘) — 가까이서 사람처럼
-  for (const s of [-1, 1]) partBox(lit, _B, 0, nY, nZ, hp, hy, 0, s * 0.1, 0.25, 0.222, 0.05, 0.06, 0.01, fx.shoeC, id);
+  if (look.phones) { // 헤드폰: 머리띠 + 귀 덮개
+    const by = hatOn ? 0.555 : 0.525;
+    Hd(0, by, 0, 0.5, 0.05, 0.08, look.phones);
+    for (const s of [-1, 1]) { if (det) Hd(s * 0.26, 0.4, 0, 0.04, 0.24, 0.07, look.phones); Hd(s * 0.27, 0.25, 0, 0.08, 0.17, 0.15, look.phones); }
+  }
+  // 수염 · 안경 · 눈(작은 점 둘)
+  if (A.beard === 'beard') Hd(0, 0.07, 0.2, 0.46, 0.15, 0.07, look.hair);
+  else if (A.beard === 'mustache') Hd(0, 0.15, 0.226, 0.18, 0.04, 0.012, look.hair);
+  const ez = look.glasses ? (det ? 0.234 : 0.232) : 0.222;
+  if (look.glasses && !det) Hd(0, 0.25, 0.226, 0.36, 0.08, 0.008, look.glasses); // 멀리서는 안경 한 줄
+  else if (look.glasses) {
+    for (const s of [-1, 1]) { Hd(s * 0.1, 0.25, 0.224, 0.15, 0.12, 0.008, look.glasses); Hd(s * 0.1, 0.25, 0.228, 0.11, 0.08, 0.006, look.lens); }
+    Hd(0, 0.27, 0.224, 0.06, 0.02, 0.008, look.glasses);
+  }
+  for (const s of [-1, 1]) Hd(s * 0.1, 0.25, ez, 0.05, 0.06, 0.01, fx.shoeC);
+  if (F && det) {
+    for (const s of [-1, 1]) Hd(s * 0.125, 0.29, ez, 0.07, 0.015, 0.01, fx.shoeC);
+    Hd(0, 0.12, 0.222, 0.1, 0.025, 0.01, look.lip);
+  }
   // 머리 위: 스킬 금색 큐브 / 제자리 작업 작은 상자 / 오류 !
-  const topY = rootY + (nY + 0.75) * k;
+  const topY = rootY + (nY + 0.75 + (ch.headExtra || 0)) * k;
   if (goldOn || fx.metaSkill) {
     _cG.copy(fx.skill);
     glow.box(px, topY + 0.15 + 0.05 * Math.sin(t * 3), pz, 0.16, 0.16, 0.16, _cG, t * 2);

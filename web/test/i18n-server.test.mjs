@@ -7,7 +7,7 @@ import { localizeServerText, localizeLine, localizePanel, localizeEvent, localiz
 import { toolBrief, resultBrief } from '../../server/brief.mjs';
 import { inputPanel, resultPanel, progressPanel, tailPanel, sanitizePanel } from '../../server/panel.mjs';
 import { mainRoleLabel, claudePLabel } from '../../server/session.mjs';
-import { parsePlanMarkdown, PlanTracker, planStart } from '../../server/plans.mjs';
+import { parsePlanMarkdown } from '../../server/plans.mjs';
 import { Graph } from '../../server/graph.mjs';
 import { artStart } from '../../server/artifacts.mjs';
 
@@ -112,21 +112,7 @@ test('영어: 노드 라벨(메인·임시·기동기·claude -p)·계획 제목
   assert.equal(out[2], 'Main · (temp) scratch');
   assert.equal(out[3], 'Launcher · relaunch.sh');
 
-  // 계획: 실제 PlanTracker(Graph) 가 낸 meta.plans
-  const g = new Graph({ rootSessionId: 'm', keepAll: true, localSeq: true });
-  const T = (s) => new Date(Date.UTC(2026, 9, 24, 0, 0, s)).toISOString();
-  g.addNode({ id: 's:m', kind: 'main', label: mainRoleLabel('D:\\r\\proj') }, T(0));
-  const pt = new PlanTracker({ graph: g });
-  const run = (name, input, ts, tur = {}) => pt.end(planStart(name, input), { ok: true, tur, nodeId: 's:m', ts });
-  run('TodoWrite', { todos: [{ content: 'server', status: 'in_progress' }, { content: 'web', status: 'pending' }] }, T(1));
-  run('TaskCreate', { subject: '' }, T(2), { task: { id: '7' } });
-  const plans = clone(g.get('s:m').meta.plans);
-  assert.ok(plans.some((p) => p.title === '할 일') && plans.some((p) => p.title === '작업 목록'));
-  en(() => localizePlans(plans));
-  assert.ok(plans.some((p) => p.title === 'To-dos') && plans.some((p) => p.title === 'Tasks'));
-  assert.ok(plans.flatMap((p) => p.items).some((it) => it.t === 'Task 7'));
-  assert.ok(plans.flatMap((p) => p.items).some((it) => it.t === 'server'), '할 일 글은 데이터');
-  for (const p of plans) { assert.ok(!HANGUL.test(p.title)); for (const it of p.items) assert.ok(!HANGUL.test(it.t)); }
+  // 계획(자율 루프 판): 단계 설계서 '단계 N — …' 꼴만
   const ph = parsePlanMarkdown('# x\n### 단계 1 — Deploy\n**단계 1 상태**: ✅ done\n### 단계 2 — Verify\n**단계 2 상태**: pending\n');
   const pp = [{ title: 'x', items: clone(ph.items) }];
   en(() => localizePlans(pp));

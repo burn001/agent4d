@@ -97,7 +97,18 @@ export class VxSessCore {
       const lg = this.loungeOf(p);
       if (!lg) continue;
       const who = [this._char(p.nodeA, p.a), this._char(p.nodeB, p.b)];
-      who.forEach((ch, i) => { if (ch) ch.visit = { spot: lg.spots[i % lg.spots.length], until: now + VISIT_SEC / Math.max(1, Math.sqrt(v.ts || 1)) }; });
+      // 캐비닛 앞 자리: 다른 충돌로 와 있는 직원이 쓰는 자리는 건너뛰고 빈 자리부터(예전엔 늘 0·1번 → 두 묶음이 같은 점). 다 차면 자리에서
+      const used = new Set();
+      for (const o of v.chars.values()) if (o.visit && o.visit.until > now && o.visit.lounge === lg.id && !who.includes(o)) used.add(o.visit.idx);
+      const until = now + VISIT_SEC / Math.max(1, Math.sqrt(v.ts || 1));
+      for (const ch of who) {
+        if (!ch) continue;
+        let i = ch.visit && ch.visit.until > now && ch.visit.lounge === lg.id && !used.has(ch.visit.idx) ? ch.visit.idx : -1;
+        if (i < 0) { i = 0; while (i < lg.spots.length && used.has(i)) i++; }
+        if (i >= lg.spots.length) continue;
+        used.add(i);
+        ch.visit = { spot: lg.spots[i], until, lounge: lg.id, idx: i };
+      }
     }
     for (const id of [...this.seen.keys()]) if (!keep.has(id)) this.seen.delete(id);
   }

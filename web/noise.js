@@ -157,7 +157,9 @@ void main() {
   if (mo > 0.001) col *= 1.0 - 0.07 * mo * uMotion * step(0.86, hash(vec2(floor(uTime * 12.0), 3.0)));
   col += glow * vec3(0.5, 0.78, 1.0) * 0.55;
   col = clamp(col, 0.0, 1.0);
-  gl_FragColor = vec4(col, 1.0); // 이미 sRGB(renderer.outputColorSpace 기본값과 같음)
+  // §115 알파는 화면 복사본 그대로 — 계획 보드 자리 구멍(투명 픽셀)이 신호 열화 중에도 뚫린 채로(예전 1.0 이면 판 자리가 검게 덮였다)
+  float aOut = texture2D(tDiffuse, vUv).a;
+  gl_FragColor = vec4(col * aOut, aOut); // 이미 sRGB(renderer.outputColorSpace 기본값과 같음) · 구멍 밖은 aOut = 1
 }
 `;
 

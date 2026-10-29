@@ -1,17 +1,26 @@
-// 흐름(Flow) 3D 사용자 단말(나 · 사용자) 입체
-// 예전엔 섬 위 단말이 선(틀·받침)만이라 육각 기둥 노드 사이에서 납작한 빈 틀로 보였다. 이제 부피 있는 단말:
-//  육각 받침(윗면 상태색 고리) · 기둥 · 뒤로 기운 화면 패널(베젤 두께 · 뒷면 덮개) · 어두운 유리 화면(상태에 따라 발광·스캔라인) · 베젤 표시등
-//  + 어휘 그대로 바닥 그림자 원반 · 바닥 → 받침 밑면 점선 기둥줄.
+// 흐름(Flow) 3D 사용자 콘솔(나 · 사용자) — '홀로그램 콘솔 데스크'(예전 기운 모니터를 바꿈)
+// 반달 책상(윗면 안쪽 금빛 호 · 바깥 상태색 호) · 자판 판 · 투사기 막대 · 받침 기둥 · 바닥 발판 + 투사기에서 떠 있는 화면으로 오르는 빛 부채,
+// 떠 있는 홀로그램 화면에 글이 바로 뜬다(마지막 입력 첫 몇 단어 · 상태·시간 · 상태 표시 — 캔버스 텍스처, 12fps 이하·보이고 클 때만).
+// 보낼 때: 자판이 번쩍 → 글자 빛이 자판에서 화면으로 오르고(여기) → 화면에서 메인으로 금빛 빔(ix-core drawUser, 예전 그대로).
+// 질문이 오면 화면 옆에 금빛 '?' 카드가 선다. 어휘 그대로 바닥 그림자 원반 · 바닥 → 발판 점선 기둥줄.
 // 자리·방위·상태는 ix-core ixGeometry 의 geo.cons(입체 모드 env.solid — 화면 가운데·기저 r/v/n·방위·상태·투명도)를 그대로 따른다.
-// 화면 안 글줄·이름표·집기·빔 출발점도 같은 값이라 서로 어긋나지 않는다. 그리기 2번(단말 1 + 그림자 1, 인스턴싱), 프레임마다 객체 생성 없음.
+// 그리기: 책상 몸 인스턴싱 1 + 빛 부채 인스턴싱 1 + 그림자 1 + 화면 글 판(가까운 것 몇 개, 글 없으면 옅은 화면만).
 import * as THREE from 'three';
 import { CON3D, ixKeyColor } from '../ix-core.mjs';
 import { consoleLook, CON_LOD_PX } from './console-core.mjs';
+import { DESK, sendPhase } from './shape-core.mjs';
+import { userBook } from '../user-core.mjs';
+import { t as tr } from '../i18n.mjs';
 
 const MAX = 48;
-// 단말 부분 번호(aPart): 0 몸(베젤·덮개·기둥·받침 옆) · 1 화면 유리 · 2 표시등 · 3 받침 윗면 · 4 그림자 원반 · 5 점선 기둥줄
-const PED_Y = -1.78;   // 받침 윗면 높이(화면 가운데 기준)
-const PED_R = 0.78, PED_T = 0.16, PED_Z = -0.2;
+const SCREEN_MAX = 16; // 글 판(텍스처) 상한 — 화면에서 큰 것부터
+// 단말 부분 번호(aM.x): 0 몸 · 2 자판 판 · 3 책상 윗면 · 4 그림자 원반 · 5 점선 기둥줄 · 6 투사기 막대 · 7 빛 부채
+export const DESK3D = {
+  TOP_Y: -1.5, THICK: 0.14, ZC: 2.4, R0: 1.13, R1: 2.13, ANG: 0.91, // 책상 윗면 높이(화면 가운데 기준) · 두께 · 호 중심 z · 안/바깥 반지름 · 반각
+  PED_Y: -2.6, PED_Z: 0.8, FOOT_R: 0.6,                              // 발판 윗면 · 받침 z
+  KEY: { z: 1.0, w: 1.04, d: 0.36 }, EMIT: { z: 0.47, w: 0.93 },
+};
+const D = DESK3D;
 
 const VS = `
 attribute vec3 aNrm; attribute vec4 aM; // aM: 부분 · 세부(LOD 에서 뺌) · uv
@@ -23,18 +32,18 @@ void main() {
   vec3 C = instanceMatrix[3].xyz;
   mat3 R = mat3(instanceMatrix);
   vec3 w;
-  if (aM.x > 4.5) {            // 바닥 → 받침 밑면 점선 기둥줄(세로축 빌보드)
-    vec3 base = C + R * vec3(0.0, ${(PED_Y - PED_T).toFixed(3)}, ${PED_Z.toFixed(3)});
+  if (aM.x > 4.5 && aM.x < 5.5) {   // 바닥 → 발판 밑면 점선 기둥줄(세로축 빌보드)
+    vec3 base = C + R * vec3(0.0, ${(D.PED_Y - 0.08).toFixed(3)}, ${D.PED_Z.toFixed(3)});
     float hg = max(0.0, base.y - uFloor);
     vec3 b = vec3(base.x, uFloor + position.y * hg, base.z);
     vec3 tc = cameraPosition - b;
     vec3 r = normalize(vec3(tc.z, 0.0, -tc.x) + vec3(1e-4, 0.0, 0.0));
     w = b + r * position.x * uStemW;
     vUv = vec2(position.x, position.y * hg); vH = hg;
-  } else if (aM.x > 3.5) {     // 그림자 원반(바닥): 높을수록 넓고 옅게
-    vec3 base = C + R * vec3(0.0, ${PED_Y.toFixed(3)}, ${PED_Z.toFixed(3)});
+  } else if (aM.x > 3.5 && aM.x < 4.5) { // 그림자 원반(바닥): 높을수록 넓고 옅게
+    vec3 base = C + R * vec3(0.0, ${D.PED_Y.toFixed(3)}, ${(D.PED_Z + 0.6).toFixed(3)});
     float hg = max(0.0, base.y - uFloor);
-    float rr = 1.25 * (1.0 + hg * 0.035);
+    float rr = 2.0 * (1.0 + hg * 0.035);
     w = vec3(base.x + position.x * rr, uFloor + 0.05, base.z + position.z * rr);
     vUv = position.xz; vH = hg;
   } else {
@@ -48,18 +57,24 @@ void main() {
 }`;
 
 const FS = `
-uniform float uTime; uniform float uLight; uniform vec3 uBody; uniform vec3 uGlass; uniform vec3 uFog; uniform float uFogMax;
+uniform float uTime; uniform float uLight; uniform vec3 uBody; uniform vec3 uFog; uniform float uFogMax;
 varying vec3 vN; varying vec3 vW; varying vec2 vUv; varying float vPart; varying vec3 vCol; varying vec3 vLed; varying vec4 vP; varying vec4 vQ; varying float vFog; varying float vH;
-// vP: 투명도(페이드) · 발광 0..1 · 표시등 세기 0..1 · 호버/선택 / vQ: LOD · 씨앗 · 스캔라인 속도(0 = 멈춤) · 질문 대기
+// vCol 사용자 금빛(오류면 빨강) · vLed 상태색 / vP: 투명도 · 발광 0..1 · 자판 번쩍 0..1 · 호버/선택 / vQ: LOD · 씨앗 · 빛 부채 세기 · 질문 대기
 void main() {
   bool light = uLight > 0.5;
-  float fade = vP.x, glow = vP.y, ledK = vP.z, foc = vP.w;
+  float fade = vP.x, glow = vP.y, keyK = vP.z, foc = vP.w;
   if (fade < 0.004) discard;
+  if (vPart > 6.5) {          // 빛 부채: 투사기(아래)에서 화면(위)으로 옅어지는 사다리꼴 빛, 양옆 가장자리 흐림
+    float side = smoothstep(0.0, 0.22, vUv.x) * smoothstep(1.0, 0.78, vUv.x);
+    float a = mix(0.9, 0.12, vUv.y) * side * vQ.z;
+    gl_FragColor = linearToOutputTexel(vec4(mix(vLed, uFog, vFog * uFogMax), a * fade * (light ? 0.8 : 1.0)));
+    return;
+  }
   if (vPart > 4.5) {          // 점선 기둥줄: 아래로 흐르는 점선
     float lineA = smoothstep(1.0, 0.15, abs(vUv.x));
     float dash = step(0.5, fract(vUv.y * 0.7 + uTime * 0.35 * step(0.001, vQ.z)));
     float al = lineA * dash * (light ? 0.34 : 0.26) * (0.4 + 0.6 * smoothstep(0.0, 2.0, vUv.y));
-    gl_FragColor = linearToOutputTexel(vec4(mix(vCol, uFog, vFog * uFogMax), al * fade));
+    gl_FragColor = linearToOutputTexel(vec4(mix(vLed, uFog, vFog * uFogMax), al * fade));
     return;
   }
   if (vPart > 3.5) {          // 그림자 원반: 부드러운 어두운 가운데 + 상태색 옅은 테
@@ -68,7 +83,7 @@ void main() {
     float hk = 1.0 / (1.0 + vH * 0.05);
     float core = 1.0 - smoothstep(0.0, 1.0, dd); core *= core;
     float rim = smoothstep(0.08, 0.0, abs(dd - 0.82));
-    vec3 col = light ? mix(vec3(0.22, 0.27, 0.36), vCol, rim * 0.75) : mix(vec3(0.0), vCol, rim);
+    vec3 col = light ? mix(vec3(0.22, 0.27, 0.36), vLed, rim * 0.75) : mix(vec3(0.0), vLed, rim);
     float al = (core * (light ? 0.3 : 0.6) + rim * (light ? 0.16 : 0.2)) * hk;
     gl_FragColor = linearToOutputTexel(vec4(mix(col, uFog, vFog * uFogMax), al * fade));
     return;
@@ -79,35 +94,29 @@ void main() {
   float shade = light ? 0.78 + 0.22 * ndl : 0.42 + 0.58 * ndl;
   float fres = pow(1.0 - abs(dot(N, V)), 3.0);
   vec3 ink = light ? vCol * 0.85 : mix(vCol, vec3(1.0), 0.12);
+  vec3 sink = light ? vLed * 0.85 : mix(vLed, vec3(1.0), 0.1);
   vec3 col; float al = 1.0;
-  if (vPart < 0.5) {          // 몸: 어두운(라이트는 밝은) 판 + 방향광 음영 + 모서리선·가장자리 상태색 테(호버면 진하게)
+  if (vPart < 0.5) {          // 몸: 어두운(라이트는 밝은) 판 + 방향광 음영 + 가장자리 금빛 테(호버면 진하게)
     col = uBody * shade;
-    float e = min(min(vUv.x, 1.0 - vUv.x), min(vUv.y, 1.0 - vUv.y));
-    float edge = smoothstep(0.035, 0.0, e);
-    col = mix(col, ink, max(edge * (light ? 0.45 : 0.4), fres * (light ? 0.3 : 0.5)) * (0.4 + 0.6 * glow + foc * 0.6));
-  } else if (vPart < 1.5) {   // 화면 유리: 상태 발광 + 가장자리 어둡게 + 위에서 아래로 지나는 스캔라인 + 안쪽 테
-    vec2 q = vUv * 2.0 - 1.0;
-    float vig = 1.0 - 0.35 * dot(q * vec2(0.8, 1.0), q * vec2(0.8, 1.0));
-    col = mix(uGlass, vCol, 0.004 + 0.12 * glow * sqrt(glow)) * vig; // 대기 화면은 거의 검은 유리, 질문·답함일수록 금빛
-    col += vec3(0.006, 0.009, 0.016) * (light ? 3.0 : 1.0) * smoothstep(0.2, 1.0, vUv.y) * (1.0 - vUv.x * 0.6); // 유리 위쪽이 살짝 밝게
-    float sy = 1.0 - fract(uTime * vQ.z * 0.35 + vQ.y);
-    float scan = smoothstep(0.05, 0.0, abs(vUv.y - sy)) * step(0.001, vQ.z) * 0.06 * (0.3 + glow);
-    col = mix(col, vCol, scan);
-    float edge = max(smoothstep(0.035, 0.0, min(vUv.x, 1.0 - vUv.x)), smoothstep(0.05, 0.0, min(vUv.y, 1.0 - vUv.y)));
-    col = mix(col, ink, edge * (0.25 + 0.5 * glow + foc * 0.3));
-    col += vec3(1.0) * smoothstep(0.55, 0.0, abs(vUv.x + vUv.y * 0.6 - 0.35)) * smoothstep(0.45, 1.0, vUv.y) * (light ? 0.02 : 0.012); // 유리 반사(비스듬한 옅은 띠)
-    al = light ? 0.97 : 0.95;
-  } else if (vPart < 2.5) {   // 표시등
-    vec3 off = uBody * 0.8;
-    col = mix(off, light ? vLed * 0.9 : mix(vLed, vec3(1.0), 0.25), ledK);
-  } else {                    // 받침 윗면: 몸색 + 상태색 고리(발광에 따라)
+    col = mix(col, ink, fres * (light ? 0.25 : 0.4) * (0.4 + 0.6 * glow + foc * 0.6));
+  } else if (vPart < 2.5) {   // 자판 판: 옅은 금빛 판 + 키 격자, 보낼 때 번쩍
+    vec2 g = vec2(vUv.x * 12.0, vUv.y * 4.0);
+    vec2 f = abs(fract(g) - 0.5);
+    float key = smoothstep(0.42, 0.36, max(f.x, f.y)) * step(vUv.y, 0.75);
+    float bar = step(0.78, vUv.y) * step(0.3, vUv.x) * step(vUv.x, 0.7);
+    float k = 0.18 + 0.25 * glow + keyK * 0.8;
+    col = mix(uBody * shade, ink, (key + bar) * k + 0.06);
+  } else if (vPart < 3.5) {   // 책상 윗면: 몸색 + 안쪽 금빛 호 · 바깥 상태색 호
     col = uBody * (light ? 0.95 : 0.75 + 0.25 * ndl);
-    float d = length(vUv);
-    float ring = smoothstep(0.07, 0.0, abs(d - 0.8)) * (0.3 + 0.6 * glow + foc * 0.4);
-    col = mix(col, ink, ring);
+    float inner = smoothstep(0.06, 0.0, vUv.y) * (0.55 + 0.4 * glow + foc * 0.4);
+    float outer = smoothstep(0.94, 1.0, vUv.y) * (0.35 + 0.6 * glow + foc * 0.3);
+    col = mix(col, ink, inner);
+    col = mix(col, sink, outer);
+  } else {                    // 투사기 막대: 금빛 발광(빛 부채 세기만큼)
+    col = mix(uBody, ink, 0.45 + 0.55 * vQ.z);
   }
   col = mix(col, uFog, vFog * uFogMax);
-  gl_FragColor = linearToOutputTexel(vec4(col, al * fade * (1.0 - vFog * uFogMax * 0.3))); // 색은 THREE.Color(선형) — 화면 색공간으로(ix 선·이름표 색과 같은 색조)
+  gl_FragColor = linearToOutputTexel(vec4(col, al * fade * (1.0 - vFog * uFogMax * 0.3)));
 }`;
 
 // ───── 모양 틀(단말 지역 좌표: 화면 가운데 원점, x 오른쪽, y 위, z 앞(카메라 쪽)) ─────
@@ -120,62 +129,61 @@ function builder() {
   };
   return { P, N, M, idx, v, quad };
 }
-const rotX = (p, t) => [p[0], p[1] * Math.cos(t) - p[2] * Math.sin(t), p[1] * Math.sin(t) + p[2] * Math.cos(t)];
-/** 상자(가운데 c, 반크기 h), 지역 회전 x 축 t(화면 기울기) — 6면, 앞면(+z)은 skipFront 면 뺌 */
-function box(B, c, h, t, part, det, skipFront = false) {
-  const R = (p) => { const q = rotX(p, t); return [q[0] + c[0], q[1] + c[1], q[2] + c[2]]; };
+function box(B, c, h, part, det) {
   const F = [
-    [[0, 0, 1], [[-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]]],
-    [[0, 0, -1], [[1, -1, -1], [-1, -1, -1], [-1, 1, -1], [1, 1, -1]]],
-    [[1, 0, 0], [[1, -1, 1], [1, -1, -1], [1, 1, -1], [1, 1, 1]]],
-    [[-1, 0, 0], [[-1, -1, -1], [-1, -1, 1], [-1, 1, 1], [-1, 1, -1]]],
-    [[0, 1, 0], [[-1, 1, 1], [1, 1, 1], [1, 1, -1], [-1, 1, -1]]],
-    [[0, -1, 0], [[-1, -1, -1], [1, -1, -1], [1, -1, 1], [-1, -1, 1]]],
+    [[0, 0, 1], [[-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]]], [[0, 0, -1], [[1, -1, -1], [-1, -1, -1], [-1, 1, -1], [1, 1, -1]]],
+    [[1, 0, 0], [[1, -1, 1], [1, -1, -1], [1, 1, -1], [1, 1, 1]]], [[-1, 0, 0], [[-1, -1, -1], [-1, -1, 1], [-1, 1, 1], [-1, 1, -1]]],
+    [[0, 1, 0], [[-1, 1, 1], [1, 1, 1], [1, 1, -1], [-1, 1, -1]]], [[0, -1, 0], [[-1, -1, -1], [1, -1, -1], [1, -1, 1], [-1, -1, 1]]],
   ];
-  for (let k = 0; k < F.length; k++) {
-    if (skipFront && k === 0) continue;
-    const [n, cs] = F[k];
-    const pts = cs.map((s) => R([s[0] * h[0], s[1] * h[1], s[2] * h[2]]));
-    B.quad(pts[0], pts[1], pts[2], pts[3], rotX(n, t), part, det);
-  }
+  for (const [n, cs] of F) { const p = cs.map((s) => [c[0] + s[0] * h[0], c[1] + s[1] * h[1], c[2] + s[2] * h[2]]); B.quad(p[0], p[1], p[2], p[3], n, part, det); }
 }
-/** 받침: 육각 기둥(윗면은 부분 3 — uv = 반지름 정규화 좌표) */
-function pedestal(B, y, r, th, z) {
-  const H = [];
-  for (let i = 0; i < 6; i++) { const a = Math.PI / 6 + (Math.PI / 3) * i; H.push([Math.cos(a) * r, Math.sin(a) * r]); }
+/** 육각 기둥(가운데 (x, z), y0..y1, 반지름 r0 아래 · r1 위), 윗면 포함 */
+function hexCol(B, x, z, y0, y1, r0, r1, part, det, top = true) {
+  const H = (r, y) => Array.from({ length: 6 }, (_, i) => { const a = Math.PI / 6 + (Math.PI / 3) * i; return [x + Math.cos(a) * r, y, z + Math.sin(a) * r]; });
+  const lo = H(r0, y0), hi = H(r1, y1);
   for (let i = 0; i < 6; i++) {
-    const a = H[i], b = H[(i + 1) % 6], am = Math.PI / 6 + (Math.PI / 3) * (i + 0.5), n = [Math.cos(am), 0, Math.sin(am)];
-    B.quad([a[0], y - th, a[1] + z], [b[0], y - th, b[1] + z], [b[0], y, b[1] + z], [a[0], y, a[1] + z], n, 0, 0);
+    const j = (i + 1) % 6, am = Math.PI / 6 + (Math.PI / 3) * (i + 0.5);
+    B.quad(lo[i], lo[j], hi[j], hi[i], [Math.cos(am), 0, Math.sin(am)], part, det);
   }
-  const c = B.v([0, y, z], [0, 1, 0], 3, 0, 0, 0);
-  const ring = H.map((h) => B.v([h[0], y, h[1] + z], [0, 1, 0], 3, 0, h[0] / r, h[1] / r));
-  for (let i = 0; i < 6; i++) B.idx.push(c, ring[(i + 1) % 6], ring[i]);
+  if (top) { const c = B.v([x, y1, z], [0, 1, 0], part, det); const ring = hi.map((p) => B.v(p, [0, 1, 0], part, det)); for (let i = 0; i < 6; i++) B.idx.push(c, ring[(i + 1) % 6], ring[i]); }
 }
 function consoleGeometry() {
   const B = builder();
-  const W = CON3D.W, H = CON3D.H, bz = CON3D.BEZEL, t = -CON3D.TILT, D = 0.2; // 음수 = 위가 뒤로(화면 법선이 앞·약간 위, ix-core conBasis 와 같음)
-  // 베젤 몸(앞면은 화면이 덮음 — 앞 테두리만 보이게 앞면 대신 테 4장)
-  box(B, rotX([0, 0, -D / 2], t), [W + bz, H + bz, D / 2], t, 0, 0, true);
-  const fz = 0.0, T = (p) => rotX(p, t), fn = rotX([0, 0, 1], t);
-  const rim = (x0, y0, x1, y1) => B.quad(T([x0, y0, fz]), T([x1, y0, fz]), T([x1, y1, fz]), T([x0, y1, fz]), fn, 0, 0);
-  rim(-W - bz, -H - bz, W + bz, -H); rim(-W - bz, H, W + bz, H + bz); rim(-W - bz, -H, -W, H); rim(W, -H, W + bz, H);
-  // 화면 유리(앞면 살짝 안쪽)
-  B.quad(T([-W, -H, fz - 0.012]), T([W, -H, fz - 0.012]), T([W, H, fz - 0.012]), T([-W, H, fz - 0.012]), fn, 1, 0);
-  // 뒷면 덮개(가운데가 불룩한 등판 두 단) — 세부
-  box(B, rotX([0, -0.04, -D - 0.1], t), [W * 0.68, H * 0.7, 0.1], t, 0, 1);
-  box(B, rotX([0, -0.08, -D - 0.24], t), [W * 0.36, H * 0.42, 0.06], t, 0, 1);
-  // 표시등(베젤 아래 오른쪽) — 세부
-  box(B, rotX([W - 0.12, -H - bz * 0.5, 0.025], t), [0.09, 0.035, 0.03], t, 2, 1);
-  // 목: 등판 아래 → 받침
-  const nb = rotX([0, -0.2, -D - 0.1], t);
-  box(B, [0, (nb[1] + PED_Y) / 2, PED_Z], [0.11, (nb[1] - PED_Y) / 2, 0.11], 0, 0, 0);
-  // 받침(육각 판)
-  pedestal(B, PED_Y, PED_R, PED_T, PED_Z);
+  const y1 = D.TOP_Y, y0 = D.TOP_Y - D.THICK, A = D.ANG, SEG = 20;
+  const pt = (a, r, y) => [Math.sin(a) * r, y, D.ZC - Math.cos(a) * r];
+  // 반달 책상: 윗면(부분 3, uv = 호 · 반지름) · 밑면 · 안쪽/바깥 옆 · 양 끝
+  for (let i = 0; i < SEG; i++) {
+    const a0 = -A + (2 * A * i) / SEG, a1 = -A + (2 * A * (i + 1)) / SEG, u0 = i / SEG, u1 = (i + 1) / SEG;
+    B.quad(pt(a0, D.R1, y1), pt(a1, D.R1, y1), pt(a1, D.R0, y1), pt(a0, D.R0, y1), [0, 1, 0], 3, 0, [[u0, 1], [u1, 1], [u1, 0], [u0, 0]]);
+    B.quad(pt(a0, D.R0, y0), pt(a1, D.R0, y0), pt(a1, D.R1, y0), pt(a0, D.R1, y0), [0, -1, 0], 0, 0);
+    const no = [-Math.sin((a0 + a1) / 2), 0, Math.cos((a0 + a1) / 2)]; // 바깥(뒤, 화면 쪽) 옆 법선
+    B.quad(pt(a1, D.R1, y0), pt(a0, D.R1, y0), pt(a0, D.R1, y1), pt(a1, D.R1, y1), [-no[0], 0, -no[2]], 0, 0);
+    B.quad(pt(a0, D.R0, y0), pt(a1, D.R0, y0), pt(a1, D.R0, y1), pt(a0, D.R0, y1), no, 0, 0);
+  }
+  for (const s of [-1, 1]) { const a = s * A; B.quad(pt(a, D.R0, y0), pt(a, D.R1, y0), pt(a, D.R1, y1), pt(a, D.R0, y1), [s * Math.cos(a), 0, s * Math.sin(a)], 0, 0); }
+  // 자판 판(윗면 바로 위) · 투사기 막대(뒤쪽 가장자리)
+  const K = D.KEY, ky = y1 + 0.012;
+  B.quad([-K.w / 2, ky, K.z + K.d / 2], [K.w / 2, ky, K.z + K.d / 2], [K.w / 2, ky, K.z - K.d / 2], [-K.w / 2, ky, K.z - K.d / 2], [0, 1, 0], 2, 1);
+  box(B, [0, y1 + 0.035, D.EMIT.z], [D.EMIT.w / 2, 0.035, 0.05], 6, 0);
+  // 받침 기둥 · 발판
+  hexCol(B, 0, D.PED_Z, D.PED_Y, y0, 0.24, 0.13, 0, 0, false);
+  hexCol(B, 0, D.PED_Z, D.PED_Y - 0.08, D.PED_Y, D.FOOT_R * 1.06, D.FOOT_R, 0, 0, true);
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(B.P, 3));
   g.setAttribute('aNrm', new THREE.Float32BufferAttribute(B.N, 3));
   g.setAttribute('aM', new THREE.Float32BufferAttribute(B.M, 4));
   g.setIndex(B.idx);
+  return g;
+}
+/** 빛 부채: 투사기 막대 윗변 → 떠 있는 화면 아랫변(기운 화면 — CON3D.TILT) */
+function fanGeometry() {
+  const t = CON3D.TILT, by = -CON3D.H * Math.cos(t), bz = CON3D.H * Math.sin(t), ey = D.TOP_Y + 0.07, ez = D.EMIT.z, ew = D.EMIT.w / 2;
+  const P = [-ew, ey, ez, ew, ey, ez, CON3D.W, by, bz, -CON3D.W, by, bz];
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  g.setAttribute('aNrm', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1], 3));
+  g.setAttribute('aM', new THREE.Float32BufferAttribute([7, 0, 0, 0, 7, 0, 1, 0, 7, 0, 1, 1, 7, 0, 0, 1], 4));
+  g.setIndex([0, 1, 2, 0, 2, 3]);
   return g;
 }
 function shadowGeometry() {
@@ -189,41 +197,135 @@ function shadowGeometry() {
   return g;
 }
 
+// ───── 떠 있는 화면 글(캔버스) ─────
+const ST_COL = { idle: '#7b88a8', working: '#66ccff', answered: '#66ffaa', asking: '#fcd34d', alert: '#ff5566' };
+const ST_COL_L = { idle: '#5b6680', working: '#1f7fc4', answered: '#0f9e6a', asking: '#a16207', alert: '#d4313f' };
+const FONT = '"IBM Plex Sans KR","Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif';
+const MONO = '"JetBrains Mono",D2Coding,Consolas,ui-monospace,monospace';
+const rgba = (hex, a) => { const c = parseInt(hex.slice(1), 16); return `rgba(${(c >> 16) & 255},${(c >> 8) & 255},${c & 255},${a})`; };
+function fitText(x, s, maxW) { if (x.measureText(s).width <= maxW) return s; while (s.length > 1 && x.measureText(s + '…').width > maxW) s = s.slice(0, -1); return s + '…'; }
+function wrap2(x, s, maxW) {
+  const out = []; let cur = '';
+  for (const ch of s) { if (cur && x.measureText(cur + ch).width > maxW) { out.push(cur); cur = ch === ' ' ? '' : ch; if (out.length === 2) break; } else cur += ch; }
+  if (out.length < 2 && cur) out.push(cur);
+  if (out.length === 2 && x.measureText(s).width > maxW * 2) out[1] = fitText(x, out[1] + '……', maxW);
+  return out;
+}
+/** 화면 한 장 그리기(홀로그램: 옅은 바탕 + 주사선 + 모서리 금빛 괄호 + 글). text = false 면 글 없이 바탕만(멀 때) */
+export function drawDeskScreen(x, w, h, info, t, o = {}) {
+  const st = (info && info.state) || 'idle', L = !!o.light, C = (L ? ST_COL_L : ST_COL)[st] || ST_COL.idle;
+  const gold = L ? '#a16207' : '#fcd34d';
+  x.clearRect(0, 0, w, h);
+  x.fillStyle = L ? 'rgba(20,40,90,.07)' : 'rgba(40,80,150,.13)'; x.fillRect(0, 0, w, h);
+  const pul = st === 'asking' && !o.reduced ? 0.6 + 0.4 * Math.sin(t * 5) : 1;
+  const tint = ({ idle: 0.02, working: 0.09, answered: 0.12, asking: 0.2, alert: 0.16 }[st] || 0.04) * pul;
+  x.fillStyle = rgba(C, tint); x.fillRect(0, 0, w, h);
+  x.fillStyle = L ? 'rgba(0,0,0,.025)' : 'rgba(255,255,255,.03)'; for (let y = 0; y < h; y += 4) x.fillRect(0, y, w, 1);
+  if (st !== 'idle' && !o.reduced) { const sy = ((t * (st === 'working' ? 0.45 : 0.25)) % 1) * h; const g = x.createLinearGradient(0, sy - 18, 0, sy + 18); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.5, rgba(C, 0.14)); g.addColorStop(1, 'rgba(255,255,255,0)'); x.fillStyle = g; x.fillRect(0, sy - 18, w, 36); }
+  x.strokeStyle = rgba(gold, 0.6); x.lineWidth = Math.max(2, w / 200); const k = w * 0.06;
+  for (const [cx, cy, sx, sy] of [[3, 3, 1, 1], [w - 3, 3, -1, 1], [w - 3, h - 3, -1, -1], [3, h - 3, 1, -1]]) { x.beginPath(); x.moveTo(cx + sx * k, cy); x.lineTo(cx, cy); x.lineTo(cx, cy + sy * k); x.stroke(); }
+  if (o.text === false) return;
+  const u = Math.min(h / 7, w / 11.5), pad = u * 0.8, maxW = w - pad * 2;
+  let y = pad + u * 0.5;
+  x.textAlign = 'left'; x.textBaseline = 'middle';
+  x.font = `600 ${u * 0.6}px ${MONO}`; x.fillStyle = rgba(gold, 0.82); x.fillText(tr('cards.user.title'), pad, y);
+  x.beginPath(); x.arc(w - pad, y, u * 0.22, 0, Math.PI * 2); x.fillStyle = C; x.globalAlpha = st === 'asking' && !o.reduced ? 0.4 + 0.6 * (Math.sin(t * 8) > 0 ? 1 : 0) : 1; x.fill(); x.globalAlpha = 1;
+  y += u * 1.3;
+  x.font = `700 ${u * 0.92}px ${FONT}`; x.fillStyle = st === 'idle' ? (L ? '#6b7690' : '#56627f') : (L ? '#7a4a00' : '#fde68a');
+  const lines = info && info.text ? wrap2(x, info.text, maxW) : ['—'];
+  for (const l of lines) { x.fillText(l, pad, y); y += u * 1.15; }
+  if (lines.length < 2) y += u * 1.15 * 0.5;
+  x.font = `500 ${u * 0.74}px ${FONT}`; x.fillStyle = C; x.fillText(fitText(x, (info && info.status) || '', maxW), pad, y);
+  // 아래 상태 표시: 작업 중 = 흐르는 점, 질문 = 선택지 칸, 답함 = 숨 쉬는 줄, 대기 = 깜빡이는 커서
+  const by = h - pad - u * 0.2;
+  if (st === 'working') {
+    x.fillStyle = rgba(C, 0.25); x.fillRect(pad, by - 2, maxW, 4);
+    const p = o.reduced ? 0.5 : (t * 0.5) % 1; x.fillStyle = C; x.beginPath(); x.arc(pad + maxW * p, by, u * 0.2, 0, Math.PI * 2); x.fill();
+    x.fillStyle = rgba(C, 0.7); x.fillRect(pad, by - 2, maxW * p, 4);
+  } else if (st === 'asking') {
+    const n = Math.max(2, Math.min(4, (info && info.opts) || 3)), pw = Math.min(maxW / (n + 0.4), u * 2.2), gap = (maxW - pw * n) / Math.max(1, n - 1);
+    for (let i = 0; i < n; i++) { const on = o.reduced || Math.sin(t * 4 - i * 0.9) > 0; const X = pad + i * (pw + gap); x.fillStyle = rgba(gold, on ? 0.32 : 0.12); x.fillRect(X, by - u * 0.42, pw, u * 0.84); x.strokeStyle = rgba(gold, 0.8); x.lineWidth = 2; x.strokeRect(X, by - u * 0.42, pw, u * 0.84); x.fillStyle = L ? '#7a4a00' : '#fde68a'; x.font = `700 ${u * 0.6}px ${MONO}`; x.textAlign = 'center'; x.fillText(String(i + 1), X + pw / 2, by + 1); x.textAlign = 'left'; }
+  } else if (st === 'answered') {
+    x.fillStyle = rgba(C, 0.35 + 0.35 * (o.reduced ? 1 : 0.5 + 0.5 * Math.sin(t * 3))); x.fillRect(pad, by - 2, maxW * 0.6, 4);
+  } else {
+    x.fillStyle = rgba(C, o.reduced || Math.sin(t * 3) > 0 ? 0.8 : 0.1); x.fillRect(pad, by - u * 0.35, u * 0.4, u * 0.7);
+  }
+}
+
 export class FlowConsoles {
   constructor(scene, view) {
-    this.view = view;
-    const geo = consoleGeometry(), sgeo = shadowGeometry();
+    this.view = view; this.scene = scene;
+    const geo = consoleGeometry(), fgeo = fanGeometry(), sgeo = shadowGeometry();
     const mk = (n) => new THREE.InstancedBufferAttribute(new Float32Array(MAX * n), n).setUsage(THREE.DynamicDrawUsage);
     this.aCol = mk(3); this.aLed = mk(3); this.aP = mk(4); this.aQ = mk(4);
-    for (const g of [geo, sgeo]) { g.setAttribute('iCol', this.aCol); g.setAttribute('iLed', this.aLed); g.setAttribute('iP', this.aP); g.setAttribute('iQ', this.aQ); }
-    this.uniforms = { uTime: { value: 0 }, uLight: { value: 0 }, uBody: { value: new THREE.Color() }, uGlass: { value: new THREE.Color() }, uFog: { value: new THREE.Color() }, uFogMax: { value: 0.5 },
+    for (const g of [geo, fgeo, sgeo]) { g.setAttribute('iCol', this.aCol); g.setAttribute('iLed', this.aLed); g.setAttribute('iP', this.aP); g.setAttribute('iQ', this.aQ); }
+    this.uniforms = { uTime: { value: 0 }, uLight: { value: 0 }, uBody: { value: new THREE.Color() }, uFog: { value: new THREE.Color() }, uFogMax: { value: 0.5 },
       uFogNear: { value: 80 }, uFogFar: { value: 300 }, uFloor: { value: 0 }, uStemW: { value: 0.08 } };
     this.mat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: VS, fragmentShader: FS, transparent: true, depthWrite: true, side: THREE.DoubleSide });
     this.mesh = new THREE.InstancedMesh(geo, this.mat, MAX);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.mesh.count = 0; this.mesh.frustumCulled = false;
-    this.mesh.renderOrder = 1.6; // 칩 색(1)·칩 깊이(1.5) 다음 — 앞의 칩에 가려지고 뒤의 칩은 가림, 빔·글줄(2·3)은 그 뒤
+    this.mesh.renderOrder = 1.6; // 칩 깊이(0.9)·색(1) 다음 — 앞의 칩에 가려지고 뒤의 칩은 가림, 빔·글줄(2·3)은 그 뒤
+    this.fmat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: VS, fragmentShader: FS, transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
+    this.fan = new THREE.InstancedMesh(fgeo, this.fmat, MAX);
+    this.fan.instanceMatrix = this.mesh.instanceMatrix;
+    this.fan.count = 0; this.fan.frustumCulled = false; this.fan.renderOrder = 1.65;
     this.smat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: VS, fragmentShader: FS, transparent: true, depthWrite: false, side: THREE.DoubleSide });
     this.shadow = new THREE.InstancedMesh(sgeo, this.smat, MAX);
     this.shadow.instanceMatrix = this.mesh.instanceMatrix;
     this.shadow.count = 0; this.shadow.frustumCulled = false; this.shadow.renderOrder = 0.5;
-    scene.add(this.shadow, this.mesh);
+    scene.add(this.shadow, this.mesh, this.fan);
+    // 떠 있는 화면 글 판 풀(콘솔마다 하나, 큰 것부터 SCREEN_MAX)
+    this.screens = [];
+    this.sgeo = new THREE.PlaneGeometry(CON3D.W * 2, CON3D.H * 2);
+    this.qgeo = new THREE.PlaneGeometry(0.62, 0.62);
     this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._p = new THREE.Vector3(); this._s = new THREE.Vector3(1, 1, 1); this._e = new THREE.Euler(); this._c = new THREE.Color();
     this._keyCol = new Map();
     this.isLight = false;
     this.count = 0;
+    this._cand = [];
   }
   applyTheme(isLight) {
     this.isLight = !!isLight;
     this.uniforms.uLight.value = this.isLight ? 1 : 0;
     this.uniforms.uBody.value.set(this.isLight ? '#d3dae5' : '#1d2740');
-    this.uniforms.uGlass.value.set(this.isLight ? '#2a3243' : '#060a14'); // 라이트도 어두운 화면 유리 — 글줄(배경 쪽으로 섞인 금빛)이 밝게 읽힘
+    this.fmat.blending = this.isLight ? THREE.NormalBlending : THREE.AdditiveBlending; this.fmat.needsUpdate = true;
+    for (const s of this.screens) { s.mat.blending = this.isLight ? THREE.NormalBlending : THREE.AdditiveBlending; s.mat.needsUpdate = true; s.key = ''; s.qmat.needsUpdate = true; this._drawQ(s); }
     this._keyCol.clear();
   }
   _col(key) {
     let c = this._keyCol.get(key);
     if (!c) { c = new THREE.Color(ixKeyColor(key, this.isLight)); this._keyCol.set(key, c); }
     return c;
+  }
+  _drawQ(s) {
+    const x = s.qx, L = this.isLight; x.clearRect(0, 0, 128, 128);
+    x.fillStyle = L ? 'rgba(255,248,225,.92)' : 'rgba(40,30,0,.72)'; x.beginPath(); x.arc(64, 64, 56, 0, Math.PI * 2); x.fill();
+    x.strokeStyle = L ? '#a16207' : '#fcd34d'; x.lineWidth = 6; x.stroke();
+    x.font = `700 74px ${FONT}`; x.fillStyle = L ? '#a16207' : '#fcd34d'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('?', 64, 68);
+    s.qtex.needsUpdate = true;
+  }
+  _screen(i) {
+    let s = this.screens[i];
+    if (s) return s;
+    const c = document.createElement('canvas'); c.width = DESK.TEX_W; c.height = DESK.TEX_H;
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+    const bl = this.isLight ? THREE.NormalBlending : THREE.AdditiveBlending;
+    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: bl });
+    const grp = new THREE.Group();
+    const scr = new THREE.Mesh(this.sgeo, mat); scr.raycast = () => {}; scr.renderOrder = 2.5; scr.rotation.x = -CON3D.TILT;
+    const qc = document.createElement('canvas'); qc.width = qc.height = 128;
+    const qtex = new THREE.CanvasTexture(qc); qtex.colorSpace = THREE.SRGBColorSpace;
+    const qmat = new THREE.MeshBasicMaterial({ map: qtex, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+    const q = new THREE.Mesh(this.qgeo, qmat); q.raycast = () => {}; q.renderOrder = 2.6; q.visible = false;
+    const gg = new THREE.BufferGeometry(); gg.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(24), 3));
+    const gm = new THREE.PointsMaterial({ size: 0.16, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, color: 0xfcd34d });
+    const glyph = new THREE.Points(gg, gm); glyph.raycast = () => {}; glyph.visible = false; glyph.renderOrder = 2.6; glyph.frustumCulled = false;
+    grp.add(scr, q, glyph); grp.visible = false;
+    this.scene.add(grp);
+    s = this.screens[i] = { c, x: c.getContext('2d'), tex, mat, grp, scr, q, qmat, qtex, qx: qc.getContext('2d'), glyph, key: '', at: -1 };
+    this._drawQ(s);
+    return s;
   }
   /** cons = ix 의 geo.cons(입체 항목만 그림) */
   update(now, cons) {
@@ -236,27 +338,80 @@ export class FlowConsoles {
     U.uFloor.value = view.tierFloor ?? 0;
     const C = this.aCol.array, L = this.aLed.array, A = this.aP.array, Q = this.aQ.array;
     const reduced = !!view.reduced;
+    const nowMs = view.clock ? view.clock() : Date.now();
+    const cand = this._cand; cand.length = 0;
     let n = 0;
     for (const con of cons || []) {
       if (!con.r || n >= MAX) continue;
       const look = consoleLook(con, now, reduced);
-      this._p.set(con.x, con.y, con.z);
+      this._p.set(con.x, con.y, con.z).addScaledVector(this._v || (this._v = new THREE.Vector3()).set(con.n[0], con.n[1], con.n[2]), -CON3D.FACE_OUT); // 화면 가운데 S
       this._q.setFromEuler(this._e.set(0, con.yaw || 0, 0));
       this._m.compose(this._p, this._q, this._s);
       this.mesh.setMatrixAt(n, this._m);
-      const kc = this._col(con.key || 'user'), lc = this._col(look.led);
+      const kc = this._col(con.key || 'user'), lc = this._col(look.led === 'dim' ? 'dim' : look.led);
+      // 보낸 직후(사람 입력 시각 = 장부 promptAt): 자판 번쩍 → 글자 빛이 화면으로
+      const e = userBook.get(con.root);
+      const ph = e && e.promptAt != null ? sendPhase((nowMs - e.promptAt) / 1000) : -1;
+      const keyK = ph >= 0 && !reduced ? (ph < 0.35 ? 0.5 + 0.5 * (Math.sin(now * 40) > 0 ? 1 : 0) : 0) : 0;
+      const fanK = (con.state === 'idle' ? 0.06 : con.asking ? 0.26 + (reduced ? 0 : 0.1 * Math.sin(now * 5)) : 0.17) + (ph > 0.2 && ph < 0.6 ? 0.2 : 0);
       C[n * 3] = kc.r; C[n * 3 + 1] = kc.g; C[n * 3 + 2] = kc.b;
-      L[n * 3] = lc.r; L[n * 3 + 1] = lc.g; L[n * 3 + 2] = lc.b;
+      const fanC = con.asking || ph >= 0 ? kc : lc;
+      L[n * 3] = fanC.r; L[n * 3 + 1] = fanC.g; L[n * 3 + 2] = fanC.b;
       const foc = view.hoverId === con.root || view.focusId === con.root ? 1 : 0;
-      A[n * 4] = con.fade ?? 1; A[n * 4 + 1] = look.glow; A[n * 4 + 2] = look.ledK; A[n * 4 + 3] = foc;
-      Q[n * 4] = (con.px ?? 999) < CON_LOD_PX ? 1 : 0; Q[n * 4 + 1] = (n * 0.37) % 1; Q[n * 4 + 2] = look.scan; Q[n * 4 + 3] = con.asking ? 1 : 0;
+      A[n * 4] = con.fade ?? 1; A[n * 4 + 1] = look.glow; A[n * 4 + 2] = keyK; A[n * 4 + 3] = foc;
+      Q[n * 4] = (con.px ?? 999) < CON_LOD_PX ? 1 : 0; Q[n * 4 + 1] = (n * 0.37) % 1; Q[n * 4 + 2] = fanK * (this.isLight ? 1.4 : 1); Q[n * 4 + 3] = con.asking ? 1 : 0;
+      if ((con.px ?? 0) >= DESK.BADGE_PX) cand.push({ con, ph, fade: con.fade ?? 1 });
       n++;
     }
-    this.mesh.count = n; this.shadow.count = n; this.count = n;
+    this.mesh.count = n; this.shadow.count = n; this.fan.count = n; this.count = n;
     if (n) {
       this.mesh.instanceMatrix.needsUpdate = true;
       this.aCol.needsUpdate = true; this.aLed.needsUpdate = true; this.aP.needsUpdate = true; this.aQ.needsUpdate = true;
     }
+    // 떠 있는 화면: 큰 것부터 SCREEN_MAX — 글은 TEXT_PX 이상일 때만(작으면 옅은 화면만), 다시 그리기 ≤ 12fps
+    cand.sort((a, b) => (b.con.px || 0) - (a.con.px || 0));
+    const m = Math.min(SCREEN_MAX, cand.length);
+    for (let i = 0; i < m; i++) {
+      const { con, ph, fade } = cand[i], s = this._screen(i);
+      const info = view.ix && view.ix.consoleInfo ? view.ix.consoleInfo(con.root) : null;
+      const opts = e2((con.px || 0) >= DESK.TEXT_PX);
+      const key = con.root + '|' + (info ? info.state + info.text + info.status : '') + '|' + opts.text + '|' + this.isLight;
+      const moving = !reduced && info && info.state !== 'idle';
+      if (key !== s.key || (moving && now - s.at >= 1 / DESK.FPS)) {
+        s.key = key; s.at = now;
+        drawDeskScreen(s.x, DESK.TEX_W, DESK.TEX_H, info ? { ...info, opts: e3(con.root) } : null, now, { light: this.isLight, reduced, text: opts.text });
+        s.tex.needsUpdate = true;
+      }
+      s.grp.position.set(con.x - con.n[0] * CON3D.FACE_OUT, con.y - con.n[1] * CON3D.FACE_OUT, con.z - con.n[2] * CON3D.FACE_OUT);
+      s.grp.rotation.set(0, con.yaw || 0, 0);
+      s.mat.opacity = Math.min(1, fade * (info && info.state === 'idle' ? 0.6 : 1) * (this.isLight ? 1 : 1));
+      // 질문 카드(화면 오른쪽 위 바깥)
+      s.q.visible = !!con.asking;
+      if (s.q.visible) { s.q.position.set(CON3D.W + 0.55, CON3D.H * 0.75 + (reduced ? 0 : 0.06 * Math.sin(now * 3)), 0.05); s.qmat.opacity = fade; }
+      // 보낸 직후 글자 빛: 자판 → 화면 아랫변
+      const gl = s.glyph;
+      gl.visible = ph >= 0 && ph < 0.75 && !reduced;
+      if (gl.visible) {
+        const arr = gl.geometry.getAttribute('position').array, by = -CON3D.H * Math.cos(CON3D.TILT) + 0.1, bz = CON3D.H * Math.sin(CON3D.TILT);
+        for (let k = 0; k < 8; k++) {
+          const u = Math.min(1, Math.max(0, (ph / 0.75 - k * 0.04) / 0.7));
+          arr[k * 3] = -0.4 + k * 0.11 + Math.sin(k + now) * 0.05; arr[k * 3 + 1] = D.TOP_Y + 0.05 + (by - D.TOP_Y) * u; arr[k * 3 + 2] = D.KEY.z + (bz - D.KEY.z) * u;
+        }
+        gl.geometry.getAttribute('position').needsUpdate = true;
+        gl.material.opacity = fade * Math.sin(Math.min(1, ph / 0.75) * Math.PI);
+        gl.material.blending = this.isLight ? THREE.NormalBlending : THREE.AdditiveBlending;
+        gl.material.color.set(this.isLight ? '#a16207' : '#fcd34d');
+      }
+      s.grp.visible = fade > 0.02;
+    }
+    for (let i = m; i < this.screens.length; i++) this.screens[i].grp.visible = false;
   }
-  dispose() { this.mesh.removeFromParent(); this.shadow.removeFromParent(); this.mesh.geometry.dispose(); this.shadow.geometry.dispose(); this.mat.dispose(); this.smat.dispose(); }
+  dispose() {
+    this.mesh.removeFromParent(); this.shadow.removeFromParent(); this.fan.removeFromParent();
+    this.mesh.geometry.dispose(); this.shadow.geometry.dispose(); this.fan.geometry.dispose(); this.mat.dispose(); this.smat.dispose(); this.fmat.dispose();
+    for (const s of this.screens) { s.grp.removeFromParent(); s.mat.dispose(); s.tex.dispose(); s.qmat.dispose(); s.qtex.dispose(); s.glyph.geometry.dispose(); s.glyph.material.dispose(); }
+    this.screens = []; this.sgeo.dispose(); this.qgeo.dispose();
+  }
 }
+const e2 = (text) => ({ text });
+const e3 = (root) => { const e = userBook.get(root); return e && e.ask ? e.ask.opts : 0; };

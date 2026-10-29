@@ -79,6 +79,9 @@
 }
 .ix-con b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; max-width: 196px; }
 .ix-con span { font-weight: 500; font-size: 9.5px; color: rgba(255, 240, 200, .74); }
+/* 흐름 3D 홀로그램 콘솔: 화면에 글이 바로 뜨므로 멀어서 글이 안 읽힐 때만 작은 '나' 배지 */
+.ix-con.badge { padding: 0 6px 1px; border-radius: 9px; font-size: 10px; }
+.ix-con.badge span { display: none; }
 .ix-con.st-asking { border-color: color-mix(in srgb, var(--ix-c, #fcd34d) 70%, transparent); }
 .ix-con.st-asking span, .ix-con.st-alert span { color: var(--ix-c, #fcd34d); }
 :root[data-theme="light"] .ix-con { background: rgba(255, 255, 255, .86); }

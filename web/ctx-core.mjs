@@ -155,6 +155,19 @@ export function pickGaugeNode({ nodes, focusId = null, root = null, streamAll = 
   return best ? { id: best.id, why: 'max' } : null;
 }
 
+/**
+ * 전체 보기 열화 대상 루트: 살아 있는(live === true) 세션만. 지난(recent)·끝난 루트와 /clear 로 끝난 앞 세션
+ * (새 메인 meta.clearedFrom)은 뺀다 — 옛 노드의 큰 ctx 가 같은 섬에 남아 /clear 뒤에도 열화가 높게 남던 문제(10.28.).
+ * 그 노드의 카드·툴팁 ctx 표시는 그대로다.
+ * @returns {Array} roots 중 열화에 쓸 것(순서 유지)
+ */
+export function degradeRoots(roots, nodes) {
+  if (!roots || !roots.length) return [];
+  const cleared = new Set();
+  if (nodes) for (const n of nodes.values()) { const cf = n && n.meta && n.meta.clearedFrom; if (cf) cleared.add(cf); }
+  return roots.filter((r) => r && r.live === true && !cleared.has(r.sessionId));
+}
+
 /** 전체 보기 국소 열화 대상: 세션(루트)별 사용률이 문턱 이상인 것 중 높은 순 max 개 */
 export function rankRegions(entries, max = 6, min = NOISE_MIN_PCT) {
   return entries.filter((e) => e.pct >= min || e.purging).sort((a, b) => ((b.purging ? 1 : 0) - (a.purging ? 1 : 0)) || b.pct - a.pct).slice(0, max);

@@ -29,7 +29,7 @@ If none is found, do not install anything on your own. Tell the user how to get 
 git clone https://github.com/burn001/agent4d.git ~/agent4d
 ```
 
-(Optional background music: `gh release download v0.1.0 --pattern "*.mp3" --dir web/assets` inside the clone.) If the user keeps the clone somewhere else, suggest setting `AGENT4D_HOME` to that folder.
+(Optional background music: `gh release download --pattern "*.mp3" --dir web/assets` inside the clone.) If the user keeps the clone somewhere else, suggest setting `AGENT4D_HOME` to that folder.
 
 ## 2. Check for updates
 
@@ -81,13 +81,14 @@ When the user asks to change what the open viewer shows, run `$A4D ctl <command>
 | "only show atlas" / "show everything" / "atlas 만 보여줘" | `$A4D ctl scope project:atlas` / `$A4D ctl scope all` |
 | "hide beta" / "keep only atlas visible" / "show all again" | `$A4D ctl visible hide project:beta` / `$A4D ctl visible only project:atlas` / `$A4D ctl visible all` |
 | "mute" / "sound on" / "소리 꺼" | `$A4D ctl sound off` / `$A4D ctl sound on` |
-| "music quieter" / "no sound effects" | `$A4D ctl music 30` / `$A4D ctl sfx 0` |
+| "music quieter" / "effects volume 0" | `$A4D ctl music 30` / `$A4D ctl sfx 0` |
+| "music off" / "no sound effects" (sound stays on) | `$A4D ctl music off` / `$A4D ctl sfx off` (also `on`, `toggle`) |
 | "pause the screen" / "back to live" | `$A4D ctl pause` / `$A4D ctl resume` |
 | "replay this session at 8x" / "go live" | `$A4D ctl replay current --speed 8` / `$A4D ctl live` |
 | "Korean UI" / "English UI" | `$A4D ctl lang ko` / `$A4D ctl lang en` |
 | "close the popups" / "reload the viewer" / "show 'meeting starts' on screen" | `$A4D ctl close` / `$A4D ctl reload` / `$A4D ctl toast "meeting starts"` |
 
-More: camera (`auto|manual|fit|follow`), `focus <node or session>`, `bgm auto|<track>`, `artifacts on|off`, `plans on|off`, `weather auto|off|fog|rain|snow`, `grid on|off`, `noise on|off|0-100`, `panel open|close`, `timeline show|hide`, `done on|off`. Full list: `$A4D ctl help`.
+More: camera (`auto|manual|fit|follow`), `focus <node or session>`, `bgm auto|<track>`, `artifacts on|off`, `plans on|off` (loop board), `weather auto|off|fog|rain|snow`, `grid on|off`, `noise on|off|0-100`, `panel open|close`, `timeline show|hide`, `done on|off`. Full list: `$A4D ctl help`.
 
 - If more than one viewer is open and the user means only one ("just the meeting-room TV"), run `$A4D ctl clients` first and add `--client <id prefix or part of its name>`. Viewers can be named in their ⚙ menu.
 - If a project or session name matches several, the command prints the candidates and changes nothing. **Ask the user which one** instead of guessing, then send it again with the exact name or id.

@@ -342,7 +342,7 @@ export class BubbleLayer {
     this.shown = new Set();
     this._n = 0;
   }
-  push(id, role, text) { return this.book.push(id, role, text, performance.now() / 1000); }
+  push(id, role, text, hold, pri, fade) { return this.book.push(id, role, text, performance.now() / 1000, hold, pri, fade); }
   drop(id) { this.book.drop(id); }
   clear() { this.book.clear(); }
   /** 흐려지는 중이면 2(30fps), 개수가 바뀌면 다시 그리기 요청 */
@@ -361,6 +361,11 @@ export class BubbleLayer {
     const live = this.book.live(now);
     const shown = new Set();
     let k = 0;
+    // 복셀 생각·말풍선(role q-think·q-say): 포커스 > 중요도 > 최근 순으로 자리를 먼저 잡고, 서로 겹치면 한 칸 비켜 보고 그래도 겹치면 숨김
+    const quip = live.some((it) => it.role === 'q-think' || it.role === 'q-say');
+    if (quip) live.sort((a, b) => ((b.nodeId === view.focusId) - (a.nodeId === view.focusId)) || ((b.pri ?? 1) - (a.pri ?? 1)) || (b.at - a.at));
+    const taken = quip ? (this._taken || (this._taken = [])) : null;
+    if (taken) taken.length = 0;
     for (const it of live) {
       const v = view.vis.get(it.nodeId);
       if (!v || v.hidden || v.gone || !v._on || (v.scopeD ?? v.scopeK ?? 1) < 0.5) continue;
@@ -380,7 +385,7 @@ export class BubbleLayer {
       }
       k++;
       if (!b.el.isConnected) view.labelContainer.appendChild(b.el);
-      if (b.key !== it.at + it.nodeId) { b.key = it.at + it.nodeId; b.h.textContent = roleLabel(it.role); b.p.textContent = it.text; b.el.dataset.role = it.role; b.w = 0; }
+      if (b.key !== it.at + it.nodeId) { b.key = it.at + it.nodeId; b.id = it.nodeId; b.h.textContent = roleLabel(it.role); b.p.textContent = it.text; b.el.dataset.role = it.role; b.w = 0; }
       const hasRight = view.holo.book.list(it.nodeId).some((e) => e.slot >= 0 && e.dir === 'shell');
       const gap = Math.round(Math.min(80, R * 1.6 + 8) + (hasRight ? Math.min(320, cardPx(1.25 + 0.3 * v.r, view._s, { minPx: HOLO.MIN_PX_ACTIVE }) * 1.85 + 12) : 0));
       const ax = A ? A.x : v._sp.x, ay = A ? A.y : v._sp.y;
@@ -389,6 +394,12 @@ export class BubbleLayer {
       // 비키지 못한 라벨(고정·포커스)에 걸치면 위아래로 비킴
       let dy = 0;
       if (b.base && view.labelScreenBoxes) { const labs = view.labelScreenBoxes(this._labs || (this._labs = [])); dy = dodgeBox(b.base, labs) ?? 0; labs.length = 0; }
+      if (taken && b.base) {
+        const hit = (y) => taken.some((r) => b.base[0] < r[2] && b.base[2] > r[0] && b.base[1] + y < r[3] && b.base[3] + y > r[1]);
+        if (hit(dy)) { const h = b.hh + 4; dy = !hit(dy - h) ? dy - h : !hit(dy + h) ? dy + h : null; }
+        if (dy == null) { k--; b.el.remove(); b.key = null; b.base = null; continue; }
+        taken.push([b.base[0], b.base[1] + dy, b.base[2], b.base[3] + dy]);
+      }
       const tf = `translate(0, -50%) translate(${Math.round(ax + gap)}px, ${Math.round(ay + dy)}px)`;
       if (b.tf !== tf) { b.el.style.transform = tf; b.tf = tf; }
       const al = it.alpha * (v.projA ?? 1); // 프로젝트 페이드

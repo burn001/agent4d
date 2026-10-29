@@ -146,3 +146,64 @@ test('audio.js·app.js 연결: 활동 출처·이행 키·일시정지 시 단�
   assert.match(app, /music\.setActivitySource\(\(\) => activity\.sample\(clockFn\(\), store\.nodes\.values\(\)\), \(\) => pauseBuf\.paused\)/);
   assert.match(app, /if \(fx\) \{\n    activity\.note\(ev, clockFn\(\)\);/);
 });
+
+test('§67 테마별 풀: 매니페스트 views 가 확정 분류와 같고, 지금 표현의 그 단계 곡만 후보', async () => {
+  const { viewCandidates } = await import('../bgm-auto.mjs');
+  const m = parseManifest(JSON.parse(readFileSync(new URL('../assets/bgm-tracks.json', import.meta.url), 'utf8')));
+  const POOL = {
+    flow: [['lofi', 'pulse'], ['lofi', 'deephouse', 'circuit'], ['drive', 'deephouse'], ['liquid', 'uplift', 'overclock']],
+    planet: [['orbit', 'ambient'], ['stardust', 'nebula'], ['drive', 'pulsar'], ['uplift', 'warp']],
+    voxel: [['dawn', 'bossa'], ['jazz', 'chillhop', 'lofi'], ['city', 'funk'], ['swing', 'caper']],
+  };
+  for (const [v, lv] of Object.entries(POOL)) {
+    for (let i = 0; i < 4; i++) assert.deepEqual(viewCandidates(i, m.tracks, v).sort(), [...lv[i]].sort(), `${v} ${i}`);
+    for (let i = 0; i < 4; i++) for (let k = 0; k < 20; k++) {
+      const id = pickForLevel(i, m.tracks, { view: v, recent: ['lofi'], rand: () => k / 20 });
+      assert.ok(lv[i].includes(id), `${v} ${i} → ${id}`);
+    }
+  }
+  // 겹치는 곡: lofi 는 흐름 0·1, 복셀 1, Planet 풀엔 없음
+  const lofi = m.tracks.find((t) => t.id === 'lofi');
+  assert.deepEqual(lofi.views, { flow: [0, 1], voxel: [1] });
+  assert.equal(pickForLevel(0, m.tracks, { view: 'flow', cur: 'lofi', keep: true }), 'lofi');
+  assert.equal(pickForLevel(1, m.tracks, { view: 'voxel', cur: 'lofi', keep: true }), 'lofi');
+  assert.notEqual(pickForLevel(1, m.tracks, { view: 'planet', cur: 'lofi', keep: true }), 'lofi'); // 표현을 바꾸면 그 테마 곡으로
+  assert.notEqual(pickForLevel(0, m.tracks, { view: 'voxel', cur: 'lofi', keep: true }), 'lofi');
+});
+
+test('§67 테마별 풀 폴백: 표현 없음·views 없음·그 단계에 테마 곡 없음 → 전체 풀(stage)', async () => {
+  const { viewCandidates } = await import('../bgm-auto.mjs');
+  const tr = parseManifest({ tracks: [
+    { id: 'a', file: 'a.mp3', stage: 0, views: { flow: [0] } },
+    { id: 'b', file: 'b.mp3', stage: 1, views: { planet: 1 } },
+    { id: 'c', file: 'c.mp3', stage: [1, 2], views: { flow: [2], bogus: [1] } },
+    { id: 'd', file: 'd.mp3', stage: 3 },
+  ] }).tracks;
+  assert.deepEqual(tr.find((t) => t.id === 'c').views, { flow: [2] }); // 모르는 표현 버림
+  assert.equal(tr.find((t) => t.id === 'd').views, null);
+  assert.deepEqual(viewCandidates(0, tr, 'flow'), ['a']);
+  assert.deepEqual(viewCandidates(1, tr, 'flow'), ['b', 'c']);   // 흐름 1단계 없음 → 전체 풀 stage 1
+  assert.deepEqual(viewCandidates(3, tr, 'voxel'), ['d']);       // 복셀 풀 비어 있음 → 전체 풀
+  assert.deepEqual(viewCandidates(1, tr, null), ['b', 'c']);     // 표현 모름 → 예전 규칙
+  assert.deepEqual(viewCandidates(2, tr, 'planet'), ['c']);
+  const plain = [{ id: 'x', stage: [1] }, { id: 'y', stage: [2] }];
+  assert.deepEqual(viewCandidates(2, plain, 'flow'), ['y']);     // views 없는 매니페스트 = 예전 그대로
+});
+
+test('§67 곡 목록: 지금 표현 곡이 위에 단계별, 다른 테마 곡은 아래 묶음', async () => {
+  const { optionList } = await import('../bgm-core.mjs');
+  const m = parseManifest(JSON.parse(readFileSync(new URL('../assets/bgm-tracks.json', import.meta.url), 'utf8')));
+  for (const v of ['flow', 'planet', 'voxel']) {
+    const o = optionList(m.tracks, v).filter((x) => !isMode(x.value));
+    assert.equal(o.length, m.tracks.length);
+    const firstOther = o.findIndex((x) => x.other);
+    assert.ok(firstOther > 0, v);
+    assert.ok(o.slice(firstOther).every((x) => x.other), `${v}: 다른 테마는 끝에 몰림`);
+    for (const x of o.slice(0, firstOther)) assert.ok(m.tracks.find((t) => t.id === x.value).views[v], `${v} ${x.value}`);
+  }
+  const f = optionList(m.tracks, 'flow').filter((x) => !isMode(x.value));
+  assert.equal(f[0].value, 'pulse'); // 흐름 한가: pulse(0.22) → lofi(0.35)
+  assert.equal(f[1].value, 'lofi');
+  assert.ok(f.every((x) => x.value !== 'orbit' || x.other));
+  assert.ok(optionList(m.tracks).every((x) => !x.other)); // 표현 없으면 예전 목록
+});

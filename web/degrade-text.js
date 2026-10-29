@@ -39,6 +39,7 @@ export class TextGlitch {
     if (view && view.vis) for (const v of view.vis.values()) if (v.labelOn && v.labelEl && !v.hidden) push(v.labelEl, v.id || (v.node && v.node.id));
     const bub = view && view.bubbles;
     if (bub && bub.lpool) for (const p of [bub.lpool, bub.bpool]) if (p) for (const it of p.items) if (it.o.visible && it.key) push(it.el, it.key);
+    if (bub && bub.els && view.quips) for (const b of bub.els) if (b.id && b.el.isConnected) push(b.p, b.id); // 복셀 2D 생각·말풍선도 같은 규칙
     if (panelEl) { let i = 0; for (let ln = panelEl.firstElementChild; ln && i < PANEL_ROWS; ln = ln.nextElementSibling, i++) if (!ln.classList.contains('k-hidden') && !ln.classList.contains('k-scope')) push(ln, ln.dataset.node); }
     // 지속 표시(data-ccv-deg)
     const keep = this._keep; keep.clear();

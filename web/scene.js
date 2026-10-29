@@ -8,12 +8,12 @@ import { Islands } from './overview/islands.js';
 import { projectAreaPad } from './overview/pick-core.mjs';
 import { FlowLayer } from './flow.js';
 import { DEG, degOf, lineGap, lineFlicker, lineJitter, packetGone } from './degrade-core.mjs';
-import { exitEligible, catColor } from './flow-core.mjs';
+import { exitEligible, exitWalls, endedBadly, badEndDueAt, catColor } from './flow-core.mjs';
 import { HoloLayer } from './holo.js';
 import { CAT_LABEL } from './icons.js';
 import { actLine, sayBrief, pushHist, panelPx } from './holo-core.mjs';
 import { placeLabels, LABEL_SHIFTS, LABEL_FAR_SHIFTS, textWidth, labelReserve, smoothReserve } from './label-place.mjs';
-import { planLabelRects } from './plan-core.mjs'; // 계획 보드 = 라벨의 고정 장애물
+import { planLabelRects, PLAN_PUNCH, PLAN_SHADOW, punchCorners, labelBoardCut, labelCutPath } from './plan-core.mjs'; // 계획 보드 = 라벨의 고정 장애물 · 판 깊이(구멍 사각형)
 import { spawnLinks, dashSpans, spawnTag } from './spawn-link.mjs';
 
 const SPAWN_CAP = 24, SPAWN_DASH = dashSpans(12, 0.5);
@@ -156,7 +156,8 @@ export class SceneView {
     this._tmpC = new THREE.Color();
     this._tmpC2 = new THREE.Color();
 
-    const r = this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    // alpha: 계획 보드 자리 구멍(캔버스 아래 판 DOM 이 비쳐 보임). 바탕은 scene.background 로 불투명하게 지우므로 다른 화면은 그대로
+    const r = this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', alpha: true });
     r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     container.prepend(r.domElement);
     r.domElement.tabIndex = 0;
@@ -275,6 +276,126 @@ export class SceneView {
   get hiddenDoneCount() { let n = 0; for (const v of this.vis.values()) if (v.gone) n++; return n; }
 
   /** 루프 중지·DOM 제거·GPU 자원 해제. 같은 container 에 다른 view 를 바로 만들어도 된다 */
+  /**
+   * 계획 보드 깊이: 판마다 구멍 사각형(판 평면 네 모서리 — 판 기준 월드 점 깊이에서 카메라와 나란한 평면, GPU 가 픽셀마다 깊이 시험)과
+   * 그 둘레 그림자 판(CSS box-shadow 대신)을 둔다. list = [{wx, wy, wz(판 기준 월드 점), box{x,y,w,h}(페이지 px), r(모서리 반지름 px), a(판 불투명도)}].
+   * plan-ui 가 매 프레임(onFrame — 이번 렌더 바로 앞) 부른다. 빈 목록이면 모두 숨김.
+   * 깊이 시험 없이 그리는 것(depthTest:false 스프라이트)은 판 뒤에서 판 상자와 겹치는 동안만 깊이 시험을 켜고, DOM 라벨은 렌더 뒤 _cutLabels 가 잘라낸다
+   */
+  setPlanPunch(list) {
+    if (!this._punch) this._punch = [];
+    const cam = this.camera, dom = this.renderer.domElement, rect = dom.getBoundingClientRect();
+    cam.updateMatrixWorld();
+    const v = this._tmpV, light = !!(this.tokens && this.tokens.isLight);
+    const boards = [];
+    let n = 0;
+    for (const b of list || []) {
+      if (n >= PLAN_PUNCH.MAX) break;
+      v.set(b.wx, b.wy, b.wz).applyMatrix4(cam.matrixWorldInverse);
+      const zv = -v.z;
+      const pc = punchCorners(zv, b.box, rect, cam.fov, 0, cam.near);
+      if (!pc) continue;
+      const sc = punchCorners(zv, b.box, rect, cam.fov, PLAN_SHADOW.PAD, cam.near);
+      let P = this._punch[n];
+      if (!P) { P = { hole: this._punchMesh(false), shadow: this._punchMesh(true) }; this._punch.push(P); }
+      this._setQuad(P.hole, pc, cam);
+      this._setQuad(P.shadow, sc, cam);
+      const a = Math.max(0, Math.min(1, b.a ?? 1));
+      const u = P.hole.material.uniforms;
+      u.uA.value = a; u.uSize.value.set(b.box.w, b.box.h); u.uR.value = Math.max(0, b.r || 0); u.uPad.value = 0;
+      const us = P.shadow.material.uniforms;
+      us.uA.value = a * (light ? PLAN_SHADOW.A_LIGHT : PLAN_SHADOW.A_DARK); us.uSize.value.set(b.box.w, b.box.h); us.uR.value = Math.max(0, b.r || 0);
+      us.uPad.value = PLAN_SHADOW.PAD; us.uDy.value = PLAN_SHADOW.DY; us.uBlur.value = PLAN_SHADOW.BLUR;
+      P.hole.visible = true; P.shadow.visible = a > 0.02;
+      boards.push({ x0: b.box.x, y0: b.box.y, x1: b.box.x + b.box.w, y1: b.box.y + b.box.h, zv });
+      n++;
+    }
+    for (let i = n; i < this._punch.length; i++) { this._punch[i].hole.visible = false; this._punch[i].shadow.visible = false; }
+    this._punchBoards = boards.length ? boards : null;
+    this._depthlessGate(boards, rect);
+    return n;
+  }
+  /** 구멍(shadow=false) 또는 그림자(shadow=true) 사각형 하나 — 네 꼭짓점은 _setQuad 가 매 프레임 채운다 */
+  _punchMesh(shadow) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(12), 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 1, 1, 1, 1, 0, 0, 0]), 2));
+    g.setIndex([0, 3, 1, 1, 3, 2]);
+    // 판 상자 안 px 좌표 p(가운데 0, 아래 +) · 반폭 hs = uSize/2 · 둥근 사각형 SDF(안 음수)
+    const sdf = 'float sdBox(vec2 p, vec2 hs, float r){ vec2 q = abs(p) - (hs - vec2(r)); return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }';
+    const body = shadow
+      ? 'if (d <= 0.0) discard; float ds = sdBox(p - vec2(0.0, uDy), uSize * 0.5, uR); float k = 1.0 - smoothstep(-uBlur * 0.5, uBlur, ds); gl_FragColor = vec4(0.0, 0.0, 0.0, uA * k); }'
+      : 'if (d > 0.0) discard; gl_FragColor = vec4(0.0, 0.0, 0.0, uA); }';
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { uA: { value: 1 }, uSize: { value: new THREE.Vector2(1, 1) }, uR: { value: 0 }, uPad: { value: 0 }, uDy: { value: 0 }, uBlur: { value: 1 } },
+      vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: 'uniform float uA; uniform vec2 uSize; uniform float uR; uniform float uPad; uniform float uDy; uniform float uBlur; varying vec2 vUv;' + sdf +
+        'void main(){ vec2 full = uSize + vec2(uPad * 2.0); vec2 p = (vUv - 0.5) * full * vec2(1.0, -1.0); float d = sdBox(p, uSize * 0.5, uR);' + body,
+      depthTest: PLAN_PUNCH.depthTest, depthWrite: shadow ? false : PLAN_PUNCH.depthWrite, transparent: PLAN_PUNCH.transparent, fog: PLAN_PUNCH.fog,
+      // 구멍 = dst × (1 − a)(색·알파) · 그림자 = 보통 섞기(색만, 알파는 그대로 — 구멍 밖은 장면 알파 1). 둘 다 불투명 단계라 섞기를 직접 지정
+      blending: THREE.CustomBlending, blendEquation: THREE.AddEquation,
+      ...(shadow ? { blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor }
+        : { blendSrc: THREE.ZeroFactor, blendDst: THREE.OneMinusSrcAlphaFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneMinusSrcAlphaFactor }),
+    });
+    const m = new THREE.Mesh(g, mat);
+    m.renderOrder = PLAN_PUNCH.renderOrder + (shadow ? 1 : 0); m.frustumCulled = false; m.name = shadow ? 'plan-shadow' : 'plan-punch'; m.raycast = () => {};
+    this.scene.add(m);
+    return m;
+  }
+  _setQuad(m, pts, cam) {
+    const at = m.geometry.attributes.position, A = at.array, v = this._tmpV2;
+    for (let i = 0; i < 4; i++) { v.set(pts[i].x, pts[i].y, pts[i].z).applyMatrix4(cam.matrixWorld); A[i * 3] = v.x; A[i * 3 + 1] = v.y; A[i * 3 + 2] = v.z; }
+    at.needsUpdate = true;
+  }
+  /** depthTest:false 로 그리는 것(Planet 관문 글자 스프라이트 등)이 판 뒤에서 판 상자 가까이 있으면 그동안만 깊이 시험(판 구멍 깊이에 픽셀마다 진다) */
+  _depthlessGate(boards, rect) {
+    const f = this.frameNo = (this.frameNo || 0) + 1;
+    if (!this._dl || f % 30 === 1) {
+      this._dl = [];
+      this.scene.traverse((o) => { const m = o.material; if (m && !Array.isArray(m) && (m.depthTest === false || m.userData.boardGate) && o.name !== 'plan-punch' && o.name !== 'plan-shadow') { m.userData.boardGate = true; this._dl.push(o); } });
+    }
+    const cam = this.camera, v = this._tmpV2, w = this._tmpW || (this._tmpW = new THREE.Vector3());
+    for (const o of this._dl) {
+      let hit = false;
+      if (boards.length && o.visible && o.parent) {
+        o.getWorldPosition(v);
+        const zv = -w.copy(v).applyMatrix4(cam.matrixWorldInverse).z;
+        v.project(cam);
+        const x = rect.left + ((v.x + 1) / 2) * rect.width, y = rect.top + ((1 - v.y) / 2) * rect.height;
+        for (const b of boards) if (zv > b.zv && x > b.x0 - 160 && x < b.x1 + 160 && y > b.y0 - 80 && y < b.y1 + 80) { hit = true; break; }
+      }
+      if (o.material.depthTest !== hit) o.material.depthTest = hit;
+    }
+  }
+  /** 판 뒤 DOM 라벨(CSS2D — 이름표·말풍선·효과 리본·배지)이 판 상자와 겹치면 그 부분을 잘라낸다(판 앞 라벨은 그대로). 렌더 뒤(라벨 자리 확정 뒤) */
+  _cutLabels() {
+    const B = this._punchBoards, cut = this._cutEls || (this._cutEls = new Map());
+    const f = this.frameNo || 0;
+    if (!this._l2 || f % 30 === 1) { this._l2 = []; this.scene.traverse((o) => { if (o.isCSS2DObject) this._l2.push(o); }); }
+    const seen = new Set();
+    if (B) {
+      const cam = this.camera, v = this._tmpV2, w = this._tmpW || (this._tmpW = new THREE.Vector3()), rect = this.renderer.domElement.getBoundingClientRect();
+      for (const o of this._l2) {
+        const el = o.element;
+        if (!el || !el.isConnected || el.style.display === 'none' || !o.visible) continue;
+        o.getWorldPosition(v);
+        const zv = -w.copy(v).applyMatrix4(cam.matrixWorldInverse).z;
+        v.project(cam);
+        const x = rect.left + ((v.x + 1) / 2) * rect.width, y = rect.top + ((1 - v.y) / 2) * rect.height;
+        let near = false;
+        for (const b of B) if (zv > b.zv && x > b.x0 - 360 && x < b.x1 + 360 && y > b.y0 - 240 && y < b.y1 + 240) { near = true; break; }
+        if (!near) continue;
+        const r = el.getBoundingClientRect();
+        const c = labelBoardCut({ left: r.left, top: r.top, width: r.width, height: r.height }, zv, B);
+        if (!c) continue;
+        const path = labelCutPath(c, r.width, r.height);
+        if (cut.get(el) !== path) { el.style.clipPath = path; cut.set(el, path); }
+        seen.add(el);
+      }
+    }
+    for (const [el] of cut) if (!seen.has(el)) { el.style.clipPath = ''; cut.delete(el); }
+  }
+
   dispose() {
     if (this._disposed) return;
     this._disposed = true;
@@ -284,6 +405,7 @@ export class SceneView {
     if (this.islands) { this.islands.dispose(); this.islands = null; }
     if (this.flow) { this.flow.dispose(); this.flow = null; }
     if (this.holo) { this.holo.dispose(); this.holo = null; }
+    if (this._punch) { for (const P of this._punch) for (const m of [P.hole, P.shadow]) { this.scene.remove(m); m.material.dispose(); m.geometry.dispose(); } this._punch = null; }
     if (this.ix) { this.ix.dispose(); this.ix = null; }
     if (this.exitFx) { this.exitFx.dispose(); this.exitFx = null; }
     if (this.sessFx) { this.sessFx.dispose(); this.sessFx = null; }
@@ -451,7 +573,7 @@ export class SceneView {
         v.icons.clear();
       }
       if (ENDED_OK(patch.status)) { if (v.endWall == null) v.endWall = opts.quiet ? -1e9 : this.animT; }
-      else { v.endWall = null; if (v.exiting != null || v.gone) this._unexit(v); }
+      else { v.endWall = null; if ((v.exiting != null || v.gone) && !(patch.status === 'error' && v.badWall != null)) this._unexit(v); } // 퇴장한 오류 노드에 같은 오류 갱신이 와도 되살리지 않음
       this._exitAt = 0; // 다음 프레임에 퇴장 판정
     }
     this._styleVis(v);
@@ -836,10 +958,23 @@ export class SceneView {
     for (const [id, v] of this.vis) if (!v.removing) nodes.set(id, v.node);
     const roots = [this.rootId, this.layoutRoot];
     for (const r of this.scope.roots || []) roots.push(r.nodeId);
-    const elig = exitEligible(nodes, roots);
+    const clockMs = this.clock();
+    // 문제 있게 끝난 노드: 끝난 시각이 없으면 처음 본 시각부터 센다(표시 시계 — 재생은 가상 시계)
+    const seen = this._badSeen || (this._badSeen = new Map());
+    for (const [id, n] of nodes) { if (!endedBadly(n)) seen.delete(id); else if (!seen.has(id)) seen.set(id, clockMs); }
+    const elig = exitEligible(nodes, roots, { nowMs: clockMs, seen });
     const linger = EXIT_LINGER / Math.min(4, Math.max(1, Math.sqrt(this.timeScale || 1)));
     const pol = animate ? exitPolicy(this.timeScale) : null;
-    const clockMs = this.clock();
+    const own = new Map();
+    for (const [id, v] of this.vis) {
+      if (v.removing || !elig.has(id)) { v.badWall = null; continue; }
+      if (endedBadly(v.node)) {
+        // 문턱을 지난 순간을 '막 LINGER 가 지난 끝'으로 잡아 같은 퇴장 연출. 한참 지난 것(스냅샷·탐색)은 바로 숨김
+        if (v.badWall == null) { const due = badEndDueAt(v.node, seen.get(id)); v.badWall = due != null && (clockMs - due) / 1000 / Math.max(1, this.timeScale || 1) > linger + EXIT.DUR + 1 ? -1e9 : now - linger; }
+        own.set(id, v.badWall);
+      } else { v.badWall = null; own.set(id, v.endWall); }
+    }
+    const walls = exitWalls(nodes, elig, own); // 하위가 늦게 끝나면 그때부터 센다
     for (const [id, v] of this.vis) {
       if (v.removing) continue;
       // 만료된 Monitor 는 재무장을 기다리는 동안 대기 표시로 남김 — 30분마다 사라졌다 생기는 깜빡임 방지
@@ -847,12 +982,13 @@ export class SceneView {
       const standby = v.kind === 'monitor' && !v.foldHidden && rearmStandby(v.node, nodes.get(v.node.parentId), ago);
       if (standby !== !!v.standby) { v.standby = standby; this._labelText(v); }
       if (v._jobKey != null && clockLabelKey(v.node, clockMs) !== v._jobKey) this._clockRefresh(v); // 정체· 실행 경과(시계)
-      let want = elig.has(id) && v.endWall != null && now - v.endWall >= linger && !standby;
-      if (v.foldHidden && elig.has(id) && v.endWall != null) want = true; // 장치 안으로 접힌 노드는 연출 없이
+      const endWall = elig.has(id) ? walls.get(id) : null;
+      let want = elig.has(id) && endWall != null && now - endWall >= linger && !standby;
+      if (v.foldHidden && elig.has(id) && endWall != null) want = true; // 장치 안으로 접힌 노드는 연출 없이
       if (want && v.foldHidden && !v.gone) { if (v.exiting != null) this._exitingN = Math.max(0, this._exitingN - 1); v.exiting = null; v.gone = true; v.exitF = 0; this._syncHidden(v); continue; }
       if (want) {
         if (v.gone || v.exiting != null) continue;
-        if (!pol || now - v.endWall > linger + EXIT.DUR + 1) { v.gone = true; v.exitF = 0; this._syncHidden(v); this.layoutDirty = true; }
+        if (!pol || now - endWall > linger + EXIT.DUR + 1) { v.gone = true; v.exitF = 0; this._syncHidden(v); this.layoutDirty = true; }
         else this._startExit(v, pol);
       } else if (v.exiting != null || v.gone) this._unexit(v);
     }
@@ -1398,6 +1534,7 @@ export class SceneView {
     if (this._preRender) this._preRender(now, dt); // 하위 표현(흐름)의 추가 그리기 갱신
     this.renderer.render(this.scene, this.camera);
     this.labelRenderer.render(this.scene, this.camera);
+    if (this._punchBoards || (this._cutEls && this._cutEls.size)) this._cutLabels(); // 판 뒤 DOM 라벨 잘라내기
   }
 
   _updateLinks(now, t) {

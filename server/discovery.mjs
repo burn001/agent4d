@@ -72,13 +72,13 @@ export function cutAtWord(s, n) {
 
 /** jsonl 앞부분에서 entrypoint·cwd·첫 시각·첫 프롬프트 */
 export function parseHead(text) {
-  const info = { entrypoint: null, cwd: null, firstTs: null, firstPrompt: null, hasUser: false, clearAt: null };
+  const info = { entrypoint: null, cwd: null, firstTs: null, firstPrompt: null, hasUser: false, clearAt: null, scanned: false };
   const lines = text.split('\n');
   let doneAt = -1;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (!line || line.startsWith('{"type":"api-request')) continue;
-    if (doneAt >= 0 && i > doneAt + 40) break;
+    if (doneAt >= 0 && i > doneAt + 40) { info.scanned = true; break; } // /clear 표지를 찾을 머리 범위(첫 user 뒤 40줄)를 다 봤다
     let r; try { r = JSON.parse(line); } catch { continue; }
     // /clear 로 시작한 세션: 머리의 로컬 명령 clear·SessionStart:clear 훅·/clear 명령 기록. 머리 기록은 시각 순이 아니고
     // (실측: 훅 기록 08:22:19 가 로컬 명령 08:22:15 보다 앞, 첫 user 보다 뒤) 가장 이른 시각을 쓴다(첫 user 뒤 40줄까지 본다)
@@ -234,12 +234,15 @@ export class SessionIndex {
   async ensureHead(e) {
     // 갓 생긴 파일은 첫 user 레코드·entrypoint 가 아직 없을 수 있다. 그때 읽은 결과를 영구 캐시하면
     // claude -p 자식이 영영 sdk-cli 로 보이지 않으므로, 불완전한 head 는 파일이 자라면 다시 읽는다.
-    const complete = e.head && e.head.entrypoint && e.head.hasUser;
+    // /clear 표지(clearAt)를 찾을 머리 범위(첫 user 뒤 40줄)를 다 보지 못했으면 아직 불완전 — 원격 조종(Remote Control)으로 한
+    // /clear 는 첫 user('start') 뒤에 큰 첨부(도구·스킬 목록, 실측 약 120KB)가 먼저 오고 SessionStart:clear 훅 기록이 그 뒤라 96KB 안에 없었다
+    const headDone = (h) => !!(h && h.entrypoint && h.hasUser && (h.scanned || h.clearAt));
+    const complete = headDone(e.head);
     if (!e.head || (!complete && e.headSize !== e.size && e.headSize < HEAD_MAX)) {
       e.head = parseHead(await readHead(e.file));
       // 표준 입력 프롬프트가 큰 claude -p(실측 53KB 짜리 queue-operation + 같은 크기 user 레코드)는 96KB 안에 첫 user 레코드가
-      // 다 들어오지 않아 entrypoint 를 못 읽고 sdk-cli 로도 메인으로도 안 보였다. 모자라면 1MB 까지 다시 읽는다
-      if (!(e.head.entrypoint && e.head.hasUser) && e.size > 96 * 1024) e.head = parseHead(await readHead(e.file, HEAD_MAX));
+      // 다 들어오지 않아 entrypoint 를 못 읽고 sdk-cli 로도 메인으로도 안 보였다. 모자라면 1MB 까지 다시 읽는다(clear 표지도)
+      if (!headDone(e.head) && e.size > 96 * 1024) e.head = parseHead(await readHead(e.file, HEAD_MAX));
       e.headSize = e.size;
     }
     return e.head;

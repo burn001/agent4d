@@ -97,3 +97,38 @@
 .vx-ix i { font-style: normal; color: var(--ixc, var(--accent)); }
 .vx-ix.bad { border-color: var(--error); }
 .vx-ix.done { opacity: .85; }
+
+/* 생각·말풍선 — 말풍선(q-say) = 뾰족 꼬리, 생각 풍선(q-think) = 구름(몸통 + 혹 둘) + 머리 쪽으로 작은 동그라미 둘.
+   글은 안쪽 span(.q-t, 글 하나만 든 잎 → 글자 깨짐이 그대로 덮음). 겹침 밀기(transform)와 겹치지 않게 등장은 scale 속성으로 */
+.vx-bubble.q-say, .vx-bubble.q-think { overflow: visible; max-width: 250px; text-overflow: clip; }
+.vx-bubble .q-t { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vx-bubble.q-say { padding: 4px 10px; border-radius: 11px; font-weight: 600; }
+.vx-bubble.q-say::after { left: 38%; }
+.vx-bubble.q-think {
+  padding: 5px 12px; border: 0; border-radius: 15px;
+  background: color-mix(in srgb, var(--panel-bg) 88%, var(--accent) 12%);
+  color: color-mix(in srgb, var(--text) 82%, var(--muted));
+  font-style: italic; font-weight: 520; box-shadow: none;
+  filter: drop-shadow(0 0 .7px color-mix(in srgb, var(--border) 90%, var(--accent))) drop-shadow(0 1.5px 2.5px rgba(0, 0, 0, .22));
+}
+.vx-bubble.q-think::before, .vx-bubble.q-think::after {
+  content: ""; position: absolute; z-index: -1; border: 0; transform: none; margin: 0;
+  background: inherit; border-radius: 50%;
+}
+.vx-bubble.q-think::before { width: 22px; height: 18px; left: 16%; top: -6px; }
+.vx-bubble.q-think::after { width: 26px; height: 20px; left: auto; right: 14%; top: -8px; bottom: auto; }
+.vx-bubble.q-think .q-d { position: absolute; left: calc(50% - 6px); bottom: -9px; width: 8px; height: 8px; border-radius: 50%; background: color-mix(in srgb, var(--panel-bg) 88%, var(--accent) 12%); }
+.vx-bubble.q-think .q-d2 { left: calc(50% - 13px); bottom: -17px; width: 5px; height: 5px; }
+.vx-bubble.q-think.focus, .vx-bubble.q-say.focus { outline: none; }
+.vx-bubble.q-say.focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow); }
+.vx-bubble.q-think.focus { filter: drop-shadow(0 0 1.2px var(--accent)) drop-shadow(0 1.5px 2.5px rgba(0, 0, 0, .22)); }
+.vx-bubble.qa { animation: vx-qpop-a .26s ease-out; transform-origin: 40% 100%; }
+.vx-bubble.qb { animation: vx-qpop-b .26s ease-out; transform-origin: 40% 100%; }
+.vx-bubble.q-think.qa, .vx-bubble.q-think.qb { transform-origin: 46% 100%; }
+@keyframes vx-qpop-a { from { scale: .55; opacity: 0; } to { scale: 1; opacity: 1; } }
+@keyframes vx-qpop-b { from { scale: .55; opacity: 0; } to { scale: 1; opacity: 1; } }
+.vx-bubble.q-say.out, .vx-bubble.q-think.out { opacity: 0; transition: opacity .3s; }
+@media (prefers-reduced-motion: reduce) {
+  @keyframes vx-qpop-a { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes vx-qpop-b { from { opacity: 0; } to { opacity: 1; } }
+}

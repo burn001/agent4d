@@ -15,7 +15,84 @@ export const PLAN = {
   DOCS: 24,         // 기억하는 문서 수(LRU)
 };
 
-export const PLAN_SRC = ['todo', 'tasks', 'exitplan', 'file', 'phases', 'workflow'];
+export const PLAN_SRC = ['phases', 'axes']; // 자율 루프 판: 러너 단계 설계서 · 축 큐(일반 계획판 출처는 폐기)
+
+// ── 공통 계획 형식(v2) ──
+// 계획 → 큰 항목(축·마일스톤·할 일) → 작은 항목(단계, steps). 상태 st = done|current|pending|blocked|skipped.
+// 옛 꼴(s = done|in_progress|pending, hold)은 웹 호환으로 함께 싣는다(legacyOf). 출처마다 어댑터가 이 형식으로 만든다.
+export const PLAN_STATE = ['done', 'current', 'pending', 'blocked', 'skipped'];
+export const PLAN_V2 = { ITEMS: 400, STEPS: 24, TEXT: 120, NOTE: 80, META: 3 };
+/** 옛 상태(s, hold) → v2 st */
+export const toV2State = (s, hold) => (s === 'done' ? 'done' : s === 'in_progress' ? 'current' : hold ? 'blocked' : 'pending');
+/** v2 st → 옛 {s, hold} */
+export function legacyOf(st) {
+  switch (st) {
+    case 'done': case 'skipped': return { s: 'done' };
+    case 'current': return { s: 'in_progress' };
+    case 'blocked': return { s: 'pending', hold: 1 };
+    default: return { s: 'pending' };
+  }
+}
+/** 느슨한 상태 글 → v2 st(모르면 null): done·완료·✅ / current·진행·in_progress / pending·대기·todo / blocked·보류·review·⏸ / skipped·건너뜀 */
+export function parseState(v) {
+  const x = String(v ?? '').trim().toLowerCase();
+  if (!x) return null;
+  if (PLAN_STATE.includes(x)) return x;
+  if (/^(completed?|closed|ok|✅|✔|☑|완료|닫힘|끝)$/.test(x)) return 'done';
+  if (/^(in[_ -]?progress|active|running|wip|doing|▶|◐|진행|진행중|진행 중|착수)$/.test(x)) return 'current';
+  if (/^(todo|open|planned|queued|next|○|☐|대기|예정)$/.test(x)) return 'pending';
+  if (/^(hold|on[_ -]?hold|paused|waiting|review|⏸|보류|검토대기|검토 대기|막힘)$/.test(x)) return 'blocked';
+  if (/^(skip|skipped|cancell?ed|dropped|건너뜀|취소)$/.test(x)) return 'skipped';
+  return null;
+}
+/** 진행 요약 {done, current, pending, blocked, skipped, total, settled}(settled = done + skipped) */
+export function v2Progress(items) {
+  const c = { done: 0, current: 0, pending: 0, blocked: 0, skipped: 0, total: 0 };
+  for (const it of items || []) { const st = PLAN_STATE.includes(it && it.st) ? it.st : 'pending'; c[st]++; c.total++; }
+  c.settled = c.done + c.skipped;
+  return c;
+}
+/**
+ * 바깥 계획(파일· 선언 연결) → wire v2 계획. raw = {id?, src, title, doc?, current?(항목 id), items:[{id?, title, state, doc?, note?, meta?[], group?, emph?,
+ * steps?: [{title, state}] | {done, total, current?}}]}. 글은 redact·상한, minimal 이면 글 없음(상태·수만)
+ */
+export function planFromRaw(raw, { privacy = 'summary', at = 0, key = '' } = {}) {
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.items)) return null;
+  const minimal = privacy === 'minimal';
+  const txt = (v, n) => (minimal ? '' : clip(redact(String(v ?? '')), n));
+  const curId = raw.current != null ? String(raw.current) : null;
+  const all = raw.items.filter((x) => x && typeof x === 'object');
+  const items = all.slice(0, PLAN_V2.ITEMS).map((x, i) => {
+    const id = String(x.id ?? x.k ?? x.title ?? i);
+    let st = parseState(x.state ?? x.st) || (x.s ? toV2State(x.s, x.hold) : 'pending');
+    if (curId != null && id === curId && st !== 'done' && st !== 'skipped') st = 'current';
+    const out = { k: planHash(id, 8), t: txt(x.title ?? x.t ?? id, PLAN_V2.TEXT), st, ...legacyOf(st) };
+    if (!minimal) out.id = clip(id, 60);
+    if (!minimal && x.doc) out.doc = clip(redact(String(x.doc)), PLAN.TITLE);
+    if (!minimal && x.note) out.note = txt(x.note, PLAN_V2.NOTE);
+    if (!minimal && x.group) out.group = txt(x.group, 40);
+    if (!minimal && Array.isArray(x.meta)) { const m = x.meta.filter((v) => v != null && String(v).trim()).slice(0, PLAN_V2.META).map((v) => txt(v, 40)); if (m.length) out.meta = m; }
+    if (x.emph) out.emph = 1;
+    const sp = x.steps;
+    if (Array.isArray(sp) && sp.length) {
+      const list = sp.filter((y) => y && typeof y === 'object').map((y, j) => { const s2 = parseState(y.state ?? y.st) || (y.s ? toV2State(y.s, y.hold) : 'pending'); return { k: planHash(String(y.id ?? y.title ?? j), 8), t: txt(y.title ?? y.t ?? '', PLAN_V2.TEXT), st: s2 }; });
+      const pr = v2Progress(list);
+      const cs = list.find((y) => y.st === 'current') || list.find((y) => y.st === 'pending');
+      out.steps = { done: pr.settled, total: pr.total, ...(cs && cs.t ? { cur: cs.t } : {}), items: list.slice(0, PLAN_V2.STEPS) };
+    } else if (sp && typeof sp === 'object' && Number.isFinite(sp.total)) {
+      out.steps = { done: Math.max(0, Math.min(sp.total, Number(sp.done) || 0)), total: Math.max(0, Math.round(sp.total)), ...(sp.current && !minimal ? { cur: txt(sp.current, PLAN_V2.TEXT) } : {}) };
+    }
+    return out;
+  });
+  const pr = v2Progress(items);
+  const cur = items.findIndex((x) => x.st === 'current');
+  return {
+    v: 2, id: 'p' + planHash(key || raw.id || raw.title || 'plan', 8), src: raw.src || 'plan', title: txt(raw.title || '계획', PLAN.TITLE),
+    ...(raw.doc && !minimal ? { doc: clip(redact(String(raw.doc)), PLAN.TITLE) } : {}), at: at || 0, n: all.length,
+    progress: pr, ...(cur >= 0 ? { cur } : {}), owner: raw.owner || 'main', items,
+    ...(raw.auto ? { auto: 1 } : {}), ...(Number.isFinite(raw.refine) && raw.refine > 0 ? { refine: Math.round(raw.refine) } : {}), ...(Number.isFinite(raw.cands) && raw.cands > 0 ? { cands: Math.round(raw.cands) } : {}), // 자동 추정
+  };
+}
 const STATUS = new Set(['pending', 'in_progress', 'done']);
 
 /** FNV-1a 32비트 → 16진 n자(web/artifact-core.mjs artHash 와 같은 값) */
@@ -154,25 +231,6 @@ function dedupe(items) {
   return items;
 }
 
-/** Workflow 스크립트 → meta.phases 제목들(없으면 []) */
-export function workflowPhases(script) {
-  if (typeof script !== 'string') return [];
-  const i = script.search(/\bphases\s*:\s*\[/);
-  if (i < 0) return [];
-  // 대괄호 짝 맞추기(문자열 안 괄호는 대충 무시 — 제목만 뽑으면 됨)
-  let depth = 0, j = script.indexOf('[', i), end = -1;
-  for (let k = j; k < script.length && k < j + 20000; k++) {
-    const ch = script[k];
-    if (ch === '[') depth++;
-    else if (ch === ']') { depth--; if (depth === 0) { end = k; break; } }
-  }
-  const body = script.slice(j, end > 0 ? end : j + 20000);
-  const out = [];
-  const re = /\btitle\s*:\s*(['"`])((?:\\.|(?!\1).)*)\1/g;
-  let m;
-  while ((m = re.exec(body)) && out.length < PLAN.ITEMS) out.push(m[2].replace(/\\(.)/g, '$1'));
-  return out;
-}
 
 /** 계획 파일 제목: 파일 이름, 흔한 이름(_STATUS.md·README.md …)이면 윗 폴더/이름 */
 export function planTitleOf(fp) {
@@ -197,26 +255,7 @@ export function planStart(name, input, { cwd } = {}) {
     return { key: abs.replace(/\\/g, '/').replace(/^\/([a-z])\//i, '$1:/').toLowerCase(), base: planTitleOf(abs) };
   };
   switch (name) {
-    case 'TodoWrite': {
-      const t = Array.isArray(input.todos) ? input.todos : null;
-      if (!t) return null;
-      return { src: 'todo', items: t.slice(0, 200).map((x) => ({ t: String((x && (x.content || x.subject || x.activeForm)) || ''), s: normStatus(x && x.status) })).filter((x) => x.t) };
-    }
-    case 'TaskCreate':
-      return { src: 'tasks', op: 'create', t: String(input.subject || input.title || input.description || '').slice(0, 400), s: normStatus(input.status) };
-    case 'TaskUpdate': {
-      const id = input.taskId ?? input.task_id ?? input.id;
-      if (id == null) return null;
-      return { src: 'tasks', op: 'update', id: String(id), s: input.status ? String(input.status) : null, t: input.subject ? String(input.subject).slice(0, 400) : null };
-    }
-    case 'ExitPlanMode': {
-      const p = parsePlanMarkdown(typeof input.plan === 'string' ? input.plan.slice(0, PLAN.DOC_MAX) : '', { loose: true });
-      return p ? { src: 'exitplan', parsed: p } : null;
-    }
-    case 'Workflow': {
-      const ph = workflowPhases(input.script);
-      return ph.length ? { src: 'workflow', phases: ph } : null;
-    }
+    // TodoWrite·Task·ExitPlanMode·Workflow 출처는 폐기(일반 계획판 철거) — 자율 루프 판은 러너 아래 단계 설계서만
     case 'Write': {
       if (!isMd(input.file_path)) return null;
       const f = fileKey(input.file_path); if (!f) return null;
@@ -274,11 +313,21 @@ export class PlanTracker {
     this.g = graph;
     this.plans = new Map();   // planKey → {key, id, src, title, doc, owner, ownerT, strong, at, by, cy, byT, items: Map<k,{k,t,s,at,by,cy,hold,seen}>, order:[k], gone: Map<k, seen>}
     this.docs = new Map();    // 파일 열쇠 → {text, ctx}(LRU)
-    this.taskOf = new Map();  // task id → planKey
-    this.wf = new Map();      // workflow 노드 id → {phases:[], seen: Map<lower title, ts>, ended: null|'ok'|'fail'}
-    this.taskSeq = 0;
     this.emitT = new Map();   // 소유 노드 → 마지막으로 낸 시각
+    this.ext = new Map();     // 바깥 계획 열쇠 → {owner, plan(wire v2), sig}
   }
+
+  /** 바깥 계획(파일·선언 연결) 싣기·지우기. plan = planFromRaw 결과(null 이면 지움). 내용이 같으면 아무것도 안 냄 */
+  setExternal(key, owner, plan, t = 0) {
+    const old = this.ext.get(key);
+    if (!plan) { if (old) { this.ext.delete(key); this._emitOwner(old.owner, t); } return; }
+    const sig = JSON.stringify({ ...plan, at: 0 });
+    if (old && old.sig === sig && old.owner === owner) return;
+    this.ext.set(key, { owner, plan, sig });
+    if (old && old.owner !== owner) this._emitOwner(old.owner, t);
+    this._emitOwner(owner, t);
+  }
+  externalKeys() { return [...this.ext.keys()]; }
 
   // ── 노드 관계 ──
   _anc(id, pred) {
@@ -313,29 +362,11 @@ export class PlanTracker {
     const t = Date.parse(ts) || 0;
     try {
       switch (desc.src) {
-        case 'todo': return this._set(`todo:${nodeId}`, { src: 'todo', title: '할 일', owner: nodeId }, desc.items.map((x) => ({ k: itemKey(x.t), t: x.t, s: x.s })), nodeId, t);
-        case 'tasks': return this._task(desc, tur, nodeId, t);
-        case 'exitplan': return this._set(`exitplan:${nodeId}`, { src: 'exitplan', title: desc.parsed.title || '계획', owner: nodeId }, desc.parsed.items, nodeId, t);
         case 'file': return this._file(desc, tur, nodeId, t);
         case 'shell': return this._shell(desc, tur, nodeId, t);
         default: return;
       }
     } catch { /* 계획은 곁가지 — 실패해도 본 흐름은 그대로 */ }
-  }
-
-  _task(desc, tur, nodeId, t) {
-    if (desc.op === 'create') {
-      const tid = String(tur?.task?.id ?? tur?.taskId ?? tur?.id ?? (/#(\d+)/.exec(String(tur?.message || tur?.content || '')) || [])[1] ?? `n${++this.taskSeq}`);
-      const pk = `tasks:${nodeId}`;
-      this.taskOf.set(tid, pk);
-      return this._set(pk, { src: 'tasks', title: '작업 목록', owner: nodeId }, [{ k: `#${tid}`, t: desc.t || `작업 ${tid}`, s: desc.s || 'pending' }], nodeId, t, { merge: true, text: true });
-    }
-    const pk = this.taskOf.get(desc.id) || `tasks:${nodeId}`;
-    this.taskOf.set(desc.id, pk);
-    const p = this.plans.get(pk);
-    const old = p && p.items.get(`#${desc.id}`);
-    const it = desc.s === 'deleted' ? { k: `#${desc.id}`, del: 1 } : { k: `#${desc.id}`, t: desc.t || (old ? old.t : `작업 ${desc.id}`), s: desc.s ? normStatus(desc.s) : old ? old.s : 'pending' };
-    return this._set(pk, { src: 'tasks', title: '작업 목록', owner: p ? p.owner : nodeId }, [it], nodeId, t, { merge: true, text: !!desc.t });
   }
 
   _file(desc, tur, nodeId, t) {
@@ -363,9 +394,9 @@ export class PlanTracker {
     const runner = this._runnerOf(nodeId);
     const p = this.plans.get(pk);
     if (!parsed) { if (p && t >= p.at) this._drop(pk, t); return; }
-    // Read 는 이미 아는 계획을 고칠 때만 — 단, 러너(자율 루프) 아래 단계 설계서는 읽기만으로도 그 러너의 계획
-    if (desc.op === 'read' && !p && !(runner && parsed.kind === 'phases')) return;
-    const src = parsed.kind === 'phases' ? 'phases' : 'file';
+    // 자율 루프 판 전용: 단계 설계서(phases)이고 러너(자율 루프) 아래이거나 이미 아는 러너 계획일 때만. 체크박스 md 계획은 폐기
+    if (parsed.kind !== 'phases' || !(runner || (p && p.src === 'phases' && p.strong))) return;
+    const src = 'phases';
     return this._set(pk, { src, title: desc.base || parsed.title || '계획', doc: parsed.title || '', owner: runner || nodeId, strong: !!runner }, parsed.items, nodeId, t, { touch: true, text: true });
   }
 
@@ -423,7 +454,7 @@ export class PlanTracker {
     const pk = `file:${f.key}`;
     const p = this.plans.get(pk);
     if (!p && !(runner && pn.kind === 'phases')) return;
-    if (p && p.src === 'phases' && pn.kind !== 'phases') return; // 단계 설계서 일부의 체크박스 줄은 단계가 아님
+    if (pn.kind !== 'phases') return; // 단계 표식만(체크박스 계획 폐기)
     const items = pn.items.filter((it) => !p || p.items.has(it.k) || p.src !== 'workflow');
     const differs = !p || items.some((it) => { const o = p.items.get(it.k); return !o || (!it.nos && (o.s !== it.s || !!o.hold !== !!it.hold)); });
     if (differs && this.docs.has(f.key)) this._doc(f.key, null); // 기억한 본문과 표식이 다르면 그 본문은 낡음(그 사이 다른 곳에서 고침)
@@ -431,47 +462,6 @@ export class PlanTracker {
   }
 
   // ── Workflow ──
-  /** Workflow 도구 끝: 노드 w:<runId> 가 생긴 뒤 단계 목록을 정함 */
-  workflowDefine(wid, phases, ts) {
-    if (!wid || !phases || !phases.length) return;
-    const w = this.wf.get(wid) || { phases: [], seen: new Map(), ended: null, t0: 0 };
-    w.phases = phases.slice(0, PLAN.ITEMS);
-    w.t0 = Date.parse(ts) || 0;
-    this.wf.set(wid, w);
-    this._wfEmit(wid, w.t0);
-  }
-  /** 워크플로 에이전트가 단계 phase 로 시작함(meta.workflowPhase·journal started) */
-  workflowPhase(wid, phase, ts) {
-    if (!wid || phase == null || phase === '') return;
-    const w = this.wf.get(wid) || { phases: [], seen: new Map(), ended: null, t0: 0 };
-    this.wf.set(wid, w);
-    const k = String(phase).trim().toLowerCase();
-    const t = Date.parse(ts) || 0;
-    if (w.seen.has(k) && w.seen.get(k) <= t) return;
-    w.seen.set(k, t);
-    if (w.phases.length) this._wfEmit(wid, t);
-  }
-  workflowEnd(wid, ok, ts) {
-    const w = this.wf.get(wid);
-    if (!w || w.ended) return;
-    w.ended = ok ? 'ok' : 'fail';
-    if (w.phases.length) this._wfEmit(wid, Date.parse(ts) || 0);
-  }
-  _wfEmit(wid, t) {
-    const w = this.wf.get(wid);
-    const low = w.phases.map((p) => p.trim().toLowerCase());
-    let cur = -1;
-    for (const k of w.seen.keys()) { const i = low.indexOf(k); if (i > cur) cur = i; }
-    const items = w.phases.map((p, i) => ({
-      k: low[i] + (low.indexOf(low[i]) !== i ? `#${i}` : ''), t: p,
-      s: w.ended === 'ok' || i < cur ? 'done' : i === cur ? (w.ended ? 'pending' : 'in_progress') : 'pending',
-    }));
-    const n = this.g.get(wid);
-    // 단계 상태는 본 단계 집합에서 다시 계산한 값(순서 무관) — seen 비교 없이 늘 이 값으로
-    this._set(`wf:${wid}`, { src: 'workflow', title: (n && n.label) || '워크플로', owner: wid }, items, wid, Math.max(t, w.t0), { force: true });
-  }
-
-  // ── 장부 ──
   /**
    * 계획 갱신. items = 관찰한 항목 {k, t, s, hold?, del?}.
    *  merge: 관찰한 항목만 고침(나머지 그대로) — 아니면 목록 전체(없는 항목은 지움).
@@ -559,14 +549,20 @@ export class PlanTracker {
     const mine = [...this.plans.values()].filter((p) => p.owner === owner && p.order.length).sort((a, b) => b.at - a.at).slice(0, PLAN.PER_NODE);
     const minimal = this.g.privacy === 'minimal';
     const txt = (s, n) => (minimal ? '' : clip(redact(s), n));
-    return mine.map((p) => ({
-      id: p.id, src: p.src, title: txt(p.title, PLAN.TITLE), ...(p.doc && !minimal ? { doc: clip(redact(p.doc), PLAN.TITLE) } : {}),
-      at: p.at, by: p.by, ...(p.cy != null ? { cy: p.cy } : {}), n: p.order.length,
-      items: p.order.slice(0, PLAN.ITEMS).map((k) => {
+    const ext = [...this.ext.values()].filter((x) => x.owner === owner).map((x) => x.plan); // 바깥 계획(메인)이 앞
+    const out = mine.map((p) => {
+      const items = p.order.slice(0, PLAN.ITEMS).map((k) => {
         const it = p.items.get(k);
-        return { k: planHash(k, 8), t: txt(it.t, PLAN.TEXT), s: it.s, at: it.at, ...(it.by ? { by: it.by } : {}), ...(it.cy != null ? { cy: it.cy } : {}), ...(it.hold ? { hold: 1 } : {}) };
-      }),
-    }));
+        // v2 상태 st 와 옛 꼴(s·hold)을 함께
+        return { k: planHash(k, 8), t: txt(it.t, PLAN.TEXT), st: toV2State(it.s, it.hold), s: it.s, at: it.at, ...(it.by ? { by: it.by } : {}), ...(it.cy != null ? { cy: it.cy } : {}), ...(it.hold ? { hold: 1 } : {}) };
+      });
+      const cur = items.findIndex((x) => x.st === 'current');
+      return {
+        v: 2, id: p.id, src: p.src, title: txt(p.title, PLAN.TITLE), ...(p.doc && !minimal ? { doc: clip(redact(p.doc), PLAN.TITLE) } : {}),
+        at: p.at, by: p.by, ...(p.cy != null ? { cy: p.cy } : {}), n: p.order.length, progress: v2Progress(items), ...(cur >= 0 ? { cur } : {}), items,
+      };
+    });
+    return [...ext, ...out];
   }
 
   _emitOwner(owner, t) {

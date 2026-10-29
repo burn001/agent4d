@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  stageOf, gaugeLevel, noiseParams, noiseNeeded, isCtxDrop, ctxNote, bandOf, pickGaugeNode, rankRegions,
+  stageOf, gaugeLevel, noiseParams, noiseNeeded, isCtxDrop, ctxNote, bandOf, pickGaugeNode, rankRegions, degradeRoots,
   purgeProgress, PURGE_MS, ctxShort, ctxTitle, fmtTokens, STAGES,
 } from '../ctx-core.mjs';
 import { MockCtx, MOCK_LIMIT } from '../ctx-mock.mjs';
@@ -160,4 +160,30 @@ test('영어 화면(§86): 툴팁·단계 이름·창 근거·천 단위(Intl)',
     assert.equal(ctxTitle(null), 'No context data');
   } finally { _setLangForTest('ko'); }
   assert.equal(STAGES[1].name, '필름 그레인');
+});
+
+test('§76 열화 대상 루트: live 세션의 지금 값만 — 지난(recent)·/clear 앞 세션의 큰 ctx 는 섬 열화에 안 씀(10.28.)', () => {
+  // 실측 모양(2026-10-28 /state?scope=all): 같은 섬에 지난 메인 33.3%(recent) + live 7.9%. 예전엔 33.3% 로 섬이 열화됐다
+  const nodes = new Map([
+    ['s:old', { id: 's:old', kind: 'main', projectId: 'q', meta: { ctx: C(33.3) } }],
+    ['s:cur', { id: 's:cur', kind: 'main', projectId: 'q', meta: { ctx: C(7.9) } }],
+    ['s:pre', { id: 's:pre', kind: 'main', projectId: 'w', meta: { ctx: C(92) } }],
+    ['s:new', { id: 's:new', kind: 'main', projectId: 'w', meta: { clearedFrom: 'pre', ctx: C(15) } }],
+  ]);
+  const roots = [
+    { sessionId: 'old', projectId: 'q', live: false, tier: 'recent' },
+    { sessionId: 'cur', projectId: 'q', live: true, tier: 'live' },
+    // /clear 앞 세션이 잠깐 live 로 남은 틈에도 빠진다(새 메인 clearedFrom)
+    { sessionId: 'pre', projectId: 'w', live: true, tier: 'live' },
+    { sessionId: 'new', projectId: 'w', live: true, tier: 'live' },
+  ];
+  const ids = degradeRoots(roots, nodes).map((r) => r.sessionId);
+  assert.deepEqual(ids, ['cur', 'new']);
+  // ctx-ui 와 같은 흐름: 남은 루트로 국소 대상을 고르면 문턱(30%) 넘는 섬이 없다
+  const ents = ids.map((sid) => ({ id: 's:' + sid, pct: nodes.get('s:' + sid).meta.ctx.pct }));
+  assert.deepEqual(rankRegions(ents), []);
+  // live 가 하나도 없으면 열화 대상도 없다(게이지 알약은 대로 지난 값 중 최고를 보일 수 있음)
+  assert.deepEqual(degradeRoots([{ sessionId: 'old', live: false }], nodes), []);
+  assert.deepEqual(degradeRoots([], nodes), []);
+  assert.deepEqual(degradeRoots(null, nodes), []);
 });

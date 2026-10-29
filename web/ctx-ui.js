@@ -6,7 +6,7 @@
 // 2차: 열화 수준(levelOf) = 창 대비 %. 단계·셰이더·오디오·정화·버스트·재생 모두 같은 값(절대량 기준은 2026-10-26 폐지).
 //   메인 노드 잔상(셰이더 uMain·2D FlatDegrade)·글자 깨짐(TextGlitch)·흐름선 끊김(렌더러가 DEG 를 읽음)·문턱 버스트.
 import {
-  noiseParams, noiseNeeded, ctxNote, ctxShort, ctxTitle, pctText, gaugeLevel, pickGaugeNode, rankRegions, isCtxDrop,
+  noiseParams, noiseNeeded, ctxNote, ctxShort, ctxTitle, pctText, gaugeLevel, pickGaugeNode, rankRegions, degradeRoots, isCtxDrop,
   stageOf, STAGES, RECOMMEND_PCT, NOISE_MIN_PCT, DEFAULT_STRENGTH, fmtTokens, PurgeBook, MAX_REGIONS,
 } from './ctx-core.mjs';
 // 신호 열화 후처리(noise.js, three)는 3D 장면일 때만 필요할 때 불러온다 — 2D 화면은 three.js 를 받지 않는다
@@ -187,6 +187,7 @@ export function mountCtx({ store, getView, getState, music = null, sfx = null })
   let lastDegMap = 0, degT = 0;
   const audio = music ? new NoiseAudio(music) : null;
   const disp = new Map();          // key → 화면에 쓰는 L(부드럽게 따라감)
+  const clearSeen = new Set();     // /clear 전환 연출을 이미 판정한 새 메인 id
   const bounds = new Map();        // rootSessionId → {c:Vector3, r}
   let boundsAt = 0;
   const v3 = { x: 0, y: 0, z: 0 }, v4 = { x: 0, y: 0, z: 0 }, right = { x: 0, y: 0, z: 0 };
@@ -261,13 +262,31 @@ export function mountCtx({ store, getView, getState, music = null, sfx = null })
       return;
     }
     const sd = new Map();
-    for (const r of store.roots || []) { const id = 's:' + r.sessionId; const D = degScaled(levelOf(nodeCtx(id)), strength); if (D > 0) sd.set(r.sessionId, D); }
+    for (const r of degradeRoots(store.roots, store.nodes)) { const id = 's:' + r.sessionId; const D = degScaled(levelOf(nodeCtx(id)), strength); if (D > 0) sd.set(r.sessionId, D); }
     if (!sd.size) return;
     for (const [id, n] of store.nodes) {
       const rs = n.rootSessionId || (id.startsWith('s:') ? id.slice(2) : null);
       const D = rs && sd.get(rs);
       if (D) { DEG.base.set(id, D); DEG.sessOf.set(id, 's:' + rs); }
     }
+  }
+
+  /**
+   * /clear 전환 연출: 새 메인(meta.clearedFrom)을 처음 볼 때 앞 세션 섬이 열화 중이었으면(화면에 그리던 값) 새 섬에서 정화 연출을 한 번.
+   * 페이지를 새로 연 직후엔 앞 세션 값을 그린 적이 없으므로(disp 없음) 연출하지 않는다
+   */
+  function clearPurge(id, c, now) {
+    if (clearSeen.has(id)) return;
+    const n = store.nodes.get(id);
+    const cf = n && n.meta && n.meta.clearedFrom;
+    if (!cf) return;
+    clearSeen.add(id);
+    if (clearSeen.size > 64) clearSeen.delete(clearSeen.values().next().value);
+    const oldL = disp.get('s:' + cf);
+    if (oldL == null || oldL * 100 < NOISE_MIN_PCT || !enabled || reduced) return;
+    const nl = c ? levelOf(c) / 100 : 0;
+    if (nl >= oldL) return;
+    book.start(id, oldL, now); disp.set(id, nl); stat.purges++;
   }
 
   /** 노드 지금 자리(세계) — 3D 는 group.position, 2D 는 pos, 복셀은 target */
@@ -359,9 +378,11 @@ export function mountCtx({ store, getView, getState, music = null, sfx = null })
       full = false;
       if (now - boundsAt > 300) { computeBounds(view); boundsAt = now; }
       const ents = [];
-      for (const r of store.roots || []) {
+      // 살아 있는 세션의 지금 값만(지난·끝난 루트, /clear 앞 세션 제외 — degradeRoots)
+      for (const r of degradeRoots(store.roots, store.nodes)) {
         const id = 's:' + r.sessionId;
         const c = nodeCtx(id);
+        clearPurge(id, c, now);
         const pur = book.get(id, now);
         if (!c && !pur) continue;
         ents.push({ id, sid: r.sessionId, pct: c ? levelOf(c) : 0, c, purging: pur ? 1 : 0, pur });

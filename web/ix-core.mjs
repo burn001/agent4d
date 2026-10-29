@@ -29,7 +29,7 @@ export function ixColor(cat, isLight = false) {
   return isLight ? `hsl(${h}, 70%, 38%)` : `hsl(${h}, 85%, 66%)`;
 }
 /** 도형 색 열쇠 → 색(테마). 렌더러가 한 번 풀어 둔다 */
-export const IX_KEYS = ['github', 'db', 'remote', 'batch', 'tests', 'ok', 'err', 'skip', 'read', 'write', 'dim', 'warn', 'user', 'auto'];
+export const IX_KEYS = ['github', 'db', 'remote', 'batch', 'tests', 'ok', 'err', 'skip', 'read', 'write', 'dim', 'warn', 'user', 'auto', 'sched', 'mon'];
 export function ixKeyColor(key, isLight = false) {
   switch (key) {
     case 'ok': return isLight ? '#15803d' : '#4ade80';
@@ -40,6 +40,8 @@ export function ixKeyColor(key, isLight = false) {
     case 'warn': return isLight ? '#b45309' : '#fbbf24';
     case 'user': return isLight ? '#a16207' : '#fcd34d';   // 금빛(사용자)
     case 'auto': return isLight ? '#9ca3af' : '#6b7280';   // 자동 알림 회색
+    case 'sched': return isLight ? '#0e7490' : '#67e8f9';  // 예약 작업(시계)
+    case 'mon': return isLight ? '#7c3aed' : '#c4b5fd';    // Monitor 출력
     default: return ixColor(key, isLight);
   }
 }
@@ -172,6 +174,21 @@ export const IXFX = {
 };
 const isEnded = (s) => s === 'done' || s === 'error' || s === 'stopped';
 
+/**
+ * 사용자 아닌 것이 연 메인 턴(user · op auto)의 연출 종류: 'schedule'(예약 작업 — 시계·알람) · 'monitor'(Monitor 출력 → 메인 패킷)
+ * · 'result'(작업 끝 알림 — 출처 노드 → 메인 결과 패킷, st ok·err·stop) · 'dot'(그 밖 — 예전 회색 작은 점)
+ */
+export function ixAutoKind(ix) {
+  if (!ix || ix.cat !== 'user' || ix.op !== 'auto') return null;
+  if (ix.src === 'schedule') return 'schedule';
+  if (ix.src === 'monitor') return 'monitor';
+  if (ix.src === 'notify' && ix.from && ix.st) return 'result';
+  return 'dot';
+}
+/** 자동 턴 연출 시간(초, ÷√배속 전): 회색 점은 예전처럼 1초, 나머지는 사용자 효과와 같은 잔광 */
+export const IX_AUTO = { DOT_S: 1, LINGER_S: 3.2, TRAVEL_S: 0.9, CLOCK_R: 0.6 };
+const autoLinger = (ix) => (ixAutoKind(ix) === 'dot' ? IX_AUTO.DOT_S : IX_AUTO.LINGER_S);
+
 /** 노드별 상호작용 효과. now = 초(렌더러 시계), speed = 재생 배속(잔광을 √배속으로 줄임) */
 export class IxModel {
   constructor() { this.fx = new Map(); this.portal = new Map(); this.console = new Map(); this.seq = 0; this.dirtyAt = 0; }
@@ -256,7 +273,7 @@ export class IxModel {
   step(now) {
     for (const [key, f] of this.fx) {
       if ((f.op === 'streak' || f.op === 'fan') && f.tEnd == null && now - f.lastAt > IXFX.IDLE_S) { f.tEnd = now; f.ok = true; f.ix = { ...f.ix, phase: 'end' }; }
-      const lin = (f.cat === 'user' && f.op === 'auto' ? 1 : IXFX.LINGER[f.cat] || 2) / f.k + (f.cat === 'github' && f.ix.ci && f.ix.ci.fail ? IXFX.CI_AFTERGLOW : 0);
+      const lin = (f.cat === 'user' && f.op === 'auto' ? autoLinger(f.ix) : IXFX.LINGER[f.cat] || 2) / f.k + (f.cat === 'github' && f.ix.ci && f.ix.ci.fail ? IXFX.CI_AFTERGLOW : 0);
       if (f.tEnd != null && now - f.tEnd > lin) { this.fx.delete(key); continue; }
       if (f.tEnd == null && now - f.lastAt > (f.ix.bg ? IXFX.TTL_BG_S : IXFX.TTL_S)) this.fx.delete(key);
     }
@@ -315,7 +332,7 @@ function floorAt(fl, cat, dist) { const a = (fl.ang || IX_FLOOR.ANG)[cat]; retur
 /** 스테이션 배율 = 화면 종류 기본 크기 k(흐름 1 · Planet IX_PLANET.K) × 화면 하한 배율(k 를 곱한 폭으로 잼 — 하한 48px 은 그대로) */
 function flScale(fl, width) { const k = fl.k || 1; return k * ixScale(fl.ppu, width * k); }
 /** 흐름 3D 입체 사용자 단말: 화면 반폭·반높이·뒤로 기운 각(rad)·베젤 두께·글줄을 화면 면 앞으로 띄우는 거리·빔 출발점 */
-export const CON3D = { W: 1.2, H: 0.72, TILT: 0.3, BEZEL: 0.13, TEXT_OUT: 0.05, FACE_OUT: 0.16 };
+export const CON3D = { W: 1.2, H: 0.72, TILT: 0.14, BEZEL: 0.13, TEXT_OUT: 0.05, FACE_OUT: 0.16 }; // 홀로그램 콘솔 데스크: 떠 있는 화면은 조금만(8°) 뒤로 기움
 /** 방위 yaw(0 = 앞이 +z) → 기운 화면 기저 {r 오른쪽, v 화면 위(뒤로 기울어짐), n 화면 법선(앞·약간 위)} */
 export function conBasis(yaw, tilt = CON3D.TILT) {
   const sy = Math.sin(yaw), cy = Math.cos(yaw), st = Math.sin(tilt), ct = Math.cos(tilt);
@@ -490,12 +507,13 @@ export function ixGeometry(model, now, env, geo = new IxGeo()) {
     const st = info ? info.state : 'idle';
     const l1 = info && info.text ? 0.35 + 0.55 * Math.min(1, info.text.length / 22) : 0.18;
     const x0 = -w * 0.78, lw = w * 1.56;
-    const ta = B ? Math.min(1, a * 1.6) : a; // 입체 단말은 화면 바탕이 어두운 유리라 글줄을 조금 진하게
-    ln(x0, h * 0.32, x0 + lw * l1, h * 0.32, key, ta * 0.85);
-    if (info && info.text) ln(x0, -h * 0.02, x0 + lw * l1 * 0.62, -h * 0.02, key, ta * 0.55);
-    const l2 = st === 'idle' ? 0.3 : 0.55;
-    ln(x0, -h * 0.4, x0 + lw * l2, -h * 0.4, st === 'asking' ? 'user' : key, ta * 0.5);
-    if (st === 'working' && !env.reduced) { const q = P(x0 + lw * l2 * ((now * 0.45) % 1), -h * 0.4); geo.quad(q[0], q[1], q[2], 0.09, key, Math.min(1, ta * 2)); }
+    if (!B) { // 흐름 3D 홀로그램 콘솔(입체 모드)은 화면에 글이 바로 뜸(flowview/console3d.js 글 텍스처) — 글줄 막대는 선 단말(2D 밖 Planet)만
+      ln(x0, h * 0.32, x0 + lw * l1, h * 0.32, key, a * 0.85);
+      if (info && info.text) ln(x0, -h * 0.02, x0 + lw * l1 * 0.62, -h * 0.02, key, a * 0.55);
+      const l2 = st === 'idle' ? 0.3 : 0.55;
+      ln(x0, -h * 0.4, x0 + lw * l2, -h * 0.4, st === 'asking' ? 'user' : key, a * 0.5);
+      if (st === 'working' && !env.reduced) { const q = P(x0 + lw * l2 * ((now * 0.45) % 1), -h * 0.4); geo.quad(q[0], q[1], q[2], 0.09, key, Math.min(1, a * 2)); }
+    }
     if (flow && !B) geo.quad(sx + w * 0.78, sy + h * 0.62, sz, 0.14 + waitPulse * 0.4 + (asking ? 0.08 : 0), key, Math.min(1, a * 2.2)); // 빛나는 별(상태 등) — 입체 단말은 베젤 표시등
     const con = { root: rootId, x: sx, y: sy, z: sz, w, h, a, state: st };
     if (B) { con.r = B.r; con.v = B.v; con.n = B.n; con.yaw = B.yaw; con.fade = geo.ka; con.key = key; con.pulse = waitPulse; con.asking = asking; con.dim = dim; con.fail = fail; }
@@ -624,11 +642,7 @@ export function ixDimUnderLabels(geo, toScreen, boxes, k = IX_UNDER_LABEL.K, pad
 function drawUser(geo, f, ix, P, r, C, t, te, A, now, flow, env, model) {
   const top = { x: P.x, y: P.y + r * 0.5, z: P.z };
   const T = te != null ? te : t;
-  if (ix.op === 'auto') { // 자동 알림: 회색 작은 점 하나만(사용자 빔과 구분)
-    const s = { x: P.x - r - 0.9, y: P.y + 0.5, z: P.z - r - 0.6 };
-    const u = T / 0.9; if (u < 1) travel(geo, s, top, u, 'auto', A * 0.7, 0.09, 0.1);
-    return;
-  }
+  if (ix.op === 'auto') { drawAuto(geo, ix, P, r, top, T, A, env); return; } // 예약·Monitor·작업 알림(회색 점은 그 밖)
   if (ix.op === 'deny' || ix.op === 'interrupt') { // 붉은 파문
     for (const d of [0, 0.22]) { const q = (T - d) / 0.9; if (q > 0 && q < 1) geo.circle(P.x, P.y, P.z, r * (1.1 + q * 1.6), 'err', A * (1 - q) * 0.9, 28); }
     if (C && ix.op === 'interrupt') { const u = T / 0.6; if (u < 1) travel(geo, C, top, u, 'err', A * 0.8, 0.14, 0.2); }
@@ -671,6 +685,56 @@ function drawUser(geo, f, ix, P, r, C, t, te, A, now, flow, env, model) {
   }
   const w0 = 0.85; // 메인이 한 번 크게 깨어나는 파문
   for (const d of [0, 0.2, 0.4]) { const q = (t - w0 - d) / 1.1; if (q > 0 && q < 1) geo.circle(P.x, P.y, P.z, r * (1.15 + q * 2.4), 'user', A * (1 - q) * 0.75, 32); }
+}
+
+/**
+ * 자동 턴(사용자 콘솔 빔과 섞이지 않게 콘솔은 쓰지 않는다). 출처 노드(ix.from)가 보이면 그 노드 → 메인, 퇴장·숨김이면(env.pos null)
+ * 메인 쪽 연출만. 모든 도형은 수평(xz) 원·선이라 2D 평면에서도 같은 모양으로 읽힌다.
+ *   예약 = 메인 옆 시계(얼굴 원 + 바늘이 한 바퀴 돌며 울림 고리) → 시계에서 메인으로 빛 → 메인 깨어남 파문(청록) + '⏰ 첫 몇 단어' 리본
+ *   Monitor = Monitor 노드에서 메인으로 보라 패킷 + 출력 첫 몇 단어 리본, 닿으면 작은 고리
+ *   작업 결과 = 출처에서 메인으로 결과 패킷(ok 초록 · err 빨강 · stop 회색) → 메인 위 ✓·✕·■ 배지
+ *   그 밖 = 회색 작은 점 하나(예전)
+ */
+function drawAuto(geo, ix, P, r, top, T, A, env) {
+  const kind = ixAutoKind(ix);
+  const rib = (x, y, z, key, a, glyph) => { if (ix.text && a > 0.02) geo.label(x, y, z, glyph + (ix.text.length > 18 ? ix.text.slice(0, 17) + '…' : ix.text), key, a, 'ix-ribbon'); };
+  const ribA = (T < 2.2 ? 1 : 1 - (T - 2.2) / 0.6) * A;
+  if (kind === 'dot') {
+    const s = { x: P.x - r - 0.9, y: P.y + 0.5, z: P.z - r - 0.6 };
+    const u = T / 0.9; if (u < 1) travel(geo, s, top, u, 'auto', A * 0.7, 0.09, 0.1);
+    return;
+  }
+  const wake = (key, t0, n = 2) => { for (let i = 0; i < n; i++) { const q = (T - t0 - i * 0.2) / 1.0; if (q > 0 && q < 1) geo.circle(P.x, P.y, P.z, r * (1.12 + q * 1.8), key, A * (1 - q) * 0.7, 28); } };
+  if (kind === 'schedule') {
+    const R0 = IX_AUTO.CLOCK_R, K = { x: P.x + r + 0.9, y: P.y + r * 0.6 + 0.5, z: P.z - r * 0.4 };
+    const ring = T < 1.3 ? 0.5 + 0.5 * Math.sin(T * 22) : 0; // 울림
+    geo.circle(K.x, K.y, K.z, R0, 'sched', A * (0.75 + 0.25 * ring), 20);
+    for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2; geo.line(K.x + Math.cos(a) * R0 * 0.78, K.y, K.z + Math.sin(a) * R0 * 0.78, K.x + Math.cos(a) * R0, K.y, K.z + Math.sin(a) * R0, 'sched', A * 0.8); }
+    const ha = -Math.PI / 2 + (env.reduced ? 0 : clamp01(T / 1.3) * Math.PI * 2); // 분침이 한 바퀴
+    geo.line(K.x, K.y, K.z, K.x + Math.cos(ha) * R0 * 0.85, K.y, K.z + Math.sin(ha) * R0 * 0.85, 'sched', A);
+    geo.line(K.x, K.y, K.z, K.x + R0 * 0.5, K.y, K.z, 'sched', A * 0.85); // 시침
+    if (ring > 0) for (const d of [-1, 1]) geo.circle(K.x, K.y, K.z, R0 * (1.25 + 0.12 * ring), 'sched', A * 0.6 * ring, 8, -Math.PI / 2 + d * 0.5 - 0.35, -Math.PI / 2 + d * 0.5 + 0.35);
+    const u = (T - 0.9) / IX_AUTO.TRAVEL_S; if (u > 0 && u < 1) travel(geo, K, top, ease(u), 'sched', A, 0.16, 0.35);
+    wake('sched', 0.9 + IX_AUTO.TRAVEL_S * 0.9);
+    rib(K.x, K.y + 0.5, K.z, 'sched', ribA, '⏰ ');
+    return;
+  }
+  const F = ix.from && env.pos ? env.pos(ix.from) : null;
+  const key = kind === 'monitor' ? 'mon' : ix.st === 'err' ? 'err' : ix.st === 'stop' ? 'dim' : 'ok';
+  const S = F && (F.x !== P.x || F.z !== P.z) ? { x: F.x, y: F.y + 0.35, z: F.z } : null;
+  let arrive = 0;
+  if (S) { // 출처 → 메인
+    const u = T / IX_AUTO.TRAVEL_S;
+    if (u < 1.4) beamLine(geo, S, top, key, A * 0.28 * (1 - clamp01((u - 0.6) / 0.8)), 10, 0.45);
+    if (u < 1) travel(geo, S, top, ease(u), key, A, kind === 'monitor' ? 0.15 : 0.19, 0.45);
+    if (u < 1) rib(S.x + (top.x - S.x) * ease(u), S.y + (top.y - S.y) * ease(u) + 0.55, S.z + (top.z - S.z) * ease(u), key, ribA, kind === 'monitor' ? '◎ ' : '');
+    arrive = IX_AUTO.TRAVEL_S;
+  } else rib(top.x, top.y + r * 0.6 + 0.5, top.z, key, ribA, kind === 'monitor' ? '◎ ' : ''); // 출처가 안 보이면 메인 쪽만
+  const q = (T - arrive) / 0.7; if (q > 0 && q < 1) geo.circle(P.x, P.y, P.z, r * (1.1 + q * 0.9), key, A * (1 - q) * 0.8, 24);
+  if (kind === 'result' && T > arrive) { // 메인 위 결과 배지
+    const b = clamp01((T - arrive) / 0.25);
+    geo.label(P.x, P.y + r + 0.9, P.z, ix.st === 'err' ? '✕' : ix.st === 'stop' ? '■' : '✓', key, A * b, 'ix-badge');
+  } else if (kind === 'monitor') wake('mon', arrive, 1);
 }
 
 function travel(geo, a, b, u, key, alpha, size = 0.2, arc = 0.8) {

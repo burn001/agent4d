@@ -43,7 +43,7 @@ BUILTIN = [
 ]
 DEFAULT = "lofi"
 FIELDS = ["id", "label", "title", "mood", "label_en", "title_en", "mood_en", "file", "meta", "bpm", "key", "key_en", "duration", "bytes",
-          "stage", "energy", "source"]
+          "stage", "views", "energy", "source"]
 
 # 영어 화면용 곡 이름·제목·설명. 매니페스트 항목에 label_en·title_en·mood_en(key_en) 이 이미 있으면 그쪽 우선,
 # 없으면 이 표. 새 곡은 copy --label-en·--title-en·--mood-en 으로 주거나 여기에 더한다. 클라이언트는 영어 화면에서 이 필드를, 없으면 기존 이름을 쓴다
@@ -124,6 +124,38 @@ def norm_stage(v):
     return max(0, min(3, int(v)))
 
 
+VIEWS = ("flow", "planet", "voxel")
+
+
+def norm_views(v):
+    """표현(테마)별 자동 선곡 단계 {"flow": [0, 1], ...}(CONTRACT §62·§67). 빈 표현은 버리고, 하나도 없으면 None"""
+    if not isinstance(v, dict):
+        return None
+    out = {}
+    for k in VIEWS:
+        s = v.get(k)
+        s = s if isinstance(s, list) else ([] if s is None else [s])
+        s = sorted({int(x) for x in s if 0 <= int(x) <= 3})
+        if s:
+            out[k] = s
+    return out or None
+
+
+def parse_views(s: str | None):
+    """--views "flow:0,1;voxel:1" → {"flow": [0, 1], "voxel": [1]}"""
+    if s is None:
+        return None
+    out = {}
+    for part in str(s).replace(" ", "").split(";"):
+        if not part:
+            continue
+        k, _, v = part.partition(":")
+        if k not in VIEWS:
+            raise SystemExit(f"--views 표현은 {'/'.join(VIEWS)}: {part}")
+        out[k] = parse_stage(v)
+    return norm_views(out) or {}
+
+
 def build_manifest(ents: list[dict] | None = None) -> dict:
     out = []
     for t in ents if ents is not None else entries():
@@ -150,6 +182,7 @@ def build_manifest(ents: list[dict] | None = None) -> dict:
             "duration": meta.get("duration", t.get("duration")),
             "bytes": os.path.getsize(mp3),
             "stage": norm_stage(t.get("stage", b.get("stage"))),
+            "views": norm_views(t.get("views", b.get("views"))),
             "energy": t.get("energy", b.get("energy")),
             "source": t.get("source") or b.get("source") or "",
         }
@@ -158,7 +191,7 @@ def build_manifest(ents: list[dict] | None = None) -> dict:
             e[k] = t.get(k) or en.get(k)
         if not e["title_en"] and e["label_en"] and e["title"] == e["label"]:
             e["title_en"] = e["label_en"]
-        out.append({k: e[k] for k in FIELDS if e[k] is not None or k not in ("label_en", "title_en", "mood_en", "key_en")})
+        out.append({k: e[k] for k in FIELDS if e[k] is not None or k not in ("label_en", "title_en", "mood_en", "key_en", "views")})
         for sec in meta.get("sections") or []:
             n = sec.get("name") if isinstance(sec, dict) else None
             if n and n not in SECTIONS_EN and not n.isascii():
@@ -185,7 +218,7 @@ def parse_stage(s: str | None):
     return parts[0] if len(parts) == 1 else parts
 
 
-def copy_track(tid: str, src: str, stage=None, energy=None, label=None, title=None, source=None, en=None) -> list[dict]:
+def copy_track(tid: str, src: str, stage=None, energy=None, label=None, title=None, source=None, en=None, views=None) -> list[dict]:
     ents = entries()
     t = next((x for x in ents if x["id"] == tid), None)
     b = next((x for x in BUILTIN if x["id"] == tid), None)
@@ -216,6 +249,8 @@ def copy_track(tid: str, src: str, stage=None, energy=None, label=None, title=No
         t["energy"] = energy
         if t.get("stage") is None:
             t["stage"] = max(0, min(3, round(energy * 3)))
+    if views is not None:
+        t["views"] = views or None
     if label:
         t["label"] = label
     if title:
@@ -250,13 +285,16 @@ def main(argv=None) -> int:
     c.add_argument("--label-en", help="영어 화면용 짧은 이름")
     c.add_argument("--title-en", help="영어 화면용 제목")
     c.add_argument("--mood-en", help="영어 화면용 곡 설명")
+    c.add_argument("--key-en", help="영어 화면용 조 표기(조 이름에 한글이 섞일 때)")
+    c.add_argument("--views", help='표현(테마)별 단계 "flow:0,1;planet:2;voxel:1" (CONTRACT §67)')
     r = sub.add_parser("remove", help="매니페스트에서 곡 빼기(파일은 그대로)")
     r.add_argument("id")
     a = ap.parse_args(argv)
     ents = None
     if a.cmd == "copy":
         ents = copy_track(a.id, a.src, parse_stage(a.stage), a.energy, a.label, a.title, a.source,
-                          {"label_en": a.label_en, "title_en": a.title_en, "mood_en": a.mood_en})
+                          {"label_en": a.label_en, "title_en": a.title_en, "mood_en": a.mood_en, "key_en": a.key_en},
+                          parse_views(a.views))
     elif a.cmd == "remove":
         ents = [t for t in entries() if t["id"] != a.id]
     write_manifest(ents)

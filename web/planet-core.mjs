@@ -434,3 +434,126 @@ export function trackLabels(job, m, nowMs) {
   else if (m.mode === 'wait' && job && job.until) { const u = tsMs(job.until); if (Number.isFinite(u)) to = tr('cards.track.until', { t: hhmmOf(u) }); }
   return { from, to, key: from + '|' + to };
 }
+
+// ---------------- 서브에이전트·claude -p 시안 궤도계 (3D planet-variants.js · 2D flat/planet-variants2d.js 가 같은 값을 쓴다) ----------------
+// 사용자 결정(2026-10-28): 서브에이전트 = 자기권 빼고 6종, claude -p = 떠돌이 탐사선 빼고 4종을 노드마다 랜덤 배정.
+// 단위 = 본체 반지름 v.r(축소 뒤 — 배치·라벨·홀로그램·카메라가 쓰는 값 그대로). 중심 본체는 CORE 배로 작게 그리고 둘레를 시안 궤도계로 채운다.
+
+/** 서브에이전트 시안(A 깎인 바위 띠 · B 결정 파편 왕관 · C 드론 편대 · D 궤도 정거장 · E 접이식 날개 위성 · G 흩어진 고리 조각) */
+export const SUB_VARIANTS = ['belt', 'crystal', 'drones', 'station', 'solar', 'arcs'];
+/** claude -p 시안(P2 주머니 항성계 · P3 도킹 캡슐 · P4 웜홀 창 · P5 회차 카세트) */
+export const CP_VARIANTS = ['pocket', 'capsule', 'wormhole', 'cassette'];
+/** 중심 본체 그림 배율(지금 본체 반지름 대비 — 0.26～0.45). claude -p 상자는 한 변 1.45 × 이 값 */
+export const VARIANT_CORE = { belt: 0.42, crystal: 0.36, drones: 0.4, station: 0.34, solar: 0.4, arcs: 0.42, pocket: 0.26, capsule: 0.28, wormhole: 0.26, cassette: 0.3 };
+/** 궤도계 바깥 반지름(본체 반지름 배) — 홀로그램 자리·항로 밀기·2D 카드 자리. 지금(서브 2.0～2.9 · claude -p 2.9)과 비슷하게 */
+export const VARIANT_EXTENT = { belt: 2.45, crystal: 2.45, drones: 2.3, station: 2.2, solar: 2.55, arcs: 2.3, pocket: 2.15, capsule: 2.35, wormhole: 2.2, cassette: 2.1 };
+/** 서브 시안의 작은 본체 표면 질감(유형 셰이더 planet-subt 를 재사용 — 유형 8종 중 어울리는 것만 남김) */
+export const VARIANT_SKIN = { belt: 'swarm', crystal: 'crystal', drones: 'gas', station: 'ice', solar: 'lava', arcs: 'ringed' };
+
+/** 노드 종류(displayKind) → 시안 묶음. 'sub' | 'cp' | null(시안 없음 — 메인·워크플로·워크플로 에이전트·백그라운드·모니터·배치 장치는 예전 궤도계) */
+export function variantFamily(kind) { return kind === 'subagent' ? 'sub' : kind === 'claude-p' ? 'cp' : null; }
+export function variantList(fam) { return fam === 'sub' ? SUB_VARIANTS : fam === 'cp' ? CP_VARIANTS : []; }
+
+/** 묶음 안 순열(부모 id 시드 — Fisher-Yates, 결정적) */
+export function variantPerm(fam, seed) {
+  const L = variantList(fam).slice();
+  for (let i = L.length - 1; i > 0; i--) { const j = Math.floor(hash01(seed, 'vp' + i) * (i + 1)); const t = L[i]; L[i] = L[j]; L[j] = t; }
+  return L;
+}
+
+/** 확인용 강제 시안(URL ?pvar=belt,pocket — 이번 접속만). 없으면 null */
+let _force;
+export function forcedVariants() {
+  if (_force !== undefined) return _force;
+  let q = null;
+  try { q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('pvar') : null; } catch { q = null; }
+  _force = q ? q.split(',').map((s) => s.trim()).filter((s) => SUB_VARIANTS.includes(s) || CP_VARIANTS.includes(s)) : null;
+  if (_force && !_force.length) _force = null;
+  return _force;
+}
+
+/**
+ * 시안 배정(결정적): 같은 부모 아래 같은 묶음 형제를 시작 시각(startMs, 같으면 id) 순으로 세운 순번 rank 로
+ * 부모 id 시드 순열의 rank 번째(묶음 길이로 돎) — 형제 묶음 길이(서브 6 · claude -p 4)까지는 겹치지 않는다.
+ * 부모가 없는 노드(독립 claude -p 루트)는 id 해시로 바로. 형제 = [{ id, kind, startMs }](자기 포함해도 됨).
+ * 새로고침·재생·보관함·3D⇄2D 가 같은 형제·시작 순서를 보므로 같은 노드는 같은 시안이다.
+ */
+export function pickVariant(id, kind, parentId, startMs, sibs = []) {
+  const fam = variantFamily(kind);
+  if (!fam) return null;
+  const L = variantList(fam);
+  const F = forcedVariants();
+  const forced = F && F.filter((x) => L.includes(x));
+  if (!parentId) {
+    const i = Math.min(L.length - 1, Math.floor(hash01(id, 'var') * L.length));
+    return forced && forced.length ? forced[i % forced.length] : L[i];
+  }
+  const me = Number.isFinite(startMs) ? startMs : Infinity;
+  let rank = 0;
+  for (const s of sibs) {
+    if (!s || s.id === id || variantFamily(s.kind) !== fam) continue;
+    const t = Number.isFinite(s.startMs) ? s.startMs : Infinity;
+    if (t < me || (t === me && s.id < id)) rank++;
+  }
+  if (forced && forced.length) return forced[rank % forced.length];
+  return variantPerm(fam, parentId)[rank % L.length];
+}
+
+/** 한 페이지 안에서는 처음 정한 시안을 고정(형제가 나중에 지워져도 바뀌지 않게) — 3D·2D 가 같은 표를 쓴다 */
+const VAR_MEMO = new Map();
+export function variantMemo(id, make) {
+  let v = VAR_MEMO.get(id);
+  if (v === undefined) { v = make(); if (VAR_MEMO.size > 20000) VAR_MEMO.clear(); VAR_MEMO.set(id, v); }
+  return v;
+}
+/** 노드(뷰의 vis 항목 v: {id, kind, node}) + 형제 목록 → 시안 이름(메모). sibsOf() 는 처음 한 번만 부른다 */
+export function variantOfVis(v, sibsOf) {
+  if (!variantFamily(v.kind)) return null;
+  return variantMemo(v.id, () => {
+    const n = v.node || {};
+    return pickVariant(v.id, v.kind, n.parentId || null, Date.parse(n.startedAt), n.parentId ? sibsOf() : []);
+  });
+}
+
+/** 시안 상태 세기: spd = 공전 배율, bright = 밝기, act = 작업 반응(도구 입자·벌어짐), tidy = 완료 정리 자세, err = 붉은 맥동 */
+export const VAR_STATE = {
+  tool:  { spd: 2.4,  bright: 1.0,  act: 1,    tidy: 0, err: 0 },
+  think: { spd: 1.25, bright: 0.72, act: 0.25, tidy: 0, err: 0 },
+  wait:  { spd: 0.45, bright: 0.42, act: 0,    tidy: 0, err: 0 },
+  error: { spd: 0.25, bright: 0.5,  act: 0,    tidy: 0, err: 1 },
+  off:   { spd: 0.04, bright: 0.3,  act: 0,    tidy: 1, err: 0 },
+  stop:  { spd: 0.02, bright: 0.2,  act: 0,    tidy: 0, err: 0 },
+};
+/** 노드 상태 → 시안 상태 이름(완료 = 정리 자세, 중지됨 = 그 자리에서 멈춤·회색) */
+export function variantMode(status, tools = 0, dim = false) {
+  if (status === 'stopped') return 'stop';
+  return planetMode(status, tools, dim);
+}
+/** 시안 LOD(본체 반지름 v.r 의 화면 px): 0 = 작은 본체 + 윤곽 고리 하나, 1 = 큰 부품(개수 줄임), 2 = 부품 대부분, 3 = 전부(창 불빛·잔조각·셔틀·입자 최대) */
+export const VAR_LOD = { ONE_PX: 5, MOST_PX: 11, ALL_PX: 24 };
+export function variantLod(px) {
+  if (!(px >= VAR_LOD.ONE_PX)) return 0;
+  return px < VAR_LOD.MOST_PX ? 1 : px < VAR_LOD.ALL_PX ? 2 : 3;
+}
+
+/**
+ * P5 회차 카세트 = 그 노드 자신의 도구 호출 회차(기동기 회차는 기동기 G3 고리 몫 — 겹쳐 그리지 않는다).
+ * hist = 뷰의 최근 도구 장부(새것이 뒤, {res: null|'ok'|'error'}), open = 열린 도구 수, total = 지금까지 시작한 도구 수(node.counts.tools).
+ * → { cur 지금 칸(0..7), cards[8] 코드: 0 빈 틀 · 1 끝(초록) · 2 실패(빨강) · 3 지금(진행 막대) }
+ */
+export const CASSETTE_N = 8;
+export function cassetteModel(hist = [], open = 0, total = 0) {
+  const N = CASSETTE_N;
+  const n = Math.max(Number(total) || 0, hist.length);
+  const cards = new Array(N).fill(0);
+  const cur = open > 0 ? (n - 1 + N) % N : n % N; // 열린 도구가 없으면 다음 빈 칸을 가리킨다
+  let k = 1;
+  for (let i = hist.length - 1; i >= 0 && k < N; i--) {
+    const h = hist[i];
+    if (!h || h.res == null) continue; // 아직 열린 도구(지금 칸)
+    cards[(cur - k + N * 8) % N] = h.res === 'error' ? 2 : 1;
+    k++;
+  }
+  if (open > 0) cards[cur] = 3;
+  return { cur, cards };
+}

@@ -19,7 +19,7 @@ test('2D LOD 는 같은 문턱을 본체 px × LOD2D_K 로', () => {
 });
 
 const mkView = (reduced = false) => ({ reduced, tokens: { isLight: false } });
-const mkV = (status, tools = 0) => ({ id: 'node-x', kind: 'subagent', node: { status }, icons: new Map(Array.from({ length: tools }, (_, i) => [i, {}])) });
+const mkV = (status, tools = 0) => ({ id: 'node-x', kind: 'workflow-agent', node: { status }, icons: new Map(Array.from({ length: tools }, (_, i) => [i, {}])) }); // 서브·claude -p 는 시안(궤도 고리 없음) — 고리 궤도계는 워크플로 에이전트로 확인
 
 test('상태 진행: 도구 호출이면 궤도가 빨리 돌고, 동작 줄이기면 멈춤', () => {
   const v = mkV('active', 1), w = mkV('active', 1);

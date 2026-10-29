@@ -1,6 +1,7 @@
 // 소리 설정 팝업: 소리가 켜져 있을 때만 상단 바 소리 버튼 바로 옆에 작은 ♪ 버튼이 나타나고, 누르면 소리 기능을 모은 팝업.
 //  · 새 오디오 기능은 없다 — 기존 Music(audio.js)·Sound(sound.mjs)·Sfx 를 잇기만 한다
 //  · 팝업: 지금 곡(자동이면 활동 단계) · 재생 방식(자동·한 곡 반복·순환·무작위 = 기존 선택값 sel) · 곡 고르기(= 한 곡 반복) · 음악·효과음 음량
+//  · 음량 줄: '음악'·'효과음' 켬/끔 칩(aria-pressed, Sound.setMusicOn·setSfxOn — 마스터가 켜져 있을 때 한쪽만 끄기) + 각 슬라이더
 //  · 음량 슬라이더(#vol·#sfx-vol)와 곡 선택기(#bgm-track, 숨김)는 DOM 을 그대로 옮겨 온다(id·이벤트·저장값 그대로, 중복 조작 없음)
 //  · 곡·방식·상태가 바뀌면 즉시 다시 그림(Music._renderSelect·Sound.render 뒤에 덧붙임)
 //  · 바깥 클릭·Esc·포커스가 밖으로 나가면 닫힘, 소리를 끄면 버튼과 함께 닫힘. 좁은 화면은 화면 폭 시트(밖으로 안 나감)
@@ -82,12 +83,15 @@ export function mountSoundPop({ music, sound } = {}) {
   trackBox.setAttribute('role', 'group'); trackBox.setAttribute('aria-label', tr('sound.pop.sec.track'));
   let trackKey = '';
   function buildTracks() {
-    const opts = optionList(music.tracks).filter((o) => !isMode(o.value));
-    const key = opts.map((o) => o.value).join('|');
+    // 지금 표현의 곡을 단계별로 위에, 다른 테마 곡은 아래 '다른 테마' 묶음(묶음 이름 줄)
+    const opts = optionList(music.tracks, music.view).filter((o) => !isMode(o.value));
+    const key = opts.map((o) => o.value + ':' + o.group).join('|');
     if (key === trackKey) return;
     trackKey = key;
     trackBox.textContent = '';
+    let grp = null;
     for (const o of opts) {
+      if (o.group && o.group !== grp) { grp = o.group; trackBox.appendChild(el('span', 'sp-grp' + (o.other ? ' other' : ''), grp)); }
       const b = el('button', 'sp-chip sp-track');
       b.type = 'button'; b.dataset.id = o.value; b.title = o.title + tr('sound.pop.track.titleSuffix');
       b.append(el('i', 'sp-dot'), el('span', null, o.text));
@@ -98,13 +102,25 @@ export function mountSoundPop({ music, sound } = {}) {
 
   // 음량: 기존 슬라이더 DOM 을 옮겨 온다
   const volBox = el('div', 'sp-vols');
-  const lab = (input, text) => {
+  // 각 줄: [켬/끔 칩] [슬라이더]. label 로 감싸면 슬라이더 쪽 클릭이 칩을 누르므로 div
+  const partChips = {};
+  const lab = (input, part, text) => {
     if (!input) return null;
-    const l = el('label', 'sp-range');
-    l.append(el('span', null, text), input);
+    const l = el('div', 'sp-range');
+    l.dataset.part = part;
+    const c = el('button', 'sp-chip sp-part');
+    c.type = 'button'; c.dataset.part = part;
+    c.append(el('i', 'sp-dot'), el('span', null, text));
+    c.addEventListener('click', () => {
+      if (part === 'music') sound.setMusicOn(!sound.musicOn); else sound.setSfxOn(!sound.sfxOn);
+      render();
+    });
+    partChips[part] = c;
+    input.setAttribute('aria-label', tr(`sound.pop.vol.${part}.aria`));
+    l.append(c, input);
     return l;
   };
-  for (const n of [lab($('vol'), tr('sound.pop.vol.music')), lab($('sfx-vol'), tr('sound.pop.vol.sfx'))]) if (n) volBox.appendChild(n);
+  for (const n of [lab($('vol'), 'music', tr('sound.pop.vol.music')), lab($('sfx-vol'), 'sfx', tr('sound.pop.vol.sfx'))]) if (n) volBox.appendChild(n);
   const selEl = $('bgm-track');
   if (selEl) { selEl.hidden = true; selEl.tabIndex = -1; volBox.appendChild(selEl); } // 상태 확인용으로만 남김(조작은 위 칩)
 
@@ -129,13 +145,31 @@ export function mountSoundPop({ music, sound } = {}) {
     const auto = music.sel === 'auto';
     const lv = auto && music.autoLevel != null ? stageLabel(music.autoLevel) : null;
     const name = !avail ? (music._probed ? tr('sound.noFiles') : tr('sound.pop.probing')) : t ? t.label : '—';
-    btn.title = tr('sound.pop.btn.title', { what: avail && t ? `${t.label} · ${modeText(music.sel)}` : name });
+    const noMusic = !avail && !!music._probed;
+    const noSfx = !sound.sfx || !sound.sfx._AudioCtx;
+    const offs = [!sound.musicOn && !noMusic ? tr('sound.pop.off.music') : '', !sound.sfxOn && !noSfx ? tr('sound.pop.off.sfx') : ''].filter(Boolean);
+    const what = !sound.musicOn && !noMusic ? offs.join(' · ') : [avail && t ? `${t.label} · ${modeText(music.sel)}` : name, ...offs].join(' · ');
+    btn.title = tr('sound.pop.btn.title', { what });
     btn.setAttribute('aria-label', btn.title);
     if (pop.hidden) return; // 닫혀 있으면 버튼 툴팁만
-    hState.textContent = STATE_TEXT[st] || '';
+    hState.textContent = [STATE_TEXT[st] || '', ...offs].filter(Boolean).join(' · ');
+    for (const [part, c] of Object.entries(partChips)) {
+      const on = part === 'music' ? sound.musicOn : sound.sfxOn;
+      const none = part === 'music' ? noMusic : noSfx;
+      c.disabled = none;
+      c.setAttribute('aria-pressed', String(on && !none));
+      c.title = none ? tr(`sound.pop.part.${part}.none`) : tr(`sound.pop.part.${part}.title`);
+      if (c.parentNode) c.parentNode.classList.toggle('off', !on || none);
+    }
+    // 음악 끔(부분 토글): 지금 곡 칸은 이름을 흐리게 + '음악 꺼짐' 부제, 방식·곡 칩은 고를 수 있되 흐리게(켜면 그 선택으로 재생)
+    const mOff = !sound.musicOn && avail;
+    pop.classList.toggle('sp-music-off', mOff);
+    const offNote = mOff ? tr('sound.pop.musicOff.sub') : '';
+    for (const g of [modeBox, trackBox]) { if (mOff) g.setAttribute('aria-description', offNote); else g.removeAttribute('aria-description'); }
     nowT.textContent = name;
-    nowS.textContent = avail && t ? [modeText(music.sel) + (lv ? ` · ${tr('sound.pop.activity', { level: lv })}` : ''), t.bpm ? `${t.bpm} BPM` : ''].filter(Boolean).join(' · ') : '';
-    now.title = avail && t && t.mood ? t.mood : ''; // 곡 설명은 길어서 풍선으로만
+    if (mOff) { nowS.textContent = offNote; now.title = ''; }
+    else nowS.textContent = avail && t ? [modeText(music.sel) + (lv ? ` · ${tr('sound.pop.activity', { level: lv })}` : ''), t.bpm ? `${t.bpm} BPM` : ''].filter(Boolean).join(' · ') : '';
+    if (!mOff) now.title = avail && t && t.mood ? t.mood : ''; // 곡 설명은 길어서 풍선으로만
     for (const b of modeBtns) { b.setAttribute('aria-pressed', String(b.dataset.mode === mode)); b.disabled = !avail; }
     buildTracks();
     for (const b of trackBox.children) {

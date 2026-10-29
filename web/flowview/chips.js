@@ -12,18 +12,20 @@ import { STAND, standYawStep, yawToward } from './tier-core.mjs'; // 세운 배�
 import { JOB_CHIP, jobChipColor, jobChipModel, newJobChipMemo, jobChipAttr, jobBreathes } from './job-chip-core.mjs'; // 작업 칩
 import { RIG, heatRgb, rigCode } from './proc-rig-core.mjs'; // 분리 프로세스 장치
 import { procState, procJobId, jobHeat } from '../job-core.mjs';
+import { SIL, SIL_NAMES, SIL_DIM, silOf, silOutline } from './shape-core.mjs'; // 실루엣 문법
+import { MAIN_RIG } from './main-rig-core.mjs'; // 메인 몸 높이
 
 const QUAD = 1.9; // 노드 반지름 대비 사각형 반폭(글로우·고리 여백)
 
 // 정점 셰이더: 기둥(윗면 aPart 0 · 옆면 1)과 그림자(원반 2 · 기둥줄 3)를 같은 인스턴스 속성으로. 위치는 셰이더가 계산(기하 = 모양 틀)
 const VS = `
-attribute vec4 aShape; attribute vec4 aNorm; attribute vec2 aMeta; // 육각 모서리 xy·상자 모서리 zw / 옆면 바깥 법선(육각 xy·상자 zw) / 부분·둘레 좌표
+attribute vec4 aShape; attribute vec4 aNorm; attribute vec4 aMeta; // 육각 모서리 xy·상자 모서리 zw / 옆면 바깥 법선(육각 xy·상자 zw, 실루엣 틀은 지역 법선 xyz) / 부분·둘레 좌표·모양(§113 실루엣 0..4)·높이
 attribute vec3 iColor; attribute vec3 iKind; attribute vec4 iA; attribute vec4 iB; attribute vec4 iC; attribute vec4 iD;
 uniform float uStemW; uniform float uFogNear; uniform float uFogFar;
 varying vec2 vP; varying vec3 vColor; varying vec3 vKind; varying vec4 vA; varying vec4 vB; varying vec4 vC; varying vec4 vD;
-varying float vPart; varying float vFace; varying float vShade; varying float vFog;
+varying float vPart; varying float vFace; varying float vShade; varying float vFog; varying float vShape;
 void main() {
-  float aPart = aMeta.x, aU = aMeta.y;
+  float aPart = aMeta.x, aU = aMeta.y; vShape = aMeta.z;
   vec2 aHex = aShape.xy, aBox = aShape.zw, aNHex = aNorm.xy, aNBox = aNorm.zw;
   vColor = iColor; vKind = iKind; vA = iA; vB = iB; vC = iC; vD = iD; vPart = aPart; vFace = 1.0; vShade = 1.0;
   vec3 C = instanceMatrix[3].xyz;
@@ -35,7 +37,21 @@ void main() {
   // 세운 배치 장치(§51·§80.7): 앞면이 카메라 쪽(iD.w = 방위 yaw, standYawStep). 앞 = fw, 오른쪽 = rt, 위 = +y
   vec3 fw = vec3(sin(iD.w), 0.0, cos(iD.w)), rt = vec3(cos(iD.w), 0.0, -sin(iD.w));
   vec3 w;
-  if (aPart < 0.5) {             // 윗면: 예전 칩 그림을 바닥과 나란히 눕힘(그림의 위 = -z) — 배치 장치는 세운 앞면(그림의 위 = 위)
+  if (aMeta.z > 0.5 && aPart < 1.5) { // §113 실루엣 틀(깎인 육각·두 단·네모 터미널·둥근 퍽): 정점 = 지역 좌표(x·z 반지름 단위, y 두께 단위), 방위 iD.w(네모 터미널만 카메라 쪽)
+    float cy = cos(iD.w), sy = sin(iD.w);
+    vec3 l;
+    if (aPart < 0.5) { vP = aHex * vec2(${QUAD.toFixed(2)}); l = vec3(vP.x * s, aMeta.w * H, -vP.y * s); }
+    else {
+      l = vec3(position.x * s, position.y * H, position.z * s);
+      vec3 nl = aNorm.xyz;
+      vec3 n = normalize(vec3(nl.x * cy + nl.z * sy, nl.y, -nl.x * sy + nl.z * cy));
+      w = C + vec3(l.x * cy + l.z * sy, l.y, -l.x * sy + l.z * cy);
+      vFace = dot(n, normalize(cameraPosition - w));
+      vShade = 0.45 + 0.55 * max(0.0, dot(n, normalize(vec3(-0.45, 0.6, 0.66))));
+      vP = vec2(aU, aMeta.w);
+    }
+    w = C + vec3(l.x * cy + l.z * sy, l.y, -l.x * sy + l.z * cy);
+  } else if (aPart < 0.5) {             // 윗면: 예전 칩 그림을 바닥과 나란히 눕힘(그림의 위 = -z) — 배치 장치는 세운 앞면(그림의 위 = 위)
     vP = aHex * (dev ? vec2(1.85, 1.1) : vec2(${QUAD.toFixed(2)})); // 세운 장치는 빛무리 판을 상자 둘레만큼만(옆에서 큰 옅은 판이 보이지 않게)
     w = dev ? C + rt * (vP.x * s) + vec3(0.0, vP.y * s, 0.0) + fw * (H * 0.5) : C + vec3(vP.x * s, H * 0.5, -vP.y * s);
   } else if (aPart < 1.5) {      // 옆면: 육각(배치 장치는 세운 상자의 위·아래·양옆) 모서리, 바깥 법선으로 앞뒤·음영
@@ -76,7 +92,7 @@ const FS = `
 uniform float uTime; uniform float uLight; uniform vec3 uInterior; uniform vec3 uHolo; uniform vec3 uWarn; uniform vec3 uErr; uniform vec3 uOk; uniform vec3 uStop;
 uniform vec3 uFog; uniform float uFogMax;
 varying vec2 vP; varying vec3 vColor; varying vec3 vKind; varying vec4 vA; varying vec4 vB; varying vec4 vC; varying vec4 vD;
-varying float vPart; varying float vFace; varying float vShade; varying float vFog;
+varying float vPart; varying float vFace; varying float vShade; varying float vFog; varying float vShape;
 // 아래층일수록 어둡게(다크)·옅게(라이트) + 거리 안개(장면 안개 색 = 배경)
 vec4 finish(vec3 col, float al) {
   float dim = vD.y;
@@ -88,6 +104,13 @@ vec4 finish(vec3 col, float al) {
 float hexD(vec2 p) { p = abs(p); return max(p.x, 0.5 * p.x + 0.8660254 * p.y) / 0.8660254; }
 // 배치 장치(§51): 넓고 낮은 모서리 둥근 상자(가로 1.45 · 세로 0.82) — 변에서 1
 float devD(vec2 p) { vec2 q = abs(p) / vec2(1.45, 0.82); vec2 r = max(q - 0.78, 0.0) / 0.22; return max(max(q.x, q.y), 0.78 + 0.22 * length(r)); }
+// §113 실루엣 윗면 외곽(변에서 1): 1 깎인 육각(오른쪽 위 꼭짓점) · 2 두 단 윗단(작은 육각) · 3 네모 터미널 · 4 둥근 퍽
+float shapeD(vec2 p, float k) {
+  if (k < 1.5) return max(hexD(p), dot(p, vec2(0.8660254, 0.5)) / 0.85);
+  if (k < 2.5) return hexD(p) / 0.66;
+  if (k < 3.5) { vec2 q = abs(p) / vec2(1.12, 0.78); vec2 r = max(q - 0.86, 0.0) / 0.14; return max(max(q.x, q.y), 0.86 + 0.14 * length(r)); }
+  return length(p) / 0.96;
+}
 vec3 bandC(float b) { return b < 1.5 ? uWarn : b < 2.5 ? uOk : b < 3.5 ? uStop : uErr; }
 float line(float d, float at, float w) { return smoothstep(w, 0.0, abs(d - at)); }
 float seg(vec2 p, vec2 a, vec2 b, float w) { vec2 pa = p - a, ba = b - a; float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0); return smoothstep(w, w * 0.35, length(pa - ba * h)); }
@@ -211,6 +234,13 @@ void main() {
   if (vPart > 0.5) {             // 옆면: 어두운 몸 + 방향광 음영 + 위·아래 상태색 띠 + 모서리 + 아래로 흐르는 스캔라인
     if (vFace < 0.0) discard;
     float h = p.y;
+    if (vShape > 0.5 && h > 1.5) { // §113 두 단 육각 이음 틈: 종류색으로 은은히(독립 세션의 '두 몸')
+      float sh = h - 2.0;
+      vec3 sc = mix(uInterior, vKind, light ? 0.5 : 0.35) * (0.6 + 0.4 * vShade);
+      sc = mix(sc, light ? vKind * 0.8 : mix(vKind, vec3(1.0), 0.2), smoothstep(0.35, 0.0, abs(sh - 0.5)) * 0.6);
+      gl_FragColor = finish(sc, light ? 0.95 : 0.9);
+      return;
+    }
     vec3 body = mix(uInterior, C, light ? 0.14 : 0.2);
     vec3 col = body * (light ? 0.8 + 0.2 * vShade : vShade) * (0.72 + 0.28 * h);
     float k = floor(p.x + 0.5);
@@ -239,7 +269,9 @@ void main() {
     gl_FragColor = finish(col, light ? 0.96 : 0.94);
     return;
   }
-  float d = dev ? devD(p) : hexD(p), l = length(p);
+  bool gen = vShape > 0.5;
+  float d = gen ? shapeD(p, vShape) : dev ? devD(p) : hexD(p), l = length(p);
+  float topK = vShape > 1.5 && vShape < 2.5 ? 0.66 : vShape > 2.5 && vShape < 3.5 ? 0.8 : 1.0;
   if (job) { vec4 jt = jobTop(p, d, l, C, T, light, foc, glowK, jc, vC.z, vC.w); gl_FragColor = finish(jt.rgb, jt.a); return; }
   vec3 col = vec3(0.0); float al = 0.0;
   // 바깥 글로우(상태색)
@@ -300,9 +332,23 @@ void main() {
       }
     } else {
     // 아이콘
-    float ic = icon(p / 0.95, ik);
+    float ic = icon(p / (0.95 * topK), ik);
     vec3 icC = mix(vKind, C, 0.35);
     col = mix(col, light ? icC * 0.9 : mix(icC, vec3(1.0), 0.15), ic * 0.9);
+    if (vShape > 0.5 && vShape < 1.5) { // §113 워크플로 에이전트: 깎인 모서리 안쪽 작은 삼각 표(종류색)
+      vec2 q = (p - vec2(0.5, 0.29)) / 0.17;
+      float tri = smoothstep(0.08, 0.0, max(abs(q.x) * 0.866 + q.y * 0.5, -q.y) - 0.5);
+      col = mix(col, light ? icC * 0.85 : mix(icC, vec3(1.0), 0.2), tri * 0.85);
+    }
+    }
+  }
+  if (vShape > 3.5) { // §113 모니터 퍽: 가운데서 퍼지는 파동 셋(감시 중엔 빠르게)
+    float spd = st > 0.5 && st < 2.5 ? 0.55 : 0.18;
+    for (int i = 0; i < 3; i++) {
+      float u = fract(T * spd + float(i) / 3.0);
+      float rr = 0.25 + u * 1.25;
+      float wv = line(l, rr, 0.035) * (1.0 - u) * (light ? 0.5 : 0.42);
+      col = mix(col, vKind, wv); al = max(al, wv);
     }
   }
   // 상태색 테두리: 완료 = 점선·흐림, 중지 = 회색 얇게, 오류 = 맥동
@@ -372,57 +418,132 @@ function frame(P, part, hex, box, nh, nb, u, idx) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
   // 정점 속성은 셋으로 묶는다(인스턴스 행렬 4칸 + 인스턴스 속성 6 + 정점 4 = 14 ≤ WebGL 최소 한도 16)
-  const n = part.length, shape = new Float32Array(n * 4), norm = new Float32Array(n * 4), meta = new Float32Array(n * 2);
+  const n = part.length, shape = new Float32Array(n * 4), norm = new Float32Array(n * 4), meta = new Float32Array(n * 4);
   for (let i = 0; i < n; i++) {
     shape[i * 4] = hex[i * 2]; shape[i * 4 + 1] = hex[i * 2 + 1]; shape[i * 4 + 2] = box[i * 2]; shape[i * 4 + 3] = box[i * 2 + 1];
     norm[i * 4] = nh[i * 2]; norm[i * 4 + 1] = nh[i * 2 + 1]; norm[i * 4 + 2] = nb[i * 2]; norm[i * 4 + 3] = nb[i * 2 + 1];
-    meta[i * 2] = part[i]; meta[i * 2 + 1] = u[i];
+    meta[i * 4] = part[i]; meta[i * 4 + 1] = u[i];
   }
   g.setAttribute('aShape', new THREE.BufferAttribute(shape, 4));
   g.setAttribute('aNorm', new THREE.BufferAttribute(norm, 4));
-  g.setAttribute('aMeta', new THREE.BufferAttribute(meta, 2));
+  g.setAttribute('aMeta', new THREE.BufferAttribute(meta, 4));
   g.setIndex(idx);
   return g;
 }
-// 기둥 두께(칩 반지름 배수): 메인은 조금 더 두껍게, 배치 장치는 납작한 상자
+// 실루엣 틀: 지역 좌표 정점(x·z = 반지름 단위, y = 두께 단위 −0.5..0.5) — 옆면(두 단 이음 틈·아랫단 윗면 턱) 먼저, 윗면 사각 나중.
+// 정점 속성은 예전 틀과 같은 셋(aShape·aNorm·aMeta): aShape.xy = 윗면 사각 모서리, aNorm.xyz = 지역 법선, aMeta = (부분, 둘레, 모양, 높이 표)
+export function silGeometry(sil) {
+  const P = [], S = [], N = [], M = [], idx = [];
+  const shp = SIL[sil];
+  const put = (x, y, z, part, sh, n, u, h) => { P.push(x, y, z); S.push(sh[0], sh[1], 0, 0); N.push(n[0], n[1], n[2], 0); M.push(part, u, shp, h); return P.length / 3 - 1; };
+  // 그림 좌표(x 오른쪽, y 위 = 지역 −z)의 외곽(반시계) → 옆면 띠(y0..y1), 둘레 좌표 uOf(i), 높이 표 h0..h1
+  const ring = (pts, y0, y1, uOf, h0 = 0, h1 = 1) => {
+    const m = pts.length;
+    let ccw = 0; for (let i = 0; i < m; i++) { const a = pts[i], b = pts[(i + 1) % m]; ccw += a[0] * b[1] - b[0] * a[1]; }
+    const sg = ccw > 0 ? 1 : -1;
+    for (let i = 0; i < m; i++) {
+      const a = pts[i], b = pts[(i + 1) % m];
+      const ex = b[0] - a[0], ey = b[1] - a[1], L = Math.hypot(ex, ey) || 1;
+      const nx = (ey / L) * sg, ny = (-ex / L) * sg; // 그림 좌표 바깥 법선
+      const n = [nx, 0, -ny];
+      const o = put(a[0], y0, -a[1], 1, [0, 0], n, uOf(i), h0);
+      put(b[0], y0, -b[1], 1, [0, 0], n, uOf(i + 1), h0);
+      put(b[0], y1, -b[1], 1, [0, 0], n, uOf(i + 1), h1);
+      put(a[0], y1, -a[1], 1, [0, 0], n, uOf(i), h1);
+      idx.push(o, o + 1, o + 2, o, o + 2, o + 3);
+    }
+  };
+  const hexPts = (r) => HEX.map(([x, y]) => [x * r, y * r]);
+  const flip = (pts) => pts.map(([x, y]) => [x, -y]); // silOutline(화면 y 아래) → 그림 좌표
+  const D = SIL_DIM[sil];
+  const intU = (i) => i;
+  if (sil === 'tier2') {
+    const yl = -0.5 + D.lower, ys = yl + D.seam;
+    ring(hexPts(1), -0.5, yl, intU);
+    ring(hexPts(0.5), yl, ys, intU, 2, 3); // 이음 틈(높이 표 2..3)
+    ring(hexPts(D.top), ys, 0.5, intU);
+    // 아랫단 윗면 턱(바깥 1 → 안 0.5 육각 고리, 위를 향함) — 상태색 테가 옅게
+    const out = hexPts(1), inn = hexPts(0.5);
+    for (let i = 0; i < 6; i++) {
+      const j = (i + 1) % 6;
+      const o = put(out[i][0], yl, -out[i][1], 1, [0, 0], [0, 1, 0], 0.5, 0.92);
+      put(out[j][0], yl, -out[j][1], 1, [0, 0], [0, 1, 0], 0.5, 0.92);
+      put(inn[j][0], yl, -inn[j][1], 1, [0, 0], [0, 1, 0], 0.5, 0.6);
+      put(inn[i][0], yl, -inn[i][1], 1, [0, 0], [0, 1, 0], 0.5, 0.6);
+      idx.push(o, o + 1, o + 2, o, o + 2, o + 3);
+    }
+  } else if (sil === 'puck') {
+    ring(flip(silOutline('puck', 1)), -0.5, 0.5, (i) => 0.3 + (i / 24) * 0.4); // 매끈한 원통: 둘레 좌표가 정수를 넘지 않아 모서리선 없음
+  } else {
+    ring(sil === 'hex' ? hexPts(1) : flip(silOutline(sil, 1)), -0.5, 0.5, intU);
+  }
+  const o = put(0, 0, 0, 0, [-1, -1], [0, 1, 0], 0, 0.5);
+  put(0, 0, 0, 0, [1, -1], [0, 1, 0], 0, 0.5); put(0, 0, 0, 0, [1, 1], [0, 1, 0], 0, 0.5); put(0, 0, 0, 0, [-1, 1], [0, 1, 0], 0, 0.5);
+  idx.push(o, o + 1, o + 2, o, o + 2, o + 3);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  g.setAttribute('aShape', new THREE.Float32BufferAttribute(S, 4));
+  g.setAttribute('aNorm', new THREE.Float32BufferAttribute(N, 4));
+  g.setAttribute('aMeta', new THREE.Float32BufferAttribute(M, 4));
+  g.setIndex(idx);
+  return g;
+}
+
 // 깊이만 쓰는 패스: 색 셰이더를 그대로 돌리고 눈에 보일 만큼 불투명한 조각만 깊이를 남긴다(빛무리·투명한 테두리 밖·희미한 퇴장 노드는 앞의 선을 가리지 않음)
+// 실루엣마다 인스턴스 묶음이 따로라(그리기 순서 = 묶음 순) 깊이 패스를 색보다 먼저(0.9) 그린다 — 색 패스는 깊이 시험으로 앞 노드에 가려져 묶음 사이 앞뒤가 맞는다
 const FS_DEPTH = FS.replace('void main() {', 'void mainColor() {') + `
 void main() { mainColor(); if (gl_FragColor.a < 0.35) discard; }
 `;
-const THICK = { main: 1.0, device: 0.7, other: 0.85 }; // 배치 장치(세움)는 앞뒤 깊이
+const THICK = { device: 0.7 }; // 배치 장치(세움)는 앞뒤 깊이. 그 밖은 실루엣 두께(SIL_DIM.h), 작업 칩·분리 프로세스는 각자 값
+const ATTRS = [['iColor', 3], ['iKind', 3], ['iA', 4], ['iB', 4], ['iC', 4], ['iD', 4]];
+
+/** 실루엣 하나 = 인스턴스 묶음(색 + 깊이) 또는 그림자 묶음(그림자 원반 + 기둥줄) */
+class Bucket {
+  constructor(scene, geo, mat, dmat, cap, ro) {
+    this.cap = cap; this.n = 0;
+    const mk = (n) => new THREE.InstancedBufferAttribute(new Float32Array(cap * n), n).setUsage(THREE.DynamicDrawUsage);
+    this.a = {};
+    for (const [k, n] of ATTRS) { this.a[k] = mk(n); geo.setAttribute(k, this.a[k]); }
+    this.mesh = new THREE.InstancedMesh(geo, mat, cap);
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.count = 0; this.mesh.frustumCulled = false; this.mesh.renderOrder = ro;
+    scene.add(this.mesh);
+    if (dmat) {
+      this.depth = new THREE.InstancedMesh(geo, dmat, cap);
+      this.depth.instanceMatrix = this.mesh.instanceMatrix;
+      this.depth.count = 0; this.depth.frustumCulled = false; this.depth.renderOrder = 0.9;
+      scene.add(this.depth);
+    }
+  }
+  /** 임시 값 t 를 다음 인스턴스로 */
+  put(m, t) {
+    if (this.n >= this.cap) return;
+    const i = this.n++;
+    this.mesh.setMatrixAt(i, m);
+    for (const [k, n] of ATTRS) { const A = this.a[k].array, src = t[k]; for (let j = 0; j < n; j++) A[i * n + j] = src[j]; }
+  }
+  flush() {
+    this.mesh.count = this.n; if (this.depth) this.depth.count = this.n;
+    if (this.n) { this.mesh.instanceMatrix.needsUpdate = true; for (const [k] of ATTRS) this.a[k].needsUpdate = true; }
+  }
+  dispose() { this.mesh.removeFromParent(); if (this.depth) this.depth.removeFromParent(); this.mesh.geometry.dispose(); }
+}
 
 export class NodeChips {
   constructor(scene, view, cap = 1024) {
     this.view = view;
     this.cap = cap;
-    const geo = prismGeometry(), sgeo = shadowGeometry();
-    const mk = (n) => new THREE.InstancedBufferAttribute(new Float32Array(cap * n), n).setUsage(THREE.DynamicDrawUsage);
-    this.aColor = mk(3); this.aKind = mk(3); this.aA = mk(4); this.aB = mk(4); this.aC = mk(4); this.aD = mk(4);
-    for (const g of [geo, sgeo]) { g.setAttribute('iColor', this.aColor); g.setAttribute('iKind', this.aKind); g.setAttribute('iA', this.aA); g.setAttribute('iB', this.aB); g.setAttribute('iC', this.aC); g.setAttribute('iD', this.aD); }
     this.uniforms = { uTime: { value: 0 }, uLight: { value: 0 }, uInterior: { value: new THREE.Color() }, uHolo: { value: new THREE.Color() }, uWarn: { value: new THREE.Color() }, uErr: { value: new THREE.Color() }, uOk: { value: new THREE.Color() }, uStop: { value: new THREE.Color() },
       uFog: { value: new THREE.Color() }, uFogNear: { value: 80 }, uFogFar: { value: 300 }, uFogMax: { value: 0.5 }, uStemW: { value: 0.08 } };
+    // 재질 둘(색·깊이)을 모든 실루엣 묶음과 그림자가 나눠 쓴다(같은 셰이더 = 프로그램 하나)
     this.mat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: VS, fragmentShader: FS, transparent: true, depthWrite: false, side: THREE.DoubleSide });
-    this.mesh = new THREE.InstancedMesh(geo, this.mat, cap);
-    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.mesh.count = 0;
-    this.mesh.frustumCulled = false;
-    // 깊이: 칩은 반투명(깊이 안 씀)이라 예전엔 renderOrder 2 로 빔(1)·띄움 점선 뒤에 덧그려져 카메라에서 먼 노드가 앞의 선을 가렸다.
-    // 이제 칩(색, 1) → 칩 깊이만(1.5, 같은 셰이더·discard, 색 안 씀) → 빔·띄움 점선(2)·패킷(3) 순: 선은 노드 뒤면 가려지고 앞이면 노드 위에 그려진다.
-    this.mesh.renderOrder = 1;
     this.dmat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: VS, fragmentShader: FS_DEPTH, transparent: true, depthWrite: true, colorWrite: false, side: THREE.DoubleSide });
-    this.depth = new THREE.InstancedMesh(geo, this.dmat, cap);
-    this.depth.instanceMatrix = this.mesh.instanceMatrix;
-    this.depth.count = 0;
-    this.depth.frustumCulled = false;
-    this.depth.renderOrder = 1.5;
-    // 그림자(바닥 원반 + 기둥줄): 같은 인스턴스 속성·행렬을 나눠 쓰고, 바닥층 다음·빔 전에
-    this.shadow = new THREE.InstancedMesh(sgeo, this.mat, cap);
-    this.shadow.instanceMatrix = this.mesh.instanceMatrix;
-    this.shadow.count = 0;
-    this.shadow.frustumCulled = false;
-    this.shadow.renderOrder = 0.5;
-    scene.add(this.shadow, this.mesh, this.depth);
+    // 실루엣 묶음: hex(서브에이전트·배치 장치·작업 칩·분리 프로세스 — 예전 틀) · cham · tier2 · term · puck. 메인은 MainRigs 가 그림(그림자만 여기)
+    this.buckets = {};
+    for (const sil of SIL_NAMES) this.buckets[sil] = new Bucket(scene, sil === 'hex' ? prismGeometry() : silGeometry(sil), this.mat, this.dmat, sil === 'hex' ? cap : Math.max(64, cap >> 1), 1);
+    this.shadow = new Bucket(scene, shadowGeometry(), this.mat, null, cap, 0.5); // 그림자(바닥 원반 + 기둥줄), 바닥층 다음·빔 전
     this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._s = new THREE.Vector3(); this._c = new THREE.Color(); this._f = new THREE.Vector3();
+    this._t = Object.fromEntries(ATTRS.map(([k, n]) => [k, new Float32Array(n)]));
     this._colCache = new Map();
     this._jobCol = [];
     this._order = [];
@@ -462,13 +583,21 @@ export class NodeChips {
     if (!c) { c = new THREE.Color(stateColor(state, this.isLight)); this._colCache.set(state, c); }
     return c;
   }
+  /** 노드 → 실루엣 이름(silOf). 메인(독립 claude -p 루트는 표시 종류가 claude-p 라 제외)은 null — MainRigs 가 그린다 */
+  silOf(v) {
+    const key = (v.procRig ? 1 : 0) + (jobOf(v.node) ? 2 : 0);
+    if (v._sil !== undefined && v._silK === key) return v._sil;
+    v._silK = key;
+    if (v.kind === 'main' && !v.device) return (v._sil = null);
+    return (v._sil = silOf(v.kind, { device: !!v.device, job: !!(key & 2), proc: !!v.procRig }));
+  }
   update(now) {
     const view = this.view;
     this.uniforms.uTime.value = now % 1000;
     const dt = this._t0 != null ? Math.min(0.25, Math.max(0, now - this._t0)) : 0; this._t0 = now;
-    const C = this.aColor.array, K = this.aKind.array, A = this.aA.array, B = this.aB.array, D = this.aC.array;
+    const T = this._t, C = T.iColor, K = T.iKind, A = T.iA, B = T.iB, D = T.iC, E = T.iD;
     const nowMs = view.clock ? view.clock() : Date.now();
-    // 뒤 → 앞으로(카메라 시선 깊이) 정렬: 깊이 쓰기 없이 겹친 기둥이 바르게 덮이게(300개 정렬 ≈ 0.05ms)
+    // 뒤 → 앞으로(카메라 시선 깊이) 정렬: 같은 묶음 안에서 겹친 기둥의 반투명 가장자리가 바르게 덮이게(300개 정렬 ≈ 0.05ms)
     const cam = view.camera, cp = cam.position, fw = cam.getWorldDirection(this._f);
     const ord = this._order;
     ord.length = 0;
@@ -483,55 +612,59 @@ export class NodeChips {
     this.uniforms.uFog.value.copy(fog ? fog.color : view.tokens.bg);
     this.uniforms.uFogNear.value = camDist * 0.8; this.uniforms.uFogFar.value = camDist * 2.6;
     this.uniforms.uStemW.value = Math.max(0.05, camDist / 900);
-    const E = this.aD.array, floorY = view.tierFloor ?? 0;
+    const floorY = view.tierFloor ?? 0;
+    for (const k in this.buckets) this.buckets[k].n = 0;
+    this.shadow.n = 0;
     let n = 0;
     for (const v of ord) {
       if (n >= this.cap) break;
       const node = v.node;
+      const sil = this.silOf(v);
       const st = nodeVisualStateAt(node, v.icons ? v.icons.size : 0, nowMs); // 오래 도는 셸 = 도구 사용 모습
       // 작업 노드: 표시 상태(렌더러 시계 — 정체 판정)는 JOB_CHIP.REFRESH_MS 마다, 대기 차오름은 보관한 시각으로 산술만(객체 안 만듦)
       const job = jobOf(node);
       const jm = job ? jobChipModel(v._jobChip || (v._jobChip = newJobChipMemo()), job, nowMs) : null;
-      // 크기: SceneView 가 매 프레임 계산한 메시 배율(등장·퇴장·오래된 완료 축소 포함) × 숨쉬기(작업은 진행 중일 때만)
-      const s = v.mesh.scale.x * (jm && !jobBreathes(jm.code) ? 1 : breathe(st, now, v.seed));
+      // 크기: SceneView 가 매 프레임 계산한 메시 배율(등장·퇴장·오래된 완료 축소 포함) × 숨쉬기(작업은 진행 중일 때만). 메인 그림자는 숨쉬지 않음
+      const s = v.mesh.scale.x * (jm && !jobBreathes(jm.code) ? 1 : sil ? breathe(st, now, v.seed) : 1);
       this._s.setScalar(Math.max(0.0001, s));
       this._m.compose(v.group.position, this._q, this._s);
-      this.mesh.setMatrixAt(n, this._m);
       // 같은 프로젝트 live 메인이 여럿이면 메인 테두리(상태색 자리)를 그 세션 색으로 — 오류·중지·완료는 상태색 그대로
       const rg = !jm && v.procRig ? this._rigAttr(v, nowMs) : null; // 분리 프로세스 장치: 상태 번호·과열·색
       const c = rg ? rg.col : jm ? this.jobColor(jm.code) : runStaleOf(node, nowMs) ? this.jobColor(5) : v.sessC && v.kind === 'main' && !node.parentId && (st === NODE_STATE.idle || st === NODE_STATE.thinking || st === NODE_STATE.tool) ? v.sessC : this._col(st), kc = view.kindColor(v.kind);
-      C[n * 3] = c.r; C[n * 3 + 1] = c.g; C[n * 3 + 2] = c.b;
-      K[n * 3] = kc.r; K[n * 3 + 1] = kc.g; K[n * 3 + 2] = kc.b;
+      C[0] = c.r; C[1] = c.g; C[2] = c.b;
+      K[0] = kc.r; K[1] = kc.g; K[2] = kc.b;
       const sk = v.scopeK ?? 1;
       const endK = st === NODE_STATE.done ? 0.7 : st === NODE_STATE.stopped ? 0.6 : 1;
       const near = v.nearFaded ? Math.max(0.15, v.mat.opacity / Math.max(0.01, v.baseOpacity || 1)) : 1;
       const ctx = node.meta && node.meta.ctx;
       const ctxp = ctx && ctx.limit ? Math.min(1, Math.max(0, ctx.used / ctx.limit)) : 0;
-      A[n * 4] = st; A[n * 4 + 1] = kindIcon(v.kind); A[n * 4 + 2] = (v.exitF ?? 1) * Math.min(1, sk * 1.3) * (jm ? JOB_CHIP.ALPHA[jm.code] ?? 1 : endK) * near; A[n * 4 + 3] = jm ? 0 : ctxp;
+      A[0] = st; A[1] = kindIcon(v.kind); A[2] = (v.exitF ?? 1) * Math.min(1, sk * 1.3) * (jm ? JOB_CHIP.ALPHA[jm.code] ?? 1 : endK) * near; A[3] = jm ? 0 : ctxp;
+      v._alphaK = A[2]; // 메인 몸·네모 터미널 앞면 글이 같은 투명도를 쓴다
       const foc = v.id === view.focusId || v.id === view.hoverId ? 1 : 0;
-      B[n * 4] = v.seed; B[n * 4 + 1] = foc; B[n * 4 + 2] = (v.stale ? 0.4 : 1) * (jm ? JOB_CHIP.GLOW[jm.code] ?? 1 : 1); B[n * 4 + 3] = 0;
-      if (jm) jobChipAttr(D, n * 4, jm, nowMs); // 작업 칩: (2, 표시 상태, 진행 | -1, 대기 차오름 | -1)
-      else if (rg) { D[n * 4] = RIG.FLAG; D[n * 4 + 1] = rg.code; D[n * 4 + 2] = rg.heat; D[n * 4 + 3] = -1; A[n * 4 + 3] = 0; }
+      B[0] = v.seed; B[1] = foc; B[2] = (v.stale ? 0.4 : 1) * (jm ? JOB_CHIP.GLOW[jm.code] ?? 1 : 1); B[3] = 0;
+      if (jm) jobChipAttr(D, 0, jm, nowMs); // 작업 칩: (2, 표시 상태, 진행 | -1, 대기 차오름 | -1)
+      else if (rg) { D[0] = RIG.FLAG; D[1] = rg.code; D[2] = rg.heat; D[3] = -1; A[3] = 0; }
       else if (v.device && v.devInfo) {
         // 배치 장치: 띠(5진수) · 칸 수 · 진행(경과/평균, 진행 중 회차가 없으면 -1)
         const info = v.devInfo;
         const cur = info.running > 0 && info.currentId ? view.vis.get(info.currentId) : null;
         const pr = cur ? cycleProgress(info, cur.node, nowMs) : null;
-        D[n * 4] = 1; D[n * 4 + 1] = v._bandCode ?? (v._bandCode = bandCode(info.band)); D[n * 4 + 2] = info.band.length;
-        D[n * 4 + 3] = info.running > 0 ? (pr == null ? 1 : pr) : -1;
-      } else { D[n * 4] = 0; D[n * 4 + 1] = 0; D[n * 4 + 2] = 0; D[n * 4 + 3] = -1; }
-      // 바닥 높이 · 아래층 어둡게 · 기둥 두께
-      E[n * 4] = floorY; E[n * 4 + 1] = v.tierDim || 0; E[n * 4 + 2] = v.device ? THICK.device : rg ? RIG.THICK : jm ? JOB_CHIP.THICK : v.kind === 'main' ? THICK.main : THICK.other;
-      // 세운 배치 장치: 앞면 방위(카메라 쪽, 크게 벗어날 때만 돎). FlowView 가 집기 상자도 같은 방위로 돌린다
-      E[n * 4 + 3] = v.device || rg ? standYawStep(v._stand || (v._stand = {}), yawToward(v.group.position.x, v.group.position.z, cp.x, cp.z) + STAND.OFFSET, dt, !!view.reduced) : 0;
+        D[0] = 1; D[1] = v._bandCode ?? (v._bandCode = bandCode(info.band)); D[2] = info.band.length;
+        D[3] = info.running > 0 ? (pr == null ? 1 : pr) : -1;
+      } else { D[0] = 0; D[1] = 0; D[2] = 0; D[3] = -1; }
+      // 바닥 높이 · 아래층 어둡게 · 기둥 두께(실루엣별, 메인은 그림자 기둥줄이 몸 밑에서 시작하게 MAIN_RIG.BOTTOM)
+      E[0] = floorY; E[1] = v.tierDim || 0;
+      E[2] = v.device ? THICK.device : rg ? RIG.THICK : jm ? JOB_CHIP.THICK : sil ? SIL_DIM[sil].h : MAIN_RIG.BOTTOM * 2;
+      // 세운 배치 장치 · 네모 터미널: 앞면 방위(카메라 쪽, 크게 벗어날 때만 돎). FlowView 가 집기 상자도 같은 방위로 돌린다
+      E[3] = v.device || rg || sil === 'term' ? standYawStep(v._stand || (v._stand = {}), yawToward(v.group.position.x, v.group.position.z, cp.x, cp.z) + STAND.OFFSET, dt, !!view.reduced) : 0;
+      v._yaw = E[3]; v._sz = s;
+      if (sil) this.buckets[sil].put(this._m, T);
+      this.shadow.put(this._m, T);
       n++;
     }
-    this.mesh.count = n; this.shadow.count = n; this.depth.count = n;
-    if (n) {
-      this.mesh.instanceMatrix.needsUpdate = true;
-      this.aColor.needsUpdate = true; this.aKind.needsUpdate = true; this.aA.needsUpdate = true; this.aB.needsUpdate = true; this.aC.needsUpdate = true; this.aD.needsUpdate = true;
-    }
+    for (const k in this.buckets) this.buckets[k].flush();
+    this.shadow.flush();
     this.count = n;
   }
-  dispose() { this.mesh.removeFromParent(); this.shadow.removeFromParent(); this.depth.removeFromParent(); this.mesh.geometry.dispose(); this.shadow.geometry.dispose(); this.mat.dispose(); this.dmat.dispose(); }
+  dispose() { for (const k in this.buckets) this.buckets[k].dispose(); this.shadow.dispose(); this.mat.dispose(); this.dmat.dispose(); }
 }

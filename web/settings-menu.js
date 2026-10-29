@@ -6,6 +6,8 @@
 // 화면 아래 타임라인(매크로·이벤트 띠)은 평소 숨기고(자리는 그대로 — 카메라 맞춤이 튀지 않게) 재생 중·마우스를 올렸을 때·포커스가 들어왔을 때만 보인다.
 
 import { t, lang, langPref, setLangPref } from './i18n.mjs';
+import { quipsOn, setQuipsOn, onQuips } from './voxel/quip-pref.mjs'; // 복셀 생각·말풍선
+import { stencilOn, setStencilOn, onStencil } from './voxel/stencil-pref.mjs'; // 복셀 바닥 스텐실
 
 const $ = (id) => document.getElementById(id);
 
@@ -54,6 +56,28 @@ function langButtons() {
   return [wrap];
 }
 
+/** 생각·말풍선 켬/끔(복셀 전용, 저장 'ccviz.quips') — ctl quips 로 바뀌어도 글이 따라감 */
+function quipsButton() {
+  const b = document.createElement('button');
+  b.id = 'btn-quips'; b.type = 'button'; b.className = 'tb';
+  b.title = t('core.quips.title');
+  const sync = () => { const on = quipsOn(); b.textContent = t(on ? 'core.quips.on' : 'core.quips.off'); b.setAttribute('aria-pressed', String(on)); };
+  b.addEventListener('click', () => setQuipsOn(!quipsOn()));
+  onQuips(sync); sync();
+  return b;
+}
+
+/** 바닥 스텐실(프로젝트 이름) 켬/끔(복셀 전용, 저장 'ccviz.stencil') */
+function stencilButton() {
+  const b = document.createElement('button');
+  b.id = 'btn-stencil'; b.type = 'button'; b.className = 'tb';
+  b.title = t('core.stencil.title');
+  const sync = () => { const on = stencilOn(); b.textContent = t(on ? 'core.stencil.on' : 'core.stencil.off'); b.setAttribute('aria-pressed', String(on)); };
+  b.addEventListener('click', () => setStencilOn(!stencilOn()));
+  onStencil(sync); sync();
+  return b;
+}
+
 export function mountSettings() {
   ensureCss();
   const top = $('topbar');
@@ -84,6 +108,7 @@ export function mountSettings() {
     row(t('core.settings.row.view'), [viewNode]),
     row(t('core.settings.row.camera'), [$('btn-camera'), $('btn-cam-mode'), $('btn-follow-prompt')]),
     row(t('core.settings.row.display'), [$('btn-done'), $('btn-env'), $('btn-legend')]),
+    row(t('core.settings.row.quips'), [quipsButton(), stencilButton()]),
     row(t('core.settings.row.theme'), [$('btn-theme')]),
     row(t('core.settings.row.sound'), [soundNote]),
     row(t('core.settings.row.live'), [$('btn-pause')]),

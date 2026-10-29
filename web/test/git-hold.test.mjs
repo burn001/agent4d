@@ -172,3 +172,24 @@ test('2D 디렉터: 수동 조작·상세 팝업이 이기고, 범위 밖·quiet
   assert.equal(d.gitHold, null);
   assert.notEqual(d.shot.git, true, '풀리면 원래 순환으로');
 });
+
+test('§123 2D 초점: 고른 노드가 비행 뒤에 자리를 옮기면(다시 배치) 다시 맞춘다 · 사용자가 끌면 그만', async () => {
+  const { d, vis } = await director2d();
+  const { focusDrift, FOCUS_WATCH_S, FOCUS_DRIFT_K } = await import('../flat/camera2d.js');
+  assert.ok(focusDrift({ x: 0, z: 0, D: 10 }, { x: 2, z: 0, D: 10 }) > FOCUS_DRIFT_K);
+  assert.ok(focusDrift({ x: 0, z: 0, D: 10 }, { x: 0.5, z: 0, D: 10 }) < FOCUS_DRIFT_K);
+  let t = performance.now() / 1000;
+  d.focusNode('b');
+  for (let i = 0; i < 80; i++) { t += 0.02; d.update(0.02, t); }
+  assert.ok(Math.abs(d.cam.x - 40) < 6, '먼저 b(40) 로');
+  // 고르기·필터로 섬을 다시 배치 — b 가 -30 으로
+  vis.get('b').target.x = -30; vis.get('b').pos.x = -30;
+  for (let i = 0; i < 80; i++) { t += 0.02; d.update(0.02, t); }
+  assert.ok(Math.abs(d.cam.x - -30) < 6, '옮긴 자리로 다시 맞춤(예전엔 빈 곳에 머묾)');
+  // 사용자가 끌면 지켜보기 끝
+  d._manual();
+  vis.get('b').target.x = 100; vis.get('b').pos.x = 100;
+  for (let i = 0; i < 40; i++) { t += 0.02; d.update(0.02, t); }
+  assert.ok(Math.abs(d.cam.x - -30) < 6, '수동 조작 뒤엔 따라가지 않음');
+  assert.ok(FOCUS_WATCH_S >= 2);
+});

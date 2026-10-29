@@ -46,3 +46,20 @@ test('문구: 대기는 "소리 대기" + 툴팁 안내, 이벤트는 터치 활
   assert.match(soundLabel('on', { noMusic: true }).title, /효과음만/);
   for (const t of ['pointerdown', 'keydown', 'touchstart', 'pointerup', 'touchend']) assert.ok(GESTURE_EVENTS.includes(t));
 });
+
+test('부분 토글(§85): 끈 쪽은 대기·복원 판정에서 빠짐, 툴팁에 표시', () => {
+  const base = { on: true, activated: true, musicAvailable: true, musicBlocked: true, sfxCapable: true, sfxEnabled: false, sfxState: 'none' };
+  assert.equal(soundStatus({ ...base, musicPart: false, sfxPart: false }), 'on', '둘 다 끄면 막힌 것이 없음');
+  assert.equal(soundStatus({ ...base, musicPart: false }), 'waiting', '효과음이 아직 안 켜짐');
+  assert.equal(soundStatus({ ...base, sfxPart: false }), 'waiting', '음악이 거부됨');
+  assert.equal(soundStatus({ ...base, musicBlocked: false, sfxPart: false }), 'on');
+  const p = restorePlan({ ...base, musicOn: false, musicPart: false });
+  assert.equal(p.music, null, '끈 음악은 다시 켜지 않음');
+  assert.equal(p.sfx, 'enable');
+  const q = restorePlan({ ...base, musicOn: false, sfxPart: false });
+  assert.equal(q.sfx, null, '끈 효과음은 다시 켜지 않음');
+  assert.equal(q.music, 'start');
+  assert.match(soundLabel('on', { musicOff: true }).title, /음악 끔/);
+  assert.match(soundLabel('on', { sfxOff: true }).title, /효과음 끔/);
+  assert.doesNotMatch(soundLabel('off', { musicOff: true }).title, /끔\(/);
+});

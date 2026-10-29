@@ -56,6 +56,11 @@
       "duration": 300,
       "bytes": 4800679,
       "stage": 0,
+      "views": {
+        "planet": [
+          0
+        ]
+      },
       "energy": 0.1,
       "source": "자체 작곡(music/compose.py)"
     },
@@ -74,6 +79,15 @@
       "duration": 300,
       "bytes": 4800679,
       "stage": 1,
+      "views": {
+        "flow": [
+          0,
+          1
+        ],
+        "voxel": [
+          1
+        ]
+      },
       "energy": 0.35,
       "source": "작성자의 이전 프로젝트 곡(deep) 편곡"
     },
@@ -92,6 +106,11 @@
       "duration": 300,
       "bytes": 4800679,
       "stage": 1,
+      "views": {
+        "voxel": [
+          1
+        ]
+      },
       "energy": 0.45,
       "source": "작성자의 이전 프로젝트 곡(cafe) 편곡"
     },
@@ -113,6 +132,11 @@
         2,
         3
       ],
+      "views": {
+        "voxel": [
+          2
+        ]
+      },
       "energy": 0.7,
       "source": "작성자의 이전 프로젝트 곡(city) 편곡"
     },
@@ -131,6 +155,11 @@
       "duration": 300,
       "bytes": 4800679,
       "stage": 1,
+      "views": {
+        "voxel": [
+          1
+        ]
+      },
       "energy": 0.4,
       "source": "자체 작곡(music/compose_chillhop.py)"
     },
@@ -149,6 +178,11 @@
       "duration": 300,
       "bytes": 4800679,
       "stage": 0,
+      "views": {
+        "voxel": [
+          0
+        ]
+      },
       "energy": 0.15,
       "source": "자체 작곡"
     },
@@ -167,6 +201,11 @@
       "duration": 300,
       "bytes": 4800679,
       "stage": 0,
+      "views": {
+        "planet": [
+          0
+        ]
+      },
       "energy": 0.12,
       "source": "자체 작곡"
     },
@@ -185,6 +224,14 @@
       "duration": 300,
       "bytes": 4800679,
       "stage": 2,
+      "views": {
+        "flow": [
+          2
+        ],
+        "planet": [
+          2
+        ]
+      },
       "energy": 0.65,
       "source": "자체 작곡"
     },
@@ -203,6 +250,12 @@
       "duration": 300,
       "bytes": 4800679,
       "stage": 2,
+      "views": {
+        "flow": [
+          1,
+          2
+        ]
+      },
       "energy": 0.62,
       "source": "자체 작곡"
     },
@@ -222,6 +275,11 @@
       "duration": 300,
       "bytes": 4800679,
       "stage": 2,
+      "views": {
+        "voxel": [
+          2
+        ]
+      },
       "energy": 0.72,
       "source": "자체 작곡"
     },
@@ -240,6 +298,11 @@
       "duration": 300,
       "bytes": 4800679,
       "stage": 3,
+      "views": {
+        "flow": [
+          3
+        ]
+      },
       "energy": 0.85,
       "source": "자체 작곡"
     },
@@ -258,8 +321,247 @@
       "duration": 300,
       "bytes": 4800679,
       "stage": 3,
+      "views": {
+        "flow": [
+          3
+        ],
+        "planet": [
+          3
+        ]
+      },
       "energy": 0.85,
       "source": "자체 작곡"
+    },
+    {
+      "id": "pulse",
+      "label": "어두운 펄스",
+      "title": "심야 컴파일",
+      "mood": "어둡고 집중된 미니멀 펄스 — 먹먹한 16분 펄스, 서브 박동, 틱 하이햇, 부드러운 킥, 먼 FM 벨, 대기 중에도 이어지는 코딩 긴장감",
+      "label_en": "Dark Pulse",
+      "title_en": "Midnight Compile",
+      "mood_en": "Dark minimal pulse — muffled 16th-note pulse, sub heartbeat, ticking hats, soft kick, distant FM bells; coding tension that holds even while idle",
+      "file": "bgm-pulse.mp3",
+      "meta": "bgm-pulse.json",
+      "bpm": 100,
+      "key": "C minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 0,
+      "views": {
+        "flow": [
+          0
+        ]
+      },
+      "energy": 0.22,
+      "source": "자체 작곡(music/compose_pulse.py)"
+    },
+    {
+      "id": "circuit",
+      "label": "회로 펄스",
+      "title": "회로 기판",
+      "mood": "IDM 펄스·미니멀 테크노 — 5음 순환 16분 아르페지오 폴리미터, 끊어 치는 킥, 오프비트 베이스, 림 백비트, 어두운 마이너 9 패드, 꾸준히 집중하는 코딩",
+      "label_en": "Circuit Pulse",
+      "title_en": "Circuit Board",
+      "mood_en": "IDM pulse / minimal techno — 5-note 16th arpeggio polymeter, broken kick, off-beat bass, rim backbeat, dark minor-9 pads; steady focused coding",
+      "file": "bgm-circuit.mp3",
+      "meta": "bgm-circuit.json",
+      "bpm": 116,
+      "key": "E minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 1,
+      "views": {
+        "flow": [
+          1
+        ]
+      },
+      "energy": 0.45,
+      "source": "자체 작곡(music/compose_circuit.py)"
+    },
+    {
+      "id": "overclock",
+      "label": "오버클록",
+      "title": "오버클록",
+      "mood": "다크신스 드라이브 — 굴러가는 16분 옥타브 베이스, 4/4 킥, 2·4박 스네어, 톱니 리드 모티프, 디튠 패드, 16분 아르페지오, 강하고 빠른 구동(고음 억제)",
+      "label_en": "Overclock",
+      "title_en": "Overclock",
+      "mood_en": "Darksynth drive — rolling 16th octave bass, four-on-the-floor kick, backbeat snare, saw lead motif, detuned pads, 16th arpeggios; hard, fast momentum with tamed highs",
+      "file": "bgm-overclock.mp3",
+      "meta": "bgm-overclock.json",
+      "bpm": 140,
+      "key": "G minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 3,
+      "views": {
+        "flow": [
+          3
+        ]
+      },
+      "energy": 0.92,
+      "source": "자체 작곡(music/compose_overclock.py)"
+    },
+    {
+      "id": "stardust",
+      "label": "별빛 항로",
+      "title": "별빛 항로",
+      "mood": "코스믹 앰비언트 · 느린 서브 펄스와 별빛 벨 아르페지오, 넓은 패드, 비트 없음",
+      "label_en": "Stardust Route",
+      "title_en": "Stardust Route",
+      "mood_en": "Cosmic ambient · slow sub pulse and starlight bell arpeggios, wide pads, no beat",
+      "file": "bgm-stardust.mp3",
+      "meta": "bgm-stardust.json",
+      "bpm": 72,
+      "key": "E lydian",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 1,
+      "views": {
+        "planet": [
+          1
+        ]
+      },
+      "energy": 0.3,
+      "source": "자체 작곡(music/compose_stardust.py)"
+    },
+    {
+      "id": "nebula",
+      "label": "성운 맥동",
+      "title": "성운 맥동",
+      "mood": "코스믹 앰비언트 · 8분 화음 펄스와 심장 박동 같은 깊은 킥, 서브 베이스, 느린 벨 선율",
+      "label_en": "Nebula Pulse",
+      "title_en": "Nebula Pulse",
+      "mood_en": "Cosmic ambient · eighth-note chord pulses, a deep heartbeat kick, sub bass and a slow bell melody",
+      "file": "bgm-nebula.mp3",
+      "meta": "bgm-nebula.json",
+      "bpm": 80,
+      "key": "C dorian",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 1,
+      "views": {
+        "planet": [
+          1
+        ]
+      },
+      "energy": 0.42,
+      "source": "자체 작곡(music/compose_nebula.py)"
+    },
+    {
+      "id": "pulsar",
+      "label": "펄서 시퀀스",
+      "title": "펄서 시퀀스",
+      "mood": "스페이스 앰비언트 · 베를린 스쿨 16분 시퀀서, 부드러운 킥·서브 펄스, 넓은 패드와 벨",
+      "label_en": "Pulsar Sequence",
+      "title_en": "Pulsar Sequence",
+      "mood_en": "Space ambient · Berlin-school 16th-note sequencer, soft kick and sub pulse, wide pads and bells",
+      "file": "bgm-pulsar.mp3",
+      "meta": "bgm-pulsar.json",
+      "bpm": 112,
+      "key": "A minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 2,
+      "views": {
+        "planet": [
+          2
+        ]
+      },
+      "energy": 0.6,
+      "source": "자체 작곡(music/compose_pulsar.py)"
+    },
+    {
+      "id": "warp",
+      "label": "워프 항해",
+      "title": "워프 항해",
+      "mood": "시네마틱 스페이스 드라이브 · 16분 롤링 베이스 시퀀서, 엇갈리는 플럭 아르페지오, 넓은 슈퍼소 패드, 부드러운 킥·클랩, 장엄한 신스 주제",
+      "label_en": "Warp Voyage",
+      "title_en": "Warp Voyage",
+      "mood_en": "Cinematic space drive · rolling 16th bass sequencer, interlocking pluck arpeggios, wide supersaw pads, soft kick and clap, a grand synth theme",
+      "file": "bgm-warp.mp3",
+      "meta": "bgm-warp.json",
+      "bpm": 128,
+      "key": "D minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 3,
+      "views": {
+        "planet": [
+          3
+        ]
+      },
+      "energy": 0.85,
+      "source": "자체 작곡(music/compose_warp.py)"
+    },
+    {
+      "id": "bossa",
+      "label": "아침 보사노바",
+      "title": "아침 카페 보사노바",
+      "mood": "한가 · 아침 카페 보사노바 — 나일론 기타 컴핑, 펠트 피아노 주제, 플루트, 업라이트 베이스, 셰이커·크로스스틱",
+      "label_en": "Morning Bossa",
+      "title_en": "Morning Café Bossa Nova",
+      "mood_en": "Idle · morning café bossa nova — nylon guitar comping, felt piano theme, flute, upright bass, shaker and cross-stick",
+      "file": "bgm-bossa.mp3",
+      "meta": "bgm-bossa.json",
+      "bpm": 116,
+      "key": "D major",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 0,
+      "views": {
+        "voxel": [
+          0
+        ]
+      },
+      "energy": 0.2,
+      "source": "자체 작곡(music/compose_bossa.py)"
+    },
+    {
+      "id": "swing",
+      "label": "점심 빅밴드",
+      "title": "점심시간 빅밴드",
+      "mood": "매우 활발 · 빠른 스윙 빅밴드 — 워킹 베이스, 라이드, 색소폰 솔리, 금관 샤우트 히트, 트럼펫 라인, 유쾌한 점심시간 소란",
+      "label_en": "Lunch Big Band",
+      "title_en": "Lunch-Hour Big Band",
+      "mood_en": "Very busy · fast swing big band — walking bass, ride, sax soli, brass shout hits, trumpet lines; a cheerful lunch-hour bustle",
+      "file": "bgm-swing.mp3",
+      "meta": "bgm-swing.json",
+      "bpm": 192,
+      "key": "F major",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 3,
+      "views": {
+        "voxel": [
+          3
+        ]
+      },
+      "energy": 0.9,
+      "source": "자체 작곡(music/compose_swing.py)"
+    },
+    {
+      "id": "caper",
+      "label": "오피스 소동",
+      "title": "오피스 소동",
+      "mood": "매우 활발 · 카툰풍 오피스 캐퍼 — 스카 셔플 스캥크·금관 혼, 튜바 움파·클라리넷 질주·실로폰, 행진 스네어, 유쾌하게 정신없음",
+      "label_en": "Office Caper",
+      "title_en": "Office Caper",
+      "mood_en": "Very busy · cartoon office caper — ska-shuffle skank and horns, tuba oom-pah, racing clarinet and xylophone, marching snare; gleefully chaotic",
+      "file": "bgm-caper.mp3",
+      "meta": "bgm-caper.json",
+      "bpm": 160,
+      "key": "C major (추격 구간 A minor)",
+      "key_en": "C major (A minor in the chase)",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 3,
+      "views": {
+        "voxel": [
+          3
+        ]
+      },
+      "energy": 0.88,
+      "source": "자체 작곡(music/compose_caper.py)"
     }
   ]
 }

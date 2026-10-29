@@ -16,8 +16,8 @@ export const CTL_COMMANDS = {
   scope: { usage: 'scope all | project:<name|id> | session:<id|title>' },
   visible: { usage: 'visible all | hide|show|only project:<name> | session:<id>' },
   sound: { values: ['on', 'off', 'toggle'], usage: 'sound on|off|toggle' },
-  music: { pct: true, usage: 'music <0-100>   (background music volume)' },
-  sfx: { pct: true, usage: 'sfx <0-100>     (sound effects volume)' },
+  music: { pct: true, power: true, usage: 'music <0-100>|on|off|toggle   (background music volume, or music on/off)' },
+  sfx: { pct: true, power: true, usage: 'sfx <0-100>|on|off|toggle     (sound effects volume, or effects on/off)' },
   bgm: { usage: 'bgm auto|cycle|shuffle|<track id or name>' },
   lang: { values: ['auto', 'en', 'ko'], usage: 'lang auto|en|ko' },
   camera: { values: ['auto', 'manual', 'fit', 'follow'], usage: 'camera auto|manual|fit|follow' },
@@ -34,12 +34,14 @@ export const CTL_COMMANDS = {
   panel: { values: ['open', 'close'], alias: { closed: 'close', collapse: 'close', fold: 'close', expand: 'open', unfold: 'open' }, usage: 'panel open|close' },
   timeline: { values: ['show', 'hide'], usage: 'timeline show|hide' },
   done: { values: ['on', 'off'], usage: 'done on|off   (show finished nodes)' },
+  quips: { values: ['on', 'off'], usage: 'quips on|off  (voxel thought & speech bubbles)' },
+  plinks: { values: ['rotate', 'laser', 'orbit'], alias: { alternate: 'rotate', auto: 'rotate', beam: 'laser', ring: 'orbit', rings: 'orbit' }, usage: 'plinks rotate|laser|orbit  (Planet relation lines)' },
   close: { none: true, usage: 'close   (close popups and menus)' },
   reload: { none: true, usage: 'reload' },
   toast: { usage: 'toast "<message>" [--sec 1-30]' },
 };
 /** 명령 이름 별칭(CLI 편의) */
-export const CTL_ALIAS = { popup: 'close', popups: 'close', unpause: 'resume', volume: 'music', vol: 'music', layer: 'artifacts', plan: 'plans', msg: 'toast', message: 'toast', project: 'scope' };
+export const CTL_ALIAS = { links: 'plinks', bubbles: 'quips', quip: 'quips', popup: 'close', popups: 'close', unpause: 'resume', volume: 'music', vol: 'music', layer: 'artifacts', plan: 'plans', msg: 'toast', message: 'toast', project: 'scope' };
 
 const ON_OFF_VALUES = new Set(['on', 'off']);
 const TOAST_MAX = 200;
@@ -93,6 +95,12 @@ export function normalizeCmd(cmd, args = {}) {
     return { ok: true, cmd: c, args: { value: v } };
   }
   if (spec.pct) {
+    // music·sfx: 낱말 on|off|toggle 은 켬/끔(부분 토글). 숫자 0·1 은 음량이므로 낱말만 받는다
+    if (spec.power) {
+      const w = lc(a.power ?? a.value);
+      const p = ['on', 'true', 'yes'].includes(w) ? 'on' : ['off', 'false', 'no'].includes(w) ? 'off' : w === 'toggle' ? 'toggle' : null;
+      if (p) return { ok: true, cmd: c, args: { power: p } };
+    }
     const n = Number(String(a.value ?? '').replace(/%$/, ''));
     if (!Number.isFinite(n) || n < 0 || n > 100) return bad();
     return { ok: true, cmd: c, args: { value: Math.round(n) } };

@@ -1,5 +1,4 @@
 // --demo: 실제 파일 없이 합성 트리·이벤트를 낸다. 엔드포인트·형식은 실제와 같다.
-import { planDemoSeed, planDemoStep } from './plan-demo.mjs';
 import { Graph } from './graph.mjs';
 import { toolCategory } from './parse.mjs';
 import { toolBrief } from './brief.mjs';
@@ -91,7 +90,6 @@ class DemoRuntime {
     add(N('m:mdemo01'), M, 'monitor', '알림 감시', { timeoutMs: 1800000, background: true, taskId: 'mdemo01' });
     add(N('b:bdemo02'), N('a:demo-sub-1'), 'bash-bg', '시험 서버 :8080', { command: 'node serve.mjs --port 8080', background: true, taskId: 'bdemo02' });
     seedDemoCtx(g, this.px, t()); // 컨텍스트 사용률 합성 값
-    planDemoSeed(this, t()); // 계획 보드: 메인 할 일·워크플로 단계(실제 PlanTracker)
   }
 
   _schedule() {
@@ -114,7 +112,6 @@ class DemoRuntime {
     node.lastActivityAt = ts;
     stepDemoCtx(g, nodeId, ts);
     if (k % 3 === 1 && ixDemoStep(this, nodeId, k)) return; // 세 걸음에 한 번 github·tests·remote·db·batch 시나리오
-    if (k % 5 === 2) planDemoStep(this, ts); // 다섯 걸음에 한 번 할 일 한 칸
     if (k % 4 === 3 && artDemoStep(this, nodeId, k)) return; // 네 걸음에 한 번 작업 대상(생성·수정·삭제·DB·push·파괴적)
 
     const kind = k % 9;

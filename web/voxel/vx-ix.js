@@ -101,6 +101,11 @@ export class VxIx {
       if (now < f.showAt) continue;
       const act = this._actor(f);
       if (!act || v._isDim(act.id)) continue;
+      if (f.cat === 'user') { // 예약·Monitor·작업 알림이 연 팀장 턴(사용자 창구 연출은 client-core 가 맡음)
+        const kind = this.mod.ixAutoKind(f.ix);
+        if (kind && kind !== 'dot' && this._auto(G, f, kind, act, now, v._farAll ? null : chips)) n++;
+        continue;
+      }
       const room = this._office(act.room);
       const sp = room && ixSpot(room, f.cat);
       if (!sp) continue;
@@ -158,6 +163,41 @@ export class VxIx {
     this.s = 1;
     this.stats.fx = this.model.fx.size; this.stats.drawn = n; this.stats.scale = +smax.toFixed(2);
     this._labels(chips);
+  }
+
+  /**
+   * 팀장(메인) 책상 위: 예약 = 떠 있는 탁상시계(바늘이 한 바퀴 돌며 울림) → 쪽지가 책상으로 · Monitor = 감시 기계·직원 자리에서
+   * 보라 쪽지가 팀장 책상으로 · 작업 결과 = 출처 직원·기계에서 결과 상자(초록·빨강·회색)가 날아와 책상 위 표지로 잠깐 남음.
+   * 출처가 퇴장·숨김(_actor 없음·희미)이면 책상 쪽만(고리 맥박).
+   */
+  _auto(G, f, kind, act, now, chips = null) {
+    const v = this.view, ix = f.ix, M = this.mod.IX_AUTO;
+    const te = f.tEnd == null ? 0 : now - f.tEnd, T = now - f.t0;
+    const A = vxIxAlpha(te, M.LINGER_S / (f.k || 1));
+    if (A <= 0.02) return false;
+    const key = kind === 'schedule' ? 'sched' : kind === 'monitor' ? 'mon' : ix.st === 'err' ? 'err' : ix.st === 'stop' ? 'dim' : 'ok';
+    const c = this._c.copy(this.col(key)).multiplyScalar(0.35 + 0.65 * A);
+    const desk = { x: act.x, y: act.y + 0.2, z: act.z };
+    if (chips && ix.text && T < 2.8) chips.push({ f, x: desk.x, y: desk.y + (kind === 'schedule' ? 2.3 : 1.4), z: desk.z, at: f.t0 + 1e6, A, glyph: kind === 'schedule' ? '⏰' : kind === 'monitor' ? '◎' : ix.st === 'err' ? '✕' : ix.st === 'stop' ? '■' : '✓', text: ix.text.length > 18 ? ix.text.slice(0, 17) + '…' : ix.text, color: this.mod.ixKeyColor(key, !!v.tokens.isLight) }); // 첫 몇 단어 칩(흐름·Planet 리본과 같은 글)
+    const pulse = (t0) => { const q = (T - t0) / 0.8; if (q > 0 && q < 1 && !this.red) { const rr = 0.4 + q * 0.9; for (let i = 0; i < 10; i++) { const a = (i / 10) * Math.PI * 2; G.box(desk.x + Math.cos(a) * rr, desk.y, desk.z + Math.sin(a) * rr, 0.08, 0.03, 0.08, c); } } };
+    if (kind === 'schedule') {
+      const K = { x: desk.x, y: desk.y + 1.5, z: desk.z };
+      const ring = T < 1.3 && !this.red ? Math.sin(T * 22) * 0.06 : 0;
+      for (let i = 0; i < 16; i++) { const a = (i / 16) * Math.PI * 2; G.box(K.x + Math.cos(a) * 0.5 + ring, K.y + Math.sin(a) * 0.5, K.z, 0.12, 0.12, 0.08, c); } // 시계 얼굴(세운 원)
+      const ha = Math.PI / 2 - (this.red ? 0 : Math.min(1, T / 1.3) * Math.PI * 2);
+      for (let j = 1; j <= 4; j++) G.box(K.x + Math.cos(ha) * 0.1 * j + ring, K.y + Math.sin(ha) * 0.1 * j, K.z + 0.04, 0.08, 0.08, 0.06, c); // 분침
+      G.box(K.x + 0.13 + ring, K.y, K.z + 0.04, 0.24, 0.08, 0.06, c); // 시침
+      const u = (T - 0.9) / M.TRAVEL_S; if (u > 0 && u < 1) this._arc(G, { x: K.x, y: K.y - 0.35, z: K.z }, desk, u, 0.2, 0.2, 0.03, 0.14, c);
+      pulse(0.9 + M.TRAVEL_S);
+      return true;
+    }
+    const src = ix.from ? this._actor({ nodeId: ix.from, bgNode: null }) : null;
+    const from = src && src.id !== act.id && !v._isDim(src.id) ? { x: src.x, y: src.y + 0.2, z: src.z } : null;
+    const arrive = from ? M.TRAVEL_S : 0;
+    if (from) { const u = T / M.TRAVEL_S; if (u < 1) this._arc(G, from, desk, this.red ? 0.5 : u, 1.1, kind === 'monitor' ? 0.2 : 0.24, kind === 'monitor' ? 0.03 : 0.2, kind === 'monitor' ? 0.14 : 0.24, c); }
+    pulse(arrive);
+    if (kind === 'result' && T > arrive) G.box(desk.x, desk.y + 0.9 + (this.red ? 0 : Math.sin(now * 3) * 0.04), desk.z, 0.22, 0.22, 0.22, c); // 결과 표지
+    return true;
   }
 
   _arc(G, a, b, u, arc, sx, sy, sz, c) {
@@ -285,12 +325,12 @@ export class VxIx {
       const L = this.labels[i], c = i < LABELS ? chips[i] : null;
       if (!c) { if (L.o.visible) L.o.visible = false; continue; }
       const f = c.f;
-      const html = `<i>${escapeHtml(this.mod.IX_GLYPH[f.cat] || '')}</i>${escapeHtml(this.mod.ixSummary(f.ix) || this.mod.IX_LABEL[f.cat] || '')}`;
+      const html = `<i>${escapeHtml(c.glyph ?? (this.mod.IX_GLYPH[f.cat] || ''))}</i>${escapeHtml(c.text ?? (this.mod.ixSummary(f.ix) || this.mod.IX_LABEL[f.cat] || ''))}`;
       if (L.html !== html) { L.el.innerHTML = html; L.html = html; }
       const cls = 'vx-ix c-' + f.cat + (f.ok === false ? ' bad' : f.tEnd != null ? ' done' : '');
       if (L.cls !== cls) { L.el.className = cls; L.cls = cls; }
       L.el.style.opacity = (c.A * (v._fxA ? v._fxA(c.x, c.z) : 1)).toFixed(2); // 프로젝트 페이드
-      L.el.style.setProperty('--ixc', this.mod.ixColor(f.cat, !!v.tokens.isLight));
+      L.el.style.setProperty('--ixc', c.color || this.mod.ixColor(f.cat, !!v.tokens.isLight));
       L.o.position.set(c.x, c.y, c.z);
       if (!L.o.visible) L.o.visible = true;
     }

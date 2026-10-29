@@ -6,7 +6,7 @@
 import { computeLayout, dockedPos, RADIUS, KIND_LABEL } from '../layout.js';
 import { computeOverview, isRecentRoot } from '../overview/layout.mjs';
 import { packView, packStale } from '../overview/pack-view.js';
-import { exitEligible, catColor } from '../flow-core.mjs';
+import { exitEligible, exitWalls, endedBadly, badEndDueAt, catColor } from '../flow-core.mjs';
 import { CAT_LABEL } from '../icons.js';
 import { HoloBook, HOLO, actLine, sayBrief, pushHist } from '../holo-core.mjs';
 import { EXIT, exitPolicy, exitPose } from '../exit-core.mjs';
@@ -378,7 +378,7 @@ export class FlatView {
         v.icons.clear();
       }
       if (ENDED_OK(patch.status)) { if (v.endWall == null) v.endWall = opts.quiet ? -1e9 : this.animT; }
-      else { v.endWall = null; if (v.exiting != null || v.gone) this._unexit(v); }
+      else { v.endWall = null; if ((v.exiting != null || v.gone) && !(patch.status === 'error' && v.badWall != null)) this._unexit(v); } // 퇴장한 오류 노드에 같은 오류 갱신이 와도 되살리지 않음
       this._exitAt = 0;
     }
     if (v.device) this._syncDevice(v);
@@ -579,22 +579,36 @@ export class FlatView {
     for (const [id, v] of this.vis) if (!v.removing) nodes.set(id, v.node);
     const roots = [this.rootId, this.layoutRoot];
     for (const r of this.scope.roots || []) roots.push(r.nodeId);
-    const elig = exitEligible(nodes, roots);
+    const clockMs = this.clock();
+    // 문제 있게 끝난 노드: 끝난 시각이 없으면 처음 본 시각부터 센다(표시 시계 — 재생은 가상 시계)
+    const seen = this._badSeen || (this._badSeen = new Map());
+    for (const [id, n] of nodes) { if (!endedBadly(n)) seen.delete(id); else if (!seen.has(id)) seen.set(id, clockMs); }
+    const elig = exitEligible(nodes, roots, { nowMs: clockMs, seen });
     const linger = EXIT_LINGER / Math.min(4, Math.max(1, Math.sqrt(this.timeScale || 1)));
     const pol = animate ? exitPolicy(this.timeScale) : null;
-    const clockMs = this.clock();
+    const own = new Map();
+    for (const [id, v] of this.vis) {
+      if (v.removing || !elig.has(id)) { v.badWall = null; continue; }
+      if (endedBadly(v.node)) {
+        // 문턱을 지난 순간을 '막 LINGER 가 지난 끝'으로 잡아 같은 퇴장 연출. 한참 지난 것(스냅샷·탐색)은 바로 숨김
+        if (v.badWall == null) { const due = badEndDueAt(v.node, seen.get(id)); v.badWall = due != null && (clockMs - due) / 1000 / Math.max(1, this.timeScale || 1) > linger + EXIT.DUR + 1 ? -1e9 : now - linger; }
+        own.set(id, v.badWall);
+      } else { v.badWall = null; own.set(id, v.endWall); }
+    }
+    const walls = exitWalls(nodes, elig, own); // 하위가 늦게 끝나면 그때부터 센다
     for (const [id, v] of this.vis) {
       if (v.removing) continue;
       const ago = v.node.endedAt ? (clockMs - Date.parse(v.node.endedAt)) / 1000 : -1;
       const standby = v.kind === 'monitor' && !v.foldHidden && rearmStandby(v.node, nodes.get(v.node.parentId), ago);
       if (standby !== !!v.standby) { v.standby = standby; this._labelText(v); }
       if (v._jobKey != null && clockLabelKey(v.node, clockMs) !== v._jobKey) this._clockRefresh(v); // 정체· 실행 경과(시계)
-      let want = elig.has(id) && v.endWall != null && now - v.endWall >= linger && !standby;
-      if (v.foldHidden && elig.has(id) && v.endWall != null) want = true;
+      const endWall = elig.has(id) ? walls.get(id) : null;
+      let want = elig.has(id) && endWall != null && now - endWall >= linger && !standby;
+      if (v.foldHidden && elig.has(id) && endWall != null) want = true;
       if (want && v.foldHidden && !v.gone) { if (v.exiting != null) this._exitingN = Math.max(0, this._exitingN - 1); v.exiting = null; v.gone = true; v.exitF = 0; this._syncHidden(v); continue; }
       if (want) {
         if (v.gone || v.exiting != null) continue;
-        if (!pol || now - v.endWall > linger + EXIT.DUR + 1) { v.gone = true; v.exitF = 0; this._syncHidden(v); this.layoutDirty = true; }
+        if (!pol || now - endWall > linger + EXIT.DUR + 1) { v.gone = true; v.exitF = 0; this._syncHidden(v); this.layoutDirty = true; }
         else this._startExit(v, pol);
       } else if (v.exiting != null || v.gone) this._unexit(v);
     }

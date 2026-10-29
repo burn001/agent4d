@@ -26,6 +26,14 @@ test('정규화: 값 목록·별칭·켬/끔 동의어·범위 밖', () => {
   assert.deepEqual(normalizeCmd('timeline', { value: 'off' }).args, { value: 'hide' });
   assert.deepEqual(normalizeCmd('music', { value: '40%' }).args, { value: 40 });
   assert.equal(normalizeCmd('sfx', { value: 140 }).error, 'bad_value');
+  // 부분 토글: 낱말 on|off|toggle 은 켬/끔, 숫자 0·1 은 그대로 음량
+  assert.deepEqual(normalizeCmd('music', { value: 'off' }).args, { power: 'off' });
+  assert.deepEqual(normalizeCmd('sfx', { value: 'ON' }).args, { power: 'on' });
+  assert.deepEqual(normalizeCmd('vol', { value: 'toggle' }).args, { power: 'toggle' });
+  assert.deepEqual(normalizeCmd('sfx', { value: '0' }).args, { value: 0 });
+  assert.deepEqual(normalizeCmd('music', { value: 1 }).args, { value: 1 });
+  assert.equal(normalizeCmd('music', { value: 'loud' }).error, 'bad_value');
+  assert.deepEqual(parseCtl(['sfx', 'off']).args, { power: 'off' });
   assert.deepEqual(normalizeCmd('noise', { value: 'off' }).args, { on: false });
   assert.deepEqual(normalizeCmd('noise', { value: '70' }).args, { amount: 70 });
   assert.deepEqual(normalizeCmd('popup', {}), { ok: true, cmd: 'close', args: {} });

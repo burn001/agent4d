@@ -22,7 +22,7 @@ import { mountEnv } from './env/env.js';
 import { mountLimits } from './limits.js';
 import { EvQueue, batchItems } from './ev-queue.mjs'; // SSE 이벤트 처리 예산·따라잡기 · 서버 묶음
 import { mountTimeline } from './timeline.mjs';
-import { CAT_ORDER, catColor } from './flow-core.mjs';
+import { CAT_ORDER, catColor, EXIT_ERR } from './flow-core.mjs';
 import { mountCtx } from './ctx-ui.js';
 import { mountSettings } from './settings-menu.js'; // 상단 바 정리 · ⚙ 설정 메뉴
 import { mountSoundPop } from './sound-pop.js'; // 소리 켜짐일 때 소리 버튼 옆 ♪ 소리 설정 팝업
@@ -45,6 +45,9 @@ import { setLangPref, lang as curLang } from './i18n.mjs'; // 원격 조작 lang
 import { mountControl } from './control.js'; // 화면 원격 조작(받는 쪽)
 import { MODES as BGM_MODES } from './bgm-core.mjs'; // bgm 명령
 import { localizeEvent, localizeSnapshot, localizeProjects } from './i18n-server.mjs'; // 서버가 조합한 문구 → 지금 언어(ko 면 그대로)
+import { quipsOn, setQuipsOn } from './voxel/quip-pref.mjs'; // 복셀 생각·말풍선(ctl quips)
+import { plinksPref, setPlinksPref } from './plinks-core.mjs'; // Planet 관계선(ctl plinks)
+import { mountPlanetLinks } from './plinks-ui.js'; // ⚙ 관계선 줄·범례
 
 // index.html 정적 문구(data-i18n*)·문서 제목을 지금 언어로 — 가능한 한 일찍
 applyDom();
@@ -93,6 +96,7 @@ const mql = window.matchMedia ? matchMedia('(prefers-color-scheme: light)') : nu
 const resolveTheme = () => (themePref === 'auto' ? (mql && mql.matches ? 'light' : 'dark') : themePref);
 let view = null;
 let art = null; // 작업 대상 층 컨트롤러(mountArtifacts)
+let plinksUi = null; // Planet 관계선 ⚙ 줄·범례
 let plans = null; // 계획 보드 컨트롤러(mountPlans)
 // 같은 프로젝트 여러 live 세션: 같은 파일 충돌 장부(모든 표현이 같은 것을 읽음)·세션 색 칸
 const conflicts = new ConflictBook();
@@ -202,10 +206,12 @@ panel.setFilter = (id) => { origSetFilter(id); if (!id) { focusId = null; view.s
 const music = new Music();
 const sfx = new Sfx({ getMusicTime: () => (music.on ? music.harmonyTime() : null) });
 // 소리 토글 하나로 배경음악·효과음을 함께(저장 'ccviz.sound', URL ?sound=1|0 은 이번 접속만)
+//   마스터 아래 음악·효과음 부분 토글은 소리 팝업(저장 'ccviz.sound.parts')
 const sound = new Sound({ music, sfx, button: $('btn-sound'), sfxSlider: $('sfx-vol') });
 // 배경음악 자동 선곡: 최근 활동(재생 중이면 재생 시계 기준) → 단계 → 곡
 const activity = new ActivityMeter();
 music.setActivitySource(() => activity.sample(clockFn(), store.nodes.values()), () => pauseBuf.paused); // 일시정지 중엔 단계 시계도 멈춤
+music.setView(viewMode); // 테마별 풀: 지금 표현(흐름·Planet·복셀)의 곡으로 자동 선곡
 
 let autoCam = lsGet('ccviz.autocam') !== 'off';
 const camBtn = $('btn-camera');
@@ -263,6 +269,15 @@ function setShowDone(on) {
   statsDirty = true;
 }
 doneBtn.addEventListener('click', () => { doneBtn.blur(); setShowDone(!showDone); });
+// 문제 있게 끝난 노드가 남는 시간: 주소 ?errLinger=초 > 서버 config.errorLingerSec(healthz) > 600초
+{
+  const q = Number(new URLSearchParams(location.search).get('errLinger'));
+  if (new URLSearchParams(location.search).has('errLinger') && Number.isFinite(q) && q >= 0) EXIT_ERR.LINGER_SEC = q;
+  else fetch('./healthz', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((j) => {
+    const v = j && Number(j.errorLingerSec);
+    if (j && j.errorLingerSec != null && Number.isFinite(v) && v >= 0) EXIT_ERR.LINGER_SEC = v;
+  }).catch(() => {});
+}
 
 // 이벤트 타임라인: 라이브·재생 공통으로 onEvent 에서 push
 timeline = mountTimeline({
@@ -398,7 +413,8 @@ function bindCanvas(v) {
       v.setHover(id || (hp ? hp.id : null) || uc);
       if (ctxUi) ctxUi.hover(id, hoverEv);
       if (uc) userTip(uc, hoverEv); else holoTip(hp, hoverEv);
-      canvas.style.cursor = id || hp || uc || clusterAt(v, hoverEv.clientX, hoverEv.clientY) ? 'pointer' : '';
+      const pbh = !id && !hp && !uc && plans && plans.on && plans.hitBoard ? plans.hitBoard(hoverEv.clientX, hoverEv.clientY) : null;
+      canvas.style.cursor = pbh ? 'zoom-in' : id || hp || uc || clusterAt(v, hoverEv.clientX, hoverEv.clientY) ? 'pointer' : '';
     });
   });
   canvas.addEventListener('pointerleave', () => { if (view === v) v.setHover(null); if (ctxUi) ctxUi.hover(null); holoTip(null); });
@@ -420,6 +436,9 @@ function bindCanvas(v) {
     // 사용자 콘솔(흐름 단말·Planet 관제소·복셀 의뢰인 스크린) = 나 · 사용자 카드
     const uc = v.pickConsole ? v.pickConsole(e.clientX, e.clientY) : null;
     if (uc) { holoTip(null); inspector.open({ type: 'console', id: uc }); return; }
+    // 흐름·Planet 3D 계획 보드는 캔버스 아래(깊이로 가려짐)라 클릭을 캔버스에서 판정 — 노드·패널·콘솔이 먼저
+    const pb = plans && plans.on && plans.hitBoard ? plans.hitBoard(e.clientX, e.clientY) : null;
+    if (pb && store.nodes.has(pb)) { inspector.open({ type: 'plan', id: pb }); return; }
     const fp = focusPid(); // 단일 프로젝트 모드
     // 바닥층 대상(파일·DB·저장소…) = 대상 팝업(누가 언제 무엇을). 숨은(다른) 프로젝트 대상은 집지 않음
     const ap = v.pickArtifact ? v.pickArtifact(e.clientX, e.clientY) : null;
@@ -544,7 +563,9 @@ async function switchView(next, nextDim = dim) {
   try { old.dispose(); } catch (e) { console.warn('이전 장면 정리 실패', e); }
   viewMode = next;
   dim = nextDim;
+  music.setView(next); // 자동이면 새 테마 곡으로 크로스페이드
   if (art) art.viewChanged(next); // 표현마다 저장된 켬/끔
+  if (plinksUi) plinksUi.viewChanged();
   lsSet('ccviz.view2', next);
   const u = new URL(location.href);
   if (u.searchParams.has('view')) { u.searchParams.set('view', next); history.replaceState(null, '', u); }
@@ -1444,6 +1465,7 @@ window.__ccviz = {
 
 ctxUi = mountCtx({ store, getView: () => view, getState: () => ({ focusId, streamAll, sel, paused: pauseBuf.paused }), music, sfx });
 window.__ccvizSettings = mountSettings(); // 상단 바는 꼭 필요한 것만, 나머지는 ⚙ 메뉴로(버튼 DOM 을 그대로 옮김)
+plinksUi = mountPlanetLinks({ viewMode: () => viewMode }); // ⚙ `관계선` 줄(Planet 일 때만)·범례
 window.__ccvizSoundPop = mountSoundPop({ music, sound }); // 곡·재생 방식·음량(기존 조작을 모음)
 // 작업 대상 층: ⚙ 메뉴 '작업 대상' 줄(표현마다 저장, ?artifacts=1|0), 기본 끔
 art = mountArtifacts({
@@ -1508,8 +1530,22 @@ const ctlHooks = {
     const pending = on && (sound.status() === 'waiting' || !(ua && ua.hasBeenActive));
     return { detail: on ? 'on' : 'off', pendingGesture: pending || undefined };
   },
-  music: ({ value }) => { const el = $('vol'); if (!el) return { ok: false, error: 'not_ready' }; el.value = String(value / 100); el.dispatchEvent(new Event('input')); return {}; },
-  sfx: ({ value }) => { const el = $('sfx-vol'); sfx.setVolume(value / 100); if (el) el.value = String(sfx.volume); return {}; },
+  music: ({ value, power }) => {
+    if (power) { // 음악만 켬/끔(마스터 소리는 그대로)
+      const on = power === 'toggle' ? !sound.musicOn : power === 'on';
+      sound.setMusicOn(on);
+      return { detail: (on ? 'on' : 'off') + (sound.on ? '' : ' (sound off)') };
+    }
+    const el = $('vol'); if (!el) return { ok: false, error: 'not_ready' }; el.value = String(value / 100); el.dispatchEvent(new Event('input')); return {};
+  },
+  sfx: ({ value, power }) => {
+    if (power) {
+      const on = power === 'toggle' ? !sound.sfxOn : power === 'on';
+      sound.setSfxOn(on);
+      return { detail: (on ? 'on' : 'off') + (sound.on ? '' : ' (sound off)') };
+    }
+    const el = $('sfx-vol'); sfx.setVolume(value / 100); if (el) el.value = String(sfx.volume); return {};
+  },
   bgm: ({ value }) => {
     const v = value.toLowerCase();
     let pick = BGM_MODES.includes(v) ? v : null;
@@ -1552,6 +1588,8 @@ const ctlHooks = {
   plans: ({ value }) => { if (!plans) return { ok: false, error: 'not_ready' }; if (plans.on !== (value === 'on')) { const b = $('btn-plans'); if (b) b.click(); else plans.setOn(value === 'on'); } return {}; },
   weather: ({ value }) => { if (weather) { weather.setMode(value); return {}; } lsSet('ccviz.weather', value); return { detail: 'saved (3D only)' }; },
   grid: ({ value }) => { env.setGrid(value === 'on'); return {}; },
+  quips: ({ value }) => { setQuipsOn(value === 'on'); return viewMode === 'voxel' ? {} : { detail: 'saved (voxel only)' }; },
+  plinks: ({ value }) => { setPlinksPref(value); return viewMode === 'planet' ? {} : { detail: 'saved (planet only)' }; },
   noise: ({ on, amount }) => {
     const b = $('btn-noise'), amt = $('noise-amt');
     if (!b) return { ok: false, error: 'not_ready' };
@@ -1578,9 +1616,9 @@ ctl = mountControl({
   getState: () => ({
     view: viewMode, dim, theme: themePref, themeResolved: resolveTheme(), scope: serializeSelection(sel),
     scopeLabel: CAN_ALL ? selectionLabel(sel, store.projects, archive) : null,
-    sound: sound.on ? 'on' : 'off', soundStatus: sound.status(), paused: pauseBuf.paused, replaying,
+    sound: sound.on ? 'on' : 'off', soundStatus: sound.status(), music: sound.musicOn ? 'on' : 'off', sfx: sound.sfxOn ? 'on' : 'off', paused: pauseBuf.paused, replaying,
     replaySession: replaying && eng ? eng.sessionId : null, lang: curLang(), panel: panel.collapsed ? 'closed' : 'open',
-    artifacts: !!(art && art.on), plans: !!(plans && plans.on), grid: env.gridOn, weather: weather ? weather.mode : null,
+    artifacts: !!(art && art.on), plans: !!(plans && plans.on), grid: env.gridOn, quips: quipsOn() ? 'on' : 'off', plinks: plinksPref(), weather: weather ? weather.mode : null,
     camera: autoCam ? 'auto' : 'manual', camMode: director.camMode, mode: MODE, size: `${innerWidth}×${innerHeight}`,
   }),
 });

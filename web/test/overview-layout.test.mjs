@@ -181,3 +181,31 @@ test('성능: 프로젝트 12 · 노드 600 < 15ms', () => {
   }
   assert.ok(ms < 15, `평균 ${ms.toFixed(2)}ms`);
 });
+
+test('§74.9 /clear 승계 기동기: spawnedBy 가 새(live) 메인이면 옛(recent) 메인 rootSessionId 를 따라 숨지 않는다', () => {
+  ord = 0;
+  const pid = 'D--atlas';
+  const OLD = 'old00000-0000-4000-8000-000000000000', NEW = 'new00000-0000-4000-8000-000000000000';
+  const nodes = [
+    N('s:' + NEW, null, 'main', pid, { status: 'idle', sessionId: NEW, rootSessionId: NEW, meta: { live: true, tier: 'live', clearedFrom: OLD } }),
+    N('s:' + OLD, null, 'main', pid, { status: 'idle', sessionId: OLD, rootSessionId: OLD, meta: { live: false, tier: 'recent' } }),
+    // 옛 메인이 nohup 으로 띄운 기동기 — 서버 가 spawnedBy 를 새 메인으로 바꿔 보낸다(rootSessionId 는 옛 메인)
+    N('b:toolu_L', null, 'bash-bg', pid, { sessionId: OLD, rootSessionId: OLD, meta: { background: true, detached: true, spawnedBy: 's:' + NEW, launcher: { script: 'relaunch.sh' } } }),
+    N('b:toolu_L-r1', 'b:toolu_L', 'bash-bg', pid, { sessionId: OLD, rootSessionId: OLD, meta: { runner: { script: 'autopilot.sh' } } }),
+    N('s:cyc', 'b:toolu_L-r1', 'claude-p', pid, { sessionId: 'cyc', rootSessionId: OLD }),
+    N('a:sub', 's:cyc', 'subagent', pid, { sessionId: 'cyc', rootSessionId: OLD }),
+    N('m:oldmon', 's:' + OLD, 'monitor', pid, { status: 'done', sessionId: OLD, rootSessionId: OLD }),
+  ];
+  const roots = [
+    { sessionId: NEW, projectId: pid, nodeId: 's:' + NEW, live: true, tier: 'live' },
+    { sessionId: OLD, projectId: pid, nodeId: 's:' + OLD, live: false, tier: 'recent' },
+  ];
+  const projects = [{ projectId: pid, name: 'atlas', live: true, active: true, liveSessions: 1, liveList: [{ sessionId: NEW, liveStatus: 'shell', entrypoint: 'cli' }] }];
+  const ov = computeOverview(nodes, roots, projects, null, {});
+  for (const id of ['s:' + NEW, 'b:toolu_L', 'b:toolu_L-r1', 's:cyc', 'a:sub']) assert.ok(!ov.hidden.has(id), id + ' 보여야 함');
+  assert.ok(ov.hidden.has('s:' + OLD) && ov.hidden.has('m:oldmon'), '옛 메인 트리는 숨음');
+  // 넘기지 않은(spawnedBy = 옛 메인) 기동기는 예전처럼 옛 메인을 따라 숨는다
+  const kept = nodes.map((n) => (n.id === 'b:toolu_L' ? { ...n, meta: { ...n.meta, spawnedBy: 's:' + OLD } } : n));
+  const ov2 = computeOverview(kept, roots, projects, null, {});
+  for (const id of ['b:toolu_L', 'b:toolu_L-r1', 's:cyc', 'a:sub']) assert.ok(ov2.hidden.has(id), id + ' 숨어야 함');
+});

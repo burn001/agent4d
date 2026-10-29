@@ -6,15 +6,15 @@ import {
   cycleNodeOf, planInspectModel, boardAnchor, liveCycleOf, PLAN_ST_LABEL,
 } from '../plan-core.mjs';
 import { _setLangForTest } from '../i18n.mjs';
-import { PlanMockDriver } from '../plan-mock.mjs';
 import { MON } from '../voxel/office-core.mjs';
 import { HOLO } from '../holo-core.mjs';
 
 const I = (k, s, o = {}) => ({ k, t: `항목 ${k}`, s, at: 1000, ...o });
 const P = (id, items, o = {}) => ({ id, src: 'todo', title: '할 일', at: 5000, by: 's:m', n: items.length, items, ...o });
 
-test('⚙ 첫 값: URL 이 우선, 없으면 저장값, 기본 끔 · plansOf 는 빈 계획을 거름', () => {
-  assert.equal(planInitial(null, null), false);
+test('⚙ 첫 값(§122 자율 루프 판): URL 이 우선, 없으면 저장값, 기본 켬 · plansOf 는 빈 계획을 거름', () => {
+  assert.equal(planInitial(null, null), true, '기본 켬');
+  assert.equal(planInitial(null, '0'), false);
   assert.equal(planInitial(null, '1'), true);
   assert.equal(planInitial('0', '1'), false);
   assert.equal(planInitial('1', '0'), true);
@@ -145,29 +145,20 @@ test('§83 크게 보기 모델: 모인 계획 전부, 항목마다 상태 기�
   assert.equal(cycleNodeOf('a:z', nodes), null, '회차 밖');
 });
 
-test('§83.9 보드 앵커 단일화: 러너 계획 → 러너(회차와 무관), 러너 없으면 메인 · 러너 계획을 맨 앞으로', () => {
-  const nodes = new Map([['s:m', { id: 's:m', kind: 'main' }], ['b:R', { id: 'b:R', kind: 'bash-bg', parentId: 's:m', status: 'active', meta: { runner: 1 } }],
+test('§122 판 자리 = 재기동기(축 큐 주인·러너의 기동기 조상) · 축 큐 > 진행 중 러너 계획 > 그 밖 · 재기동기 없으면 메인', () => {
+  const nodes = new Map([['s:m', { id: 's:m', kind: 'main' }], ['b:L', { id: 'b:L', kind: 'bash-bg', parentId: null, status: 'active', meta: { launcher: { script: 'relaunch.sh' } } }],
+    ['b:R', { id: 'b:R', kind: 'bash-bg', parentId: 'b:L', status: 'active', meta: { runner: 1 } }],
     ['s:c2', { id: 's:c2', kind: 'claude-p', parentId: 'b:R', status: 'active', meta: { cycle: 2 } }], ['s:c1', { id: 's:c1', kind: 'claude-p', parentId: 'b:R', status: 'done', meta: { cycle: 1 } }],
-    ['a:k', { id: 'a:k', kind: 'subagent', parentId: 's:c2', status: 'active', meta: {} }], ['a:s', { id: 'a:s', kind: 'subagent', parentId: 's:m', status: 'active', meta: {} }]]);
+    ['a:k', { id: 'a:k', kind: 'subagent', parentId: 's:c2', status: 'active', meta: {} }]]);
   const R = (by) => ({ owner: 'b:R', runner: true, plan: P('p', [I('0', 'done', { cy: 2, by })], { src: 'phases', by }) });
-  const T = { owner: 's:m', runner: false, plan: P('t', [I('0', 'in_progress')]) };
-  // 진행 중 회차·끝난 회차·회차 안 보임 — 앵커는 늘 러너
-  for (const by of ['s:c2', 's:c1', 'a:k']) assert.equal(boardAnchor([R(by)], 's:m', nodes).id, 'b:R', by);
-  assert.equal(boardAnchor([R('s:c2')], 's:m', nodes, (id) => id !== 's:c2').id, 'b:R', '회차가 안 보여도 러너');
-  assert.equal(boardAnchor([R('s:c2')], 's:m', nodes, () => false).id, 'b:R', '러너가 잠깐 안 보여도 러너(보드는 숨김 — 메인으로 안 옮김)');
-  // 메인 할 일이 더 앞 순서여도 러너 계획이 판 맨 앞
-  const an = boardAnchor([T, R('s:c2')], 's:m', nodes);
-  assert.equal(an.id, 'b:R'); assert.deepEqual(an.entries.map((e) => e.owner), ['b:R', 's:m']);
-  // 러너 없는 계획(할 일·서브에이전트 체크박스·워크플로) → 메인
-  assert.equal(boardAnchor([T], 's:m', nodes).id, 's:m');
-  assert.equal(boardAnchor([{ owner: 'a:s', runner: false, plan: P('f', [I('0', 'pending')], { src: 'file' }) }], 's:m', nodes).id, 's:m');
-  assert.equal(boardAnchor([{ owner: 'a:s', runner: true, plan: P('ph', [I('0', 'pending')], { src: 'phases' }) }], 's:m', nodes).id, 's:m', '단계 설계서라도 주인이 러너 노드가 아니면 메인');
-  // 러너 노드가 기록에 없음 → 메인. 끝났고 화면에서도 사라짐 → 메인(한 번), 끝났어도 보이는 동안은 러너
-  assert.equal(boardAnchor([{ ...R('s:c2'), owner: 'b:X' }], 's:m', nodes).id, 's:m', '러너 노드 없음');
-  const ended = new Map(nodes); ended.set('b:R', { ...nodes.get('b:R'), status: 'done' });
-  assert.equal(boardAnchor([R('s:c2')], 's:m', ended).id, 'b:R', '퇴장 중(보임)');
-  assert.equal(boardAnchor([R('s:c2')], 's:m', ended, () => false).id, 's:m', '끝나고 사라짐');
+  const X = { owner: 'b:L', runner: true, plan: P('x', [I('0', 'in_progress')], { src: 'axes' }) };
+  for (const by of ['s:c2', 's:c1', 'a:k']) assert.equal(boardAnchor([R(by)], 's:m', nodes).id, 'b:L', '러너 계획 → 그 러너의 재기동기 ' + by);
+  const an = boardAnchor([R('s:c2'), X], 's:m', nodes);
+  assert.equal(an.id, 'b:L'); assert.deepEqual(an.entries.map((e) => e.plan.src), ['axes', 'phases'], '축 큐가 맨 앞');
+  const lone = new Map([['s:m', { id: 's:m', kind: 'main' }], ['b:R', { id: 'b:R', kind: 'bash-bg', parentId: 's:m', status: 'active', meta: { runner: 1 } }]]);
+  assert.equal(boardAnchor([R('s:c2')], 's:m', lone).id, 's:m', '재기동기를 못 찾으면 메인(예비)');
   assert.deepEqual(boardAnchor([], 's:m', nodes), { id: 's:m', entries: [] });
+  const T = { owner: 's:m', runner: false, plan: P('t', [I('0', 'in_progress')]) };
   // 진행 중 회차는 보드 안 표시로만
   assert.equal(liveCycleOf(R('a:k').plan, nodes), 2, '회차 하위가 붙들어도 그 회차 번호');
   assert.equal(liveCycleOf(R('s:c1').plan, nodes), null, '끝난 회차');
@@ -184,37 +175,12 @@ test('팝업 모델: 계획마다 제목·출처·완료/전체·항목(표·회
   assert.deepEqual(planInspectModel({ meta: {} }), []);
 });
 
-test('mock 드라이버: 메인 할 일·기동기 단계(진행 중 회차 번호)·워크플로 단계를 결정적으로 낸다', () => {
-  const nodes = new Map([
-    ['s:m', { id: 's:m', kind: 'main', status: 'active', meta: {} }],
-    ['b:L', { id: 'b:L', kind: 'bash-bg', status: 'active', meta: { launcher: { script: 'r.sh' } } }],
-    ['s:c5', { id: 's:c5', kind: 'claude-p', parentId: 'b:L', status: 'active', meta: { cycle: 5 } }],
-    ['w:1', { id: 'w:1', kind: 'workflow', label: '빌드', status: 'active', meta: {} }],
-  ]);
-  const run = () => {
-    const out = [];
-    const d = new PlanMockDriver({ nodes: () => nodes.values(), emit: (e) => out.push(e), seed: 1 });
-    d.on = true; d._seed();
-    for (let i = 0; i < 12; i++) d._tick();
-    d.stop();
-    return out;
-  };
-  const a = run(), b = run();
-  assert.deepEqual(a.map((e) => [e.nodeId, e.patch.meta.plans[0].items.map((x) => x.s).join(',')]), b.map((e) => [e.nodeId, e.patch.meta.plans[0].items.map((x) => x.s).join(',')]), '결정적');
-  const last = (id) => a.filter((e) => e.nodeId === id).pop().patch.meta.plans[0];
-  assert.equal(last('s:m').src, 'todo');
-  assert.equal(last('w:1').src, 'workflow');
-  const L = last('b:L');
-  assert.equal(L.src, 'phases');
-  assert.ok(L.items.filter((x) => x.s === 'done').every((x) => x.cy === 5 && x.by === 's:c5'), '기동기 단계는 진행 중 회차가 닫음');
-});
-
 test('§86 보드 모델 영어: 출처·상태 라벨, 이름 없는 항목·메인·제목 대체, 얼마 전', () => {
   _setLangForTest('en');
   try {
-    const entries = [{ owner: 's:m', runner: false, plan: { id: 'p', src: 'tasks', at: 1, by: 's:m', n: 2, items: [{ k: '1', s: 'done', at: 1 }, { k: '2', s: 'pending', at: 1 }] } }];
+    const entries = [{ owner: 's:m', runner: false, plan: { id: 'p', src: 'phases', at: 1, by: 's:m', n: 2, items: [{ k: '1', s: 'done', at: 1 }, { k: '2', s: 'pending', at: 1 }] } }];
     const m = boardCard(entries, { mainId: 's:m' });
-    assert.equal(m.ownerLabel, 'Main'); assert.equal(m.srcLabel, 'Task list (Task)'); assert.equal(m.title, 'Task list (Task)');
+    assert.equal(m.ownerLabel, 'Main'); assert.equal(m.srcLabel, 'Phase design doc'); assert.equal(m.title, 'Phase design doc');
     assert.equal(m.lines[0].t, 'Item 2');
     const [p] = planInspectModel({ meta: { plans: [entries[0].plan] } }, { nowMs: 3 * 3_600_000 });
     assert.equal(p.updated, '3h ago'); assert.equal(p.items[0].ago, '3h ago');
@@ -248,4 +214,127 @@ test('v0.4.1 계획 보드 앞뒤: 보드보다 가까운 노드만 판에 구�
   assert.match(css, /#plan-links \{[^}]*z-index: 0;/);
   const ui = fs.readFileSync(new URL('../plan-ui.js', import.meta.url), 'utf8');
   assert.ok(!/document\.body\.append\(svg, layer\);\n\s*layer\.addEventListener/.test(ui) && /getElementById\('stage'\)/.test(ui));
+});
+
+test('§74.9 계획: /clear 승계 기동기(부모 없음, spawnedBy = 새 메인)의 러너 계획은 새 메인 보드로 — 옛 recent 메인이 아님', async () => {
+  const { mainOf: mo, gatherPlans: gp } = await import('../plan-core.mjs');
+  const OLD = 'old00000', NEW = 'new00000';
+  const plan = { id: 'p1', src: 'phases', title: 't', items: [{ k: 'a', t: '단계 0', s: 'in_progress' }], at: 1 };
+  const nodes = new Map([
+    ['s:' + NEW, { id: 's:' + NEW, kind: 'main', sessionId: NEW, rootSessionId: NEW, meta: {} }],
+    ['s:' + OLD, { id: 's:' + OLD, kind: 'main', sessionId: OLD, rootSessionId: OLD, meta: {} }],
+    ['b:L', { id: 'b:L', parentId: null, kind: 'bash-bg', sessionId: OLD, rootSessionId: OLD, meta: { launcher: { script: 'relaunch.sh' }, spawnedBy: 's:' + NEW } }],
+    ['b:L-r1', { id: 'b:L-r1', parentId: 'b:L', kind: 'bash-bg', sessionId: OLD, rootSessionId: OLD, meta: { runner: { script: 'autopilot.sh' }, plans: [plan] } }],
+  ]);
+  assert.equal(mo('b:L-r1', nodes), 's:' + NEW);
+  assert.deepEqual([...gp(nodes).keys()], ['s:' + NEW]);
+  nodes.get('b:L').meta.spawnedBy = 's:' + OLD; // 넘기지 않은 기동기는 띄운 옛 메인
+  assert.equal(mo('b:L-r1', nodes), 's:' + OLD);
+  delete nodes.get('b:L').meta.spawnedBy; // spawnedBy 가 없으면 예전처럼 rootSessionId
+  assert.equal(mo('b:L-r1', nodes), 's:' + OLD);
+});
+
+test('§115 흐름·Planet 3D 판 깊이: 구멍 사각형 재질 약속 · 화면 상자 → 시야 공간 자리·크기', async () => {
+  const { PLAN_PUNCH: P, punchQuad: pq } = await import('../plan-core.mjs');
+  assert.equal(P.depthTest, true, '판보다 가까운 노드·선이 구멍을 덮는다(늘 위에 그리지 않음)');
+  assert.equal(P.depthWrite, true, '판 뒤에 늦게 그려지는 것은 깊이 시험에서 진다');
+  assert.equal(P.transparent, false, '불투명 단계(투명 물체보다 먼저 — 가까운 투명 물체를 지우지 않음)');
+  assert.equal(P.fog, false);
+  assert.ok(P.renderOrder >= 1000, '불투명 단계의 맨 끝(뒤 불투명 물체가 먼저 그려져 구멍에 지워짐) — 깊이 시험이 있어 늘 위가 아님');
+  const rect = { left: 0, top: 48, width: 1000, height: 800 };
+  // 화면 가운데 100×80 상자, 깊이 20, 시야각 50° → 시야 공간 원점 축 위, 크기 = px × (2·z·tan25°/800)
+  const q = pq(20, { x: 450, y: 48 + 360, w: 100, h: 80 }, rect, 50);
+  const wpp = (2 * 20 * Math.tan((25 * Math.PI) / 180)) / 800;
+  assert.ok(Math.abs(q.x) < 1e-9 && Math.abs(q.y) < 1e-9 && q.z === -20);
+  assert.ok(Math.abs(q.w - 100 * wpp) < 1e-9 && Math.abs(q.h - 80 * wpp) < 1e-9);
+  // 오른쪽 위 구석 상자 → x +, y +
+  const r = pq(10, { x: 900, y: 48, w: 100, h: 100 }, rect, 50);
+  assert.ok(r.x > 0 && r.y > 0);
+  assert.equal(pq(-1, { x: 0, y: 0, w: 10, h: 10 }, rect, 50), null, '카메라 뒤');
+  assert.equal(pq(5, { x: 0, y: 0, w: 0, h: 10 }, rect, 50), null);
+});
+
+test('§115 판 DOM 은 3D 구멍 모드에서 캔버스 아래(.under, z -1)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const css = readFileSync(new URL('../plan.css', import.meta.url), 'utf8');
+  assert.match(css, /#plan-boards\.under\s*\{\s*z-index:\s*-1/);
+  const ui = readFileSync(new URL('../plan-ui.js', import.meta.url), 'utf8');
+  assert.match(ui, /typeof view\.setPlanPunch === 'function'/);
+  assert.match(ui, /hitBoard:/);
+  const sc = readFileSync(new URL('../scene.js', import.meta.url), 'utf8');
+  assert.match(sc, /alpha: true/);
+  assert.match(sc, /blendSrc: THREE\.ZeroFactor, blendDst: THREE\.OneMinusSrcAlphaFactor/);
+  assert.match(sc, /_cutLabels\(\); \/\/ §115\.3/, '렌더 뒤 판 뒤 라벨 잘라내기');
+  const nz = readFileSync(new URL('../noise.js', import.meta.url), 'utf8');
+  assert.match(nz, /gl_FragColor = vec4\(col \* aOut, aOut\)/, '신호 열화 후처리도 구멍 알파를 지킴');
+});
+
+test('§115.2 판 평면 네 모서리: 카메라와 나란한 한 깊이 · 상자 모서리와 정확히 겹침 · 그림자 여백', async () => {
+  const { punchCorners: pc, PLAN_SHADOW } = await import('../plan-core.mjs');
+  const rect = { left: 0, top: 48, width: 1000, height: 800 }, box = { x: 100, y: 148, w: 200, h: 120 };
+  const c = pc(15, box, rect, 50);
+  assert.equal(c.length, 4);
+  for (const p of c) assert.equal(p.z, -15, '네 점 같은 시야 깊이(평면이 화면과 나란함 — 픽셀마다 같은 깊이)');
+  // 다시 화면으로 투영하면 상자 모서리
+  const th = Math.tan((25 * Math.PI) / 180), asp = 1000 / 800;
+  const back = (p) => ({ x: ((p.x / (15 * th * asp)) + 1) / 2 * 1000, y: 48 + (1 - p.y / (15 * th)) / 2 * 800 });
+  const tl = back(c[0]), br = back(c[2]);
+  assert.ok(Math.abs(tl.x - 100) < 1e-6 && Math.abs(tl.y - 148) < 1e-6 && Math.abs(br.x - 300) < 1e-6 && Math.abs(br.y - 268) < 1e-6);
+  const s = pc(15, box, rect, 50, PLAN_SHADOW.PAD);
+  assert.ok(back(s[0]).x < 100 - PLAN_SHADOW.PAD + 1e-6 && back(s[2]).y > 268 + PLAN_SHADOW.PAD - 1e-6, '그림자 판은 상자 밖으로 여백');
+  assert.equal(pc(0.01, box, rect, 50), null);
+});
+
+test('§115.3 판 뒤 DOM 라벨 잘라내기: 겹친 부분만 · 판 앞 라벨은 그대로 · 다 덮이면 숨김', async () => {
+  const { labelBoardCut: cut, labelCutPath: path } = await import('../plan-core.mjs');
+  const B = [{ x0: 100, y0: 100, x1: 300, y1: 250, zv: 20 }];
+  const el = { left: 250, top: 120, width: 120, height: 30 };
+  assert.deepEqual(cut(el, 30, B), { x0: 0, y0: 0, x1: 50, y1: 30 }, '판 뒤 라벨: 판과 겹친 왼쪽 50px');
+  assert.equal(cut(el, 15, B), null, '판 앞 라벨은 그대로');
+  assert.equal(cut({ left: 400, top: 120, width: 50, height: 20 }, 30, B), null, '겹치지 않음');
+  assert.match(path({ x0: 0, y0: 0, x1: 50, y1: 30 }, 120, 30), /^polygon\(evenodd, 0 0, 100% 0/);
+  assert.equal(path({ x0: 0, y0: 0, x1: 120, y1: 30 }, 120, 30), 'inset(50%)');
+  // 두 판이면 가장 앞(가까운) 판 기준
+  const two = cut({ left: 120, top: 120, width: 40, height: 20 }, 50, [...B, { x0: 130, y0: 110, x1: 200, y1: 200, zv: 10 }]);
+  assert.equal(two.x0, 10);
+});
+
+test('§119 판 표시(v2): 큰 큐는 지금 항목 둘레 칸 창(앞서 끝난 수) · 지금 줄 단계 진행 · 메모 · 크게 보기 부가 정보', async () => {
+  const { boardCard: bc, sheetInspectModel: sm, PLAN_UI: U } = await import('../plan-core.mjs');
+  const items = Array.from({ length: 156 }, (_, i) => (i < 155
+    ? { k: 'k' + i, t: '축 ' + i, st: 'done', s: 'done' }
+    : { k: 'k' + i, t: '걷기 행 읽기 켜기', st: 'current', s: 'in_progress', doc: 'docs/plans/x.md', steps: { done: 3, total: 5, cur: '단계 3 — 켜기 규칙' } }));
+  const plan = { v: 2, id: 'pq', src: 'axes', title: '자율 루프 축', at: 1, n: 156, items };
+  const m = bc([{ owner: 's:m', runner: false, plan }], { mainId: 's:m' });
+  assert.equal(m.cells.length, U.MAX_CELLS);
+  assert.equal(m.before, 156 - U.MAX_CELLS, '앞서 끝난 칸 수');
+  assert.ok(m.cells[m.cells.length - 1].cur, '지금 축 칸이 창 안');
+  assert.equal(m.extra, 0);
+  assert.deepEqual(m.lines[0].steps, { done: 3, total: 5, cur: '단계 3 — 켜기 규칙' });
+  assert.equal(m.done, 155); assert.equal(m.total, 156);
+  assert.equal(m.glyph, '⇶');
+  // 표 꼴(행 = 항목): 메모·대기 다음 줄
+  const t2 = { v: 2, id: 'pa', src: 'axes', title: 'ACTIVE', at: 1, n: 3, items: [
+    { k: 'a', t: '강의 준비', st: 'current', s: 'in_progress', meta: ['11-10', '대외활동'], group: '대외활동' },
+    { k: 'b', t: '3차평가 의견', st: 'blocked', s: 'pending', hold: 1, note: '검토대기', emph: 1 },
+    { k: 'c', t: '이행노력 작성', st: 'pending', s: 'pending' }] };
+  const m2 = bc([{ owner: 's:m', runner: false, plan: t2 }], { mainId: 's:m' });
+  assert.equal(m2.before, 0);
+  assert.deepEqual(m2.lines.map((l) => [l.t, l.st, l.note || null]), [['강의 준비', 'in_progress', null], ['3차평가 의견', 'hold', '검토대기'], ['이행노력 작성', 'pending', null]]);
+  const s = sm([{ owner: 's:m', runner: false, plan: t2 }], { mainId: 's:m' })[0];
+  assert.deepEqual(s.items.map((x) => [x.st, x.note, x.emph, x.meta.length]), [['in_progress', '', false, 2], ['hold', '검토대기', true, 0], ['pending', '', false, 0]]);
+  const sq = sm([{ owner: 's:m', runner: false, plan }], { mainId: 's:m' })[0];
+  assert.equal(sq.items[155].doc, 'docs/plans/x.md'); assert.equal(sq.items[155].steps.total, 5);
+  // 건너뜀
+  const sk = sm([{ owner: 's:m', runner: false, plan: { ...t2, items: [{ k: 'z', t: '취소한 일', st: 'skipped', s: 'done' }] } }], { mainId: 's:m' })[0];
+  assert.equal(sk.items[0].st, 'skipped'); assert.equal(sk.items[0].glyph, '⤼');
+});
+
+test('§119 크게 보기: 항목이 많으면 지금 항목 앞 끝난 것은 접기 · 목록 스크롤 CSS', async () => {
+  const { readFileSync } = await import('node:fs');
+  const ui = readFileSync(new URL('../plan-ui.js', import.meta.url), 'utf8');
+  assert.match(ui, /const SHEET_FOLD = 30/);
+  assert.match(ui, /<details><summary>/);
+  const css = readFileSync(new URL('../plan.css', import.meta.url), 'utf8');
+  assert.match(css, /\.ins-plan-big \.ipb-list \{ max-height: min\(60vh, 560px\); overflow: auto; \}/);
 });

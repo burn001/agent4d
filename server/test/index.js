@@ -35,3 +35,7 @@ import './control.test.mjs'; // 화면 원격 조작
 import './longrun.test.mjs';
 import './sse-out.test.mjs'; // 이벤트 몰림 조절
 import './extjobs.test.mjs'; // 외부 작업 등록부
+import './clear-head.test.mjs';
+import './auto-turn.test.mjs';
+import './plan-format.test.mjs';
+import './loop-axes.test.mjs';

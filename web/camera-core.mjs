@@ -421,6 +421,40 @@ export class FitHold {
   }
 }
 
+// ---------------- 좁은 구도(노드 샷·초점·따라가기) 목표 붙잡기 ----------------
+/**
+ * 노드 샷 구도(중심·거리)는 매 프레임 그 노드 + 가까운 자식 + 일하는 하위 노드 + 라벨 자리로 다시 재서, 상태가 바뀔 때마다(작업 중 ↔ 쉼,
+ * 노드 추가·퇴장, 라벨 등장·퇴장) 조금씩 바뀌었다 — 좁은 구도일수록 같은 변화가 화면 비율로 커서 카메라가 움찔거렸다. ShotHold 는 정한 구도를 붙잡는다.
+ * 어긋남은 **화면 비율**(보이는 반높이 unit 대비)로 잰다 — 3D 는 거리 × tan(반화각), 2D 는 반높이 D 그대로.
+ *  - 같은 샷에서 중심 어긋남 < DB_C · 거리 비가 [SHRINK, GROW] 안이면 **그대로**(데드밴드)
+ *  - 더 넓어야 하면(GROW 배 넘게 — 잘림) 곧바로(여유 HEAD 배), 크기는 그대로인데 중심이 JUMP 넘게 옮겨졌으면(다시 배치) 곧바로
+ *  - 그 밖(조금 어긋남·좁혀도 됨)은 HOLD 초 동안 계속 그럴 때만(히스테리시스) — 범위가 넓어지는 쪽은 즉시, 좁아지는 쪽은 지연
+ * x = 함께 붙잡는 값(띠 가운데 yc 등) — 정할 때만 바꾸고, 그것만 바뀌어서는 다시 정하지 않음.
+ * 정한 구도로 가는 길은 렌더러의 기존 감쇠(lerp·dampTo)·진행 중 비행이 맡는다(보간을 새로 시작하지 않음). 샷 열쇠가 바뀌면 바로 새 구도.
+ */
+export const SHOT_HOLD = { DB_C: 0.08, GROW: 1.04, SHRINK: 0.88, HOLD: 2.0, JUMP: 0.5, HEAD: 1.06 };
+export const shotKey = (s) => (s ? 'n:' + s.id + (s.wide ? ':w' : '') + (s.git ? ':g' : '') + (s.prompt ? ':p' : '') : '');
+export class ShotHold {
+  constructor(o = {}) { Object.assign(this, SHOT_HOLD, o); this.reset(); }
+  reset() { this.key = null; this.c = null; this.D = 0; this.x = null; this._since = null; this.commits = 0; }
+  /** key = 샷 열쇠, c = {x,y?,z}, D = 거리(3D) 또는 반높이(2D), unit = 화면 반높이의 세계 길이(기본 D), x = 함께 붙잡는 값 → 붙잡은 {c, D, x, moved} */
+  step(now, key, c, D, unit = D, x = null) {
+    const out = (moved) => ({ c: this.c, D: this.D, x: this.x, moved });
+    const commit = (head = 1) => { this.key = key; this.c = { x: c.x, y: c.y || 0, z: c.z }; this.D = D * head; this.x = x; this._u = unit / (D || 1); this._since = null; this.commits++; return out(true); };
+    if (key !== this.key || !this.c || !(this.D > 0) || !(D > 0)) return commit();
+    const u = Math.max(1e-6, this.D * (this._u || 1)); // 붙잡은 구도의 화면 반높이
+    const off = Math.hypot(c.x - this.c.x, (c.y || 0) - this.c.y, c.z - this.c.z) / u;
+    const r = D / this.D;
+    if (r > this.GROW) return commit(this.HEAD); // 넓힐 때는 여유 HEAD 배 — 조금씩 넓어지는 구도(걸어가는 자식)가 계단처럼 여러 번 다시 정하지 않게
+    if (off > this.JUMP && r >= this.SHRINK) return commit(); // 좁혀지는 구도(무엇이 빠짐)는 중심이 크게 옮겨도 지연
+    if (off > this.DB_C || r < this.SHRINK) {
+      if (this._since == null) this._since = now;
+      if (now - this._since >= this.HOLD) return commit();
+    } else this._since = null;
+    return out(false);
+  }
+}
+
 // ---------------- 화면 아래 덮개를 뺀 맞춤 띠 ----------------
 /**
  * 무대 높이 H 중 위 top·아래 bottom px 가 덮였을 때(이벤트 띠·매크로 타임라인·재생 막대·라벨 자리) 보이는 띠.

@@ -38,6 +38,9 @@ const boxHit = (a, b, gap) => a.minX < b.maxX + gap && a.maxX > b.minX - gap && 
  * live 사무실은 문이 라운지 쪽을 보게 돌린다(LOUNGE_ROT, o.layout 을 제자리에서 회전 — opts.rotate === false 면 안 돌림).
  * 겹치면 그 방향으로 한 칸씩 민다. 반환: [{o, offset, role, rot}], lounge(지역 좌표)
  */
+// 캐비닛 앞 자리(슬롯): 앞 양옆 둘 → 한 걸음 뒤 양옆 둘 → 가운데 → 탁자 양옆. 충돌 묶음이 여럿이어도 빈 자리부터(VxSessCore)
+const LOUNGE_SPOTS = [{ x: -1.3, z: 0.4, face: Math.PI * 0.85 }, { x: 1.3, z: 0.4, face: -Math.PI * 0.85 }, { x: -2.4, z: 1.2, face: Math.PI * 0.8 }, { x: 2.4, z: 1.2, face: -Math.PI * 0.8 },
+  { x: 0, z: 0.25, face: Math.PI }, { x: -3.4, z: 2.1, face: Math.PI * 0.74 }, { x: 3.4, z: 2.1, face: -Math.PI * 0.74 }];
 export function loungePlan(liveOffs, wingOffs, opts = {}) {
   const hw = LOUNGE.w / 2, hd = LOUNGE.d / 2, G = LOUNGE_GAP;
   const lounge = { minX: -hw, maxX: hw, minZ: -hd, maxZ: hd };
@@ -66,7 +69,7 @@ export function loungePlan(liveOffs, wingOffs, opts = {}) {
   }
   // 캐비닛은 라운지 가운데 뒤쪽, 그 앞 양옆이 직원이 서는 자리(캐비닛을 바라봄)
   const cab = { x: 0, z: -1.2 };
-  return { out, lounge: { ...lounge, cabinet: cab, spots: [{ x: -1.3, z: 0.4, face: Math.PI * 0.85 }, { x: 1.3, z: 0.4, face: -Math.PI * 0.85 }, { x: -2.4, z: 1.2, face: Math.PI * 0.8 }, { x: 2.4, z: 1.2, face: -Math.PI * 0.8 }] } };
+  return { out, lounge: { ...lounge, cabinet: cab, spots: LOUNGE_SPOTS.map((s) => ({ ...s })) } };
 }
 
 const tsOf = (iso) => { const t = Date.parse(iso || ''); return Number.isFinite(t) ? t : 0; };
@@ -133,7 +136,12 @@ export function computeCampus(nodes, roots, projects, prev, opts = {}) {
     const m2 = new Map(map);
     for (const n of map.values()) {
       if (!isDetachedRoot(n)) continue;
-      const host = (n.rootSessionId && map.has('s:' + n.rootSessionId) && 's:' + n.rootSessionId) || (map.has(n.meta.spawnedBy) && n.meta.spawnedBy) || null;
+      // /clear 승계로 서버가 spawnedBy 를 새 메인(다른 rootSessionId)으로 바꿔 보내면 그 메인 방 — 예전처럼 rootSessionId(옛 recent 메인)를
+      // 먼저 보면 기동기·러너·회차·서브에이전트가 옛 메인 사무실과 함께 통째로 숨었다
+      const sp = n.meta && n.meta.spawnedBy, spn = sp && map.get(sp);
+      const handed = spn && spn.id !== n.id && spn.rootSessionId && spn.rootSessionId !== n.rootSessionId
+        ? (map.has('s:' + spn.rootSessionId) ? 's:' + spn.rootSessionId : sp) : null;
+      const host = handed || (n.rootSessionId && map.has('s:' + n.rootSessionId) && 's:' + n.rootSessionId) || (map.has(sp) && sp) || null;
       if (host && host !== n.id) m2.set(n.id, { ...n, parentId: host });
     }
     map = m2;

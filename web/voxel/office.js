@@ -3,18 +3,21 @@
 // 매 프레임 다시 채운다 → 전체 draw call 은 한 자릿수(캐릭터 수와 무관).
 import * as THREE from 'three';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { computeOffice, stationFor, CAT_FACILITY, hashStr } from './layout.js';
+import { computeOffice, CAT_FACILITY, hashStr } from './layout.js';
 import { readTokens, palette } from './palette.js';
 import { BoxBatch, UNIT_BOX, buildRoomStatic, buildCorridor, drawFacilities, drawDeskEmitter, drawMachine, ring, roomFrame, endXf, DESK_TOP } from './props.js';
 import { xfAngle, toLocal } from './xf.mjs';
 import { Character, drawCharacter, drawCharacterFar } from './character.js';
 import { crewSpots } from './character-core.mjs';
-import { breakSpot, BREAK_N, roleOf, overseeSpot } from './office-core.mjs';
+import { roleOf, overseeSpot } from './office-core.mjs';
+import { wardrobe, headExtra } from './appearance-core.mjs';
+import { SpotBook, takeStation, takeBreak, releaseSpot, separate } from './crowd-core.mjs'; // 겹침 막기
 import { VxHolo } from './vx-holo.js';
 import { VxFlow } from './vx-flow.js';
 import { VxIx } from './vx-ix.js';
 import { VxClient } from './vx-client.js';
 import { Bubbles, esc, trunc } from './bubbles.js';
+import { VxQuips } from './quips.js'; // 생각·말풍선
 import { KIND_LABEL } from '../layout.js';
 import { t as _t } from '../i18n.mjs';
 import { computeCampus } from './campus.mjs';
@@ -32,9 +35,14 @@ import { ProjFade } from '../proj-fade.mjs';
 import { BATCH, batchFold, deviceInfo, deviceSummary, nodeTags, isLauncher, isCycle, rearmStandby, cycleProgress } from '../batch-core.mjs';
 import { runVis, runWorking, runVisStatus } from '../run-core.mjs'; // 실행 중 셸
 import { isJob, jobOf } from '../job-core.mjs'; // 작업 노드
+import { jobCardsGone, vxHeldEnded, endedBadly, badEndDueAt } from '../flow-core.mjs'; // 끝난 작업 카드 빼기 · 직원·기계 머무름
 import { jobCardModel, jobLabelAlways, jobBoardYaw, JOBCARD } from './vx-job-core.mjs';
 import { drawJobCard } from './vx-jobs.js';
 import { VxProcs } from './vx-procs.js'; // 분리 프로세스 = 생산 라인 · 들여다보기 심부름
+import { VxStencil } from './vx-stencil.js'; // 바닥 스텐실(프로젝트 이름)
+
+const _HEXC = new Map(); // 옷 색 '#hex' → 공유 THREE.Color(읽기 전용)
+const VX_DETAIL_DIST = 42; // 카메라 거리 이 안쪽 직원만 잔 장식
 
 const MACHINE_KIND = { 'bash-bg': 'rack', monitor: 'screen', workflow: 'board' };
 const KNOWN = new Set(['main', 'subagent', 'workflow', 'workflow-agent', 'claude-p', 'bash-bg', 'monitor']);
@@ -90,7 +98,7 @@ export class VoxelView {
     this.focusDist = 0;
     this.onFrame = null;
     this.effects = [];
-    this.stationUse = new Map();
+    this.spots = new SpotBook(); // 시설·탕비실 자리 예약
     this.staticSig = '';
     this._kids = new Map();
     this._kidsDirty = true;
@@ -145,6 +153,8 @@ export class VoxelView {
     }
 
     this.bubbles = new Bubbles(sc);
+    // 생각·말풍선: 상황별 미리 쓴 대사(켜져 있으면 예전 도구·말 말풍선 대신)
+    this.quips = new VxQuips(this, (id, text, kind, dur, pri) => this.bubbles.say(id, text, { type: 'q-' + kind, dur, now: this._now, pri }));
     // 개편: 홀로그램 모니터·업무 흐름(바닥 조명 라인·패킷)·특별 상호작용 은유·의뢰인 창구
     this._layoutVer = 0;
     this.reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -153,6 +163,7 @@ export class VoxelView {
     this.ix = new VxIx(this);
     this.client = new VxClient(this);
     this.procs = new VxProcs(this);
+    this.stencil = new VxStencil(this);
     this.raycaster = new THREE.Raycaster();
     this._ndc = new THREE.Vector2();
     this._tmpV = new THREE.Vector3();
@@ -160,10 +171,10 @@ export class VoxelView {
     this._ctx = { now: 0, dt: 0, ts: 1, room: null, seat: null,
       stationSpot: (ch, cat) => this._stationSpot(ch, cat),
       releaseStation: (ch) => this._releaseStation(ch),
-      breakSpot: (ch) => (ch.room && ch.room.type === 'office' ? breakSpot(ch.room, this._breakIdx(ch)) : null),
+      breakSpot: (ch) => takeBreak(this.spots, ch), // 탕비실 자리(머신 앞 → 둘레, 다 차면 자리에서)
       crewOf: (ch) => crewSpots(this.chars.values(), ch, this._crewBuf || (this._crewBuf = [])), // 팀장 지휘·감독
       overseeSpot: (ch, crew) => overseeSpot(ch.room, crew), // 볼 팀원 책상 앞 통로
-      onError: (ch) => this.bubbles.say(ch.id, _t('scene.vx.errorBubble'), { type: 'error', dur: 2, now: this._now }) };
+      onError: (ch) => (this.quips.on ? this.quips.onError(ch) : this.bubbles.say(ch.id, _t('scene.vx.errorBubble'), { type: 'error', dur: 2, now: this._now })) };
     this._fx = { t: 0, now: 0, skill: null, error: null, ok: null, text: null, focus: false, hover: false, metaSkill: false, doneLead: false, idle: false, catColor: null, monK: 0, mugC: null, coffeeC: null, bagC: null, shoeC: null, cardC: null };
     this._labels = Array.from({ length: 24 }, () => ({ id: null, text: '', html: null, cls: '', x: 0, y: 0, z: 0 }));
     this._roomLabels = Array.from({ length: 16 }, () => ({ id: null, text: '', html: null, cls: '', x: 0, z: 0 }));
@@ -181,6 +192,24 @@ export class VoxelView {
 
   // ---------------- 공통 인터페이스 ----------------
   setClock(fn) { this.clock = typeof fn === 'function' ? fn : Date.now; }
+  /** '완료 표시': 복셀은 끝난 작업 카드만 따른다(직원·기계는 문으로 나가는 고유 퇴장) */
+  setShowDone(on) { this.showDone = !!on; this._jobGoneAt = 0; this._heldAt = -1; }
+  /** '완료 표시' 끔이고 문제 있게 끝난 노드가 아직 문턱 전인가(스냅샷 첫 배치용) */
+  _badWait(node) {
+    if (this.showDone || !endedBadly(node)) return false;
+    const c = this.clock(), due = badEndDueAt(node, c);
+    return due != null && c < due;
+  }
+  /** '완료 표시' 끔: 끝났지만 퇴장 대상(exitEligible)이 아닌 직원·기계는 자리에 붙잡는다 — 흐름·평면과 같은 판정(0.25초마다) */
+  _heldPass(now) {
+    if (this._heldAt >= 0 && now - this._heldAt < 0.25) return;
+    this._heldAt = now;
+    const roots = [this.rootId, this.layoutRoot];
+    for (const r of (this.scope && this.scope.roots) || []) roots.push(r.nodeId);
+    this._held = this.showDone ? null : vxHeldEnded(this.nodes, roots, this.clock(), this._badSeen || (this._badSeen = new Map()));
+    this._ctx.held = this._held;
+  }
+  get hiddenDoneCount() { return this._jobGone ? this._jobGone.size : 0; }
   setTimeScale(k) { this.ts = Math.max(0.1, Number(k) || 1); }
 
   applyTheme() {
@@ -210,8 +239,8 @@ export class VoxelView {
     this.chars.clear(); this.machines.clear(); this.vis.clear(); this._removing.clear();
     this.layout = null; this.rooms = []; this.roomsById.clear();
     this.effects = [];
-    this.stationUse.clear();
-    this.bubbles.clear();
+    this.spots.clear();
+    this.bubbles.clear(); this.quips.clear();
     this.holo.clear(); this.flow.clear(); this.ix.clear(); this.client.clear(); this.procs.clear();
     this._lblUsed = null;
     this.focusId = null; this.hoverId = null;
@@ -231,12 +260,14 @@ export class VoxelView {
     this.orderOf.set(node.id, this.order++);
     const kind = KNOWN.has(node.kind) ? node.kind : 'subagent';
     const recent = isEnded(node) && node.endedAt && this.clock() - Date.parse(node.endedAt) < RECENT_MS;
+    const badWait = this._badWait(node); // 문제 있는 끝의 문턱 전: 스냅샷으로 와도 자리에 남는다
+    this._heldAt = -1;
     if (MACHINE_KIND[kind]) {
       // 기동기는 배치 장치(복합기), 재무장 Monitor 는 앞 화면을 이어받아 새로 켜지는 연출 없이
       const rearm = node.meta && node.meta.rearmOf && this.machines.has(node.meta.rearmOf);
       const job = isJob(node); // 작업 = 주인 기계 옆 현황판 카드(끝나도 자리를 지킨다 — 접기는 batchFold, 나감은 주인과 함께)
       const m = { id: node.id, node, type: job ? 'job' : isLauncher(node) ? 'batch' : MACHINE_KIND[kind], flashUntil: 0, endWall: null, heldUntil: 0, released: false, seed: (hashStr(node.id) % 100) / 37, appearT0: spawn && !rearm ? now : null, info: null };
-      if (isEnded(node) && !job) { m.endWall = now; m.heldUntil = now + (recent ? this._hold() : 0); if (!recent && !spawn) m.released = true; }
+      if (isEnded(node) && !job) { m.endWall = now; m.heldUntil = now + (recent || badWait ? this._hold() : 0); if (!recent && !badWait && !spawn) m.released = true; }
       this.machines.set(node.id, m);
       this.procs.seedNode(node); // 열린 들여다보기(스냅샷)
     } else {
@@ -245,7 +276,7 @@ export class VoxelView {
       const ch = new Character(node.id, node, { lead });
       ch.kind = kind;
       ch.spawnMode = spawn ? 'enter' : 'place';
-      if (!lead && isEnded(node) && !spawn) {
+      if (!lead && isEnded(node) && !spawn && !badWait) {
         if (recent) ch.startAtDoor = true;
         else { ch.state = 'gone'; ch.released = true; ch.goneAt = now; }
       }
@@ -270,6 +301,7 @@ export class VoxelView {
     const m = this.machines.get(id);
     if ('status' in patch) {
       const ended = isEnded(n);
+      this._heldAt = -1; // 머무름 다시 판정
       if (ch) {
         if (!ended && ch.state === 'gone') {
           // 재개: 출입문에서 다시 들어옴
@@ -315,7 +347,7 @@ export class VoxelView {
     if (ch) this._releaseStation(ch);
     this._removing.delete(id);
     this.nodes.delete(id); this.chars.delete(id); this.machines.delete(id); this.vis.delete(id);
-    this.holo.removeNode(id); this.ix.dropNode(id); this.client.desks.delete(id); this.procs.dropNode(id);
+    this.holo.removeNode(id); this.ix.dropNode(id); this.client.desks.delete(id); this.procs.dropNode(id); this.quips.dropNode(id);
     this.layoutDirty = true; this._kidsDirty = true;
     this._settleUntil = (this._now || 0) + 0.7;
   }
@@ -352,19 +384,17 @@ export class VoxelView {
     this.ix.event(ev, opts);
     this.client.event(ev);
     this.procs.event(ev); // 들여다보기(watch)
+    this.quips.event(ev, opts); // 생각·말풍선
   }
-  /** 탕비실 자리 번호(같은 방 안에서 겹치지 않게 해시 + 이미 쉬는 사람 수) */
-  _breakIdx(ch) {
-    let k = 0;
-    for (const o of this.chars.values()) if (o !== ch && o.room === ch.room && o.target && o.target.type === 'break') k++;
-    return (ch.hash + k) % BREAK_N;
-  }
+  /** ⚙ 생각·말풍선 켬/끔: 떠 있는 말풍선을 비운다(켜면 대사, 끄면 예전 말풍선이 다음 이벤트부터) */
+  onQuipsToggle() { this.bubbles.bubbles.clear(); }
   /** 측정용(확인 스크립트): 홀로그램·흐름·상호작용 수 */
   vxStats() { return { holo: { ...this.holo.stats }, flow: { ...this.flow.stats }, ix: { ...this.ix.stats, on: this.ix.on }, procs: { ...this.procs.stats }, dyn: this.dLit.n + this.dGlow.n, stat: this.sLit.n + this.sGlow.n + this.sGlass.n }; }
 
   /** 말풍선. type = tool|text|user|result. tool 이면 cat 동사를 앞에 붙인다(예: "읽기 · SKILL.md") */
   say(nodeId, text, { type = 'text', cat = null, ok = null } = {}) {
     if (text == null || text === '') return;
+    if (this.quips.on) return; // 생각·말풍선이 맡는다(flowEvent 경로)
     const ch = this.chars.get(nodeId), m = this.machines.get(nodeId);
     if ((!ch || ch.state === 'gone') && !m) return;
     let prefix = '';
@@ -409,6 +439,8 @@ export class VoxelView {
   has(id) { return this.vis.has(id); }
   nodeTarget(id) { const v = this.vis.get(id); return v ? v.target : null; }
   nodePos(id) { return this.nodeTarget(id); }
+  /** 카메라 노드 샷이 쓰는 자리: 캐릭터는 가는 자리(걸음마다 움직이지 않게), 장치는 그 자리 */
+  shotTarget(id) { const v = this.vis.get(id); if (!v) return null; const ch = this.chars.get(id); if (!ch) return v.target; const g = ch.goalSpot(); return { x: g.x, y: v.target.y, z: g.z }; }
   /** 계획 보드 앵커의 제자리: 캐릭터는 걸어 다녀도 자기 책상 자리(seat), 장치(기동기 등)는 그 자리 */
   planHome(id) { const v = this.vis.get(id); if (!v) return null; const ch = this.chars.get(id); return ch && ch.seat ? v.target.clone().set(ch.seat.x, 1, ch.seat.z) : v.target.clone(); }
   nodeRadius(id) { const v = this.vis.get(id); return v ? v.r : 1; }
@@ -458,9 +490,9 @@ export class VoxelView {
     this._disposed = true;
     this.renderer.setAnimationLoop(null);
     if (this._ro) this._ro.disconnect();
-    this.bubbles.dispose();
+    this.bubbles.dispose(); this.quips.dispose();
     if (this.sess) this.sess.dispose();
-    this.holo.dispose(); this.ix.dispose(); this.client.dispose(); this.procs.dispose();
+    this.holo.dispose(); this.ix.dispose(); this.client.dispose(); this.procs.dispose(); this.stencil.dispose();
     if (this.vArt) { this.vArt.dispose(); this.vArt = null; }
     for (const sg of this._signs) { sg.o.removeFromParent(); sg.el.remove(); }
     this._signs = [];
@@ -494,6 +526,7 @@ export class VoxelView {
       if (m && m.released && !(m.type === 'board' && wfMember.has(id))) continue;
       if (fold.rearmPrev.has(id)) continue;
       if (m && m.type === 'job' && fold.hidden.has(id)) continue; // 끝난 작업은 주인마다 최근 몇 개만(jobFold)
+      if (m && m.type === 'job' && this._jobGone && this._jobGone.has(id)) continue; // '완료 표시' 끔
       // 재무장 앞 Monitor 아래 작업은 대표(마지막 Monitor) 판에 — 서버가 parentId 를 옮기기 전에도 사라지지 않게
       const pid = m && m.type === 'job' && fold.rearmPrev.has(n.parentId) ? fold.rearmPrev.get(n.parentId) : n.parentId;
       out.push({ id, parentId: pid, kind: n.kind, status: n.status, order: this.orderOf.get(id), startedAt: n.startedAt, projectId: n.projectId, rootSessionId: n.rootSessionId, meta: n.meta, sessionId: n.sessionId, lastActivityAt: n.lastActivityAt });
@@ -519,7 +552,7 @@ export class VoxelView {
     // 방이 옮겨졌으면 시설 예약을 비움
     const moved = new Set();
     for (const r of lay.rooms) { const o = oldRooms.get(r.id); if (o && !movingRooms.has(r.id) && (o.origin.x !== r.origin.x || o.origin.z !== r.origin.z || o.ext !== r.ext)) moved.add(r.id); }
-    if (moved.size) for (const id of moved) this.stationUse.delete(id);
+    if (moved.size) for (const id of moved) this.spots.dropRoom(id);
     for (const ch of this.chars.values()) {
       const seat = lay.seat.get(ch.id);
       ch.offstage = campus && !seat; // 전체 보기에서 숨긴(recent) 루트 쪽 캐릭터
@@ -528,7 +561,7 @@ export class VoxelView {
       if (ch.room && (moved.has(room.id) || ch.room.id !== room.id)) {
         if (ch.station) ch.station = null;
         ch.target = null; ch.snapNext = true;
-        if (ch.room.id !== room.id) this.stationUse.forEach((m) => m.forEach((arr) => { const i = arr.indexOf(ch.id); if (i >= 0) arr[i] = null; }));
+        if (ch.room.id !== room.id) this.spots.release(ch.id);
       } else if (ch.seat && (Math.abs(ch.seat.x - seat.x) > 1e-6 || Math.abs(ch.seat.z - seat.z) > 1e-6)) ch.target = null;
       ch.seat = seat; ch.room = room;
       const lead = seat.kind === 'lead';
@@ -687,7 +720,7 @@ export class VoxelView {
     const bg = this.tokens.bg, k = this.tokens.isLight ? 0.72 : 0.68;
     const f = (c) => (c && c.isColor ? c.clone().lerp(bg, k) : c);
     const look = { ...base };
-    for (const key of ['shirt', 'jacket', 'skin', 'hair', 'pants', 'hat', 'mark', 'tie', 'vest', 'stripe', 'cap', 'badge', 'sessVest', 'shirtFront']) look[key] = f(base[key]);
+    for (const key of Object.keys(base)) if (base[key] && base[key].isColor) look[key] = f(base[key]);
     this._dimLooks.set(ch.id, { src: base, look });
     return look;
   }
@@ -705,35 +738,8 @@ export class VoxelView {
     return room.door.out;
   }
 
-  _stationSpot(ch, cat) {
-    const room = ch.room;
-    if (!room || !room.stations || !room.stations[cat]) return null;
-    const key = cat === 'workflow' ? 'agent' : cat;
-    if (ch.station && ch.station.roomId === room.id && ch.station.key === key) return ch.station.spot;
-    this._releaseStation(ch);
-    let m = this.stationUse.get(room.id);
-    if (!m) { m = new Map(); this.stationUse.set(room.id, m); }
-    let arr = m.get(key);
-    if (!arr) { arr = []; m.set(key, arr); }
-    let i = arr.indexOf(null);
-    if (i < 0) i = arr.length;
-    const spot = stationFor(cat, room, i);
-    if (!spot) return null;
-    arr[i] = ch.id;
-    ch.station = { roomId: room.id, key, idx: i, spot };
-    return spot;
-  }
-
-  _releaseStation(ch) {
-    const s = ch.station;
-    if (!s) return;
-    ch.station = null;
-    const m = this.stationUse.get(s.roomId);
-    const arr = m && m.get(s.key);
-    if (!arr) return;
-    if (arr[s.idx] === ch.id) arr[s.idx] = null;
-    while (arr.length && arr[arr.length - 1] == null) arr.pop();
-  }
+  _stationSpot(ch, cat) { return takeStation(this.spots, ch, cat); } // 접근점 → 대기 줄, 다 차면 제자리
+  _releaseStation(ch) { if (ch.station || this.spots.get(ch.id)) releaseSpot(this.spots, ch); }
 
   _computeKids() {
     this._kidsDirty = false;
@@ -799,27 +805,36 @@ export class VoxelView {
   }
 
   /**
-   * 복장: 역할(office-core roleOf) — 팀장 정장·넥타이(메인 색), 별관 팀장 보라 정장·모자, 팀원 종류 색 셔츠, 기동기 운영자 형광 조끼·모자,
-   * 손님 외투, 워크플로 에이전트 목걸이. 사원증 = 세션 색(여러 세션일 때, 팀원은 조끼 앞판도) 아니면 종류 색
+   * 복장: 역할(office-core roleOf) → 옷 계열(appearance-core) — 팀장·별관 팀장 formal(정장·셔츠·넥타이 등, 포켓스퀘어 = 종류 색,
+   * 별관은 보라 계열 정장 + 모자), 팀원·워크플로 에이전트 casual(로고·소매 끝·캡 = 종류 색, 워크플로 에이전트는 목걸이), 기동기 운영자 형광 조끼·모자,
+   * 손님 긴 외투(안 셔츠 = 종류 색). 머리·피부·소품·체형은 노드 id 시드로 결정(wardrobe). 사원증 = 세션 색(여러 세션일 때, 팀원은 조끼 앞판도) 아니면 종류 색
    */
   _look(ch) {
     const role = roleOf(ch.kind, ch.seat ? ch.seat.kind : null, ch.lead);
     const sc = this.sess.sessColor(ch.node);
     const sk = sc ? sc.getHexString() : '';
     if (ch.look && ch.look.role === role && ch.look.sk === sk) return ch.look;
-    const t = this.tokens, pal = this.pal;
+    const pal = this.pal;
     const kc = this.kindColor(ch.kind).clone();
-    const white = new THREE.Color(1, 1, 1);
-    const look = { role, sk, skin: pal.skin[ch.hash % 4], hair: pal.hair[(ch.hash >>> 3) % 4], pants: pal.pants, markKind: 'card', mark: null, badge: sc ? sc.clone() : kc.clone(), shirt: kc.clone().lerp(white, 0.12), jacket: null, tie: null, vest: null, stripe: null, cap: null, hat: null, sessVest: null, shirtFront: pal.shirt };
+    const A = wardrobe.get(ch.id, role, ch.room ? ch.room.id : '');
+    const H = (hex) => { if (!hex) return null; let c = _HEXC.get(hex); if (!c) { c = new THREE.Color(hex); _HEXC.set(hex, c); } return c; };
+    const HM = (hex, to, k) => { const key = hex + to + k; let c = _HEXC.get(key); if (!c) { c = new THREE.Color(hex).lerp(new THREE.Color(to), k); _HEXC.set(key, c); } return c; };
+    const look = {
+      role, sk, ap: A, skin: H(A.skin), hair: H(A.hair), pants: H(A.bottomC), shirt: H(A.topC), top2: H(A.top2C), shoe: H(A.shoeC),
+      neck: H(A.neckC), hatC: H(A.hatC), glasses: H(A.glasses), phones: H(A.phones), pack: H(A.pack), accent: kc, lens: H('#dde8f2'), lip: HM(A.skin, '#c0404a', 0.45), legC: H(A.legC), hairAcc: H(A.hairAccC),
+      pants2: A.bottom === 'jeans' ? HM(A.bottomC, '#ffffff', 0.28) : A.bottom === 'joggers' ? HM(A.bottomC, '#000000', 0.35) : null,
+      markKind: 'card', mark: null, badge: sc ? sc.clone() : kc.clone(), jacket: null, tie: null, vest: null, stripe: null, cap: null, hat: null, sessVest: null, shirtFront: null,
+    };
     switch (role) {
-      case 'lead': look.jacket = pal.suit.clone(); look.shirt = pal.shirt.clone(); look.tie = this.kindColor('main').clone(); look.pants = pal.suit.clone().multiplyScalar(0.8); look.markKind = 'badge'; break;
-      case 'annex': look.jacket = pal.suitP.clone(); look.shirt = pal.shirt.clone(); look.tie = this.kindColor('claude-p').clone(); look.markKind = 'crown'; look.hat = kc.clone().lerp(new THREE.Color(0, 0, 0), 0.25); break;
-      case 'operator': look.shirt = pal.coat.clone(); look.vest = pal.vest.clone(); look.stripe = pal.vestStripe.clone(); look.cap = pal.cap.clone(); break;
-      case 'guest': look.jacket = pal.coat.clone(); look.shirt = kc.clone(); break;
+      case 'lead': look.jacket = look.shirt; look.shirt = look.top2; look.accent = this.kindColor('main').clone(); look.markKind = 'badge'; break;
+      case 'annex': look.jacket = look.shirt; look.shirt = look.top2; look.accent = kc; look.markKind = 'crown'; look.hat = kc.clone().lerp(new THREE.Color(0, 0, 0), 0.25); break;
+      case 'operator': look.vest = pal.vest.clone(); look.stripe = pal.vestStripe.clone(); look.cap = pal.cap.clone(); break;
+      case 'guest': look.jacket = look.shirt; look.shirt = kc; break;
       case 'wf': look.markKind = 'necklace'; look.mark = this.kindColor('workflow'); if (sc) look.sessVest = sc.clone(); break;
       default: if (sc) look.sessVest = sc.clone();
     }
-    void t;
+    if (A.hat === 'cap' || A.hat === 'capBack') look.hatC = kc; // 캐주얼 캡 = 종류 색(예전 셔츠 색의 뜻)
+    ch.headExtra = headExtra(A);
     ch.look = look;
     this._dimLooks.delete(ch.id);
     return look;
@@ -888,6 +903,13 @@ export class VoxelView {
     const dt = Math.min(0.05, Math.max(0.0001, now - this._last));
     this._last = now; this._now = now;
     if (this.scope.mode === 'all' && this.layout && this.layout.campus && now - (this._packChk || 0) > 0.5) { this._packChk = now; if (packStale(this.layout, packView(this.container, { prefs: this.cameraPrefs }))) this.layoutDirty = true; }
+    // '완료 표시' 끔: 끝난 작업 카드는 정상 끝 2.5초 · 문제 있는 끝 문턱 뒤 판에서 뺀다(0.25초마다 판정)
+    if (now - (this._jobGoneAt || 0) > 0.25) {
+      this._jobGoneAt = now;
+      const g = this.showDone ? new Set() : jobCardsGone(this.nodes, this.clock());
+      const sig = [...g].sort().join('|');
+      if (sig !== (this._jobGoneSig || '')) { this._jobGoneSig = sig; this._jobGone = g; this.layoutDirty = true; }
+    }
     if (this.layoutDirty && now - this.lastLayout > 0.15) this._relayout(now);
     if (this.sess.stepMoves(now)) this._layoutVer++; // 이사 보간(정적 서명이 바뀌면 다시 그림) — 바닥 라인도 다시
     this.client.step(now); // 의뢰인 창구: 팀장 심부름·카드 읽기
@@ -896,6 +918,7 @@ export class VoxelView {
     this._rebuildStatic();
     this.sess.stepConflicts(now); // 충돌 → 직원 캐비닛 방문
 
+    this._heldPass(now);
     // 퇴장한 캐릭터·끝난 기계의 자리 반납
     for (const ch of this.chars.values()) {
       if (ch.state === 'gone' && !ch.released) {
@@ -904,7 +927,7 @@ export class VoxelView {
       }
     }
     for (const m of this.machines.values()) {
-      if (!m.released && m.endWall != null && now >= m.heldUntil) { m.released = true; this.layoutDirty = true; }
+      if (!m.released && m.endWall != null && now >= m.heldUntil && (m.removing || !this._held || !this._held.has(m.id))) { m.released = true; this.layoutDirty = true; } // 퇴장 대상 전이면 남음
     }
 
     // 캐릭터 상태 머신
@@ -917,6 +940,7 @@ export class VoxelView {
       if (ch.spawnMode === 'enter' && !ch.placed && !ch.spawnFrom) ch.appearT0 = now;
       ch.update(ctx);
     }
+    separate(this.chars.values(), dt, undefined, Math.min(6, this.ts || 1)); // 가벼운 밀어내기(관통·겹침 줄임)
     // 제거된 노드: 다 나간 직원·꺼진 기계는 이제 지운다
     if (this._removing.size) for (const id of [...this._removing]) {
       const ch = this.chars.get(id), m = this.machines.get(id);
@@ -936,8 +960,10 @@ export class VoxelView {
     this.holo.update(now, dt, this.camera, this.container.clientHeight || 1);
     this._drawSpawnLinks();
     if (this.vArt) this.vArt.update(now); // 작업 대상 층(켤 때만)
+    this.stencil.frame(); // 바닥 스텐실(배치·이름이 바뀔 때만 다시 놓음)
 
     // 말풍선·이름표
+    this.quips.frame(now); // 생각 풍선·등장·퇴장 대사(0.25초마다)
     this._labelPass(now);
 
     if (this.onFrame) this.onFrame(dt, now);
@@ -1072,6 +1098,7 @@ export class VoxelView {
       fx.monK = ch._monK || 0;
       if (lod && ch.id !== this.focusId) { drawCharacterFar(ch, this._look(ch), fx, L); continue; }
       fx.focus = ch.id === this.focusId; fx.hover = ch.id === this.hoverId;
+      fx.detail = fx.focus || Math.hypot(ch.pos.x - cp.x, cp.y, ch.pos.z - cp.z) < VX_DETAIL_DIST; // 잔 장식(안경알·밑창·소매 끝 등)은 가까이서만
       fx.metaSkill = !!(n.meta && n.meta.skill) && ch.state !== 'leave';
       fx.doneLead = ch.lead && isEnded(n);
       fx.idle = runVisStatus(n, clockMs) === 'idle'; // 전경 셸이 도는 중이면 대기(고개 기울임)가 아니라 작업
@@ -1202,7 +1229,7 @@ export class VoxelView {
     if (now - (this._lblAt || 0) < 0.2 && this._lblF === fid && this._lblH === hid && this._lblUsed) {
       for (const L of this._lblUsed) { const r = L.ref; if (r && r.pos && !L.fixed) { L.x = r.pos.x; L.z = r.pos.z + (r.type ? 0.6 : 0.55); } }
       const bc = this._bubCtx;
-      bc.now = now; bc.narrow = this._narrow || !!this._farAll; bc.focusId = fid; bc.hoverId = hid;
+      bc.now = now; bc.narrow = this._narrow || !!this._farAll; bc.focusId = fid; bc.hoverId = hid; bc.quips = this.quips.on;
       bc.width = this.container.clientWidth || 1; bc.height = this.container.clientHeight || 1;
       this.bubbles.update(bc);
       return;
@@ -1293,7 +1320,7 @@ export class VoxelView {
       } else { L.x = r.bounds.minX + 0.3; L.z = r.bounds.maxZ + 1.1; L.y = null; }
     }
     const bc = this._bubCtx;
-    bc.now = now; bc.narrow = this._narrow || farAll; bc.focusId = fid; bc.hoverId = hid;
+    bc.now = now; bc.narrow = this._narrow || farAll; bc.focusId = fid; bc.hoverId = hid; bc.quips = this.quips.on;
     this._updateSigns();
     this.sess.updateCabLabels(); // 캐비닛 말풍선(파일명)
     bc.labels = used; bc.rooms = this._lblRooms = rl.slice(0, k);

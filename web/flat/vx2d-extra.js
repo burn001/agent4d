@@ -3,7 +3,7 @@
 // 탕비실·특별 상호작용 시설·의뢰인 스크린(정적), 특별 상호작용 은유(시설 맥박·소포 점·요약 칩), 의뢰인 창구(카드·메모·질문 선택지).
 // Voxel2DView 가 하나 만든다. 캔버스 2D 만 쓴다(three 없음).
 import { FLOW, PacketPool, planFlow, easeInOut, catColor } from '../flow-core.mjs';
-import { OFFICE_FX, ixSpot, floorRoute, routeCum, routeAt, dashStarts, lineStyle, clientScreen, clientSpot, breakSpot, BREAK_N, MON } from '../voxel/office-core.mjs';
+import { OFFICE_FX, ixSpot, floorRoute, routeCum, routeAt, dashStarts, lineStyle, clientScreen, clientSpot, MON } from '../voxel/office-core.mjs';
 import { ClientDesk, clientOp, CLIENT } from '../voxel/client-core.mjs';
 import { userBook, consoleLines, hitRect } from '../user-core.mjs'; // 사용자 콘솔
 import * as IX from '../ix-core.mjs';
@@ -79,12 +79,6 @@ export class Vx2DExtra {
         for (const ch of v.chars.values()) if (ch.room && ch.room.id === room) ch.flinchUntil = now + CLIENT.FLINCH;
       }
     }
-  }
-  breakSpot(ch) {
-    if (!ch.room || ch.room.type !== 'office') return null;
-    let k = 0;
-    for (const o of this.view.chars.values()) if (o !== ch && o.room === ch.room && o.target && o.target.type === 'break') k++;
-    return breakSpot(ch.room, (ch.hash + k) % BREAK_N);
   }
   /** 매 프레임(상태): 팀장 심부름·카드 읽기·모니터 열림 */
   step(now, dt) {
@@ -249,6 +243,7 @@ export class Vx2DExtra {
       const ch = v.chars.get(f.nodeId) || (f.bgNode && v.chars.get(f.bgNode));
       const m = !ch && (v.machines.get(f.nodeId) || (f.bgNode && v.machines.get(f.bgNode)));
       const room = ch ? ch.room : m && m.pos ? v.roomsById.get(m.pos.roomId) : null;
+      if (f.cat === 'user') { const kind = mod.ixAutoKind(f.ix); if (kind && kind !== 'dot') this._auto2d(ctx, now, s, f, kind, ch, m); continue; }
       const off = room && room.type === 'office' ? room : room && room.officeId ? v.roomsById.get(room.officeId) : null;
       const sp = off && ixSpot(off, f.cat);
       if (!sp) continue;
@@ -283,6 +278,49 @@ export class Vx2DExtra {
         chips++;
       }
     }
+    ctx.globalAlpha = 1;
+  }
+
+  /** 예약·Monitor·작업 알림이 연 팀장 턴(평면): 예약 = 책상 위 시계(바늘 한 바퀴) → 책상으로 점 · Monitor·작업 결과 = 출처 자리에서
+   *  팀장 책상으로 사각 점(보라·초록·빨강·회색) → 책상 고리 맥박, 결과는 ✓·✕·■. 출처가 안 보이면 책상 쪽만 */
+  _auto2d(ctx, now, s, f, kind, ch, m) {
+    const v = this.view, X = v._X, Y = v._Y, L = !!v.tokens.isLight, M = IX.IX_AUTO, ix = f.ix;
+    const vv = v.vis.get(f.nodeId);
+    if (!ch || !vv || vv.hidden || !(vv.scopeK ?? 1)) return;
+    const te = f.tEnd == null ? 0 : now - f.tEnd, T = now - f.t0;
+    const A = Math.max(0, te < M.LINGER_S * 0.6 ? 1 : 1 - (te - M.LINGER_S * 0.6) / (M.LINGER_S * 0.4)) * (vv.projA ?? 1);
+    if (A <= 0.02) return;
+    const key = kind === 'schedule' ? 'sched' : kind === 'monitor' ? 'mon' : ix.st === 'err' ? 'err' : ix.st === 'stop' ? 'dim' : 'ok';
+    const col = colorOf(IX, key, L);
+    const a = { x: ch.seat ? ch.seat.deskX : ch.pos.x, z: ch.seat ? ch.seat.deskZ : ch.pos.z };
+    const red = !!v.reduced;
+    ctx.globalAlpha = A; ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = Math.max(1.2, 0.08 * s);
+    const pulse = (t0) => { const q = (T - t0) / 0.8; if (q > 0 && q < 1) { ctx.globalAlpha = A * (1 - q); ctx.beginPath(); ctx.arc(X(a.x), Y(a.z), Math.max(8 + q * 16, (0.6 + q * 1.2) * s), 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = A; } }; // 화면 하한(멀리서도 보이게)
+    const dot = (P, Q, u, k = 0.14) => { const h = Math.max(3, k * s); ctx.fillRect(X(P.x + (Q.x - P.x) * u) - h, Y(P.z + (Q.z - P.z) * u) - h, 2 * h, 2 * h); };
+    let arrive = 0;
+    if (kind === 'schedule') {
+      const K = { x: a.x + 1.1, z: a.z - 0.9 }, R0 = Math.max(9, 0.42 * s), cx = X(K.x), cy = Y(K.z);
+      ctx.beginPath(); ctx.arc(cx, cy, R0, 0, Math.PI * 2); ctx.stroke();
+      const ha = -Math.PI / 2 + (red ? 0 : Math.min(1, T / 1.3) * Math.PI * 2);
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(ha) * R0 * 0.85, cy + Math.sin(ha) * R0 * 0.85); ctx.moveTo(cx, cy); ctx.lineTo(cx + R0 * 0.5, cy); ctx.stroke();
+      const u = (T - 0.9) / M.TRAVEL_S; if (u > 0 && u < 1) dot(K, a, u);
+      arrive = 0.9 + M.TRAVEL_S;
+    } else {
+      const sc = ix.from && v.chars.get(ix.from), sm = !sc && ix.from && v.machines.get(ix.from);
+      const sv = ix.from && v.vis.get(ix.from);
+      const ok = sv && !sv.hidden && (sv.scopeK ?? 1) && !(sc && (sc.offstage || sc.state === 'gone')) && !(sm && sm.released);
+      const b = ok ? (sc ? { x: sc.seat ? sc.seat.deskX : sc.pos.x, z: sc.seat ? sc.seat.deskZ : sc.pos.z } : sm && sm.pos ? { x: sm.pos.x, z: sm.pos.z } : null) : null;
+      if (b && (b.x !== a.x || b.z !== a.z)) { const u = T / M.TRAVEL_S; if (u < 1) dot(b, a, red ? 0.5 : u, kind === 'monitor' ? 0.12 : 0.16); arrive = M.TRAVEL_S; }
+    }
+    pulse(arrive);
+    if (ix.text && T < 2.8) { // 첫 몇 단어 칩(흐름·Planet 리본과 같은 글)
+      const txt = (kind === 'schedule' ? '⏰ ' : kind === 'monitor' ? '◎ ' : '') + (ix.text.length > 18 ? ix.text.slice(0, 17) + '…' : ix.text);
+      ctx.font = `600 10.5px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      const tw = ctx.measureText(txt).width + 12, x = X(a.x), y = Y(a.z) - Math.max(26, 1.6 * s);
+      ctx.fillStyle = L ? 'rgba(255,255,255,.92)' : 'rgba(20,24,34,.9)'; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x - tw / 2, y - 8, tw, 16, 8) : ctx.rect(x - tw / 2, y - 8, tw, 16); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = v.tokens.text; ctx.fillText(txt, x, y + 0.5); ctx.fillStyle = col;
+    }
+    if (kind === 'result' && T > arrive) { ctx.font = `700 ${Math.round(Math.max(12, Math.min(16, s * 0.5)))}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(ix.st === 'err' ? '✕' : ix.st === 'stop' ? '■' : '✓', X(a.x), Y(a.z) - Math.max(14, 0.9 * s)); }
     ctx.globalAlpha = 1;
   }
 

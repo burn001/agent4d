@@ -193,6 +193,8 @@ export function roomFrame(room, b) {
 export function endXf(b) { if (b.lit) b.lit.setXf(null); if (b.glow) b.glow.setXf(null); if (b.glass) b.glass.setXf(null); }
 
 // 결정적 의사 난수(정적 그림의 스카이라인·책 등)
+/** 방 id → 창 벽 하늘 범위(drawCtxWear 용, buildRoomStatic 이 채움) */
+const SKY_BY_ID = new Map();
 function rnd(seed) { let s = seed >>> 0 || 1; return () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; }
 
 /**
@@ -247,6 +249,8 @@ export function buildRoomStatic(room0, pal, b, { dim = false, band = null } = {}
   // 앞 벽(출입문 틈)·오른쪽 벽
   const dx = room.door.x, frontZ = zf + T / 2;
   wallX(x0, dx - 0.8, frontZ, 'front'); wallX(dx + 0.8, x1, frontZ, 'front');
+  // 레이아웃이 다시 계산되면 방 객체가 새로 생겨 room._sky 가 비므로(정적은 서명이 같으면 다시 안 그림) id 로도 기억 — 컨텍스트 젖빛 유리가 깜빡이지 않게
+  if (room0.id != null) { if (room._sky && room._skyB === room._skyBuild) SKY_BY_ID.set(room0.id, room._sky); else SKY_BY_ID.delete(room0.id); }
   pane(x1 + T / 2, zb, x1 + T / 2, zf, 'right');
   // 문틀(유리문 기둥·위 틀)
   const dh = hi.front ? H : 2.1;
@@ -734,11 +738,12 @@ export function drawCtxWear(room0, pct, pal, b) {
 function ctxWear_(room, room0, pct, pal, b) {
   const G = b.glow, L = b.lit;
   const fog = Math.max(0, Math.min(1, (pct - 35) / 55));
-  const sky = room._sky || room0._sky;
+  const sky = room._sky || room0._sky || (room0.id != null ? SKY_BY_ID.get(room0.id) : null);
   if (fog > 0 && sky) {
     const glass = _c.copy(pal.skyMid).lerp(pal.fogGlass, 0.15 + fog * 0.4); // 젖빛 유리(완전 흰색까지는 아님)
-    const len = sky.x1 - sky.x0, h = 0.4 + 1.4 * fog;
-    G.box((sky.x0 + sky.x1) / 2, 2.2 - h / 2, sky.z + sky.inward * 0.07, len, h, 0.02, glass);
+    // 불 켜진 창(앞면 0.06) 바로 앞, 창살(0.04～0.10)·위 틀(앞면 0.08)과 면이 겹치지 않게 얇게, 위 틀 아래(2.17)까지만 — 겹치면 지직거림
+    const len = sky.x1 - sky.x0, top = 2.17, h = Math.min(0.4 + 1.4 * fog, top - 0.38);
+    G.box((sky.x0 + sky.x1) / 2, top - h / 2, sky.z + sky.inward * 0.063, len, h, 0.006, glass);
   }
   const d = room.leadDesk;
   if (!d) return;

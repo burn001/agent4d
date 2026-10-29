@@ -5,7 +5,7 @@ import { _setLangForTest } from '../i18n.mjs';
 import { JOBW, JOB_CODE, isJob, jobStale, jobDisplayState, jobCode, jobProgress, jobTags, jobSummary, jobLabelKey, jobFold, jobInspect } from '../job-core.mjs';
 import { batchFold, nodeTags } from '../batch-core.mjs';
 import { computeLayout, JOB_FIRST } from '../layout.js';
-import { exitEligible } from '../flow-core.mjs';
+import { exitEligible, exitWalls, jobCardsGone, EXIT_ERR } from '../flow-core.mjs';
 import { MockGenerator } from '../mock.js';
 
 _setLangForTest('ko');
@@ -66,15 +66,38 @@ test('접기: 주인마다 끝난 작업 최근 3개만 · 끝나지 않은 작�
   assert.ok(isJob(nodes.get('j:b:L:w3')) && !isJob(nodes.get('b:L')));
 });
 
-test('퇴장: 끝난 작업은 주인이 살아 있는 동안 남고, 주인이 끝나면 함께 나간다', () => {
+test('퇴장(§37.9): 끝난 작업은 주인이 살아 있어도 나가고, 문제 있는 끝(작업 rc≠0·에이전트 오류)은 문턱 전 남음 · 뒤 빠짐', () => {
   const mk = (ownerSt) => new Map([
     ['s:m', { id: 's:m', parentId: null, kind: 'main', status: 'active', meta: {} }],
     ['m:1', { id: 'm:1', parentId: 's:m', kind: 'monitor', status: ownerSt, meta: {} }],
-    ['j:m:1:a', J('j:m:1:a', 'm:1', { state: 'done' })],
+    ['j:m:1:a', J('j:m:1:a', 'm:1', { state: 'done', rc: 0, endedAt: iso(0) })],
+    ['j:m:1:f', J('j:m:1:f', 'm:1', { state: 'failed', rc: 4, endedAt: iso(0) })],
+    ['j:m:1:g', J('j:m:1:g', 'm:1', { state: 'failed', rc: 1, endedAt: iso(0), failLingerSec: 60 })],
+    ['a:1', { id: 'a:1', parentId: 's:m', kind: 'subagent', status: 'error', endedAt: iso(0), meta: {} }],
+    ['a:2', { id: 'a:2', parentId: 's:m', kind: 'subagent', status: 'error', meta: {} }], // 끝난 시각 없음 → 처음 본 시각부터
+    ['a:3', { id: 'a:3', parentId: 's:m', kind: 'subagent', status: 'done', endedAt: iso(0), meta: {} }],
+    ['b:3', { id: 'b:3', parentId: 'a:3', kind: 'bash-bg', status: 'active', meta: {} }], // 하위가 일하면 남음
   ]);
-  assert.ok(!exitEligible(mk('active'), ['s:m']).has('j:m:1:a'));
-  const e = exitEligible(mk('done'), ['s:m']);
-  assert.ok(e.has('j:m:1:a') && e.has('m:1'));
+  const at = (sec) => exitEligible(mk('active'), ['s:m'], { nowMs: T0 + sec * 1000, seen: new Map([['a:2', T0]]) });
+  // 정상 끝: 주인(Monitor)이 살아 있어도 대상(수정 전에는 주인이 끝날 때까지 남았다 — 일일 회차 작업이 계속 보이던 원인)
+  assert.ok(at(1).has('j:m:1:a'));
+  assert.ok(!exitEligible(mk('active'), ['s:m']).has('j:m:1:f')); // 시계가 없으면 오류는 남는다
+  // 문턱 전: 오류·실패 남음 / 문턱 뒤(기본 600초): 빠짐. 작업별 failLingerSec 가 이긴다
+  const before = at(EXIT_ERR.LINGER_SEC - 1), after = at(EXIT_ERR.LINGER_SEC);
+  for (const id of ['j:m:1:f', 'a:1', 'a:2']) { assert.ok(!before.has(id), id + ' 문턱 전 남음'); assert.ok(after.has(id), id + ' 문턱 뒤 빠짐'); }
+  assert.ok(!at(59).has('j:m:1:g') && at(60).has('j:m:1:g'));
+  assert.ok(!after.has('a:3') && !after.has('b:3') && !after.has('m:1') && !after.has('s:m'));
+  // 하위가 늦게 끝나면 부모는 그때부터 센다(퇴장 시각 = 자기와 하위 중 가장 늦은 끝)
+  const nodes = mk('active'); nodes.get('b:3').status = 'done';
+  const elig = exitEligible(nodes, ['s:m'], { nowMs: T0 });
+  const w = exitWalls(nodes, elig, new Map([['a:3', 10], ['b:3', 50]]));
+  assert.equal(w.get('a:3'), 50);
+  assert.equal(exitWalls(nodes, elig, new Map([['a:3', 10]])).get('a:3'), null); // 하위 끝 시각을 모르면 아직 아님
+  // 복셀 작업 카드: 정상 끝 2.5초 뒤 · 실패는 문턱 뒤
+  const vn = mk('active');
+  assert.ok(!jobCardsGone(vn, T0 + 2000).has('j:m:1:a') && jobCardsGone(vn, T0 + 2500).has('j:m:1:a'));
+  assert.ok(!jobCardsGone(vn, T0 + (EXIT_ERR.LINGER_SEC - 1) * 1000).has('j:m:1:f') && jobCardsGone(vn, T0 + EXIT_ERR.LINGER_SEC * 1000).has('j:m:1:f'));
+  assert.ok(!jobCardsGone(vn, T0 + 1e9).has('a:1')); // 복셀 직원은 고유 퇴장(카드만 판정)
 });
 
 test('배치: 위성(Monitor) 아래 작업은 바깥쪽 사슬 — 다른 위성·부모와 겹치지 않음', () => {

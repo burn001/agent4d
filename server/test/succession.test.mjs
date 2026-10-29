@@ -272,6 +272,74 @@ test('허브(§74.4): 옛 메인이 분리 실행으로 띄운 살아 있는 기
   } finally { hub.stop(); }
 });
 
+test('허브(§74.8): 서버가 /clear 뒤에 기동해 옛 메인이 처음부터 recent 로 붙어도, 살아 있는 기동기·러너·회차는 보인다', async () => {
+  // 실기록 꼴(익명화): 옛 메인 P 가 relimit-restart.sh 를 nohup 으로 띄움 → 러너 → 회차 claude -p(진행 중), 그 뒤 /clear 로 S.
+  // 서버는 /clear 뒤 재기동 — 첫 tick 부터 P 는 live 가 아닌 recent(launcherOf)라 leftAt 이 없다
+  const gP = new Graph({ rootSessionId: 'P', localSeq: true });
+  gP.addNode({ id: 's:P', parentId: null, kind: 'main', label: 'm', sessionId: 'P', meta: {} });
+  gP.addNode({ id: 'b:L', parentId: null, kind: 'bash-bg', label: '기동기 · relimit-restart.sh', sessionId: 'P', meta: { launcher: { script: 'relimit-restart.sh' }, detached: true, spawnedBy: 's:P' } });
+  gP.addNode({ id: 'b:L-r1', parentId: 'b:L', kind: 'bash-bg', label: '러너 · autopilot.sh', sessionId: 'P', meta: {} });
+  gP.addNode({ id: 's:R', parentId: 'b:L-r1', kind: 'claude-p', label: 'claude -p · R', sessionId: 'R', meta: {} });
+  gP.finishLoad();
+  const gS = new Graph({ rootSessionId: 'S', localSeq: true });
+  gS.addNode({ id: 's:S', parentId: null, kind: 'main', label: 'm', sessionId: 'S', meta: { clearedFrom: 'P' } });
+  gS.finishLoad();
+  const rts = new Map([['P', { graph: gP }], ['S', { graph: gS, inheritedFrom: new Set(['P']), inheritedIds: new Set() }]]);
+  const spec = [{ sid: 'S', live: true }, { sid: 'P', live: false }]; // desired() 순서 그대로: live 메인 먼저, 기동기가 붙든 옛 메인 뒤
+  const src = {
+    async desired() { return { roots: spec.map((r) => ({ sessionId: r.sid, projectId: 'p', live: r.live, liveStatus: null, tier: r.live ? 'live' : 'recent', orphanSdk: false })) }; },
+    async acquire(sid) { return rts.get(sid); }, release() {}, async projects() { return []; },
+  };
+  const hub = new OverviewHub({ source: src, intervalMs: 60_000, projectsMinMs: 0, graceMs: 600_000 });
+  hub.subscribe({ inactive: false, onEvent() {}, onProjects() {} });
+  try {
+    await hub.wake();
+    await hub.tick();
+    const ids = new Set(hub.snapshot().nodes.map((n) => n.id));
+    for (const id of ['b:L', 'b:L-r1', 's:R']) assert.ok(ids.has(id), `보여야 함: ${id}`);
+    const L = hub.snapshot().nodes.find((n) => n.id === 'b:L');
+    assert.equal(L.meta.spawnedBy, 's:S');
+    assert.equal(L.meta.inheritedFrom, 'P');
+    // 기동기가 끝나면 옛 루트는 다시 숨는다(recent 로 붙은 끝난 메인은 보이지 않음 — 예전 그대로)
+    gP.updateNode('b:L', { status: 'done', endedAt: new Date().toISOString() });
+    await hub.tick();
+    assert.ok(!hub.snapshot().nodes.some((n) => n.id === 's:R'));
+  } finally { hub.stop(); }
+});
+
+test('허브(§74.10): 새 메인이 §48.4 로 같은 기동기를 이어받았으면(b:adopt-…) 옛 기동기는 넘기지 않는다 — 같은 루프가 기동기 둘로 보이지 않게', async () => {
+  // 실측 꼴(실제 프로젝트 10-28 22시): 옛 메인 P 의 nohup 기동기 b:toolu_L(회차 9, 지금 idle) + /clear 사슬 끝 새 메인 S 가 그 뒤 회차를 이어받은 b:adopt-toolu_L(진행 중)
+  const gP = new Graph({ rootSessionId: 'P', localSeq: true });
+  gP.addNode({ id: 's:P', parentId: null, kind: 'main', label: 'm', sessionId: 'P', meta: {} });
+  gP.addNode({ id: 'b:toolu_L', parentId: null, kind: 'bash-bg', label: '기동기 · relimit-restart.sh', sessionId: 'P', meta: { toolUseId: 'toolu_L', launcher: { script: 'relimit-restart.sh' }, detached: true, spawnedBy: 's:P' } });
+  gP.addNode({ id: 'b:toolu_L-r1', parentId: 'b:toolu_L', kind: 'bash-bg', label: '러너 · autopilot.sh', sessionId: 'P', meta: {} });
+  gP.finishLoad();
+  const gS = new Graph({ rootSessionId: 'S', localSeq: true });
+  gS.addNode({ id: 's:S', parentId: null, kind: 'main', label: 'm', sessionId: 'S', meta: { clearedFrom: 'P' } });
+  gS.finishLoad();
+  const rts = new Map([['P', { graph: gP }], ['S', { graph: gS, inheritedFrom: new Set(['P']), inheritedIds: new Set() }]]);
+  const spec = [{ sid: 'S', live: true }, { sid: 'P', live: false }];
+  const src = {
+    async desired() { return { roots: spec.map((r) => ({ sessionId: r.sid, projectId: 'p', live: r.live, liveStatus: null, tier: r.live ? 'live' : 'recent', orphanSdk: false })) }; },
+    async acquire(sid) { return rts.get(sid); }, release() {}, async projects() { return []; },
+  };
+  const hub = new OverviewHub({ source: src, intervalMs: 60_000, projectsMinMs: 0, graceMs: 600_000 });
+  hub.subscribe({ inactive: false, onEvent() {}, onProjects() {} });
+  try {
+    await hub.wake();
+    await hub.tick();
+    assert.ok(hub.snapshot().nodes.some((n) => n.id === 'b:toolu_L'), '이어받기 전: 넘긴 기동기(§74.4)가 보인다');
+    // 새 회차가 S 로 인계됨 → S 런타임이 이어받은 기동기를 둔다
+    gS.addNode({ id: 'b:adopt-toolu_L', parentId: null, kind: 'bash-bg', label: '기동기 · relimit-restart.sh', sessionId: 'S', meta: { toolUseId: 'toolu_L', launcher: { script: 'relimit-restart.sh' }, detached: true, spawnedBy: 's:S', adopted: { fromSession: 'P' } } });
+    gS.addNode({ id: 'b:adopt-toolu_L-r1', parentId: 'b:adopt-toolu_L', kind: 'bash-bg', label: '러너 · autopilot.sh', sessionId: 'S', meta: {} });
+    await hub.tick();
+    const ids = hub.snapshot().nodes.map((n) => n.id);
+    assert.ok(ids.includes('b:adopt-toolu_L') && ids.includes('b:adopt-toolu_L-r1'));
+    assert.ok(!ids.includes('b:toolu_L') && !ids.includes('b:toolu_L-r1'), '옛 기동기·러너는 숨음(같은 루프 하나만)');
+    assert.equal(ids.filter((id) => /toolu_L$/.test(id)).length, 1);
+  } finally { hub.stop(); }
+});
+
 test('§39.9 자동 세션(--session auto): /clear 로 이어받은 새 세션으로 120초를 기다리지 않고 바로 넘어간다', async () => {
   const dir = path.join(root, 'projects', enc(cwd));
   const fp = path.join(dir, `${P}.jsonl`), fs_ = path.join(dir, `${S}.jsonl`);

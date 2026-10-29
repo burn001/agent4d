@@ -7,6 +7,9 @@ import { bodyK, JOB_BODY_K } from './planet-core.mjs';
 import { isJob, isProc, procJobId, procState, jobOf, isAutoJob, jobLaneValues, fmtRate, heatLevel } from './job-core.mjs'; // 작업 노드 = 작은 탐사선
 import { PROC, superviseLine, procName, bigNum, isExtRig, extMeterModel } from './planet-proc-core.mjs'; // 분리 프로세스 연출 · 외부 작업 = 플랫폼 승격
 import { t as tr } from './i18n.mjs';
+import { PlanetLinks } from './planet-links.js'; // 관계선: 레이저 통신 링크 ⇄ 궤도 공명 고리
+import { linkPoint } from './flow-core.mjs';
+import { endGaps } from './plinks-core.mjs';
 const LABEL_NEAR_PX = 11;
 
 export class PlanetView extends SceneView {
@@ -33,6 +36,28 @@ export class PlanetView extends SceneView {
     this.renderer.domElement.addEventListener('pointermove', this._onProcMove);
     this.renderer.domElement.addEventListener('pointerleave', this._onProcLeave);
     this._supSet = new Set(); this._supAt = 0;
+    // 관계선: 예전 1px 직선·흐르는 점·추정 점선·띄움 점선을 감추고 PlanetLinks 가 두 표현(번갈아)으로 그린다
+    this.plinks = new PlanetLinks(this.scene, this);
+    for (const o of [this.linkLines, this.dots, this.dashLines, this.spawnLines]) if (o) o.visible = false;
+    // 패킷도 같은 길: 끝은 궤도계 바깥, 레이저는 빔 위 직선, 궤도 고리는 부모 → 자식 바퀴살 방향 짧은 곡선
+    this.linkPath = (out, a, b, u, arc, fv, tv) => {
+      const P = this.plinks;
+      if (!P || !fv || !tv) return linkPoint(out, a, b, u, arc);
+      const d = a.distanceTo(b);
+      if (d < 1e-3) return linkPoint(out, a, b, u, arc);
+      const [ga, gb] = endGaps(d, P._outer(fv), P._outer(tv));
+      const k0 = ga / d, k1 = 1 - gb / d, k = k0 + (k1 - k0) * u;
+      return linkPoint(out, a, b, k, P.mix.w >= 0.5 ? arc * 0.55 : 0);
+    };
+    this.confHook = (A, B, k, strong, slot, out) => (this.plinks ? this.plinks.confHook(A, B, k, strong, slot, out) : false);
+  }
+  /** 연결선은 PlanetLinks 가(직선·점 버퍼는 쓰지 않음) */
+  _updateLinks(now, t) { if (this.plinks) this.plinks.update(now, t); else super._updateLinks(now, t); }
+  /** 세션 간 메시지: 빛 구(공용) + 레이저면 그 순간만 켜지는 빔 */
+  sessionMsg(ev) {
+    const ok = super.sessionMsg(ev);
+    if (ok && this.plinks) { const fv = this.vis.get(ev.nodeId); this.plinks.message(ev.nodeId, ev.peer, fv && fv.sessC ? fv.sessC : this.tokens['sess-3']); }
+    return ok;
   }
 
   addNode(node, spawn = true) {
@@ -162,6 +187,6 @@ export class PlanetView extends SceneView {
   setArtFoot(pid, nodeId) { if (this.pArt) this.pArt.st.setFoot(pid, nodeId); }
   setArtSelected(t) { if (this.pArt) this.pArt.st.sel = t || null; }
   fitExtra3d(pts, scope) { if (this.pArt) this.pArt.fitPoints(pts, scope); }
-  applyTheme() { super.applyTheme(); if (this.pArt) this.pArt.applyTheme(this.tokens); if (this.deco) this.deco.applyTheme(); }
-  dispose() { if (this.renderer) { this.renderer.domElement.removeEventListener('pointermove', this._onProcMove); this.renderer.domElement.removeEventListener('pointerleave', this._onProcLeave); } if (this._procTipEl) this._procTipEl.remove(); if (this.deco) { this.deco.dispose(); this.deco = null; } if (this.pArt) { this.pArt.dispose(); this.pArt = null; } super.dispose(); }
+  applyTheme() { super.applyTheme(); if (this.plinks) this.plinks.applyTheme(this.tokens); if (this.pArt) this.pArt.applyTheme(this.tokens); if (this.deco) this.deco.applyTheme(); }
+  dispose() { if (this.renderer) { this.renderer.domElement.removeEventListener('pointermove', this._onProcMove); this.renderer.domElement.removeEventListener('pointerleave', this._onProcLeave); } if (this._procTipEl) this._procTipEl.remove(); if (this.plinks) { this.plinks.dispose(); this.plinks = null; } if (this.deco) { this.deco.dispose(); this.deco = null; } if (this.pArt) { this.pArt.dispose(); this.pArt = null; } super.dispose(); }
 }

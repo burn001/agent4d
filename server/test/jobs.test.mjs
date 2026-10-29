@@ -27,6 +27,7 @@ test('규약 줄: 접두어 허용 · 필드 정규화 · 깨진 줄', () => {
   assert.deepEqual(parseProtocolLine('::agent4d {"state":"done"}'), { bad: true }, 'id 없음');
   assert.equal(parseProtocolLine('grep "::agent4d" docs'), null, '언급만 한 줄');
   assert.equal(normState('completed'), 'done'); assert.equal(normState('error'), 'failed'); assert.equal(normState('??'), null);
+  assert.equal(parseProtocolLine('::agent4d {"id":"r","started_at":"2026-10-28T01:31:18Z"}').started, '2026-10-28T01:31:18Z', 'started 별칭');
   assert.equal(jobNodeStatus('running'), 'active'); assert.equal(jobNodeStatus('waiting'), 'idle'); assert.equal(jobNodeStatus('failed'), 'error');
   assert.equal(safeJobId('  a\u0001  b '), 'a b'); assert.equal(safeJobId('x'.repeat(200)).length, JOB.ID_MAX);
 });
@@ -88,6 +89,14 @@ test('장부: 상태 굴리기 · 규약이 이긴다 · 박동 솎기 · 되살
   u = bk.feed('b:1', 'b:1', '::agent4d {"id":"j","rc":0}\n', T(90));
   assert.equal(u[0].job.state, 'done', 'rc 만 오면 끝(0 = done)');
   u = bk.feed('b:2', 'b:2', 'go 12:00:00\n', T(91)); assert.equal(u[0].job.id, 'j', '다른 스트림은 규칙 그대로');
+  // started: 작업이 실제로 시작한 시각 — 줄을 늦게 읽어도(서버 재시작·수집기 재부착) 원천 값, 끝 줄에 없어도 유지
+  const sb = new JobBook({});
+  u = sb.feed('f', 'o', '::agent4d {"id":"r","state":"running","started":"2026-10-25T02:00:00Z"}\n', T(0));
+  assert.equal(u[0].job.startedAt, '2026-10-25T02:00:00.000Z');
+  u = sb.feed('f', 'o', '::agent4d {"id":"r","state":"done","rc":0}\n', T(30));
+  assert.equal(u[0].job.startedAt, '2026-10-25T02:00:00.000Z', '끝 줄에 started 가 없어도 유지'); assert.equal(u[0].job.state, 'done');
+  u = sb.feed('f', 'o', '::agent4d {"id":"r","state":"running"}\n', T(60));
+  assert.equal(u[0].job.startedAt, T(60), 'started 없이 되살아나면 줄 시각');
   // 주인 상한
   const big = new JobBook({});
   for (let i = 0; i < JOB.MAX_PER_OWNER + 5; i++) big.feed('s', 'o', `::agent4d {"id":"k${i}"}\n`, T(i));
@@ -140,6 +149,7 @@ test('예시 규칙 묶음(examples/*/jobs.json): 컴파일 오류 0 · 캡처 �
         if (e.progress) assert.equal(`${j.progress.n}/${j.progress.total}`, e.progress);
         if (e.beatLocal) assert.equal(localHM(j.beatAt), e.beatLocal);
         if (e.untilLocal) assert.equal(localYMDHM(j.until), e.untilLocal);
+        if (e.startedAt) assert.equal(j.startedAt, e.startedAt, `${s.key} ${e.id}.startedAt`);
       }
     }
   }

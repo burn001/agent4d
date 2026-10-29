@@ -1,7 +1,7 @@
 // 카메라: OrbitControls + 자동 투어 + 수동 조작 10초 규칙
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { STALE_DWELL, isShown, isLive, isBusy, pickBest, shotLost, shotStale, shownAncestor, fitFrame, flightPose, boxCenter, requiredDist, refineFit, FitHold, safeBand, ZOOM, autoFloor, nearestKids, FIT, isFitActive, pickFitIds, PanelMemo, boxCorners, pxToE, shotFitScope, workScore, busyAlt } from './camera-core.mjs';
+import { STALE_DWELL, isShown, isLive, isBusy, pickBest, shotLost, shotStale, shownAncestor, fitFrame, flightPose, boxCenter, requiredDist, refineFit, FitHold, safeBand, ZOOM, autoFloor, nearestKids, FIT, isFitActive, pickFitIds, PanelMemo, boxCorners, pxToE, shotFitScope, workScore, busyAlt, ShotHold, shotKey } from './camera-core.mjs';
 import { stageInsets } from './screen-insets.js';
 import { bestPose, perspPose, needRepack } from './overview/fill-pack.mjs';
 import { legacyPack } from './overview/pack-view.js';
@@ -507,19 +507,20 @@ export class CameraDirector {
   /** 노드 샷의 점: 대상(늘 포함) + 활동 중인 자손(깊이 무관, 우선) + 보이는 자식(넓은 구도면 전부, 아니면 24개) */
   _nodePts(shot, now) {
     const view = this.view, id = shot.id;
-    const pts = [{ p: view.nodeTarget(id), r: view.nodeRadius(id) + 1.6, must: true }];
+    const at = (k) => (view.shotTarget && view.shotTarget(k)) || view.nodeTarget(k); // 복셀 캐릭터는 가는 자리
+    const pts = [{ p: at(id), r: view.nodeRadius(id) + 1.6, must: true }];
     const seen = new Set([id]);
     let kids = view.children(id).filter((k) => this._shownId(k));
-    if (!shot.wide) kids = nearestKids(kids, (k) => view.nodeTarget(k), pts[0].p || { x: 0, y: 0, z: 0 }, ZOOM.NODE_KIDS); // 가까운 자식 몇 개만
+    if (!shot.wide) kids = nearestKids(kids, at, pts[0].p || { x: 0, y: 0, z: 0 }, ZOOM.NODE_KIDS); // 가까운 자식 몇 개만
     if (shot.prompt || shot.git) kids = []; // 입력 받은 메인 · git 붙잡기: 그 노드 자체를 크게(자식·하위 활동 노드 훑기 없음)
     if (shot.git) for (const q of this._ixPts(id)) pts.push({ p: { x: q.x, y: q.y, z: q.z }, r: q.r, must: true }); // + 포털(Planet 위성 궤도·복셀 발송대)
     const lim = kids.length;
-    for (let i = 0; i < lim; i++) { seen.add(kids[i]); pts.push({ p: view.nodeTarget(kids[i]), r: view.nodeRadius(kids[i]) + 1.2, must: this._liveId(kids[i], now) }); }
+    for (let i = 0; i < lim; i++) { seen.add(kids[i]); pts.push({ p: at(kids[i]), r: view.nodeRadius(kids[i]) + 1.2, must: this._liveId(kids[i], now) }); }
     // 하위의 하위에서 일하는 노드(서브에이전트의 서브에이전트·claude -p 자식 등)도 들어오게
     const stack = shot.prompt || shot.git ? [] : view.children(id).slice();
     for (let n = 0; stack.length && n < 400; n++) {
       const k = stack.pop();
-      if (!seen.has(k) && this._liveId(k, now)) { seen.add(k); pts.push({ p: view.nodeTarget(k), r: view.nodeRadius(k) + 1.2, must: true }); }
+      if (!seen.has(k) && this._liveId(k, now)) { seen.add(k); pts.push({ p: at(k), r: view.nodeRadius(k) + 1.2, must: true }); }
       const kk = view.children(k);
       for (let i = 0; i < kk.length; i++) stack.push(kk[i]);
     }
@@ -692,16 +693,22 @@ export class CameraDirector {
     let dist = (r / Math.sin(fov / 2)) * scale / aspect;
     if (wide) dist *= 0.8; // 섬·동은 납작해서 경계구 기준이면 화면 가운데에 작게 몰림
     // 화면 아래 덮개: 띠 높이만큼 멀리, 시선점은 띠 가운데로
-    const band = this._band();
+    const band = this._band(false, isNode); // 노드 샷은 라벨 자리를 기본 몫으로(잰 라벨 자리는 라벨이 뜨고 질 때마다 바뀜)
     dist /= Math.max(0.6, band.k);
     dist = autoFloor(Math.max(pr.distMin, Math.min(dmax, dist)), this.controls && this.controls.minDistance);
+    let yc = band.yc;
+    if (isNode) { // 노드 샷 구도 붙잡기(데드밴드·히스테리시스, 2D 와 같은 ShotHold) — 띠 옮기기·공전 전 구도를 붙잡아 상태 변동마다 움찔거리지 않게
+      const h = this._shotHold || (this._shotHold = new ShotHold());
+      const held = h.step(now, shotKey(shot), center, dist, dist * Math.tan(fov / 2), yc);
+      center.set(held.c.x, held.c.y, held.c.z); dist = held.D; yc = held.x;
+    }
     if (shot.prompt && shot.maxDist) dist = Math.min(dist, shot.maxDist); // 입력 때는 멀어지지 않는다(지금보다 가깝거나 같게)
-    if (band.yc) {
+    if (yc) {
       const dir = this._dirFrom(center);
       const rl = Math.hypot(dir.z, dir.x) || 1;
       const R = { x: dir.z / rl, y: 0, z: -dir.x / rl }; // F = −dir 기준 R = (−F.z, 0, F.x)
       const U = { x: R.y * -dir.z - R.z * -dir.y, y: R.z * -dir.x - R.x * -dir.z, z: R.x * -dir.y - R.y * -dir.x };
-      const sh = -band.yc * Math.tan(fov / 2) * dist;
+      const sh = -yc * Math.tan(fov / 2) * dist;
       center.set(center.x + U.x * sh, center.y + U.y * sh, center.z + U.z * sh);
     }
     return { center, dist, r };
@@ -778,14 +785,14 @@ export class CameraDirector {
   }
 
   /** 맞춤 띠: 무대를 덮는 아래 UI·라벨 자리를 뺀 세로 비율 k 와 띠 가운데 yc(NDC) */
-  _band(noLabels = false) {
+  _band(noLabels = false, fixedLabels = false) {
     const v = this.view;
     const ins = stageInsets(v.container);
     const H = ins.H || (v.container && v.container.clientHeight) || 1;
     if (noLabels) return safeBand(H, ins.top, ins.bottom); // 전체 맞춤: 덮개만(라벨은 점마다)
     // 라벨이 칩 아래(흐름)면 맨 아래 노드 밑에 라벨 두세 줄, 위(Planet)면 맨 위 노드 위에 한두 줄
-    // 라벨 자리: 기본(흐름 = 아래, Planet = 위) + 실제로 맨 위·아래 노드 밖으로 나간 라벨 높이
-    const lr = v.labelReserve ? v.labelReserve() : null;
+    // 라벨 자리: 기본(흐름 = 아래, Planet = 위) + 실제로 맨 위·아래 노드 밖으로 나간 라벨 높이 — fixedLabels(노드 샷)면 기본 몫만
+    const lr = !fixedLabels && v.labelReserve ? v.labelReserve() : null;
     const labB = Math.max(v.labelBelow ? 46 : 0, lr ? lr.bottom : 0), labT = Math.max(v.labelBelow ? 0 : 30, lr ? lr.top : 0);
     return safeBand(H, ins.top + labT, ins.bottom + labB);
   }
@@ -813,6 +820,7 @@ export class CameraDirector {
 
   _startTransition(dur = TRANSITION) {
     this.shotAt = performance.now() / 1000; // 끝난 대상 머묾 기준
+    if (this._shotHold) this._shotHold.reset(); // 새로 날 때는 그 순간의 구도부터 다시 붙잡음
     this.trans = {
       t0: performance.now() / 1000, dur,
       fromPos: this.camera.position.clone(), fromTgt: this.controls.target.clone(),

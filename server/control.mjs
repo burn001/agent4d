@@ -219,7 +219,7 @@ export class ControlHub {
 }
 
 /** 화면이 알려 온 상태: 아는 키만, 짧게 */
-const STATE_KEYS = ['view', 'dim', 'theme', 'themeResolved', 'scope', 'scopeLabel', 'sound', 'soundStatus', 'paused', 'replaying', 'replaySession', 'lang', 'accept', 'panel', 'artifacts', 'plans', 'grid', 'weather', 'noise', 'camera', 'camMode', 'mode', 'size'];
+const STATE_KEYS = ['view', 'dim', 'theme', 'themeResolved', 'scope', 'scopeLabel', 'sound', 'soundStatus', 'music', 'sfx', 'paused', 'replaying', 'replaySession', 'lang', 'accept', 'panel', 'artifacts', 'plans', 'grid', 'weather', 'noise', 'camera', 'camMode', 'mode', 'size'];
 export function sanitizeState(s) {
   const out = {};
   for (const k of STATE_KEYS) {

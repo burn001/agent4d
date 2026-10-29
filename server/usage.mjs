@@ -1,6 +1,8 @@
 // 5차: 토큰 한도(5시간·7일) 독립 수집기
 // ~/.claude/.credentials.json 의 OAuth 액세스 토큰으로 GET /api/oauth/usage 를 직접 부른다.
 // - 주기: 평소 180초, 5h 또는 7d 사용률이 80% 이상이면 60초. 응답은 60초 캐시(메모리 + 파일, 프로세스 사이 중복 호출 방지)
+// - 파일 캐시의 마지막 성공 값은 나이와 무관하게 시드로 읽는다(재시작 뒤에도 stale 로 보여 줌)
+// - 429 → Retry-After, 없으면 2분·4분·8분…최대 30분 물러서기. 물러서기·마지막 시도 시각은 파일로 프로세스 사이 공유
 // - 7d 리셋 시각이 없으면 다음 토요일 13:00 KST 로 추정(estimated: true)
 // - 401/토큰 만료 → 자격증명 파일을 다시 읽어 1회 재시도, 그래도 실패면 마지막 값 유지 + stale
 // - 빈 응답·HTML·JSON 아님 등은 권한 문제로 단정하지 않고 원인 그대로 기록(lastError.kind)
@@ -15,7 +17,23 @@ import { t } from './cli-i18n.mjs';
 export const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 export const USAGE_BETA = 'oauth-2025-04-20';
 export const USAGE_DEFAULTS = { pollSec: 180, fastPollSec: 60, highPct: 80, cacheSec: 60, timeoutSec: 10 };
-const MAX_BACKOFF_MS = 15 * 60_000;
+const MAX_BACKOFF_MS = 30 * 60_000;   // 429 물러서기 상한
+const BASE_BACKOFF_MS = 2 * 60_000;   // Retry-After 없을 때 첫 물러서기(2분→4분→8분…→30분)
+
+/** Retry-After(초 또는 HTTP 날짜) → ms. 못 읽으면 null */
+export function parseRetryAfter(v, nowMs = Date.now()) {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  if (Number.isFinite(n)) return n > 0 ? n * 1000 : null;
+  const d = Date.parse(String(v));
+  return Number.isFinite(d) && d > nowMs ? d - nowMs : null;
+}
+
+/** 429 물러서기 시간: Retry-After 가 있으면 그것, 없으면 2분·4분·8분…(step 1부터), 둘 다 30분 상한 */
+export function backoffMs(step, retryAfterMs = null) {
+  if (Number.isFinite(retryAfterMs) && retryAfterMs > 0) return Math.min(MAX_BACKOFF_MS, retryAfterMs);
+  return Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * 2 ** Math.max(0, (Number(step) || 1) - 1));
+}
 const KST_OFFSET_MS = 9 * 3600_000;
 
 const homeDir = () => ccvizHome();
@@ -107,7 +125,8 @@ export class UsagePoller {
     this.lastAttemptAt = 0;   // 실제 HTTP 시도 시각(캐시 적중은 제외)
     this.lastError = null;    // { kind, status?, message, at }
     this.failed = false;      // 마지막 시도가 실패했나 → stale
-    this.backoffUntil = 0;    // 429 Retry-After
+    this.backoffUntil = 0;    // 429 물러서기 끝 시각(Retry-After 또는 지수)
+    this.backoffStep = 0;     // 연속 429 횟수(성공하면 0)
     this.calls = 0;           // HTTP 요청 수(재시도 포함)
     this.inflight = null;
     this.timer = null;
@@ -123,7 +142,7 @@ export class UsagePoller {
       lastAttemptAt: this.lastAttemptAt ? new Date(this.lastAttemptAt).toISOString() : null };
   }
 
-  /** 다음 호출까지 간격: 어느 창이든 highPct 이상이면 fast, 아니면 평소. 429 Retry-After 가 더 길면 그것 */
+  /** 다음 호출까지 간격: 어느 창이든 highPct 이상이면 fast, 아니면 평소. 429 물러서기가 더 길면 그것 */
   nextDelayMs(nowMs = this.now()) {
     const v = this.value;
     const high = !!v && [v.five_hour, v.seven_day].some((w) => w && w.pct >= this.highPct);
@@ -146,28 +165,52 @@ export class UsagePoller {
 
   stop() { if (this.timer) clearTimeout(this.timer); this.timer = null; }
 
-  _readCache(nowMs) {
+  /** 캐시 파일 전체(마지막 성공 값 + 프로세스 사이 공유 상태). 없거나 깨졌으면 null */
+  _readFile() {
     if (!this.useFileCache) return null;
     try {
       const j = JSON.parse(fs.readFileSync(this.cacheFile, 'utf8'));
-      if (j?.v !== 1 || !j.value?.capturedAt) return null;
-      const age = nowMs - Date.parse(j.value.capturedAt);
-      return Number.isFinite(age) && age >= 0 ? { value: j.value, plan: j.plan ?? null, age } : null;
+      return j && j.v === 1 ? j : null;
     } catch { return null; }
   }
 
+  /** 마지막 성공 값과 나이. 나이와 무관하게 돌려준다(재시작 시드) */
+  _readCache(nowMs) {
+    const j = this._readFile();
+    if (!j?.value?.capturedAt) return null;
+    const age = nowMs - Date.parse(j.value.capturedAt);
+    return Number.isFinite(age) && age >= 0 ? { value: j.value, plan: j.plan ?? null, age, file: j } : null;
+  }
+
+  /**
+   * 캐시 파일 쓰기(원자적). 값은 마지막 성공 값만 — 메모리에 값이 없거나 파일 값이 더 새로우면 파일 값을 지킨다.
+   * 공유 상태: lastAttemptAt(마지막 HTTP 시도), backoffUntil·backoffStep(429 물러서기), lastError(정리된 원인, 토큰 없음)
+   */
   _writeCache() {
-    if (!this.useFileCache || !this.value) return;
+    if (!this.useFileCache) return;
     try {
+      const prev = this._readFile();
+      let value = this.value, plan = this.plan;
+      const pv = prev?.value;
+      if (pv?.capturedAt && (!value || Date.parse(pv.capturedAt) > Date.parse(value.capturedAt))) { value = pv; plan = plan ?? prev.plan ?? null; }
+      const out = { v: 1, value: value || null, plan: plan ?? null,
+        lastAttemptAt: this.lastAttemptAt ? new Date(this.lastAttemptAt).toISOString() : (prev?.lastAttemptAt ?? null),
+        backoffUntil: this.backoffUntil ? new Date(this.backoffUntil).toISOString() : null,
+        backoffStep: this.backoffStep || 0,
+        lastError: this.failed ? this.lastError : null };
       fs.mkdirSync(path.dirname(this.cacheFile), { recursive: true });
       const tmp = `${this.cacheFile}.${process.pid}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify({ v: 1, value: this.value, plan: this.plan }));
+      fs.writeFileSync(tmp, JSON.stringify(out));
       fs.renameSync(tmp, this.cacheFile);
     } catch { /* 캐시 실패는 무시 */ }
   }
 
   /**
-   * 값 갱신. 메모리·파일 캐시가 cacheSec 안이면 HTTP 없이 그 값. force 면 캐시 무시.
+   * 값 갱신. force 가 아니면 다음 순서로 HTTP 를 아낀다.
+   *  1) 메모리 값이 cacheSec 안 → 그 값
+   *  2) 파일 값이 메모리보다 새로우면(또는 메모리가 비었으면) 나이와 무관하게 받아 둔다(재시작 시드). cacheSec 안이면 그 값
+   *  3) 429 물러서기 중(메모리 또는 파일, 다른 프로세스가 맞은 것 포함) → 부르지 않음, 마지막 값 + stale
+   *  4) 다른 프로세스가 cacheSec 안에 이미 시도했으면 → 부르지 않음
    * 반환: snapshot()
    */
   async refresh({ force = false } = {}) {
@@ -176,13 +219,32 @@ export class UsagePoller {
     if (!force) {
       if (this.value && !this.failed && nowMs - Date.parse(this.value.capturedAt) < this.cacheMs) return this.snapshot();
       const c = this._readCache(nowMs);
-      if (c && c.age < this.cacheMs) {
-        const changed = JSON.stringify(c.value) !== JSON.stringify(this.value);
-        this.value = c.value; this.plan = c.plan ?? this.plan; this.failed = false; this.lastError = null;
+      const f = c?.file || this._readFile();
+      let changed = false;
+      if (c && (!this.value || Date.parse(c.value.capturedAt) > Date.parse(this.value.capturedAt))) {
+        changed = JSON.stringify(c.value) !== JSON.stringify(this.value);
+        this.value = c.value; this.plan = c.plan ?? this.plan;
+      }
+      if (c && c.age < this.cacheMs && this.value === c.value) {
+        this.failed = false; this.lastError = null;
         if (changed) this._emit();
         return this.snapshot();
       }
-      if (nowMs < this.backoffUntil) return this.snapshot();
+      const fileBackoff = f?.backoffUntil ? Date.parse(f.backoffUntil) : 0;
+      if (Number.isFinite(fileBackoff) && fileBackoff > this.backoffUntil) {
+        this.backoffUntil = fileBackoff;
+        this.backoffStep = Math.max(this.backoffStep, Number(f.backoffStep) || 0);
+      }
+      const fileAttempt = f?.lastAttemptAt ? Date.parse(f.lastAttemptAt) : 0;
+      const othersRecent = Number.isFinite(fileAttempt) && fileAttempt > this.lastAttemptAt && nowMs - fileAttempt < this.cacheMs;
+      if (nowMs < this.backoffUntil || othersRecent) {
+        // 지금은 부르지 않는다. 다른 프로세스의 실패 원인이 있으면 이어받아 stale 로 표시
+        if (f?.lastError && !this.lastError) { this.failed = true; this.lastError = f.lastError; changed = true; }
+        else if (nowMs < this.backoffUntil && !this.failed) { this.failed = true; changed = true; }
+        if (changed) this._emit();
+        return this.snapshot();
+      }
+      if (changed) this._emit();
     }
     this.inflight = this._fetch(nowMs).finally(() => { this.inflight = null; });
     return this.inflight;
@@ -212,6 +274,7 @@ export class UsagePoller {
     this.failed = true;
     this.lastError = { ...error, at: new Date(nowMs).toISOString() };
     this.logger(`${t('server.usageFail')} kind=${error.kind}${error.status ? ` status=${error.status}` : ''} ${error.message || ''}`.trim());
+    if (this.lastAttemptAt === nowMs) this._writeCache(); // 실제로 HTTP 를 시도했을 때만 공유 상태 기록(값은 지킴)
     this._emit();
     return this.snapshot();
   }
@@ -228,6 +291,7 @@ export class UsagePoller {
       if (cred.error) return this._fail(cred.error, nowMs);
     }
     this.lastAttemptAt = nowMs;
+    this._writeCache(); // 시도 시각을 먼저 알려 다른 프로세스가 겹쳐 부르지 않게
     let r = await this._call(cred.token);
     if (r.status === 401 && !retried) {
       retried = true;
@@ -240,8 +304,9 @@ export class UsagePoller {
     this.logger(`limits usage status=${r.status || r.err} ms=${r.ms}${retried ? ' retried=1' : ''}`);
     if (r.status === 0) return this._fail({ kind: r.err, message: r.errMsg || r.err }, nowMs);
     if (r.status === 429) {
-      const sec = Number(r.retryAfter);
-      this.backoffUntil = nowMs + Math.min(MAX_BACKOFF_MS, Number.isFinite(sec) && sec > 0 ? sec * 1000 : this.pollMs);
+      // Retry-After 를 따르고, 없으면 2분부터 두 배씩(최대 30분). 성공하면 원래 주기로
+      this.backoffStep += 1;
+      this.backoffUntil = nowMs + backoffMs(this.backoffStep, parseRetryAfter(r.retryAfter, nowMs));
     }
     if (r.status !== 200) {
       // 본문 그대로(정리만) 기록. 401 도 "권한 없음"으로 단정하지 않고 상태·본문을 남긴다
@@ -255,6 +320,7 @@ export class UsagePoller {
     this.failed = false;
     this.lastError = null;
     this.backoffUntil = 0;
+    this.backoffStep = 0;
     this._writeCache();
     this._emit();
     return this.snapshot();

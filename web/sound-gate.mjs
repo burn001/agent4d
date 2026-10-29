@@ -4,6 +4,9 @@
 //   저장된 '켜짐'만 보고 '소리 켜짐'이라 쓰면 실제로는 조용하다 → 실제 상태로 '대기'를 판정하고, 첫 사용자 동작에서 복원한다.
 import { t as tr } from './i18n.mjs';
 
+/** 부분 토글을 반영: 끈 쪽은 '없음'으로 보아 대기·복원 판정에서 뺀다 */
+const parts = (s) => ({ ...s, musicAvailable: !!s.musicAvailable && s.musicPart !== false, sfxCapable: !!s.sfxCapable && s.sfxPart !== false });
+
 /**
  * 지금 소리 상태.
  * @param {object} s
@@ -16,10 +19,13 @@ import { t as tr } from './i18n.mjs';
  * @param {boolean} [s.sfxEnabled]    효과음이 켜져 있음(첫 동작 전엔 일부러 안 켬)
  * @param {string}  [s.sfxState]      효과음 AudioContext 상태: 'none'(아직 없음)|'suspended'|'running'|'interrupted'|'closed'
  * @param {string}  [s.routeState]    배경음악을 잇는 신호 열화 필터 컨텍스트(ctx-ui NoiseAudio) 상태: 'none'|…
+ * @param {boolean} [s.musicPart]     팝업 '음악' 토글(기본 켬) — 끄면 음악은 없는 것처럼 본다
+ * @param {boolean} [s.sfxPart]       팝업 '효과음' 토글(기본 켬) — 끄면 효과음은 없는 것처럼 본다
  * @returns {'off'|'held'|'waiting'|'loading'|'on'}
  */
-export function soundStatus(s) {
-  if (!s || !s.on) return 'off';
+export function soundStatus(s0) {
+  if (!s0 || !s0.on) return 'off';
+  const s = parts(s0);
   if (s.held) return 'held';
   const stalled = (st) => st === 'suspended' || st === 'interrupted';
   if (s.musicAvailable && s.musicBlocked) return 'waiting';
@@ -35,9 +41,10 @@ export function soundStatus(s) {
  *   (동작 전에 만든 suspended 컨텍스트에 소리가 쌓였다가 한꺼번에 나는 것을 막으려고)
  * @returns {{sfx: null|'enable'|'resume', music: null|'start'|'play', route: null|'resume'}}
  */
-export function restorePlan(s) {
+export function restorePlan(s0) {
   const plan = { sfx: null, music: null, route: null };
-  if (!s || !s.on || s.held) return plan;
+  if (!s0 || !s0.on || s0.held) return plan;
+  const s = parts(s0);
   const stalled = (st) => st === 'suspended' || st === 'interrupted';
   if (s.sfxCapable && s.activated) {
     if (!s.sfxEnabled) plan.sfx = 'enable';
@@ -55,13 +62,14 @@ export function restorePlan(s) {
 export const WAIT_HINT = tr('sound.waitHint'); // 불러올 때 언어
 
 /** 버튼 문구·툴팁·aria-label */
-export function soundLabel(status, { noMusic = false } = {}) {
+export function soundLabel(status, { noMusic = false, musicOff = false, sfxOff = false } = {}) {
   const hint = tr('sound.waitHint');
   const text = tr(`sound.btn.${['off', 'held', 'waiting', 'loading', 'on'].includes(status) ? status : 'off'}`);
   let title = tr('sound.btn.title');
   if (status === 'held') title += tr('sound.btn.title.held');
   else if (status === 'waiting') title = tr('sound.btn.title.waiting', { hint });
   if (noMusic) title += tr('sound.btn.title.noMusic');
+  if (status !== 'off' && (musicOff || sfxOff)) title += tr(musicOff && sfxOff ? 'sound.btn.title.bothOff' : musicOff ? 'sound.btn.title.musicOff' : 'sound.btn.title.sfxOff');
   const aria = status === 'off' ? tr('sound.btn.aria.off')
     : status === 'waiting' ? tr('sound.btn.aria.waiting', { hint }) : tr('sound.btn.aria.on');
   return { text, title, aria };

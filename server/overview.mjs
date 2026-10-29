@@ -154,7 +154,9 @@ export class OverviewHub {
 
   _visibleOf(R, now) {
     if (R.meta.live) return true;
-    if (R.leftAt != null && this._hasLiveHandoff(R)) return true;
+    // 넘긴 기동기가 살아 있으면 보인다. 서버가 /clear 뒤에 (재)기동하면 옛 메인은 처음부터 recent 로 붙어
+    // leftAt 이 없다 — leftAt 을 따지면 기동기·회차·러너가 통째로 숨었다
+    if (this._hasLiveHandoff(R)) return true;
     return R.leftAt != null && now - R.leftAt <= this.graceMs;
   }
 
@@ -268,8 +270,18 @@ export class OverviewHub {
     if (!node || node.parentId || node.kind !== 'bash-bg' || !node.meta?.launcher) return null;
     if (node.status === 'done' || node.status === 'error' || node.status === 'stopped') return null;
     if (node.meta.spawnedBy !== R.rootNodeId) return null;
+    // 인계로 다른 live 루트가 이미 이 기동기를 '이어받은 기동기'(b:adopt-<기동 tool_use id>)로 그리면 그쪽이 진짜 — 넘기지 않는다.
+    // 둘 다 넘기면 같은 루프가 기동기 둘로 보였다(옛 쪽은 새 회차를 못 받아 idle)
+    const tu = node.meta.toolUseId || (node.id.startsWith('b:') ? node.id.slice(2) : null);
+    if (tu && this._adoptedElsewhere(R, `b:adopt-${tu}`)) return null;
     const S = this._successorOf(R.sid);
     return S ? { spawnedBy: S.rootNodeId, inheritedFrom: R.sid } : null;
+  }
+
+  /** R 밖의 live 루트 그래프에 id(이어받은 기동기)가 있는가 */
+  _adoptedElsewhere(R, id) {
+    for (const S of this.roots.values()) if (S !== R && S.meta.live && S.rt?.graph?.has?.(id)) return true;
+    return false;
   }
 
   _hasLiveHandoff(R) {

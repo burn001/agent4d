@@ -752,7 +752,7 @@ export class IxTracker {
 }
 
 // ───────────────────────── 마스킹 (graph.emit) ─────────────────────────
-const IX_ENUM = new Set(['cat', 'op', 'phase', 'engine', 'runner', 'transfer', 'rw', 'unit', 'sub', 'src']);
+const IX_ENUM = new Set(['cat', 'op', 'phase', 'engine', 'runner', 'transfer', 'rw', 'unit', 'sub', 'src', 'st']);
 const IX_STR = new Set(['remote', 'branch', 'repo', 'db', 'host', 'tag', 'tool', 'text', 'answer', 'cmd']);
 /** 이벤트의 ix 필드 정리: 문자열은 redact·48자, 수는 유한·정수, 알 수 없는 키 버림. minimal 이면 이름(문자열) 버림 */
 export function sanitizeIx(ix, privacy = 'summary') {
@@ -772,6 +772,7 @@ export function sanitizeIx(ix, privacy = 'summary') {
     if (k === 'ci') { if (v && typeof v === 'object') { const c = {}; for (const kk of ['pass', 'fail', 'pending', 'skip']) if (Number.isFinite(v[kk])) c[kk] = Math.max(0, Math.round(v[kk])); out.ci = c; } continue; }
     if (k === 'ok') { out.ok = !!v; continue; }
     if (k === 'ref') { if (typeof v === 'string' && /^[\w-]{1,80}$/.test(v)) out.ref = v; continue; }
+    if (k === 'from') { if (typeof v === 'string' && /^[a-z]{1,3}:[\w:.-]{1,120}$/.test(v)) out.from = v; continue; } // 자동 턴의 출처 노드 id
     if (typeof v === 'number' && Number.isFinite(v)) { out[k] = Math.max(0, Math.round(v)); continue; }
     if (v === true) out[k] = 1;
   }

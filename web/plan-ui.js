@@ -71,8 +71,8 @@ function boardProject(view, aid) {
 export function mountPlans(h) {
   ensureCss();
   const fx = new PlanFx();
-  let on = planInitial(h.params.get('plans'), h.lsGet(PLAN_STORE_KEY));
-  let layer = null, svg = null, raf = 0, driver = null;
+  let on = planInitial(h.params.get('loopboard') ?? h.params.get('plans'), h.lsGet(PLAN_STORE_KEY)); // 기본 켬 · 옛 ccviz.plans 저장값은 읽지 않음
+  let layer = null, svg = null, raf = 0;
   let openBox = null; // 크게 보기로 연 보드 자리(화면 원 {x, y, r}) — 카드 자리 앵커
   const boards = new Map(); // 메인 id → {el, sig, pos, side, w, h, rows:[[{x,y}]], secs:[{y}]}
   const links = []; // svg path 풀
@@ -130,6 +130,8 @@ export function mountPlans(h) {
       if (svg.parentNode !== stage || layer.parentNode !== stage || layer.nextSibling !== before) { stage.insertBefore(svg, before); stage.insertBefore(layer, before); }
     } else if (layer.parentNode !== document.body) document.body.append(svg, layer);
   }
+  /** 구멍 사각형 끄기(보드 끔·표현 바뀜) */
+  function clearPunch() { if (punchView && punchView.setPlanPunch) { try { punchView.setPlanPunch([]); } catch (e) { /* 무시 */ } } punchView = null; }
   function dropLayer() {
     if (layer) layer.remove();
     if (svg) svg.remove();
@@ -140,21 +142,11 @@ export function mountPlans(h) {
     on = !!v;
     if (save) h.lsSet(PLAN_STORE_KEY, on ? '1' : '0');
     label();
-    if (on) { ensureLayer(); mountLegend(); startDriver(); dirty = true; kick(); }
-    else { stopDriver(); fx.clear(); if (raf) cancelAnimationFrame(raf); raf = 0; dropLayer(); const lg = document.querySelector('#legend .plan-legend'); if (lg) lg.remove(); }
+    if (on) { ensureLayer(); mountLegend(); dirty = true; kick(); }
+    else { fx.clear(); if (raf) cancelAnimationFrame(raf); raf = 0; dropLayer(); clearPunch(); const lg = document.querySelector('#legend .plan-legend'); if (lg) lg.remove(); }
     const v2 = h.getView(); if (v2 && v2.invalidate) v2.invalidate();
   }
 
-  // ── mock 드라이버 ──
-  function startDriver() {
-    if (!h.mock || driver || h.params.get('planmock') === '0' || (h.replay && h.replay())) return;
-    import('./plan-mock.mjs').then(({ PlanMockDriver }) => {
-      if (!on || driver || (h.replay && h.replay())) return;
-      driver = new PlanMockDriver({ nodes: () => h.nodes().values(), emit: (ev) => h.onEvent(ev) });
-      driver.start();
-    }).catch(() => {});
-  }
-  function stopDriver() { if (driver) { driver.stop(); driver = null; } }
 
   function kick() { if (on && !raf) raf = requestAnimationFrame(loop); }
 
@@ -173,7 +165,7 @@ export function mountPlans(h) {
 
   function render(b, m) {
     const sig = JSON.stringify([m.pid, m.liveCy, m.owner, m.ownerLabel, m.title, m.count, m.prog, m.hot, m.more, m.hold, m.extra, m.dels.length,
-      m.cells.map((c) => [c.st, c.cur, c.fx, c.cy]), m.lines.map((l) => [l.i, l.st, l.t, l.cy])]);
+      m.cells.map((c) => [c.st, c.cur, c.fx, c.cy]), m.lines.map((l) => [l.i, l.st, l.t, l.cy, l.note, l.steps && [l.steps.done, l.steps.total, l.steps.cur]]), m.before]);
     if (sig === b.sig) return;
     b.sig = sig;
     b.el.style.setProperty('--pk', `var(--k-${(h.nodes().get(m.owner) || {}).kind || 'main'}, var(--accent))`);
@@ -183,14 +175,15 @@ export function mountPlans(h) {
     const cells = m.cells.map((c) => `<i class="pc st-${c.st}${c.cur ? ' cur' : ''}${c.live ? ' live' : ''}${c.fx ? ' fx-' + c.fx : ''}" title="${esc(c.st === 'hold' ? t('boards.plan.st.hold') : PLAN_ST_LABEL[c.s] || '')} · ${esc(c.t)}${c.cy != null ? ` · ${esc(t('boards.plan.cycle', { n: c.cy }))}` : ''}"></i>`).join('');
     const dels = m.dels.map(() => '<i class="pc st-pending fx-del"></i>').join('');
     const lines = m.lines.length
-      ? m.lines.map((l) => `<div class="pb-l st-${l.st}${l.up ? ' up' : ''}"><i class="pl-m">${esc(l.mark)}</i><span class="pr-t">${l.next ? esc(t('boards.plan.next')) : ''}${esc(l.t)}</span>${l.cy != null ? `<b class="pr-cy">${esc(t('boards.plan.cycle', { n: l.cy }))}</b>` : ''}</div>`).join('')
+      ? m.lines.map((l) => `<div class="pb-l st-${l.st}${l.up ? ' up' : ''}"><i class="pl-m">${esc(l.mark)}</i><span class="pr-t">${l.next ? esc(t('boards.plan.next')) : ''}${esc(l.t)}</span>${l.note ? `<b class="pr-note">${esc(l.note)}</b>` : ''}${l.cy != null ? `<b class="pr-cy">${esc(t('boards.plan.cycle', { n: l.cy }))}</b>` : ''}</div>` +
+        (l.steps ? `<div class="pb-sb" title="${esc(t('boards.plan.steps', { done: l.steps.done, total: l.steps.total }))}${l.steps.cur ? ' · ' + esc(l.steps.cur) : ''}"><span class="pb-sbar"><i style="width:${((l.steps.done / l.steps.total) * 100).toFixed(1)}%"></i></span><small>${esc(t('boards.plan.steps', { done: l.steps.done, total: l.steps.total }))}${l.steps.cur ? ' · ' + esc(l.steps.cur) : ''}</small></div>` : '')).join('')
       : `<div class="pb-l st-done"><i class="pl-m">✓</i><span class="pr-t">${m.allDone ? esc(t('boards.plan.allDone')) : '—'}</span></div>`;
     const chips = [m.liveCy != null ? `<span class="pb-chip live">${esc(t('boards.plan.liveChip', { n: m.liveCy }))}</span>` : '', m.hold ? `<span class="pb-chip hold">${esc(t('boards.plan.holdChip', { n: m.hold }))}</span>` : '', m.more ? `<span class="pb-chip">${esc(t('boards.plan.moreChip', { n: m.more }))}</span>` : ''].filter(Boolean).join('');
     b.el.innerHTML = `<header class="pb-h"><span class="pb-g" aria-hidden="true">${esc(m.glyph)}</span><span class="pb-ti"><span class="pb-t">${esc(m.title)}</span>` +
       `<span class="pb-o"><i class="pb-dot"></i>${esc(m.ownerLabel)} · ${esc(m.srcLabel)}</span></span>` +
       `<span class="pb-n" aria-label="${esc(t('boards.plan.countAria', { done: m.done, total: m.total }))}"><b>${m.done}</b><small>/${m.total}</small></span></header>` +
       `<div class="pb-bar"><i class="d" style="width:${(m.fracDone * 100).toFixed(1)}%"></i><i class="p" style="width:${(m.fracProg * 100).toFixed(1)}%"></i></div>` +
-      `<div class="pb-cells">${cells}${dels}${m.extra ? `<span class="pb-x">+${m.extra}</span>` : ''}</div>` +
+      `<div class="pb-cells">${m.before ? `<span class="pb-x pre" title="${esc(t('boards.plan.before', { n: m.before }))}">✓${m.before}</span>` : ''}${cells}${dels}${m.extra ? `<span class="pb-x">+${m.extra}</span>` : ''}</div>` +
       `<div class="pb-lines">${lines}</div>` + (chips ? `<div class="pb-chips">${chips}</div>` : '');
   }
 
@@ -207,6 +200,9 @@ export function mountPlans(h) {
     return linkProxy(links[i].__w);
   }
   let curA = 1; // 지금 그리는 보드의 프로젝트 투명도
+  const SHEET_FOLD = 30; // 크게 보기: 이보다 많으면 지금 항목 앞 끝난 항목 접기
+  let punchView = null; // 구멍 사각형을 그리는 3D 표현(흐름·Planet) — 판 DOM 은 캔버스 아래, 깊이는 WebGL 이 가린다
+  const hitBoxes = []; // 캔버스 아래 판은 포인터를 못 받으므로 클릭 판정용 상자 [{id, x0,y0,x1,y1}]
   const linkProxy = (w) => ({
     setAttribute(k, v) {
       if (k === 'd') { const r = v.replace(/-?\d+\.\d+/g, (x) => String(Math.round(+x))); /* 정수 px — 노드가 조금 흔들릴 때마다 SVG 를 다시 칠하지 않게 */ if (r !== w.d) { w.d = r; w.el.setAttribute('d', r); } }
@@ -241,6 +237,11 @@ export function mountPlans(h) {
     const opened = h.openedPlan ? h.openedPlan() : null; // 크게 보기로 연 보드는 그 카드가 대신함
     const W = innerWidth, H = innerHeight;
     if (layer) layer.classList.toggle('vx', !!(view && view.constructor && view.constructor.modeId === 'voxel')); // 복셀: 게시판 모양
+    const punch = !!(view && !view.flat && typeof view.setPlanPunch === 'function'); // 흐름·Planet 3D
+    if (punchView && punchView !== view) clearPunch();
+    if (layer) layer.classList.toggle('under', punch);
+    const punches = [];
+    hitBoxes.length = 0;
     const cands = [];
     openBox = null;
     if (view) for (const [mid, entries] of groups) {
@@ -306,13 +307,16 @@ export function mountPlans(h) {
       b.dbg = { aid: c.aid, home: pj.home, wp: pj.wp, s: sc.s ?? null, hidden: !!sc.hidden, box: sc.box || null };
       if (sc.hidden) { if (!b.el.hidden) b.el.hidden = true; continue; } // 화면 밖·카메라 뒤·너무 멀면 그냥 안 보임(안으로 끌어오지 않음)
       curA = projA(view, c.id);
-      { const o = curA < 1 ? (Math.round(curA * 20) / 20).toFixed(2) : ''; if (b.op !== o) { b.op = o; b.el.style.opacity = o; } }
+      { const o = !punch && curA < 1 ? (Math.round(curA * 20) / 20).toFixed(2) : ''; if (b.op !== o) { b.op = o; b.el.style.opacity = o; } } // 구멍 모드는 구멍 알파가 섞음
       const bx = sc.box.x, by = sc.box.y;
       const tf = `translate(${bx.toFixed(1)}px, ${by.toFixed(1)}px) scale(${sc.s.toFixed(4)})`;
       if (tf !== b.tf) { b.tf = tf; b.el.style.transform = tf; }
       b.el.hidden = false;
       let clip = '';
-      if (occ3d && pj.wp) {
+      if (punch && pj.wp) { // 판 기준 월드 점 + 화면 상자 → 판 평면 네 모서리 구멍(모서리 반지름 = CSS 9px × 배율)
+        punches.push({ wx: pj.wp.x, wy: pj.wp.y, wz: pj.wp.z, box: sc.box, r: 9 * sc.s, a: curA }); // 판 기준점 = 판 DOM 이 자리·배율을 잡는 월드 점(왼쪽 아래)
+        hitBoxes.push({ id: c.id, x0: bx, y0: by, x1: bx + sc.box.w, y1: by + sc.box.h });
+      } else if (occ3d && pj.wp) {
         const cp = view.camera.position, wc = { x: pj.wp.x + pj.wb.w / 2 - cp.x, y: pj.wp.y + pj.wb.h / 2 - cp.y, z: pj.wp.z - cp.z };
         const all = occluders().filter((o) => o.id !== c.aid);
         clip = holesMask(boardHoles(sc.box, sc.s, all, Math.hypot(wc.x, wc.y, wc.z)));
@@ -333,6 +337,7 @@ export function mountPlans(h) {
     }
     PLAN_CAM.rects = rects;
     curA = 1;
+    if (punch) { view.setPlanPunch(punches); punchView = view; }
     for (let i = li; i < links.length; i++) { const w = links[i].__w; if (w.d) { w.d = ''; w.el.setAttribute('d', ''); } }
     for (const [id, b] of boards) if (!keep.has(id)) { b.el.remove(); boards.delete(id); }
   }
@@ -366,6 +371,26 @@ export function mountPlans(h) {
         `${it.ago ? `<small>${esc(it.ago)}</small>` : ''}</li>`).join('')}</ol>${p.more ? `<p class="ins-dim">${esc(t('boards.plan.moreItems', { n: p.more }))}</p>` : ''}</section>`).join('');
   }
 
+
+  /** 크게 보기 항목 목록: 줄마다 상태·번호·제목(★ 강조)·메모·부가(일정·묶음)·문서·단계 진행(남은 단계)·회차·얼마 전.
+   *  항목이 SHEET_FOLD 넘으면 지금 항목 앞의 끝난 항목은 접힘(<details>) — 156축 큐도 지금 축이 바로 보이게. 목록은 카드 안에서 스크롤(CSS) */
+  function sheetItems(p, nodes) {
+    const row = (it, i) => `<li class="pr st-${esc(it.st)}${it.cur ? ' cur' : ''}${it.emph ? ' emph' : ''}"><i class="pl-m" aria-label="${esc(it.st === 'hold' ? t('boards.plan.st.hold') : it.st === 'skipped' ? t('boards.plan.st.skipped') : PLAN_ST_LABEL[it.s] || '')}">${esc(it.glyph)}</i><span class="ipb-i">${i + 1}</span><span class="pr-t">${esc(it.t)}</span>` +
+      `${it.note ? `<b class="pr-hold">${esc(it.note)}</b>` : it.st === 'hold' ? `<b class="pr-hold">${esc(t('boards.plan.st.hold'))}</b>` : ''}` +
+      `${it.steps ? `<span class="ipb-st" title="${esc(it.steps.cur || '')}"><span class="pb-sbar"><i style="width:${((it.steps.done / it.steps.total) * 100).toFixed(1)}%"></i></span>${esc(t('boards.plan.steps', { done: it.steps.done, total: it.steps.total }))}</span>` : ''}` +
+      `${it.cy != null ? (it.by && nodes.has(it.by) ? `<button type="button" class="ins-link pr-cy" data-goto="${esc(it.by)}">${esc(t('boards.plan.cycle', { n: it.cy }))}</button>` : `<b class="pr-cy">${esc(t('boards.plan.cycle', { n: it.cy }))}</b>`) : it.byLabel && it.s !== 'pending' ? (it.by && nodes.has(it.by) ? `<button type="button" class="ins-link ipb-by" data-goto="${esc(it.by)}">${esc(it.byLabel.slice(0, 22))}</button>` : `<small>${esc(it.byLabel.slice(0, 22))}</small>`) : ''}` +
+      `${it.ago ? `<small class="ipb-ago">${esc(it.ago)}</small>` : ''}` +
+      `${it.cur && it.steps && Array.isArray(it.steps.items) && it.steps.items.length ? `<ul class="ipb-steps">${it.steps.items.map((x) => `<li class="st-${esc(x.st)}"><i>${x.st === 'done' ? '✓' : x.st === 'current' ? '▶' : x.st === 'blocked' ? '⏸' : x.st === 'skipped' ? '⤼' : '○'}</i>${esc(x.t)}</li>`).join('')}</ul>` : ''}` +
+      `${it.meta && it.meta.length || it.doc || (it.steps && it.cur && it.steps.cur) ? `<span class="ipb-sub">${[...(it.meta || []), it.doc ? '▤ ' + it.doc : '', it.steps && it.cur && it.steps.cur ? '▶ ' + it.steps.cur : ''].filter(Boolean).map(esc).join(' · ')}</span>` : ''}</li>`;
+    const L = p.items;
+    if (L.length <= SHEET_FOLD) return L.map(row).join('');
+    const ci = L.findIndex((x) => x.cur);
+    const cut = ci > 0 ? ci : L.findIndex((x) => x.s !== 'done');
+    const k = cut > 0 ? cut : 0;
+    const head = L.slice(0, k), rest = L.slice(k);
+    const folded = head.length ? `<li class="pr-fold"><details><summary>${esc(t('boards.plan.doneGroup', { n: head.length }))}</summary><ol class="ipb-list" start="1">${head.map(row).join('')}</ol></details></li>` : '';
+    return folded + rest.map((it, j) => row(it, k + j)).join('');
+  }
   /** 크게 보기(보드 전용 넓은 카드): {title, kindLine, pill, html} — 그 메인에 모인 계획 전부. 없으면 null */
   function sheetHtml(mainId, nowMs) {
     if (!on) return null;
@@ -374,17 +399,14 @@ export function mountPlans(h) {
     const entries = groups.get(mainId);
     if (!entries || !entries.length) return null;
     const labelOf = (id) => { const n = nodes.get(id); return n ? n.label || id : ''; };
-    const ms = sheetInspectModel(entries, { nowMs, labelOf, mainId });
+    const ms = sheetInspectModel(boardAnchor(entries, mainId, nodes).entries, { nowMs, labelOf, mainId }); // 판과 같은 순서(바깥 계획이 앞)
     let done = 0, total = 0, prog = 0;
     for (const p of ms) { done += p.done; total += p.total; prog += p.prog; }
     const html = ms.map((p) => `<section class="ins-sec ins-plan ins-plan-big" style="--pk:var(--k-${(nodes.get(p.owner) || {}).kind || 'main'}, var(--accent))">` +
       `<h4><span class="pb-g" aria-hidden="true">${esc(p.glyph)}</span><span class="ipb-t">${esc(p.title)}</span><span class="ipb-n"><b>${p.done}</b>/${p.total}</span></h4>` +
       `<p class="ipb-o">${nodes.has(p.owner) ? `<button type="button" class="ins-link" data-goto="${esc(p.owner)}"><i class="pb-dot"></i>${esc(p.ownerLabel)}</button>` : esc(p.ownerLabel)} · ${esc(p.src)}${p.updated ? ' · ' + esc(t('boards.plan.updated', { ago: p.updated })) : ''}${p.hold ? ` · <span class="ipb-hold">${esc(t('boards.plan.holdChip', { n: p.hold }))}</span>` : ''}</p>` +
       `<div class="pb-bar ipb-bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(p.frac * 100)}" aria-label="${esc(t('boards.plan.progressAria'))}"><i class="d" style="width:${(p.fracDone * 100).toFixed(1)}%"></i><i class="p" style="width:${(p.fracProg * 100).toFixed(1)}%"></i></div>` +
-      `<ol class="ipb-list">${p.items.map((it, i) => `<li class="pr st-${esc(it.st)}${it.cur ? ' cur' : ''}"><i class="pl-m" aria-label="${esc(it.st === 'hold' ? t('boards.plan.st.hold') : PLAN_ST_LABEL[it.s] || '')}">${esc(it.glyph)}</i><span class="ipb-i">${i + 1}</span><span class="pr-t">${esc(it.t)}</span>` +
-        `${it.st === 'hold' ? `<b class="pr-hold">${esc(t('boards.plan.st.hold'))}</b>` : ''}` +
-        `${it.cy != null ? (it.by && nodes.has(it.by) ? `<button type="button" class="ins-link pr-cy" data-goto="${esc(it.by)}">${esc(t('boards.plan.cycle', { n: it.cy }))}</button>` : `<b class="pr-cy">${esc(t('boards.plan.cycle', { n: it.cy }))}</b>`) : it.byLabel && it.s !== 'pending' ? (it.by && nodes.has(it.by) ? `<button type="button" class="ins-link ipb-by" data-goto="${esc(it.by)}">${esc(it.byLabel.slice(0, 22))}</button>` : `<small>${esc(it.byLabel.slice(0, 22))}</small>`) : ''}` +
-        `${it.ago ? `<small class="ipb-ago">${esc(it.ago)}</small>` : ''}</li>`).join('')}</ol>${p.more ? `<p class="ins-dim">${esc(t('boards.plan.moreItems', { n: p.more }))}</p>` : ''}</section>`).join('');
+      `<ol class="ipb-list">${sheetItems(p, nodes)}</ol>${p.more ? `<p class="ins-dim">${esc(t('boards.plan.moreItems', { n: p.more }))}</p>` : ''}</section>`).join('');
     const main = nodes.get(mainId);
     return { title: t('boards.plan.sheetTitle'), kindLine: `${(main && main.label) || t('boards.plan.main')} · ${t('boards.plan.count', { n: ms.length })}`, pill: `${t('boards.plan.pillDone', { done, total })}${prog ? ` · ${t('boards.plan.pillProg', { n: prog })}` : ''}`, html };
   }
@@ -395,5 +417,7 @@ export function mountPlans(h) {
     get boards() { return boards; }, fx, stats,
     /** 크게 보기 카드 앵커: 연 보드의 이번 프레임 화면 원(없으면 null — 화면 밖이면 카드는 앵커 노드 곁) */
     openAnchor: () => openBox,
+    /** 캔버스 아래에 둔 판의 클릭 판정(페이지 px) — 그 자리 판 묶음 주인 id | null. 노드·패널 집기 뒤에 부른다 */
+    hitBoard: (x, y) => { for (let i = hitBoxes.length - 1; i >= 0; i--) { const b = hitBoxes[i]; if (x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1) return b.id; } return null; },
   };
 }

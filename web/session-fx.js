@@ -78,6 +78,9 @@ export class SessionFx {
       const strong = it.level === 'strong';
       const col = this._c.copy(base).lerp(bg, (1 - k) * 0.85 + (strong ? 0 : 0.15));
       if (fa < 1) col.lerp(bg, 1 - fa);
+      // Planet 관계선 표현이 충돌을 직접 그리면(레이저 간섭·궤도 겹침) 곡선·점 사슬은 건너뛰고 칩 자리만 받는다
+      const own = view.confHook ? view.confHook(A, B, k * fa, strong, slot, this._cp || (this._cp = new THREE.Vector3())) : false;
+      if (!own) {
       // 가는 선
       for (let i = 0; i < SEG; i++) {
         const u0 = i / SEG, u1 = (i + 1) / SEG, q = (nl * SEG + i) * 6;
@@ -100,6 +103,7 @@ export class SessionFx {
         this.dots.setColorAt(nd, col);
         nd++;
       }
+      }
       // 파일명 칩: 곡선 위를 왕복
       seen.add(it.id);
       let ch = this.chips.get(it.id);
@@ -116,9 +120,8 @@ export class SessionFx {
       if (ch.html !== html) { ch.el.innerHTML = html; ch.html = html; ch.el.title = tr('cards.sess.same', { how: tr(strong ? 'cards.sess.both' : 'cards.sess.one'), paths: it.paths.join(', ') }); }
       ch.el.classList.toggle('strong', strong);
       ch.el.classList.toggle('fading', !!it.fading);
-      const u = 0.5 + 0.36 * Math.sin(now * 0.8 + ch.seed);
-      bez(this._p, a, cp, b, u);
-      ch.obj.position.copy(this._p);
+      if (own) ch.obj.position.copy(this._cp);
+      else { const u = 0.5 + 0.36 * Math.sin(now * 0.8 + ch.seed); bez(this._p, a, cp, b, u); ch.obj.position.copy(this._p); }
       const op = (Math.round(k * fa * 20) / 20).toFixed(2);
       if (ch.el.style.opacity !== op) ch.el.style.opacity = op;
       n++;

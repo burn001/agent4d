@@ -27,10 +27,12 @@ export const OFFICE_FX = {
 
 /** 특별 상호작용 범주 → 시설 */
 export const IX_FACILITY = { github: 'dispatch', db: 'archive', remote: 'booth', batch: 'conveyor', tests: 'qc' };
-// 탕비실 쉬는 자리(카운터 앞 둘 + 한 걸음 뒤 둘, 서로 마주 봄)
+// 탕비실 쉬는 자리(슬롯): 0 = 커피 머신 앞(카운터를 봄), 1 = 카운터 컵 앞, 2～3 = 한 걸음 뒤(머신 쪽을 보며 기다림),
+// 4～5 = 둘레 줄(뒤쪽). 도착 순서대로 앞 번호부터(SpotBook), 다 차면 자리에서 대기 동작
 const BREAK_LOCAL = [
-  { x: -10.55, z: -7.15, face: -PI / 2 }, { x: -10.55, z: -6.05, face: -PI / 2 },
-  { x: -9.45, z: -7.35, look: [-10.55, -6.6] }, { x: -9.45, z: -5.85, look: [-10.55, -6.6] },
+  { x: -10.55, z: -7.15, face: -PI / 2 }, { x: -10.55, z: -6.2, face: -PI / 2 },
+  { x: -9.6, z: -7.1, look: [-10.9, -6.9] }, { x: -9.6, z: -6.2, look: [-10.9, -6.6] },
+  { x: -8.7, z: -6.65, look: [-10.9, -6.8] }, { x: -9.25, z: -5.4, look: [-10.9, -6.6] },
 ];
 
 /** 방 지역 점 → 세계(돌린 방은 회전, 앞쪽 자리는 ext 만큼). 회의실·외부 작업 방은 그대로 쓴다 */
@@ -88,6 +90,11 @@ export function breakSpot(room, i = 0) {
   return p;
 }
 export const BREAK_N = BREAK_LOCAL.length;
+/** 탕비실 자리 전부(세계, 방 객체에 기억) — SpotBook 후보. 사무실이 아니면 null */
+export function breakSlots(room) {
+  if (!room || room.type !== 'office') return null;
+  return room._brk || (room._brk = BREAK_LOCAL.map((_, i) => breakSpot(room, i)));
+}
 
 /** 의뢰인 스크린 지역 z(창 벽 = 뒤 벽이면 뒤, 돌린 방에서 앞 벽이 창이면 앞) · 방 안쪽 방향(+1 = +z) */
 export function clientLocal(room) {
@@ -103,9 +110,11 @@ export function clientScreen(room) {
   p.y = OFFICE_FX.client.y;
   return p;
 }
+/** 스크린에서 한 걸음 반 앞(1.3 이면 안테나 접근점과 0.55 — 겹쳐 보였다) */
+export const CLIENT_STEP = 1.65;
 export function clientSpot(room) {
   if (!room || room.type !== 'office') return null;
-  const c = clientLocal(room), p = roomPoint(room, c.x, c.z + c.inward * 1.3);
+  const c = clientLocal(room), p = roomPoint(room, c.x, c.z + c.inward * CLIENT_STEP);
   p.face = (c.inward > 0 ? PI : 0) + xfAngle(room.xf && room.local ? room.xf : null);
   p.client = true;
   return p;

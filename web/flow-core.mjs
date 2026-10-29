@@ -188,10 +188,84 @@ export function trailUs(u, n = FLOW.TRAIL, du = FLOW.TRAIL_DU) {
 }
 
 /**
- * 완료 노드 퇴장 대상: 끝난(done·stopped) 노드 중 하위 전체도 대상인 것. 오류·작업 중·대기는 남긴다.
- * 루트(메인·rootIds)는 항상 남긴다. nodes: Map<id,{id,parentId,kind,status}>
+ * 완료 노드 퇴장 대상: 끝난 노드 중 하위 전체도 대상인 것. 작업 중·대기는 남긴다. 모든 종류(작업 노드 포함)가 같은 규칙.
+ * 정상 끝(done·stopped)은 바로 대상, 문제 있게 끝난 것(endedBadly)은 opts.nowMs 가 badEndDueAt 을 지났을 때만 대상.
+ * 루트(메인·rootIds)는 항상 남긴다. nodes: Map<id,{id,parentId,kind,status}> · seen: Map<id, 처음 본 ms>(끝난 시각이 없는 노드용)
  */
-export function exitEligible(nodes, rootIds = []) {
+export const EXIT_ERR = { LINGER_SEC: 600 }; // 문제 있게 끝난 노드가 남는 시간(초). app.js 가 /healthz 의 errorLingerSec(config.json)로 바꾼다
+
+/** 문제 있게 끝났나: 오류(error — 에이전트 오류·rc≠0 실패 작업) 또는 정체 표시를 단 채 끝난 작업 */
+export function endedBadly(n) {
+  if (!n) return false;
+  if (n.status === 'error') return true;
+  const j = n.meta && n.meta.job;
+  return !!(j && j.stale && (n.status === 'done' || n.status === 'stopped'));
+}
+
+/** 문제 있게 끝난 노드가 퇴장 대상이 되는 시각(ms, 표시 시계). 끝난 시각 = 작업 endedAt → 노드 endedAt → seenMs(웹이 처음 본 시각) */
+export function badEndDueAt(n, seenMs = null, defSec = EXIT_ERR.LINGER_SEC) {
+  if (!endedBadly(n)) return null;
+  const j = n.meta && n.meta.job;
+  let end = Date.parse((j && j.endedAt) || n.endedAt || '');
+  if (!Number.isFinite(end)) end = Number.isFinite(seenMs) ? seenMs : NaN;
+  if (!Number.isFinite(end)) return null;
+  const own = j && j.failLingerSec != null ? +j.failLingerSec : NaN; // 작업은 jobs.json failLingerSec 가 이긴다
+  const sec = Number.isFinite(own) && own >= 0 ? own : defSec;
+  return end + sec * 1000;
+}
+
+/**
+ * 퇴장 시각 합치기: 대상 노드마다 자기 끝 시각(own: id → 벽시계 초)과 하위 전체(대상인 것)의 가장 늦은 끝 시각 중 큰 값.
+ * 하위가 늦게 끝나면 부모는 그때부터 LINGER 를 센다. 반환 Map<id, 초|null>
+ */
+export function exitWalls(nodes, elig, own) {
+  const kids = new Map();
+  for (const n of nodes.values()) if (n.parentId && elig.has(n.id) && elig.has(n.parentId)) { if (!kids.has(n.parentId)) kids.set(n.parentId, []); kids.get(n.parentId).push(n.id); }
+  const memo = new Map();
+  const w = (id, depth = 0) => {
+    if (memo.has(id)) return memo.get(id);
+    let r = own.get(id); if (r == null) r = null;
+    if (depth < 64) for (const c of kids.get(id) || []) { const cw = w(c, depth + 1); if (cw == null) { r = null; break; } if (r != null && cw > r) r = cw; }
+    memo.set(id, r);
+    return r;
+  };
+  const out = new Map();
+  for (const id of elig) out.set(id, w(id));
+  return out;
+}
+
+/**
+ * 복셀: '완료 표시' 끔이면 끝난 작업 카드를 뺀다 — 정상 끝은 끝난 뒤 lingerMs(표시 시계), 문제 있는 끝은 badEndDueAt 뒤.
+ * 직원·기계는 복셀 고유 퇴장(문으로 나감)을 그대로 쓴다. 반환 Set<id>
+ */
+export function jobCardsGone(nodes, nowMs, lingerMs = 2500) {
+  const out = new Set();
+  if (!Number.isFinite(nowMs)) return out;
+  for (const n of nodes.values()) {
+    const j = n && n.meta && n.meta.job;
+    if (!j) continue;
+    let due = null;
+    if (endedBadly(n)) due = badEndDueAt(n);
+    else if (n.status === 'done' || n.status === 'stopped') { const e = Date.parse(j.endedAt || n.endedAt || ''); due = Number.isFinite(e) ? e + lingerMs : -Infinity; }
+    if (due != null && nowMs >= due) out.add(n.id);
+  }
+  return out;
+}
+
+/**
+ * 복셀 직원·기계: '완료 표시' 끔일 때 끝났지만 아직 퇴장 대상(exitEligible)이 아닌 노드 — 자리에 붙잡는다.
+ * 문제 있는 끝은 문턱 전, 일하는 하위가 있으면 하위가 끝날 때까지. 판정은 흐름·평면과 같은 exitEligible 그대로.
+ * seen: Map<id, 처음 본 ms>(끝난 시각 없는 오류용, 여기서 갱신 — 뷰가 들고 다님). 반환 Set<id>
+ */
+export function vxHeldEnded(nodes, rootIds = [], nowMs = null, seen = null) {
+  if (seen) for (const [id, n] of nodes) { if (!endedBadly(n)) seen.delete(id); else if (!seen.has(id) && Number.isFinite(nowMs)) seen.set(id, nowMs); }
+  const elig = exitEligible(nodes, rootIds, { nowMs, seen });
+  const out = new Set();
+  for (const n of nodes.values()) if (n && (n.status === 'done' || n.status === 'stopped' || n.status === 'error') && !elig.has(n.id)) out.add(n.id);
+  return out;
+}
+
+export function exitEligible(nodes, rootIds = [], { nowMs = null, seen = null } = {}) {
   const roots = new Set(rootIds.filter(Boolean));
   const kids = new Map();
   for (const n of nodes.values()) {
@@ -201,9 +275,11 @@ export function exitEligible(nodes, rootIds = []) {
   const ok = (id, depth = 0) => {
     if (memo.has(id)) return memo.get(id);
     const n = nodes.get(id);
-    let r = !!n && (n.status === 'done' || n.status === 'stopped') && !roots.has(id) && n.kind !== 'main';
-    // 끝난 작업은 주인(출력 스트림)이 살아 있는 동안 남는다 — 몇 개만 남기는 것은 접기(jobFold)가 맡는다
-    if (r && n.meta && n.meta.job) { const p = nodes.get(n.parentId); if (p && !['done', 'stopped', 'error'].includes(p.status)) r = false; }
+    let r = false;
+    if (n && !roots.has(id) && n.kind !== 'main') {
+      if (endedBadly(n)) { const due = badEndDueAt(n, seen ? seen.get(id) : null); r = due != null && Number.isFinite(nowMs) && nowMs >= due; }
+      else r = n.status === 'done' || n.status === 'stopped';
+    }
     if (r && depth < 64) for (const c of kids.get(id) || []) if (!ok(c, depth + 1)) { r = false; break; }
     memo.set(id, r);
     return r;

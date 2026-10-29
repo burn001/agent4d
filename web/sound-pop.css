@@ -27,13 +27,29 @@
 #sound-pop .sp-chip:disabled { opacity: .45; cursor: not-allowed; }
 #sound-pop .sp-chip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 #sound-pop .sp-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+#sound-pop .sp-grp { flex: 0 0 100%; color: var(--muted); font-size: 10.5px; font-weight: 600; margin-top: 2px; }
+#sound-pop .sp-grp.other { margin-top: 6px; padding-top: 4px; border-top: 1px dashed var(--border); }
 #sound-pop .sp-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border); flex: none; }
 #sound-pop .sp-track.cur .sp-dot { background: var(--accent); box-shadow: 0 0 5px var(--accent); }
 #sound-pop .sp-range { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11.5px; }
+#sound-pop .sp-part { min-width: 68px; }
+#sound-pop .sp-part[aria-pressed="true"] .sp-dot { background: var(--accent); box-shadow: 0 0 5px var(--accent); }
+#sound-pop .sp-range.off input[type="range"] { opacity: .45; }
 /* 좁은 화면 규칙이 상단 바 볼륨 슬라이더를 숨기던 것을 팝업 안에선 되살림 */
 #sound-pop #vol, #sound-pop #sfx-vol { display: inline-block !important; width: 84px; accent-color: var(--accent); }
 #sound-pop #bgm-track { display: none !important; }
+/* 음악 끔: 지금 곡 이름 흐리게 + 부제(sound.pop.musicOff.sub), 방식·곡 칩은 누를 수 있되 흐리게 */
+#sound-pop.sp-music-off .sp-now-t { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 1px; }
+#sound-pop.sp-music-off .sp-now-s { color: var(--warn, #f59e0b); font-weight: 600; }
+#sound-pop.sp-music-off .sp-seg .sp-chip, #sound-pop.sp-music-off .sp-tracks .sp-chip { opacity: .55; }
+#sound-pop.sp-music-off .sp-seg .sp-chip:hover, #sound-pop.sp-music-off .sp-tracks .sp-chip:hover,
+#sound-pop.sp-music-off .sp-seg .sp-chip:focus-visible, #sound-pop.sp-music-off .sp-tracks .sp-chip:focus-visible { opacity: .85; }
+#sound-pop.sp-music-off .sp-track.cur .sp-dot { background: var(--muted); box-shadow: none; }
 #sound-pop .sp-hint { margin: 6px 0 0; color: var(--muted); font-size: 11px; }
+/* 좁은 화면(시트가 실황 패널 위를 덮음)·2D(backdrop-filter 끔): 반투명 패널색을 불투명 바탕(--bg) 위에 겹쳐 뒤 글자가 비치지 않게.
+   넓은 3D 화면은 그대로(흐림 유리) */
 @media (max-width: 719px) {
-  #sound-pop { left: 8px !important; right: 8px !important; width: auto; max-width: none; }
+  #sound-pop { left: 8px !important; right: 8px !important; width: auto; max-width: none;
+    background: linear-gradient(var(--panel-bg), var(--panel-bg)), var(--bg); }
 }
+html[data-dim="2d"] #sound-pop { background: linear-gradient(var(--panel-bg), var(--panel-bg)), var(--bg); }

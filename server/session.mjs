@@ -1,6 +1,7 @@
 // 세션 루트 하나(메인 + 그 아래 전부)의 수집 런타임
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { Graph } from './graph.mjs';
 import { toolBrief, resultBrief, textBrief } from './brief.mjs';
 import { redact } from './redact.mjs';
@@ -20,7 +21,8 @@ import { inheritPlan, agentMetaFromChain, agentFileIn } from './succession.mjs';
 import { toolFileRefs, msgTo } from '../web/conflict-core.mjs';
 import { createHash } from 'node:crypto';
 import { artStart, artEnd } from './artifacts.mjs'; // 작업 대상 층
-import { PlanTracker, planStart } from './plans.mjs'; // 계획 보드
+import { PlanTracker, planStart, planFromRaw } from './plans.mjs'; // 계획 보드
+import { loopAxesPlan } from './loop-axes.mjs'; // 자율 루프 판 — 축 큐 어댑터
 import { classifyStart, classifyEnd, outputProgress, IxTracker, classifyUserMessage, USER_DENY_RE, ixSnip } from './interactions.mjs'; // 특별 상호작용
 import { JobBook, loadJobRules, jobNodeId, jobNodeStatus, jobLabel, isJobEnded, setMatchesProject } from './jobs.mjs'; // 작업 오브젝트
 import { ccvizHome } from './home.mjs';
@@ -784,7 +786,6 @@ export class RootRuntime {
       } else {
         g.updateNode(id, { meta: { phase: meta.workflowPhase ?? g.get(id).meta.phase } }, now);
       }
-      if (meta.workflowPhase != null) this._plans().workflowPhase(wid, meta.workflowPhase, g.get(id)?.startedAt || now);
     } else {
       let parent = this.parentFor(meta.toolUseId, null);
       if (!parent && meta.parentAgentId && g.has(`a:${meta.parentAgentId}`)) parent = `a:${meta.parentAgentId}`;
@@ -866,7 +867,6 @@ export class RootRuntime {
       } else {
         g.updateNode(id, { label: rec.label, meta: { phase: rec.phase ?? null } }, ts);
       }
-      if (rec.phase != null) this._plans().workflowPhase(wid, rec.phase, ts);
       this.touch(wid, ts, backlog);
     } else if (rec.type === 'result' && rec.agentId) {
       const id = `a:${rec.agentId}`;
@@ -1183,7 +1183,7 @@ export class RootRuntime {
     const artE = tu && tu.art ? artEnd(tu.art, { ok, tur, ixEnd: ixEnd0 }) : null; // 결과로 다듬은 대상(실패면 없음)
     g.emit({ ts, type: 'tool-end', nodeId: owner.id, toolUseId: tuid, tool: name, cat: toolCategory(name), ok, durationMs, text: summarizeToolResult(item.content),
       brief: resultBrief(name, tur, stripTags(bodyText), ok), ...(panel ? { panel } : {}), ...(ixEnd ? { ix: ixEnd } : {}), ...(artE ? { art: artE } : {}) });
-    if (tu && tu.plan && tu.plan.src !== 'workflow') { this._plans().end(tu.plan, { ok, tur, nodeId: owner.id, ts }); tu.plan = null; }
+    if (tu && tu.plan) { this._plans().end(tu.plan, { ok, tur, nodeId: owner.id, ts }); tu.plan = null; }
 
     if ((name === 'Agent' || name === 'Task') && tur && tur.agentId) {
       const aid = `a:${tur.agentId}`;
@@ -1203,7 +1203,6 @@ export class RootRuntime {
       }
     } else if (name === 'Workflow' && tur && tur.runId) {
       const wid = this.ensureWorkflow(w, tur.runId, { parent: owner.id, label: tur.workflowName, taskId: tur.taskId, ts: tu?.ts || ts });
-      if (tu && tu.plan && tu.plan.src === 'workflow') { this._plans().workflowDefine(wid, tu.plan.phases, tu.ts || ts); tu.plan = null; } // meta.phases
     } else if (SHELL.has(name)) {
       if (tur && tur.backgroundTaskId) this.ensureBg(tur.backgroundTaskId, owner, w, tu, ts, bodyText, tur);
       if (tur && tur.backgroundTaskId) this._watchBind(tuid, `b:${tur.backgroundTaskId}`, ts);
@@ -1324,7 +1323,7 @@ export class RootRuntime {
     this.seenNotif.set(key, tms);
     if (this.seenNotif.size > 5000) this.seenNotif.delete(this.seenNotif.keys().next().value);
     const summary = n.summary || (n.event ? `이벤트: ${n.event}` : '') || userTextSummary(content);
-    g.emit({ ts, type: 'user', nodeId: node.id, origin: 'task-notification', text: oneLine(summary), ...(node.kind === 'main' ? { ix: { v: 1, cat: 'user', op: 'auto', src: 'notify', phase: 'end' } } : {}) }); // 자동 알림 = 회색 점
+    g.emit({ ts, type: 'user', nodeId: node.id, origin: 'task-notification', text: oneLine(summary), ...(node.kind === 'main' ? { ix: this._notifyIx(n) } : {}) }); // 자동 알림 · 출처 노드(Monitor 출력·작업 결과)
     if (!n.taskId) return;
     if (n.outputFile) w.tasksDirs.add(path.dirname(n.outputFile));
     // 세션 종료 정리 알림(status stopped)은 task-id 여러 개(끝의 __orphan_summary__ 는 요약용 가짜 id)
@@ -1339,6 +1338,28 @@ export class RootRuntime {
       }
       this.applyNotification(ni, target, ts, node.id);
     }
+  }
+
+  /**
+   * 메인에 들어온 작업 알림의 ix. 출처 노드를 알면 from(노드 id)을 싣는다 — Monitor 출력 이벤트 = src 'monitor'(text = 출력 한 줄),
+   * 끝 알림(status) = src 'notify' + st ok·err·stop(text = 요약 한 줄). 출처를 모르거나 Monitor 만료·상태 없는 알림은 예전 회색 점(src 'notify'만)
+   */
+  _notifyIx(n) {
+    const ix = { v: 1, cat: 'user', op: 'auto', src: 'notify', phase: 'end' };
+    const g = this.graph, tid = n.taskId;
+    const target = tid ? (this.taskMap.get(tid) || [`a:${tid}`, `b:${tid}`, `m:${tid}`, `w:${tid}`].find((x) => g.has(x))) : null;
+    const tn = target ? g.get(target) : null;
+    if (!tn) return ix;
+    const ev = String(n.event || '');
+    if (tn.kind === 'monitor' && ev && !n.status && !/^\[(Monitor expired|killed)/.test(ev)) {
+      ix.src = 'monitor'; ix.from = target;
+      const t = ixSnip(ev); if (t) ix.text = t;
+    } else if (n.status) {
+      ix.from = target;
+      ix.st = n.status === 'completed' ? 'ok' : n.status === 'failed' ? 'err' : 'stop';
+      const t = ixSnip(n.summary || ''); if (t) ix.text = t;
+    }
+    return ix;
   }
 
   applyNotification(n, target, ts, ownerId) {
@@ -1400,6 +1421,16 @@ export class RootRuntime {
         if (node.status === 'active') g.updateNode(node.id, { status: 'idle' }, ts, rx ? { ix: rx } : null);
         else if (rx) g.emit({ ts, type: 'node-update', nodeId: node.id, patch: {}, ix: rx });
         if (node.meta?.skill) g.updateNode(node.id, { meta: { skill: null } }, ts);
+      }
+    } else if (rec.subtype === 'scheduled_task_fire') {
+      // 예약 작업(정시 보고 등)이 연 메인 턴. 뒤따르는 프롬프트 user 기록은 isMeta 라 버려진다 — 이 기록이 그 턴의 시작 표지
+      if (node.kind === 'main' && !rec.isSidechain) {
+        const raw = typeof rec.prompt === 'string' && rec.prompt ? rec.prompt : typeof rec.content === 'string' ? rec.content : '';
+        const text = userTextSummary(raw);
+        if (text) {
+          const sn = ixSnip(raw);
+          g.emit({ ts, type: 'user', nodeId: node.id, origin: 'schedule', text, ix: { v: 1, cat: 'user', op: 'auto', src: 'schedule', phase: 'end', ...(sn ? { text: sn } : {}) } });
+        }
       }
     } else if (rec.subtype === 'away_summary') {
       const text = oneLine(typeof rec.content === 'string' ? rec.content : textOfContent(rec.content));
@@ -2555,7 +2586,7 @@ export class RootRuntime {
     pass(runners, true);
     this._sweepSessionEnd(now, off); // 띄운 세션이 끝난 bg 작업
     this._sweepWatches(); // 끝난 백그라운드 셸·Monitor 의 들여다보기 닫기
-    if (!off) { this._jobFiles(); this._extJobsSweep(now); this._flushAutoJobs(nowIso); this._runSweep(now); }
+    if (!off) { this._jobFiles(); this._extJobsSweep(now); this._flushAutoJobs(nowIso); this._runSweep(now); this._loopAxesSweep(now); }
   }
 
   // ───────────── 분리 프로세스 · 들여다보기 ─────────────
@@ -2955,6 +2986,29 @@ export class RootRuntime {
    * `j:s:<sid>:x:<id>`(모양, src 'ext')로 낸다. 진행이 있으면 그 노드의 `output` 이벤트에 바닥 진행 띠 ix(batch i/N 또는 pct)를
    * 싣는다(웹 ix-core 가 그대로 그림). 라이브만(기록 밖 파일). 붙일 세션은 등록부가 정한다(서술 sessionId → 프로젝트의 살아 있는 메인).
    */
+  /**
+   * 자율 루프 판 — 축 큐: 이 런타임에 기동기·러너 노드가 있고 메인 cwd 가 자율 루프 레이아웃(`.autopilot/relaunch.sh` 의 AXIS_QUEUE)이면
+   * 축 목록·지금 축·축별 단계 진행을 메인 meta.plans 맨 앞에 싣는다(10초마다, 파일 mtime 캐시). 레이아웃이 없으면 아무것도 안 함. 라이브만
+   */
+  _loopAxesSweep(now) {
+    if (this._loopAt && now - this._loopAt < 10_000) return;
+    this._loopAt = now;
+    const mid = `s:${this.sessionId}`, main = this.graph.get(mid);
+    if (!main || main.kind !== 'main') return;
+    const tr = this._plans();
+    // 판 주인 = 재기동기(기동기 노드 — 축을 고르는 주체). 끝나지 않은 것 > 최근 시작. /clear 승계로 이어받은 기동기(b:adopt-…)도 이 런타임의 노드
+    let L = null;
+    for (const n of this.graph.nodes.values()) {
+      if (!n.meta || !n.meta.launcher) continue;
+      const live = !['done', 'error', 'stopped'].includes(n.status);
+      const sc = (live ? 1e15 : 0) + (Date.parse(n.startedAt || '') || 0);
+      if (!L || sc > L.sc) L = { id: n.id, sc };
+    }
+    const raw = L && main.meta && main.meta.cwd ? loopAxesPlan(main.meta.cwd) : null;
+    const plan = raw ? planFromRaw(raw, { privacy: this.privacy, at: now, key: main.meta.cwd + '|axes' }) : null;
+    tr.setExternal('axes', L ? L.id : mid, plan, now);
+  }
+
   _extJobsSweep(now) {
     const reg = this._ext;
     if (!reg || this.closed || this.offline) return;

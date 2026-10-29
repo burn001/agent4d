@@ -2,6 +2,7 @@
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { placeLabels, textWidth as textPx } from '../label-place.mjs';
 import { planLabelRects } from '../plan-core.mjs'; // 계획 보드 = 라벨의 고정 장애물
+import { QUIP, rankQuips } from './quip-core.mjs'; // 생각·말풍선
 
 const VX_SHIFTS = [0, 14, 28], VX_FAR = [42, [0.6, 14], [-0.6, 14], 56, [0.6, 42], [-0.6, 42], 70];
 
@@ -39,11 +40,11 @@ export class Bubbles {
     this.rpool = new Pool(scene, 'vx-room', ROOM_MAX, [0, 0.5]);
   }
 
-  /** 말풍선 하나(캐릭터당 1개, 새것이 덮음) */
-  say(id, text, { type = 'text', dur = 2.5, now }) {
-    const t = trunc(text, 28);
+  /** 말풍선 하나(캐릭터당 1개, 새것이 덮음). type 'q-think'|'q-say' = 생각·말풍선(pri = 중요도 0～2) */
+  say(id, text, { type = 'text', dur = 2.5, now, pri = 1 }) {
+    const t = trunc(text, type === 'q-think' || type === 'q-say' ? 40 : 28);
     if (!t) return;
-    this.bubbles.set(id, { text: t, type, until: now + dur, born: now });
+    this.bubbles.set(id, { text: t, type, until: now + dur, born: now, pri, pop: (this._pop = (this._pop || 0) + 1) & 1 });
   }
 
   clear() { this.bubbles.clear(); for (const p of [this.bpool, this.lpool, this.rpool]) for (const it of p.items) { it.o.visible = false; it.key = null; } }
@@ -53,33 +54,59 @@ export class Bubbles {
    */
   update(ctx) {
     const { now } = ctx;
-    // 말풍선: 만료 제거 → 포커스 > 최근 순으로 남김
-    const list = [];
+    // 말풍선: 만료 제거 → 포커스 > 최근 순으로 남김(생각·말풍선: 포커스 > 중요도 > 가까움 > 활동 > 최근, 멀면 숨김)
+    const list = this._list || (this._list = []);
+    list.length = 0;
+    const cam = ctx.camera, quip = !!ctx.quips;
+    const f = cam ? (ctx.height || 1) / (2 * Math.tan((cam.fov * Math.PI) / 360)) : 0;
     for (const [id, b] of this.bubbles) {
       if (now > b.until) { this.bubbles.delete(id); continue; }
       const p = ctx.posOf(id); // 공유 임시 객체 → 값만 복사
       if (!p) continue;
-      list.push([id, b, p.x, p.y, p.z]);
+      const focus = id === ctx.focusId || id === ctx.hoverId;
+      let dist = 0;
+      if (quip && cam) {
+        const dx = cam.position.x - p.x, dy = cam.position.y - p.y, dz = cam.position.z - p.z;
+        dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (!focus && (0.55 * f) / Math.max(0.01, dist) < QUIP.LOD_PX) continue; // 사람이 이보다 작게 보이면 풍선 숨김(LOD)
+      }
+      const e = b._e || (b._e = { id: null, b: null, x: 0, y: 0, z: 0, focus: false, pri: 0, dist: 0, born: 0, active: false });
+      e.id = id; e.b = b; e.x = p.x; e.y = p.y; e.z = p.z; e.focus = focus; e.pri = b.pri || 0; e.dist = dist; e.born = b.born;
+      e.active = !!(ctx.chars && ctx.chars.get(id) && ctx.chars.get(id).workCat);
+      list.push(e);
     }
-    list.sort((a, b) => ((b[0] === ctx.focusId) - (a[0] === ctx.focusId)) || (b[1].born - a[1].born));
-    const max = ctx.narrow ? BUBBLE_MAX_NARROW : BUBBLE_MAX;
+    if (quip) rankQuips(list);
+    else list.sort((a, b) => ((b.id === ctx.focusId) - (a.id === ctx.focusId)) || (b.born - a.born));
+    const max = quip ? (ctx.narrow ? QUIP.MAX_ON_NARROW : QUIP.MAX_ON) : ctx.narrow ? BUBBLE_MAX_NARROW : BUBBLE_MAX;
     const items = this.bpool.items;
-    for (let i = 0; i < items.length; i++) {
-      const it = items[i];
-      const e = i < max ? list[i] : null;
+    // 자리 고정: 이미 그 노드 풍선을 그리던 칸은 그대로(순위가 바뀔 때마다 칸을 바꿔 쓰면 className 이 바뀌어 등장 애니메이션이 모두 다시 돈다)
+    const n = Math.min(max, list.length), order = this._order || (this._order = []);
+    order.length = 0;
+    const want = this._want || (this._want = new Map());
+    want.clear();
+    for (let i = 0; i < n; i++) want.set(list[i].id, list[i]);
+    const free = this._free || (this._free = []);
+    free.length = 0;
+    for (const it of items) { if (it.key != null && want.has(it.key)) { it._e = want.get(it.key); want.delete(it.key); } else { it._e = null; free.push(it); } }
+    for (const e of want.values()) { const it = free.shift(); if (it) it._e = e; }
+    for (let i = 0; i < n; i++) for (const it of items) if (it._e === list[i]) { order.push(it); break; }
+    for (const it of items) {
+      const e = it._e;
       if (!e) { if (it.o.visible) it.o.visible = false; it.key = null; continue; }
-      const [id, b, px, py, pz] = e;
-      const html = esc(b.text);
-      const cls = 'vx-bubble t-' + b.type + (id === ctx.focusId ? ' focus' : '') + (b.until - now < 0.35 ? ' out' : '');
+      const { id, b } = e;
+      const q = b.type === 'q-think' || b.type === 'q-say';
+      const html = q ? '<span class="q-t">' + esc(b.text) + '</span>' + (b.type === 'q-think' ? '<i class="q-d"></i><i class="q-d q-d2"></i>' : '') : esc(b.text);
+      const cls = (q ? 'vx-bubble ' + b.type + (b.pop ? ' qa' : ' qb') : 'vx-bubble t-' + b.type) + (id === ctx.focusId ? ' focus' : '') + (b.until - now < 0.35 ? ' out' : '');
       if (it.html !== html) { it.el.innerHTML = html; it.html = html; }
       if (it.cls !== cls) { it.el.className = cls; it.cls = cls; }
-      it.o.position.set(px, py + 0.55, pz);
+      it.o.position.set(e.x, e.y + 0.55, e.z);
       it.key = id;
-      it.w = textWidth(b.text);
+      it.quip = q;
+      it.w = textWidth(b.text) + (q ? 8 : 0);
       if (!it.o.visible) it.o.visible = true;
     }
     if (this._placed) this._placed.length = 0;
-    if (ctx.camera) this._declutter(ctx, Math.min(max, list.length));
+    if (ctx.camera) this._declutter(ctx, order);
     // 이름표
     fill(this.lpool, ctx.labels || [], (it, L) => { it.o.position.set(L.x, L.y, L.z); it.key = L.id; }, 'vx-label');
     fadePool(this.bpool, ctx); fadePool(this.lpool, ctx); // 프로젝트 페이드(사라진 동의 것은 숨겨 겹침 계산에서도 뺌)
@@ -135,27 +162,31 @@ export class Bubbles {
   }
 
   /** 화면에서 겹치는 말풍선은 위로 쌓는다(우선순위 높은 것이 제자리) */
-  _declutter(ctx, n) {
+  _declutter(ctx, order) {
     const W = ctx.width, H = ctx.height, cam = ctx.camera;
-    const items = this.bpool.items;
     const placed = this._placed || (this._placed = []);
     placed.length = 0;
     const v = this._v || (this._v = cam.position.clone());
-    for (let i = 0; i < n; i++) {
-      const it = items[i];
+    for (const it of order) {
       v.copy(it.o.position).project(cam);
       const x = (v.x * 0.5 + 0.5) * W, y = (-v.y * 0.5 + 0.5) * H;
-      const w = it.w, h = 24;
-      let off = 0;
-      for (let k = 0; k < 5; k++) {
+      const w = it.w, h = it.quip ? 28 : 24;
+      let off = 0, clash = false;
+      // 생각·말풍선은 두 칸까지만 쌓고 그래도 겹치면 숨김(우선순위 낮은 쪽)
+      const tries = it.quip ? 3 : 5;
+      for (let k = 0; k < tries; k++) {
         const top = y - h - off, bot = y - off;
         let hit = false;
         for (let j = 0; j < placed.length; j += 4) {
           if (x - w / 2 < placed[j + 2] && x + w / 2 > placed[j] && top < placed[j + 3] && bot > placed[j + 1]) { hit = true; break; }
         }
+        clash = hit;
         if (!hit) break;
-        off += h + 3;
+        if (k < tries - 1) off += h + 3;
       }
+      const vis = it.quip && clash ? 'hidden' : '';
+      if (it.el.style.visibility !== vis) it.el.style.visibility = vis;
+      if (vis) continue;
       placed.push(x - w / 2, y - h - off, x + w / 2, y - off);
       if (it.off !== off) { it.off = off; it.el.style.transform = off ? `translateY(${-off}px)` : ''; }
     }

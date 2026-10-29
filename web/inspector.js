@@ -351,7 +351,11 @@ export function mountInspector(h) {
     const kids = childrenOf(h.nodes, n.id);
     const cs = childStats(kids);
     const st = statusInfo(n, cs);
-    setHead(ki.icon, KIND_VAR[n.kind] || null, n.label || n.id, `${ki.name} — ${ki.desc}`);
+    // Planet 시안 이름(서브에이전트·claude -p — 지금 표현이 Planet 일 때만)
+    const pvw = h.getView ? h.getView() : null, pvv = pvw && pvw.constructor && pvw.constructor.modeId === 'planet' && pvw.vis ? pvw.vis.get(n.id) : null;
+    const pvn = pvv ? pvv._pvar || (pvv._po && pvv._po.spec && pvv._po.spec.variant) : null;
+    const shp = n.kind === 'main' && pvw && pvw.mainShapeOf ? pvw.mainShapeOf(n.id) : null; // 흐름 메인 모양(반응로·기둥)
+    setHead(ki.icon, KIND_VAR[n.kind] || null, n.label || n.id, `${ki.name} — ${ki.desc}` + (pvn ? ` · ${tr('cards.pvar.' + pvn)}` : '') + (shp ? ` · ${tr('cards.ins.shape.' + shp)}` : ''));
     const pill = $('.ins-pill');
     pill.className = 'ins-pill st-' + st.key; pill.textContent = st.label;
     const em = elapsedMs(n, nowMs);

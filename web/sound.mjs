@@ -6,6 +6,8 @@
 //     버튼을 '소리 대기'(점멸 점·툴팁 "화면을 한 번 누르면 소리가 납니다")로 둔다. 페이지 어디든 사용자 동작(capture)에서
 //     audio.play()·ctx.resume() 으로 복원하고 표시를 지운다. 대기 중 소리 버튼을 누르면 끄지 않고 복원한다.
 //     탭 복귀(visibilitychange)·컨텍스트 statechange(interrupted 등)·일시정지 해제도 같은 복원 경로. 판정은 sound-gate.mjs(순수)
+//   - 부분 토글: 소리 팝업의 '음악'·'효과음' 켬/끔. 'ccviz.sound.parts' = {music, sfx}(기본 둘 다 켬, URL 로는 안 바뀜).
+//     상단 소리 버튼은 마스터 — 실제로 나는 것 = 마스터 켬 && 그 부분 켬. 끈 부분은 복원·일시정지 해제·자동 선곡이 다시 켜지 않는다
 
 import { soundStatus, restorePlan, soundLabel, GESTURE_EVENTS } from './sound-gate.mjs';
 
@@ -23,6 +25,18 @@ export function loadSoundOn(storage) {
 
 export function saveSoundOn(storage, on) {
   try { storage && storage.setItem(KEY, JSON.stringify({ on: !!on })); } catch (e) { /* 저장 불가: 이번 접속만 */ }
+}
+
+export const PARTS_KEY = 'ccviz.sound.parts';
+
+/** 부분 토글 저장값 {music, sfx}: 없거나 읽기 실패면 둘 다 켬 */
+export function loadSoundParts(storage) {
+  const p = readJson(storage, PARTS_KEY) || {};
+  return { music: p.music !== false, sfx: p.sfx !== false };
+}
+
+export function saveSoundParts(storage, parts) {
+  try { storage && storage.setItem(PARTS_KEY, JSON.stringify({ music: parts.music !== false, sfx: parts.sfx !== false })); } catch (e) {}
 }
 
 /** URL 의 sound 파라미터: '1'·'on'·'true' → true, '0'·'off'·'false' → false, 없거나 그 밖 → null */
@@ -61,6 +75,9 @@ export class Sound {
     this.on = override != null ? override : loadSoundOn(this._storage);
     // 이행: 새 키가 없으면 한 번 써 둔다(URL 로 정한 값은 저장하지 않음)
     if (override == null && !(readJson(this._storage, KEY) || {}).hasOwnProperty('on')) saveSoundOn(this._storage, this.on);
+    const parts = loadSoundParts(this._storage);
+    this.musicOn = parts.music; // 팝업 '음악' 토글(마스터가 켜져 있을 때만 의미)
+    this.sfxOn = parts.sfx;     // 팝업 '효과음' 토글
     this.held = false; // 시각화 일시정지 중: 소리를 잠시 멈춤 — 사용자 선택(this.on·저장값)은 그대로
     this.musicBlocked = false; // 최근 play() 가 자동재생 정책으로 거부됨
     this._autoplayOk = false;  // 동작 없이 음악이 났다 = 자동재생 허용(효과음 컨텍스트도 만들어 봄)
@@ -76,7 +93,7 @@ export class Sound {
       try { const st = this._doc.createElement('style'); st.id = 'snd-wait-css'; st.textContent = CSS; this._doc.head.appendChild(st); } catch (e) {}
     }
     if (music) {
-      music.wantOn = this.on; // 켬이면 미리 받아 두기(preload auto)
+      music.wantOn = this.wantMusic; // 켬이면 미리 받아 두기(preload auto)
       music.onChange = () => { this._watch(music.routeCtx); this.render(); };
       music.onAvailable = () => { if (this.on && !this.held) this.restore(false); else this.render(); };
     }
@@ -92,6 +109,10 @@ export class Sound {
     else this.render();
   }
 
+  /** 실제로 원하는 것: 마스터 && 부분 */
+  get wantMusic() { return !!(this.on && this.musicOn); }
+  get wantSfx() { return !!(this.on && this.sfxOn); }
+
   _activated(gesture) {
     if (gesture || this._autoplayOk) return true;
     const ua = this._nav && this._nav.userActivation;
@@ -101,7 +122,7 @@ export class Sound {
   _snapshot(gesture = false) {
     const m = this.music, s = this.sfx;
     return {
-      on: this.on, held: this.held, activated: this._activated(gesture),
+      on: this.on, held: this.held, activated: this._activated(gesture), musicPart: this.musicOn, sfxPart: this.sfxOn,
       musicAvailable: !!(m && m.available), musicOn: !!(m && m.on), musicPaused: !!(m && m.paused),
       musicLoading: !!(m && m.loading), musicBlocked: this.musicBlocked,
       audioPaused: !!(m && m.audio && m.audio.paused),
@@ -147,7 +168,7 @@ export class Sound {
     p.then((ok) => {
       this._pending--;
       const m = this.music;
-      if (ok === false) this.musicBlocked = !!(this.on && m && m.lastError === 'NotAllowedError');
+      if (ok === false) this.musicBlocked = !!(this.wantMusic && m && m.lastError === 'NotAllowedError');
       else if (ok === true) {
         this.musicBlocked = false;
         if (!gesture && !this._activated(false)) { this._autoplayOk = true; this.restore(false); return; }
@@ -183,13 +204,40 @@ export class Sound {
         if (u.searchParams.has('sound')) { u.searchParams.delete('sound'); history.replaceState(history.state, '', u); }
       }
     } catch (e) {}
-    if (this.music) this.music.wantOn = this.on;
-    if (this.sfx) this.sfx.setEnabled(this.on);
-    if (this.held) { if (!this.on && this.music) this.music.stop(); this.render(); return; } // 정지 중: 선택만 저장, 재개 때 재생
+    if (this.music) this.music.wantOn = this.wantMusic;
+    if (this.sfx) this.sfx.setEnabled(this.wantSfx);
+    if (this.held) { if (!this.wantMusic && this.music) this.music.stop(); this.render(); return; } // 정지 중: 선택만 저장, 재개 때 재생
     if (this.on) {
+      if (!this.musicOn && this.music) this.music.stop();
       this.restore(true);
-      if (this.sfx) this.sfx.play('chime', { priority: 0 });
+      if (this.sfx && this.sfxOn) this.sfx.play('chime', { priority: 0 });
     } else if (this.music) this.music.stop();
+    this.render();
+  }
+
+  /** 팝업 '음악' 켬/끔(저장). 끄면 배경음악만 페이드 아웃, 효과음은 그대로. 마스터가 꺼져 있으면 선택만 저장 */
+  setMusicOn(on) {
+    on = !!on;
+    if (on === this.musicOn) { this.render(); return; }
+    this.musicOn = on;
+    saveSoundParts(this._storage, { music: this.musicOn, sfx: this.sfxOn });
+    if (this.music) this.music.wantOn = this.wantMusic;
+    if (!on) { this.musicBlocked = false; if (this.music) this.music.stop(); }
+    else if (this.on && !this.held) this.restore(true);
+    this.render();
+  }
+
+  /** 팝업 '효과음' 켬/끔(저장). 음악은 그대로 */
+  setSfxOn(on) {
+    on = !!on;
+    if (on === this.sfxOn) { this.render(); return; }
+    this.sfxOn = on;
+    saveSoundParts(this._storage, { music: this.musicOn, sfx: this.sfxOn });
+    if (!on) { if (this.sfx) this.sfx.setEnabled(false); }
+    else if (this.on && !this.held) {
+      this.restore(true); // 사용자 동작 안: 컨텍스트 만들고 resume
+      if (this.sfx) this.sfx.play('chime', { priority: 0 });
+    }
     this.render();
   }
 
@@ -205,6 +253,7 @@ export class Sound {
     if (s && typeof s.setHold === 'function') s.setHold(on);
     if (on) { if (m && typeof m.pause === 'function') m.pause(); }
     else if (this.on) {
+      if (m && m.paused && m.on && !this.musicOn) { m.paused = false; m.stop(); } // 정지 중에 음악을 껐다(보통은 setMusicOn 이 이미 멈춤)
       if (m && m.paused && m.on) {
         const p = m.resume();
         if (p && typeof p.then === 'function') p.then((ok) => { if (ok === false) this.restore(false); else this.render(); }, () => {});
@@ -221,7 +270,7 @@ export class Sound {
     const b = this.button;
     if (!b) return;
     const noMusic = !!(this.music && this.music.available === false && this.music._probed);
-    const l = soundLabel(st, { noMusic });
+    const l = soundLabel(st, { noMusic, musicOff: this.on && !this.musicOn && !noMusic, sfxOff: this.on && !this.sfxOn });
     b.textContent = l.text;
     b.title = l.title;
     b.setAttribute('aria-pressed', String(this.on));

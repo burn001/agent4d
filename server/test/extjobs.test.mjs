@@ -80,6 +80,7 @@ test('등록부: 로그 증분 · 진행 n/N 과 ix(i/N) · 진행 줄 없는 �
     assert.equal(F.progress, null);
     // 진행 줄 두 개(1분 간격) — 증분으로 읽고 처리율·남은 시간
     fs.appendFileSync(log, '  12:02:51 [DAILY] 판 갈래 — 쌍 84/125,712 완료\r\n' + SAMPLE_LINE + '\r\n');
+    { const m = new Date(); m.setHours(12, 10, 0, 0); fs.utimesSync(log, m, m); } // 줄 시각(12:0x)이 로그 수정 시각보다 1분 넘게 늦으면 버려지므로 벽시계에 따라 깨지지 않게 고정
     now += 5000; reg.refresh();
     assert.deepEqual(F.progress, { n: 2538, total: 125712 });
     const vF = extJobView(F, now);

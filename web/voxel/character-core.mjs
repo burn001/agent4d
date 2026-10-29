@@ -121,7 +121,9 @@ export class Character {
         this.leaveAfter = now + (this.forceLeave ? 0.15 : st === 'error' ? 2.0 : 0.6) / Math.min(4, Math.max(1, ts));
         if (st === 'error') { this.errUntil = now + 2; ctx.onError && ctx.onError(this); }
       }
-      if (now >= this.leaveAfter) this._startLeave(ctx);
+      // '완료 표시' 끔: 퇴장 대상이 아직 아니면(문제 있는 끝의 문턱 전·일하는 하위) 자리에 남는다 — 판정은 뷰가 exitEligible 로(ctx.held)
+      const held = !this.forceLeave && ctx.held && ctx.held.has(this.id);
+      if (now >= this.leaveAfter && !held) this._startLeave(ctx);
     } else if (!ended && (this.state === 'leave' || this.endAt != null)) {
       // 재개: 퇴장 취소
       this.endAt = null;
@@ -156,7 +158,12 @@ export class Character {
 
   _decide(ctx) {
     this.sup = null;
-    if (this.endAt != null) return; // 끝남: 하던 자리에서 마무리 후 퇴장
+    if (this.endAt != null) { // 끝남: 하던 자리에서 마무리 후 퇴장
+      // 끝난 채 붙잡혀 있는데(오류 잠깐· 완료 표시 끔) 재배치로 자리를 옮겼으면(target 비움) 새 자리로 걸어간다
+      // 예전엔 옛 책상에 그대로 서 있어 그 책상을 새로 받은 직원과 한 점에 겹쳤다
+      if (!this.target && this.seat && (this.state === 'seated' || this.state === 'work')) this._goTo({ key: 'desk:' + this.seat.x.toFixed(2) + ',' + this.seat.z.toFixed(2), type: 'desk', spot: this.seat, cat: null, toolId: null }, ctx);
+      return;
+    }
     const now = ctx.now;
     // 의뢰인 창구: 팀장이 스크린 앞으로(보고·질문) — 도구보다 먼저
     if (this.errand && this.errand.until > now && ctx.room) {
@@ -185,9 +192,10 @@ export class Character {
       const d = breakDecision({ lead: this.lead, status: ctx.clockMs != null ? runVisStatus(this.node, ctx.clockMs) : this.node.status, idleFor: now - this.lastBusy, hash: this.hash, ts: ctx.ts || 1, now, breakUntil: this.breakUntil, cooldownUntil: this.cooldownUntil, onBreak });
       if (d === 'go' || d === 'stay') {
         if (!onBreak) {
+          // 탕비실 자리(슬롯)는 시설 예약과 같은 장부 — 하던 시설 자리를 먼저 돌려주고 잡는다. 다 차면 null → 자리에서 대기 동작
+          ctx.releaseStation(this);
           const sp = ctx.breakSpot(this);
           if (sp) {
-            ctx.releaseStation(this);
             const sq = Math.max(1, Math.sqrt(ctx.ts || 1));
             if (!this.lead) { this.breakUntil = now + BREAK.STAFF_DUR / sq; this.cooldownUntil = now + BREAK.COOLDOWN; }
             else { this.breakUntil = now + BREAK.LEAD_DUR / sq; this.cooldownUntil = now + BREAK.LEAD_COOLDOWN; } // 한 번 다녀오면 긴 쿨다운
@@ -253,6 +261,8 @@ export class Character {
     const fromVisit = this.target && this.target.type === 'visit';
     this.target = want;
     this.workCat = null;
+    // 이미 그 자리에 서 있으면(처음 배치 직후 등) 바로 도착 — 예전엔 자리 → 책상 옆 → 통로 → 자리로 책상을 한 바퀴 돌았다
+    if (this.state !== 'enter' && Math.abs(this.pos.x - b.x) < 1e-3 && Math.abs(this.pos.z - b.z) < 1e-3) { this.snapNext = false; this._arrive(b, now); return; }
     // 라운지 방문: 방 안 → 문 → 문 밖 → 라운지 자리, 돌아올 때는 거꾸로(라운지는 방 밖이라 방 경계로 자르지 않음)
     const door = ctx.room && ctx.room.door;
     let path;
@@ -316,7 +326,9 @@ export class Character {
       const q = this.path[this.pi];
       const dx = q.x - this.pos.x, dz = q.z - this.pos.z;
       const d = Math.hypot(dx, dz);
-      if (d <= step) { this.pos.x = q.x; this.pos.z = q.z; step -= d; this.pi++; }
+      // 밀어내기(crowd-core separate)로 길에서 비켜난 사람은 꺾이는 점 가까이서 다음 조각으로(모서리를 조금 질러 감)
+      if (this.nudged && d < 0.45 && this.pi < this.path.length - 1) { this.pi++; this.nudged = false; continue; }
+      if (d <= step) { this.pos.x = q.x; this.pos.z = q.z; step -= d; this.pi++; this.nudged = false; }
       else { this.pos.x += (dx / d) * step; this.pos.z += (dz / d) * step; step = 0; }
     }
     if (this.pi >= this.path.length) {
@@ -336,8 +348,10 @@ export class Character {
   }
 
   /** 카메라가 볼 점(머리 쪽) — 스탠딩 데스크라 늘 선 키 */
-  headY() { return 1.55; }
+  headY() { return 1.55 + (this.headExtra || 0); } // 키·머리 장식 보정(외형이 정해지면 office _look 이 채움)
   /** 자기 책상 앞에 서 있나(홀로그램 모니터를 펼칠 자리) */
+  /** 가는 자리(걷는 중이면 도착할 자리, 아니면 지금 자리): 목표가 책상이면 자기 좌석, 그 밖(작업대·라운지·감독)은 그 자리, 목표 없음·등장 중·퇴장 중이면 좌석 → 없으면 지금 위치 */
+  goalSpot() { if (this.state === 'leave' || this.state === 'gone') return this.seat || this.pos; /* 퇴장: 문으로 가는 걸음은 구도를 넓히지 않음(자리에서 사라지는 것으로) */ const t = this.target; const b = t ? (t.type === 'desk' ? this.seat : t.spot) : this.seat; return b || this.pos; }
   atDesk() { return (this.state === 'seated' || this.state === 'work') && !!this.target && this.target.type === 'desk'; }
 }
 

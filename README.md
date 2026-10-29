@@ -2,6 +2,8 @@
 
 **Agent4D — your coding agents in 3D space + time**
 
+*Visual Companion for Lonely Vibecoders*
+
 [![GitHub stars](https://img.shields.io/github/stars/burn001/agent4d?style=social)](https://github.com/burn001/agent4d/stargazers) [![version](https://img.shields.io/github/v/release/burn001/agent4d?label=version)](CHANGELOG.md) [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 **English** (canonical) · [한국어](README.ko.md)
@@ -96,7 +98,6 @@ The server tails the transcripts that Claude Code already writes under `~/.claud
 - **You, in the scene.** Each main agent has a small **user console** (Flow: a terminal above the island; Planet: a ground station; Voxel Office: the client screen on the office wall). It always shows the first words of your last message and where things stand ("Main working · 2m", "Answered 5m ago", "Question for you · 3 options"). A gold beam carries each message to the main agent and the answer flies back. Hover it for a summary, click it for a card with your recent messages, a pending question and the last final answer. When you send a prompt, the camera moves to the main agent that receives it (⚙ **Follow my prompts**, on by default; skipped while you steer the camera).
 - **Live tool activity.** Panels next to each node show the current tool (shell, read, edit, search, web, agent, skill…) and a one-line summary. A collapsible side panel shows a live text feed.
 - **Replay.** Play past or running sessions from the start at 0.5×–32×, with idle gaps compressed, a scrubbable timeline, highlight markers and continuous playback. An optional read-only **archive** folder keeps transcripts around for replay after the originals are gone (`agent4d archive add`).
-- **Plan board** (off by default). TodoWrite and task lists, plan-mode text and Markdown checklists appear as one small board pinned in the world next to the runner when there is one, otherwise next to the main agent. The board is as wide as a tool hologram and 1.5 times as tall, with a single line back to its anchor.
 - **Gauges.** A per-session **context usage** gauge, with an optional "signal degradation" effect (grain, scanlines, glitches) as the context fills up, and an opt-in **usage-limit** gauge for the 5-hour and 7-day windows.
 - **Sound** (off until you turn it on). 12 background tracks synthesized from code, plus sound effects synthesized live in the browser.
 - **Languages.** The web UI and the CLI are in English by default and switch to Korean on a Korean locale. Both can be forced (see [FAQ](#faq-and-troubleshooting)).
@@ -128,7 +129,7 @@ Agent4D reads **Claude Code** today. Adapters for other agent harnesses are welc
 git clone https://github.com/burn001/agent4d.git
 cd agent4d
 # optional: background music (see below)
-gh release download v0.1.0 --pattern "*.mp3" --dir web/assets
+gh release download --pattern "*.mp3" --dir web/assets
 ```
 
 [Quick start](#quick-start) is enough to run it; the music download is optional. `bin/agent4d` (sh) and `bin/agent4d.cmd` (Windows) are thin wrappers around `node bin/agent4d.mjs`; put `bin/` on your `PATH` if you want to type `agent4d`. The old name still works: `ccviz` (`bin/ccviz`, `bin/ccviz.cmd`, `bin/ccviz.mjs`) is an alias.
@@ -194,14 +195,14 @@ To turn the check off, set `"updateCheck": false` in `config.json` or the enviro
 
 ## Background music
 
-The 12 tracks (`bgm.mp3`, `bgm-lofi.mp3`, `bgm-jazz.mp3`, `bgm-city.mp3`, `bgm-chillhop.mp3`, `bgm-dawn.mp3`, `bgm-deephouse.mp3`, `bgm-drive.mp3`, `bgm-funk.mp3`, `bgm-liquid.mp3`, `bgm-orbit.mp3`, `bgm-uplift.mp3`; about 4.6 MB each) are attached to the [v0.1.0 release](https://github.com/burn001/agent4d/releases/tag/v0.1.0) rather than stored in the repository. Put them in `web/assets/`. Without them the viewer works fine, just without music (sound effects still play).
+The 22 tracks (`bgm.mp3`, `bgm-bossa.mp3`, `bgm-caper.mp3`, `bgm-chillhop.mp3`, `bgm-circuit.mp3`, `bgm-city.mp3`, `bgm-dawn.mp3`, `bgm-deephouse.mp3`, `bgm-drive.mp3`, `bgm-funk.mp3`, `bgm-jazz.mp3`, `bgm-liquid.mp3`, `bgm-lofi.mp3`, `bgm-nebula.mp3`, `bgm-orbit.mp3`, `bgm-overclock.mp3`, `bgm-pulsar.mp3`, `bgm-pulse.mp3`, `bgm-stardust.mp3`, `bgm-swing.mp3`, `bgm-uplift.mp3`, `bgm-warp.mp3`; about 4.6 MB each) are attached to the [latest release](https://github.com/burn001/agent4d/releases/latest) rather than stored in the repository. Put them in `web/assets/`. Without them the viewer works fine, just without music (sound effects still play).
 
 ```bash
-# with the GitHub CLI, inside the clone
-gh release download v0.1.0 --pattern "*.mp3" --dir web/assets
+# with the GitHub CLI, inside the clone (latest release)
+gh release download --pattern "*.mp3" --dir web/assets
 
 # or with curl, one file at a time
-curl -L -o web/assets/bgm-lofi.mp3 https://github.com/burn001/agent4d/releases/download/v0.1.0/bgm-lofi.mp3
+curl -L -o web/assets/bgm-lofi.mp3 https://github.com/burn001/agent4d/releases/latest/download/bgm-lofi.mp3
 ```
 
 You can also generate them yourself. Output is deterministic; each track takes about 2–4 minutes and up to 1.5 GB of RAM.

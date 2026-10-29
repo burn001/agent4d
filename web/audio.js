@@ -69,6 +69,7 @@ export class Music {
     // 자동 선곡: 단계 시계는 시각화 일시정지 동안 멈춘다(_autoT), 탭이 쉬던 시간은 한 번에 5초까지만 센다
     this.picker = new AutoPicker();
     this.autoLevel = null;
+    this.view = null; // 지금 표현(flow·planet·voxel) — 자동 선곡·곡 목록을 그 테마 풀로(setView)
     this.metrics = null;
     this._activity = null;
     this._autoT = 0;
@@ -119,7 +120,7 @@ export class Music {
   _renderSelect() {
     const s = this.selEl;
     if (!s) return;
-    const opts = optionList(this.tracks);
+    const opts = optionList(this.tracks, this.view);
     if (s.options.length !== opts.length || [...s.options].some((o, i) => o.value !== opts[i].value)) {
       s.textContent = '';
       let grp = null; // 단계별 묶음(optgroup)
@@ -185,7 +186,7 @@ export class Music {
   }
 
   _firstId() {
-    if (this.sel === 'auto' && this.autoLevel != null) return pickForLevel(this.autoLevel, this.tracks, { recent: this._recent });
+    if (this.sel === 'auto' && this.autoLevel != null) return pickForLevel(this.autoLevel, this.tracks, { recent: this._recent, view: this.view });
     return firstTrack(this.sel, this.tracks, lsGet(LAST_KEY), this.def);
   }
 
@@ -195,6 +196,22 @@ export class Music {
     if (typeof isHeld === 'function') this._isHeld = isHeld; // 시각화 일시정지 여부(소리가 꺼져 있어도 단계 시계를 멈추려고)
     if (!this._autoTimer && this._activity) this._autoTimer = setInterval(() => this._autoTick(), AUTO_TICK_MS);
     this._autoTick(true);
+  }
+
+  /**
+   * 지금 표현(테마)을 알림(app.js 가 처음·표현 바꿀 때). 자동이고 지금 곡이 새 테마의 그 단계 풀에 없으면
+   * 바로 그 테마 곡으로 크로스페이드(kind 'auto'). 수동 선택·순환·무작위는 곡을 그대로 두고 목록 순서만 바뀐다
+   */
+  setView(v) {
+    v = typeof v === 'string' ? v : null;
+    if (v === this.view) return;
+    this.view = v;
+    if (this.sel === 'auto' && this.autoLevel != null && this._probed && this.available && !this.loading && !this._autoWant) {
+      const want = pickForLevel(this.autoLevel, this.tracks, { recent: this._recent, cur: this.cur, keep: true, view: this.view });
+      if (want && want !== this.cur) { this._autoWant = want; this._switchTo(want, { kind: 'auto' }); return; }
+    }
+    this._renderSelect();
+    this._changed();
   }
 
   /** 시험용: 히스테리시스 시간 바꾸기({up, down, minHold} 밀리초) */
@@ -216,7 +233,7 @@ export class Music {
     if (this.sel !== 'auto' || !this._probed || !this.available) { if (prev !== this.autoLevel) this._renderSelect(); return; }
     if (this.loading) { if (prev !== this.autoLevel) this._renderSelect(); return; } // 켜는 중(play 대기)에 src 를 바꾸면 play() 가 AbortError — 다음 틱에
     // 지금 곡이 새 단계 후보에 있으면 그대로(여러 단계 겸용 곡), 없으면 그 단계 곡 중 직전 2곡을 피해 무작위
-    const want = this._autoWant ? null : pickForLevel(this.autoLevel, this.tracks, { recent: this._recent, cur: this.cur, keep: true });
+    const want = this._autoWant ? null : pickForLevel(this.autoLevel, this.tracks, { recent: this._recent, cur: this.cur, keep: true, view: this.view });
     if (want && want !== this.cur) { this._autoWant = want; this._switchTo(want, { kind: 'auto' }); }
     else if (prev !== this.autoLevel) this._renderSelect();
   }
@@ -309,7 +326,7 @@ export class Music {
     lsSet(TRACK_KEY, sel);
     lsSet(MIG_KEY, '2');
     for (const d of this.decks) d.el.loop = loopFor(sel);
-    const autoId = sel === 'auto' && this.autoLevel != null ? pickForLevel(this.autoLevel, this.tracks, { recent: this._recent, cur: this.cur, keep: true }) : null;
+    const autoId = sel === 'auto' && this.autoLevel != null ? pickForLevel(this.autoLevel, this.tracks, { recent: this._recent, cur: this.cur, keep: true, view: this.view }) : null;
     if (autoId && autoId !== this.cur) this._switchTo(autoId, { kind: 'manual' });
     else if (!isMode(sel) && sel !== this.cur) this._switchTo(sel, { kind: 'manual' });
     else this._renderSelect(); // 순환·무작위: 지금 곡은 그대로 두고 끝나면 다음 곡
@@ -319,7 +336,7 @@ export class Music {
   /** 곡이 끝난 뒤 다음 곡 id(자동: 같은 단계의 다른 곡, 하나뿐이면 같은 곡 — 다른 덱에서 처음부터) */
   _nextAfterEnd() {
     if (!isMode(this.sel)) return null;
-    if (this.sel === 'auto') return pickForLevel(this.autoLevel != null ? this.autoLevel : 1, this.tracks, { recent: this._recent, cur: this.cur });
+    if (this.sel === 'auto') return pickForLevel(this.autoLevel != null ? this.autoLevel : 1, this.tracks, { recent: this._recent, cur: this.cur, view: this.view });
     return nextTrack(this.sel, this.tracks, this.cur);
   }
 

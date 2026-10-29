@@ -1,12 +1,11 @@
-// 계획 보드: 계획 출처 정규화(TodoWrite·Task·ExitPlanMode·체크박스 md·단계 설계서·셸 grep·Workflow phases) →
-// 소유 노드 meta.plans. 러너 아래 회차가 만진 단계 설계서는 러너의 계획 + 항목마다 처리한 회차.
+// 자율 루프 판: 단계 설계서·셸 grep → 러너 meta.plans(일반 계획판 출처는 폐기). 러너 아래 회차가 만진 단계 설계서는 러너의 계획 + 항목마다 처리한 회차.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { Graph } from '../graph.mjs';
-import { PlanTracker, planStart, parsePlanMarkdown, phaseStatus, workflowPhases, planTitleOf, normStatus, PLAN } from '../plans.mjs';
+import { PlanTracker, planStart, parsePlanMarkdown, phaseStatus, planTitleOf, normStatus, PLAN } from '../plans.mjs';
 import { SessionIndex } from '../discovery.mjs';
 import { RootRuntime } from '../session.mjs';
 import { LauncherIndex } from '../launcher.mjs';
@@ -22,7 +21,22 @@ const DESIGN = (st) => `# 축 설계
 **단계 2 상태**: ${st[2]}
 `;
 
-test('파서: 단계 설계서·체크박스·ExitPlanMode 느슨한 목록·Workflow phases·상태 매핑·제목', () => {
+function tree(privacy = 'summary') {
+  const g = new Graph({ rootSessionId: 'm', privacy, keepAll: true, localSeq: true });
+  const T = (s) => new Date(Date.UTC(2026, 9, 24, 0, 0, s)).toISOString();
+  g.addNode({ id: 's:m', kind: 'main', label: '메인' }, T(0));
+  g.addNode({ id: 'a:sub', parentId: 's:m', kind: 'subagent', label: '서브' }, T(1));
+  g.addNode({ id: 'b:L', parentId: 's:m', kind: 'bash-bg', label: '기동기 · relaunch.sh', meta: { launcher: { script: 'relaunch.sh', via: ['relaunch.sh', 'autopilot.sh'] } } }, T(2));
+  g.addNode({ id: 'b:L-r1', parentId: 'b:L', kind: 'bash-bg', label: '러너 · autopilot.sh', meta: { runner: { script: 'autopilot.sh', instance: 1, launcher: 'b:L' } } }, T(3));
+  g.addNode({ id: 's:c2', parentId: 'b:L-r1', kind: 'claude-p', label: '회차 2', meta: { cycle: 2 } }, T(4));
+  g.addNode({ id: 's:c3', parentId: 'b:L-r1', kind: 'claude-p', label: '회차 3', meta: { cycle: 3 } }, T(5));
+  g.addNode({ id: 'a:c3sub', parentId: 's:c3', kind: 'subagent', label: '회차 3 서브' }, T(6));
+  return { g, T, plans: (id) => g.get(id).meta.plans };
+}
+const run = (pt, name, input, nodeId, ts, tur = {}, ok = true, cwd = 'D:/r') => pt.end(planStart(name, input, { cwd }), { ok, tur, nodeId, ts });
+
+
+test('파서: 단계 설계서·상태 매핑·제목(체크박스·느슨한 목록 파서는 단계 설계서 일부 판정에 남음)', () => {
   const d = parsePlanMarkdown(DESIGN(['✅ **닫힘**(2026-10-24)', '◑ 미착지', '⏸ 외부 대기']));
   assert.equal(d.kind, 'phases');
   assert.equal(d.title, '축 설계');
@@ -38,93 +52,9 @@ test('파서: 단계 설계서·체크박스·ExitPlanMode 느슨한 목록·Wor
   assert.deepEqual(lp.items.map((x) => x.t), ['서버', '웹', '시험']);
   const hp = parsePlanMarkdown('# 계획\n## 요약\n## 서버 바꾸기\n## 웹 바꾸기', { loose: true });
   assert.deepEqual(hp.items.map((x) => x.t), ['서버 바꾸기', '웹 바꾸기'], '요약 같은 절 제목은 빼고 나머지 ## 제목');
-  assert.deepEqual(workflowPhases("export const meta = { name: 'x', phases: [ { title: 'Design', detail: 'a [b]' }, { title: \"Build\" }, { title: `Ship` } ] }; phase('Design')"), ['Design', 'Build', 'Ship']);
-  assert.deepEqual(workflowPhases('no phases'), []);
   assert.equal(planTitleOf('D:\\Works\\26.10.23 시각화\\_STATUS.md'), '26.10.23 시각화/_STATUS.md');
   assert.equal(planTitleOf('/r/docs/plans/2026-10-24-x-execution-design.md'), '2026-10-24-x-execution-design.md');
   assert.equal(normStatus('completed'), 'done'); assert.equal(normStatus('in_progress'), 'in_progress'); assert.equal(normStatus('?'), 'pending');
-});
-
-test('planStart: 출처별 서술자(md 만 파일 계획, 셸은 md 경로를 든 명령만, 쓰는 명령 표지)', () => {
-  assert.equal(planStart('TodoWrite', { todos: [{ content: 'a', status: 'completed' }, { content: 'b', status: 'in_progress', activeForm: 'b 중' }] }).items.length, 2);
-  assert.deepEqual(planStart('TaskUpdate', { taskId: 3, status: 'completed' }), { src: 'tasks', op: 'update', id: '3', s: 'completed', t: null });
-  assert.equal(planStart('ExitPlanMode', { plan: '# P\n1. a\n2. b' }).parsed.items.length, 2);
-  assert.equal(planStart('Write', { file_path: 'src/a.js', content: '- [ ] a\n- [ ] b' }), null);
-  const w = planStart('Write', { file_path: 'docs/plan.md', content: '- [ ] a\n- [ ] b' }, { cwd: 'D:\\r' });
-  assert.equal(w.key, 'd:/r/docs/plan.md'); assert.equal(w.base, 'docs/plan.md');
-  assert.equal(planStart('Edit', { file_path: '/d/R/docs/x.md', old_string: 'a', new_string: 'b' }).key, 'd:/r/docs/x.md');
-  const sh = planStart('Bash', { command: "grep -n '단계 . 상태' docs/plans/x-design.md" }, { cwd: '/d/r' });
-  assert.equal(sh.src, 'shell'); assert.equal(sh.writes, false); assert.equal(sh.files[0].key, 'd:/r/docs/plans/x-design.md');
-  assert.equal(planStart('Bash', { command: "python3 - <<'EOF'\np='docs/x.md'\nEOF" }).writes, true);
-  assert.equal(planStart('Bash', { command: 'ls -la' }), null);
-  assert.equal(planStart('Workflow', { script: "meta={phases:[{title:'A'}]}" }).phases[0], 'A');
-});
-
-/** 메인 → 서브에이전트, 메인 → 기동기 → 러너 → 회차(cycle 2·3) → 회차 안 서브에이전트 */
-function tree(privacy = 'summary') {
-  const g = new Graph({ rootSessionId: 'm', privacy, keepAll: true, localSeq: true });
-  const T = (s) => new Date(Date.UTC(2026, 9, 24, 0, 0, s)).toISOString();
-  g.addNode({ id: 's:m', kind: 'main', label: '메인' }, T(0));
-  g.addNode({ id: 'a:sub', parentId: 's:m', kind: 'subagent', label: '서브' }, T(1));
-  g.addNode({ id: 'b:L', parentId: 's:m', kind: 'bash-bg', label: '기동기 · relaunch.sh', meta: { launcher: { script: 'relaunch.sh', via: ['relaunch.sh', 'autopilot.sh'] } } }, T(2));
-  g.addNode({ id: 'b:L-r1', parentId: 'b:L', kind: 'bash-bg', label: '러너 · autopilot.sh', meta: { runner: { script: 'autopilot.sh', instance: 1, launcher: 'b:L' } } }, T(3));
-  g.addNode({ id: 's:c2', parentId: 'b:L-r1', kind: 'claude-p', label: '회차 2', meta: { cycle: 2 } }, T(4));
-  g.addNode({ id: 's:c3', parentId: 'b:L-r1', kind: 'claude-p', label: '회차 3', meta: { cycle: 3 } }, T(5));
-  g.addNode({ id: 'a:c3sub', parentId: 's:c3', kind: 'subagent', label: '회차 3 서브' }, T(6));
-  return { g, T, plans: (id) => g.get(id).meta.plans };
-}
-const run = (pt, name, input, nodeId, ts, tur = {}, ok = true, cwd = 'D:/r') => pt.end(planStart(name, input, { cwd }), { ok, tur, nodeId, ts });
-
-test('PlanTracker: TodoWrite 전이(처리 시각·노드 유지)·Task 만들기/고치기/지우기·ExitPlanMode·실패 무시·node-update 로 냄', () => {
-  const { g, T, plans } = tree();
-  const pt = new PlanTracker({ graph: g });
-  run(pt, 'TodoWrite', { todos: [{ content: '서버', status: 'in_progress' }, { content: '웹', status: 'pending' }] }, 's:m', T(10));
-  let p = plans('s:m')[0];
-  assert.equal(p.src, 'todo'); assert.deepEqual(p.items.map((x) => x.s), ['in_progress', 'pending']);
-  run(pt, 'TodoWrite', { todos: [{ content: '서버', status: 'completed' }, { content: '웹', status: 'in_progress' }, { content: '시험', status: 'pending' }] }, 's:m', T(20));
-  p = plans('s:m')[0];
-  assert.deepEqual(p.items.map((x) => [x.s, x.at]), [['done', Date.parse(T(20))], ['in_progress', Date.parse(T(20))], ['pending', Date.parse(T(20))]]);
-  run(pt, 'TodoWrite', { todos: [{ content: '서버', status: 'completed' }, { content: '웹', status: 'in_progress' }] }, 's:m', T(30));
-  p = plans('s:m')[0];
-  assert.equal(p.items.length, 2, '빠진 항목은 지움');
-  assert.equal(p.items[0].at, Date.parse(T(20)), '상태 그대로면 처리 시각 유지');
-  const ups = g.ring.filter((e) => e.type === 'node-update' && e.patch?.meta && 'plans' in e.patch.meta);
-  assert.equal(ups.length, 3, '바뀔 때만 node-update');
-  run(pt, 'TodoWrite', { todos: [{ content: 'x', status: 'pending' }] }, 's:m', T(31), {}, false);
-  assert.equal(plans('s:m')[0].items.length, 2, '실패한 호출은 무시');
-  // Task 계열
-  run(pt, 'TaskCreate', { subject: '보드 그리기' }, 'a:sub', T(40), { task: { id: '7' } });
-  run(pt, 'TaskCreate', { subject: '팝업' }, 'a:sub', T(41), { task: { id: '8' } });
-  run(pt, 'TaskUpdate', { taskId: '7', status: 'in_progress' }, 'a:sub', T(42));
-  run(pt, 'TaskUpdate', { taskId: '7', status: 'completed' }, 's:m', T(43));
-  run(pt, 'TaskUpdate', { taskId: '8', status: 'deleted' }, 'a:sub', T(44));
-  const tp = plans('a:sub')[0];
-  assert.equal(tp.src, 'tasks');
-  assert.deepEqual(tp.items.map((x) => [x.t, x.s, x.by]), [['보드 그리기', 'done', 's:m']], '다른 노드가 고쳐도 같은 목록(주인은 만든 노드)');
-  run(pt, 'ExitPlanMode', { plan: '# 계획 보드\n1. 서버 모델\n2. 웹 보드\n3. 시험' }, 's:m', T(50));
-  const ep = plans('s:m').find((x) => x.src === 'exitplan');
-  assert.equal(ep.title, '계획 보드'); assert.equal(ep.items.length, 3);
-  assert.ok(plans('s:m').length <= PLAN.PER_NODE);
-});
-
-test('체크박스 md: Write → Edit(기억한 본문에 적용) → 본문 모르는 Edit 은 바뀐 줄만, 주인은 트리 위쪽, 읽기만으로는 안 만듦', () => {
-  const { g, T, plans } = tree();
-  const pt = new PlanTracker({ graph: g });
-  run(pt, 'Read', { file_path: 'D:/r/notes/todo-list.md' }, 's:m', T(5), { file: { content: '- [ ] a\n- [ ] b', numLines: 2, startLine: 1, totalLines: 2 } });
-  assert.equal(plans('s:m'), undefined, '읽기만으로는 계획을 만들지 않음');
-  run(pt, 'Write', { file_path: 'D:/r/work/_STATUS.md', content: '# 작업\n## 남은 작업\n- [ ] 서버\n- [ ] 웹\n- [ ] 시험' }, 'a:sub', T(10));
-  assert.equal(plans('a:sub')[0].title, 'work/_STATUS.md');
-  run(pt, 'Edit', { file_path: 'D:/r/work/_STATUS.md', old_string: '- [ ] 서버', new_string: '- [x] 서버' }, 's:m', T(20));
-  assert.equal(plans('a:sub'), null, '메인이 만지면 메인 계획으로 옮김(트리 위쪽)');
-  let p = plans('s:m')[0];
-  assert.deepEqual(p.items.map((x) => x.s), ['done', 'pending', 'pending']);
-  assert.equal(p.items[0].by, 's:m');
-  pt.docs.clear(); // 본문을 모름(긴 세션 LRU 밀림 등)
-  run(pt, 'Edit', { file_path: 'D:/r/work/_STATUS.md', old_string: '- [ ] 웹', new_string: '- [x] 웹\n- [ ] 문서' }, 's:m', T(30));
-  p = plans('s:m')[0];
-  assert.deepEqual(p.items.map((x) => [x.t, x.s]), [['서버', 'done'], ['웹', 'done'], ['시험', 'pending'], ['문서', 'pending']]);
-  run(pt, 'Write', { file_path: 'D:/r/work/_STATUS.md', content: '체크박스 없음' }, 's:m', T(40));
-  assert.equal(plans('s:m'), null, '체크박스가 없어지면 계획도 없앰');
 });
 
 test('러너: 회차가 읽은 단계 설계서 = 러너의 계획, 항목마다 처리 회차, 셸 grep 으로 상태 갱신, 늦게 읽힌 옛 관찰은 새 상태를 못 덮음', () => {
@@ -150,79 +80,6 @@ test('러너: 회차가 읽은 단계 설계서 = 러너의 계획, 항목마다
   // 낸 시각은 줄지 않음(재생 정렬 뒤에도 마지막 계산이 마지막)
   const ts = g.ring.filter((e) => e.nodeId === 'b:L-r1' && e.patch?.meta?.plans !== undefined).map((e) => Date.parse(e.ts));
   assert.deepEqual(ts, [...ts].sort((a, b) => a - b));
-});
-
-test('Workflow: meta.phases → 단계, 에이전트가 들어간 단계까지 완료·지금 단계 진행, 끝나면 모두 완료(순서 무관)', () => {
-  const { g, T, plans } = tree();
-  g.addNode({ id: 'w:run1', parentId: 's:m', kind: 'workflow', label: 'viz-build' }, T(1));
-  const pt = new PlanTracker({ graph: g });
-  pt.workflowPhase('w:run1', 'Build', T(30)); // 저널이 Workflow 결과보다 먼저 읽힘
-  pt.workflowDefine('w:run1', ['Design', 'Build', 'Verify'], T(10));
-  assert.deepEqual(plans('w:run1')[0].items.map((x) => x.s), ['done', 'in_progress', 'pending']);
-  pt.workflowPhase('w:run1', 'design', T(12));
-  assert.deepEqual(plans('w:run1')[0].items.map((x) => x.s), ['done', 'in_progress', 'pending']);
-  pt.workflowEnd('w:run1', true, T(90));
-  assert.deepEqual(plans('w:run1')[0].items.map((x) => x.s), ['done', 'done', 'done']);
-  assert.equal(plans('w:run1')[0].title, 'viz-build');
-});
-
-test('minimal: 글·제목 없이 상태·수만, 비밀은 마스킹', () => {
-  const { g, T } = tree('minimal');
-  const pt = new PlanTracker({ graph: g });
-  run(pt, 'TodoWrite', { todos: [{ content: 'sk-ant-api03-SECRETSECRETSECRET 넣기', status: 'pending' }, { content: 'b', status: 'completed' }] }, 's:m', T(10));
-  const p = g.get('s:m').meta.plans[0];
-  assert.deepEqual(p.items.map((x) => [x.t, x.s]), [['', 'pending'], ['', 'done']]);
-  assert.equal(p.title, '');
-});
-
-test('라이브 = 재생: 합성 transcript(TodoWrite·체크박스 md·ExitPlanMode·실패 Edit) → 같은 최종 meta.plans', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ccviz-plan-'));
-  const prevTmp = process.env.CCVIZ_CLAUDE_TMP;
-  try {
-    const cwd = 'D:/work/planp';
-    const enc = (c) => c.replace(/[^A-Za-z0-9]/g, '-');
-    const SID = 'ffffffff-5555-4555-8555-ffffffffffff';
-    const projects = path.join(root, 'projects'), sessions = path.join(root, 'sessions');
-    const proj = path.join(projects, enc(cwd));
-    for (const d of [proj, sessions]) fs.mkdirSync(d, { recursive: true });
-    process.env.CCVIZ_CLAUDE_TMP = path.join(root, 'tmp');
-    const P = Date.now() - 2 * 86400_000, T = (s) => new Date(P + s * 1000).toISOString();
-    const base = { sessionId: SID, cwd, version: '2.1.309', entrypoint: 'cli' };
-    const A = (s, id, name, input) => ({ type: 'assistant', timestamp: T(s), ...base, message: { model: 'm', role: 'assistant', content: [{ type: 'tool_use', id, name, input }] } });
-    const R = (s, id, tur, err = false) => ({ type: 'user', timestamp: T(s), ...base, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'ok', is_error: err }] }, toolUseResult: tur });
-    const recs = [
-      { type: 'user', timestamp: T(0), ...base, origin: { kind: 'human' }, promptSource: 'user', message: { role: 'user', content: '계획 시험' } },
-      A(1, 't1', 'TodoWrite', { todos: [{ content: '모델', status: 'in_progress', activeForm: '모델 만드는 중' }, { content: '보드', status: 'pending' }] }), R(2, 't1', {}),
-      A(3, 'w1', 'Write', { file_path: 'D:/work/planp/PLAN.md', content: '# 계획\n- [ ] 서버\n- [ ] 웹' }), R(4, 'w1', { type: 'create' }),
-      A(5, 'e1', 'Edit', { file_path: 'PLAN.md', old_string: '- [ ] 서버', new_string: '- [x] 서버' }), R(6, 'e1', { structuredPatch: [] }),
-      A(7, 'e2', 'Edit', { file_path: 'PLAN.md', old_string: '- [ ] 웹', new_string: '- [x] 웹' }), R(8, 'e2', null, true),
-      A(9, 't2', 'TodoWrite', { todos: [{ content: '모델', status: 'completed' }, { content: '보드', status: 'in_progress' }] }), R(10, 't2', {}),
-      A(11, 'x1', 'ExitPlanMode', { plan: '# 다음\n1. 시험\n2. 문서' }), R(12, 'x1', {}),
-      { type: 'system', subtype: 'turn_duration', durationMs: 1000, timestamp: T(20), ...base },
-    ];
-    fs.writeFileSync(path.join(proj, `${SID}.jsonl`), recs.map((r) => JSON.stringify(r)).join('\n') + '\n');
-    const old = (P + 60_000) / 1000;
-    fs.utimesSync(path.join(proj, `${SID}.jsonl`), old, old);
-    const index = new SessionIndex({ projectsDir: projects, sessionsDir: sessions });
-    await index.refresh();
-    for (const e of index.entries.values()) e.birthtimeMs = e.mtimeMs;
-    const rt = new RootRuntime({ sessionId: SID, index });
-    await rt.start(); rt.close();
-    const live = rt.graph.get(`s:${SID}`).meta.plans;
-    const data = await buildReplay({ sessionId: SID, index });
-    let rep;
-    for (const x of data.events) { const e = x.e || x; if (e.nodeId === `s:${SID}` && e.type === 'node-update' && e.patch?.meta && 'plans' in e.patch.meta) rep = e.patch.meta.plans; }
-    const sig = (pl) => pl.map((p) => [p.src, p.title, p.items.map((i) => [i.t, i.s, i.at])]).sort();
-    assert.deepEqual(sig(rep), sig(live));
-    const byS = Object.fromEntries(live.map((p) => [p.src, p]));
-    assert.deepEqual(byS.todo.items.map((i) => [i.t, i.s]), [['모델', 'done'], ['보드', 'in_progress']]);
-    assert.deepEqual(byS.file.items.map((i) => [i.t, i.s]), [['서버', 'done'], ['웹', 'pending']], '실패한 Edit 은 반영 안 함');
-    assert.equal(byS.file.title, 'planp/PLAN.md');
-    assert.deepEqual(byS.exitplan.items.map((i) => i.t), ['시험', '문서']);
-  } finally {
-    if (prevTmp == null) delete process.env.CCVIZ_CLAUDE_TMP; else process.env.CCVIZ_CLAUDE_TMP = prevTmp;
-    try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
-  }
 });
 
 test('러너 실구조(합성 레포): 재기동기 → 러너 → 회차 Read·Edit → 러너 meta.plans + 회차 번호, 라이브·재생 같음', async () => {
@@ -289,22 +146,6 @@ test('러너 실구조(합성 레포): 재기동기 → 러너 → 회차 Read·
   } finally { try { fs.rmSync(root, { recursive: true, force: true }); } catch {} }
 });
 
-test('데모: 실제 PlanTracker 로 메인 할 일·워크플로 단계(진행 중 Build)를 내고 걸음마다 한 칸씩', async () => {
-  const { planDemoSeed, planDemoStep, PLAN_DEMO_TODOS } = await import('../plan-demo.mjs');
-  const g = new Graph({ rootSessionId: 'demo', keepAll: true, localSeq: true });
-  g.addNode({ id: 's:demo', kind: 'main', label: '데모' });
-  g.addNode({ id: 'w:wf_demo-001', parentId: 's:demo', kind: 'workflow', label: '빌드' });
-  const rt = { graph: g, sessionId: 'demo', N: (id) => id };
-  planDemoSeed(rt);
-  assert.deepEqual(g.get('w:wf_demo-001').meta.plans[0].items.map((x) => x.s), ['done', 'in_progress', 'pending', 'pending']);
-  let todo = g.get('s:demo').meta.plans[0];
-  assert.equal(todo.items.length, PLAN_DEMO_TODOS.length);
-  assert.equal(todo.items.filter((x) => x.s !== 'pending').length, 0);
-  planDemoStep(rt); planDemoStep(rt); planDemoStep(rt);
-  todo = g.get('s:demo').meta.plans[0];
-  assert.deepEqual(todo.items.slice(0, 2).map((x) => x.s), ['done', 'in_progress']);
-});
-
 test('단계 설계서 형식 넓힘: Phase N·1a·두 자리·표 줄·표식 없는 단계는 대기, 옛 **단계 N 상태** 그대로', () => {
   const en = parsePlanMarkdown('# Rollout\n## Phase 1 — Measure\n**Phase 1 status**: ✅ done\n## Phase 2: Build\n## Phase 10 — Ship\n### Phase 2.1 sub\n');
   assert.equal(en.kind, 'phases');
@@ -347,4 +188,15 @@ test('러너: 부분 관찰(앞부분 sed·부분 Read·여러 파일 명령의 
   // 머리 없는 줄을 받을 파일이 모호하면(설계서 이름이 둘) 버림
   run(pt, 'Bash', { command: 'grep -n "단계 . 상태" docs/plans/a-design.md && cat docs/plans/b-design.md' }, 's:c3', T(50), { stdout: '**단계 9 상태**: ✅' });
   assert.equal(plans('b:L-r1').length, 1);
+});
+
+test('§122 출처 폐기: TodoWrite·Task·ExitPlanMode·Workflow 는 계획이 아니고, 체크박스 md·러너 밖 단계 설계서도 계획을 만들지 않음', () => {
+  for (const [n, i] of [['TodoWrite', { todos: [{ content: 'a', status: 'pending' }] }], ['TaskCreate', { subject: 'x' }], ['ExitPlanMode', { plan: '1. a\n2. b' }], ['Workflow', { script: "phases: [{ title: 'A' }]" }]]) assert.equal(planStart(n, i), null, n);
+  const g = new Graph({ rootSessionId: 'S', localSeq: true });
+  g.addNode({ id: 's:m', parentId: null, kind: 'main', label: 'm', sessionId: 'S', meta: {} });
+  g.finishLoad();
+  const pt = new PlanTracker({ graph: g });
+  pt.end(planStart('Write', { file_path: 'D:/r/TODO.md', content: '- [ ] a\n- [ ] b\n' }), { ok: true, tur: null, nodeId: 's:m', ts: '2026-10-28T00:00:00Z' });
+  pt.end(planStart('Write', { file_path: 'D:/r/docs/x-execution-design.md', content: DESIGN(['✅', '◑', '◑']) }), { ok: true, tur: null, nodeId: 's:m', ts: '2026-10-28T00:00:01Z' });
+  assert.equal(g.get('s:m').meta.plans, undefined, '러너 밖에서는 계획 없음');
 });

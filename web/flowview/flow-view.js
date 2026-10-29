@@ -20,6 +20,11 @@ import { JOB_CHIP } from './job-chip-core.mjs'; // 작업 칩
 import { RIG, RigWatch, RigTicks, superviseText, supervisorSets } from './proc-rig-core.mjs'; // 분리 프로세스 장치
 import { ProcRigs } from './procrig.js';
 import { escapeHtml } from '../html-util.mjs';
+import { MainRigs } from './main-rigs.js'; // 메인 몸(반응로 코어 · 데이터 띠 기둥)
+import { TermFaces } from './term-faces.js'; // 네모 터미널 앞면 출력 글(가까울 때만)
+import { MAIN_RIG, mainLinkY } from './main-rig-core.mjs';
+import { SIL_DIM } from './shape-core.mjs';
+import { flowLegend } from './flow-legend.js';
 
 const CHIP_SCALE = 1.45;
 // 세운 배치 장치의 집기 상자(칩 배율 단위: 폭 2×1.45 · 높이 2×0.82 · 깊이 = 장치 두께 0.7) — 메시는 숨긴 채 raycast 에만 쓰고, 방위는 칩과 같게
@@ -72,6 +77,9 @@ export class FlowView extends SceneView {
     // 움직임 줄이기(빔 대시·패킷 흔들림·세운 장치/단말 돌기·단말 깜빡임). 예전엔 SceneView 에 없어 늘 undefined 였다(평면·복셀 표현과 같은 식으로 읽음)
     this.reduced = !!(typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches);
     this.chips = new NodeChips(this.scene, this);
+    this.mainRigs = new MainRigs(this.scene, this);
+    this.termFaces = new TermFaces(this.scene, this);
+    flowLegend(true);
     this.beams = new Beams(this.scene, this);
     if (this.spawnLines) this.spawnLines.renderOrder = 2; // 칩 깊이 패스(1.5) 다음
     if (this.spawnMat) this.spawnMat.opacity = 0.22; // 위계: 충돌 곡선 > 패킷 > 일반 연결선 > 띄움 점선
@@ -127,6 +135,7 @@ export class FlowView extends SceneView {
   }
   flowEvent(ev, opts = {}) {
     super.flowEvent(ev, opts);
+    if (this.termFaces) this.termFaces.event(ev); // 네모 터미널 앞면 글(출력 꼬리)
     if (ev.type === 'watch') this.rigWatch.event(ev);
     // 자동 진행 작업 갱신 = 새 진행 줄 → 장치에서 눈금 패킷(조용한 이벤트·스크럽은 여기 안 옴)
     else if (ev.type === 'node-update' && this.procRigs) {
@@ -144,7 +153,7 @@ export class FlowView extends SceneView {
     super.setScope(scope);
   }
   removeNode(id) { super.removeNode(id); if (this.bubbles) this.bubbles.drop(id); }
-  reset() { super.reset(); if (this.bubbles) this.bubbles.clear(); if (this.rigWatch) this.rigWatch.reset(); if (this.procRigs) this.procRigs.clear(); if (this.rigTicks) this.rigTicks.clear(); }
+  reset() { super.reset(); if (this.bubbles) this.bubbles.clear(); if (this.mainRigs) this.mainRigs.clear(); if (this.termFaces) this.termFaces.clear(); if (this.rigWatch) this.rigWatch.reset(); if (this.procRigs) this.procRigs.clear(); if (this.rigTicks) this.rigTicks.clear(); }
   say(id, text, opts = {}) { if (this.bubbles) this.bubbles.say(id, text, opts); }
   /** 작업 줄: 말풍선이 떠 있으면 말 한 줄은 빼고 도구만(같은 말을 두 번 보이지 않게) */
   _actHtml(v) {
@@ -195,6 +204,8 @@ export class FlowView extends SceneView {
     if (this.flow) this.flow.applyTheme(t);
     if (this.holo) this.holo.applyTheme(t);
     this.chips.applyTheme(t.isLight);
+    if (this.mainRigs) this.mainRigs.applyTheme(t.isLight);
+    if (this.termFaces) this.termFaces.applyTheme(t.isLight);
     if (this.consoles) this.consoles.applyTheme(t.isLight);
     if (this.procRigs) this.procRigs.applyTheme(t.isLight);
     this.beams.applyTheme(t.isLight, t.bg);
@@ -278,21 +289,30 @@ export class FlowView extends SceneView {
   }
 
   /** 홀로그램 패널 거리 기준 반지름(holo.js): 분리 프로세스 장치는 넓은 상자(반폭 1.45 × 칩 배율)라 패널이 계기판을 덮지 않게 더 띄움 */
-  holoR(v) { return v.r * v.size * (v.procRig ? 1.5 : 1); }
+  /** 메인 모양('reactor'|'column') — 상세 팝업·시험 */
+  mainShapeOf(id) { if (this.mainRigs) { this.mainRigs._assign(); return this.mainRigs.shapeOf(id); } return null; }
+  holoR(v) { return v.r * v.size * (v.procRig ? 1.5 : v.kind === 'main' && !v.device ? MAIN_RIG.HOLO_K : 1); } // 메인 몸은 자이로 고리·띠가 반지름 밖으로 조금
 
   /** 빔·패킷 끝점: 세운 배치 장치는 아래 변에서 나가고(떠오름 없이 곧장 내려감) 위 변으로 들어온다. 그 밖 노드는 중심 */
   linkEnd(v, asParent) {
-    if (!v.device && !v.procRig) return v.group.position;
     const k = asParent ? '_endFrom' : '_endTo';
     const o = v[k] || (v[k] = new THREE.Vector3());
-    const hy = STAND.DEV_HY * v.mesh.scale.x * 0.96;
+    const s = v.mesh.scale.x;
+    // 메인 몸: 나가는 빔은 밑판, 들어오는 빔은 윗면. 실루엣 노드: 나가는 빔은 밑면(떠오름 없이), 들어오는 빔은 윗면 가운데
+    let hy;
+    if (v.device || v.procRig) hy = STAND.DEV_HY * s * 0.96;
+    else if (v.kind === 'main') { o.copy(v.group.position); o.y += mainLinkY(asParent) * s; o.noLift = !!asParent; return o; }
+    else { const sil = v._sil && SIL_DIM[v._sil]; hy = (sil ? sil.h : 0.62) * 0.5 * s; }
     o.copy(v.group.position); o.y += asParent ? -hy : hy;
     o.noLift = !!asParent;
     return o;
   }
 
   _preRender(now, dt) {
+    if (!this._legOk) this._legOk = flowLegend(true); // 범례는 표현보다 늦게 만들어질 수 있음
     this.chips.update(now);
+    if (this.mainRigs) this.mainRigs.update(now); // 칩 패스가 정한 투명도(v._alphaK)를 씀 — 칩 다음
+    if (this.termFaces) this.termFaces.update(now);
     // 세운 배치 장치: 집기 상자를 칩과 같은 방위로(SceneView 가 프레임마다 돌리는 회전을 덮어씀)
     let pn = 0;
     for (const v of this.vis.values()) {
@@ -331,7 +351,8 @@ export class FlowView extends SceneView {
   dispose() {
     if (this._disposed) return;
     if (this.labelContainer) this.labelContainer.classList.remove('flow-mode');
-    for (const k of ['chips', 'consoles', 'beams', 'backdrop', 'bubbles', 'art', 'procRigs']) { if (this[k]) { this[k].dispose(); this[k] = null; } }
+    flowLegend(false);
+    for (const k of ['chips', 'mainRigs', 'termFaces', 'consoles', 'beams', 'backdrop', 'bubbles', 'art', 'procRigs']) { if (this[k]) { this[k].dispose(); this[k] = null; } }
     super.dispose();
   }
 }

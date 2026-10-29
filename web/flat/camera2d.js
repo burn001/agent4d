@@ -1,7 +1,7 @@
 // 2D(저사양) 표현의 카메라. 3D CameraDirector 와 같은 바깥 모양(app.js 가 쓰는 메서드·필드)을
 // three 없이 2D 팬·줌으로: 휠(커서 기준)·끌기·핀치·WASD/QE, 자동 카메라 = 살아 있는 노드 전체 맞춤(2D판, FitHold 히스테리시스),
 // '따라가기'는 활동 노드를 8초마다 확대(간이), 수동 조작 10초 뒤 복귀, 빈 곳 클릭 즉시 복귀(resumeAuto), 일시정지 얼림(enabled=false).
-import { isShown, isLive, pickBest, shotLost, FitHold, safeBand, ZOOM, autoFloor, nearestKids, FIT, isFitActive, pickFitIds, PanelMemo, pxToE, shotFitScope, workScore } from '../camera-core.mjs';
+import { isShown, isLive, pickBest, shotLost, FitHold, safeBand, ZOOM, autoFloor, nearestKids, FIT, isFitActive, pickFitIds, PanelMemo, pxToE, shotFitScope, workScore, ShotHold, shotKey } from '../camera-core.mjs';
 import { stageInsets } from '../screen-insets.js';
 import { t } from '../i18n.mjs';
 import { promptCamPlan } from '../camera-core.mjs'; // 입력 때 메인으로(Follow my prompts)
@@ -11,6 +11,15 @@ const HAS = (view, id) => { const v = view && view.vis && view.vis.get(id); retu
 
 const SWITCH_EVERY = 8, RESUME_AFTER = 10, IDLE_OVERVIEW = 30, TRANSITION = 1.6;
 const easeInOutCubic = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+
+/** 고른 노드 다시 맞춤: 지켜보는 시간(초)·어긋남 문턱(카메라 반높이 D 대비) */
+export const FOCUS_WATCH_S = 4;
+export const FOCUS_DRIFT_K = 0.15;
+/** 카메라 → 구도 어긋남(반높이 D 기준 비율, 확대 차이 포함) */
+export function focusDrift(cam, f) {
+  const D = Math.max(1e-6, cam.D);
+  return Math.max(Math.hypot(f.x - cam.x, f.z - cam.z) / D, Math.abs(f.D - cam.D) / D);
+}
 
 export class Director2D {
   constructor(view, getNode) {
@@ -84,7 +93,7 @@ export class Director2D {
   detach() { this._unbind(); this.active = false; this.view = null; }
 
   _size() { const v = this.view; return { W: v.W || 1, H: v.H || 1 }; } // view 가 ResizeObserver 로 받아 둔 크기(clientWidth 강제 레이아웃 없이)
-  _manual() { this.lastInput = performance.now() / 1000; this.mode = 'manual'; this.trans = null; this.focusFly = false; if (this.view) this.view.invalidate(); }
+  _manual() { this.lastInput = performance.now() / 1000; this.mode = 'manual'; this.trans = null; this.focusFly = false; this._focusWatch = null; if (this.view) this.view.invalidate(); }
 
   _wheel(e) {
     e.preventDefault();
@@ -166,6 +175,7 @@ export class Director2D {
     this.shotFit.reset();
     this._startTransition(1.0);
     this.focusFly = true;
+    if (t.type !== 'cluster') this._watchShot();
   }
   setFollow(on) { if (this.hold) this.hold.follow = !!on; }
   release() {
@@ -242,7 +252,10 @@ export class Director2D {
     this.shot = { type: 'node', id };
     this._startTransition(1.0);
     this.focusFly = true;
+    this._watchShot();
   }
+  /** 고른 노드가 비행 뒤에 자리를 옮기면(고르기·필터가 섬을 다시 배치 — 부모 없는 기동기 등) 잠깐 동안 다시 맞춘다 */
+  _watchShot(sec = FOCUS_WATCH_S) { this._focusWatch = { until: performance.now() / 1000 + sec }; }
   overview(immediate = false) {
     this.shot = { type: this.camMode === 'fit' ? 'fit' : 'overview' };
     this.fit.reset();
@@ -323,12 +336,12 @@ export class Director2D {
     return { x: hold.c.x, z: hold.c.z + hold.D * band.yc, D: hold.D, n: pts.length };
   }
   /** 맞춤 띠(3D camera.js _band 와 같은 규칙) */
-  _band(H, noLabels = false) {
+  _band(H, noLabels = false, fixedLabels = false) {
     const v = this.view;
     const ins = stageInsets(v.container || this._el);
     if (noLabels) return safeBand(ins.H || H, ins.top, ins.bottom); // 전체 맞춤: 덮개만(라벨은 점마다)
-    // 라벨 자리: 기본(흐름 = 아래, Planet = 위) + 실제로 맨 위·아래 노드 밖으로 나간 라벨 높이
-    const lr = v.labelReserve ? v.labelReserve() : null;
+    // 라벨 자리: 기본(흐름 = 아래, Planet = 위) + 실제로 맨 위·아래 노드 밖으로 나간 라벨 높이 — fixedLabels(노드 샷)면 기본 몫만
+    const lr = !fixedLabels && v.labelReserve ? v.labelReserve() : null;
     const labB = Math.max(v.labelBelow ? 46 : 0, lr ? lr.bottom : 0), labT = Math.max(v.labelBelow ? 0 : 30, lr ? lr.top : 0);
     return safeBand(ins.H || H, ins.top + labT, ins.bottom + labB);
   }
@@ -337,28 +350,36 @@ export class Director2D {
     const v = this.view;
     try { return (v.ix && v.ix.holdPts && v.ix.holdPts(id)) || (v.vx && v.vx.holdPts && v.vx.holdPts(id)) || []; } catch { return []; }
   }
-  _nodeFrame(id, wide, git = false) {
+  /** 노드 샷 구도. key·now 를 주면 ShotHold 로 붙잡는다(데드밴드·히스테리시스). 반환 {x, z, D, yc} */
+  _nodeFrame(id, wide, git = false, key = null, now = 0) {
     const view = this.view, v = view.vis.get(id);
     if (!v) return null;
-    const pts = [{ p: v.target, r: v.r * FLAT.FIT_PAD_K + FLAT.FIT_PAD }];
+    const at = (k) => (view.shotTarget && view.shotTarget(k)) || view.vis.get(k).target; // 복셀 캐릭터는 가는 자리
+    const pts = [{ p: at(id), r: v.r * FLAT.FIT_PAD_K + FLAT.FIT_PAD }];
     if (git) for (const q of this._ixPts(id)) pts.push({ p: { x: q.x, y: 0, z: q.z }, r: q.r }); // + 포털·발송대(자식은 담지 않음)
     let kids = git ? [] : view.children(id).filter((k) => view.vis.get(k) && this._shown(k));
-    if (!wide) kids = nearestKids(kids, (k) => view.vis.get(k).target, v.target, ZOOM.NODE_KIDS); // 가까운 자식 몇 개만
-    for (const kid of kids) { const k = view.vis.get(kid); pts.push({ p: k.target, r: k.r + 1.2 }); }
+    if (!wide) kids = nearestKids(kids, at, pts[0].p, ZOOM.NODE_KIDS); // 가까운 자식 몇 개만
+    for (const kid of kids) { const k = view.vis.get(kid); pts.push({ p: at(kid), r: k.r + 1.2 }); }
     const { W, H } = this._size();
     const c = boxCenterXZ(pts);
-    const band = this._band(H);
+    const band = this._band(H, false, true); // 노드 샷은 라벨 자리를 기본 몫으로(잰 라벨 자리는 라벨이 뜨고 질 때마다 바뀜)
     const deep = !wide; // 노드 샷은 바닥(MIN_R)·여유를 줄여 더 가깝게, 수동 최소(D_MIN)보다는 멀리
-    const D = clampD(autoFloor(Math.max(fitMinD(W / H) * (deep ? ZOOM.NODE_MIN_R_K : 1), fitNeed(pts, c, W / H, FLAT.FIT_MH, FLAT.FIT_MV * band.k) * (deep ? ZOOM.NODE_MARGIN_2D : 1.1)), FLAT.D_MIN));
-    return { x: c.x, z: c.z + D * band.yc, D };
+    let D = clampD(autoFloor(Math.max(fitMinD(W / H) * (deep ? ZOOM.NODE_MIN_R_K : 1), fitNeed(pts, c, W / H, FLAT.FIT_MH, FLAT.FIT_MV * band.k) * (deep ? ZOOM.NODE_MARGIN_2D : 1.1)), FLAT.D_MIN));
+    let cx = c.x, cz = c.z, yc = band.yc;
+    if (key) { // 띠 옮기기 전 구도를 붙잡아 상태 변동마다 움찔거리지 않게(3D camera.js 와 같은 ShotHold)
+      const h = this._shotHold || (this._shotHold = new ShotHold());
+      const held = h.step(now, key, { x: cx, z: cz }, D, D, yc);
+      cx = held.c.x; cz = held.c.z; D = held.D; yc = held.x;
+    }
+    return { x: cx, z: cz + D * yc, D, yc };
   }
   _frame(shot, now = performance.now() / 1000) {
     if (shot.type === 'node' && this.view.has(shot.id)) {
       if (shot.prompt) { // 입력 받은 메인을 가운데로, 멀어지지 않게
-        const f = this._nodeFrame(shot.id, false), v = this.view.vis.get(shot.id);
-        if (f && v) { const D = Math.min(f.D, shot.maxD || f.D); return { x: v.target.x, z: v.target.z + D * this._band(this._size().H).yc, D }; }
+        const f = this._nodeFrame(shot.id, false, false, shotKey(shot), now), v = this.view.vis.get(shot.id);
+        if (f && v) { const D = Math.min(f.D, shot.maxD || f.D), p = (this.view.shotTarget && this.view.shotTarget(shot.id)) || v.target; return { x: p.x, z: p.z + D * f.yc, D }; }
       }
-      return this._nodeFrame(shot.id, shot.wide, !!shot.git) || this._fitFrame(now);
+      return this._nodeFrame(shot.id, shot.wide, !!shot.git, shotKey(shot), now) || this._fitFrame(now);
     }
     if (shot.type === 'cluster' && this.view.clusterTarget) {
       const c = this.view.clusterTarget(shot.pid);
@@ -419,6 +440,7 @@ export class Director2D {
   }
   _startTransition(dur = TRANSITION) {
     if (!this.cam) return;
+    if (this._shotHold) this._shotHold.reset(); // 새로 날 때는 그 순간의 구도부터 다시 붙잡음
     this.shotAt = performance.now() / 1000;
     this.trans = { t0: performance.now() / 1000, dur, from: { x: this.cam.x, z: this.cam.z, D: this.cam.D } };
   }
@@ -459,6 +481,11 @@ export class Director2D {
         this._flyNext = false;
       }
     }
+    // 고른 노드 지켜보기: 비행이 끝난 뒤 그 노드 구도가 화면 반높이의 15% 넘게 어긋나면(다시 배치) 0.6초 다시 비행
+    if (this._focusWatch && !this.trans && !this.dragging && this.shot.type === 'node') {
+      if (now > this._focusWatch.until || !this.view.has(this.shot.id)) this._focusWatch = null;
+      else { const f = this._frame(this.shot, now); if (f && focusDrift(cam, f) > FOCUS_DRIFT_K) { this._startTransition(0.6); this.focusFly = true; } }
+    } else if (this._focusWatch && this.shot.type !== 'node') this._focusWatch = null;
     const flying = this.trans && (this.mode === 'auto' || this.focusFly);
     if (flying) {
       const f = this._frame(this.shot, now);

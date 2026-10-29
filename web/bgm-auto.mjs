@@ -3,8 +3,9 @@
 //   activityLevel: 지표 → 0 한가 · 1 보통 · 2 활발 · 3 매우 활발
 //   AutoPicker:    단계 히스테리시스(올림 45초·내림 120초 유지, 전환 뒤 최소 90초) — 덜컥거림 방지
 //   stageCandidates·pickForLevel: 매니페스트 곡의 stage(0～3, 목록 가능)로 단계 → 후보 → 직전 2곡 피해 무작위
+//   viewCandidates: 지금 표현(flow·planet·voxel)의 테마 풀(views)에서 그 단계 곡, 비면 전체 풀(stageCandidates)로 폴백
 import { t as tr } from './i18n.mjs';
-import { stageLabel } from './bgm-core.mjs';
+import { stageLabel, themed, viewStages } from './bgm-core.mjs';
 
 export const WINDOW_MS = 90_000;     // 활동 창(최근 1분 30초)
 export const WORK_RECENT_MS = 30_000; // 작업 중 노드: 최근 30초 안 이벤트가 온 노드 + 창 안에 연 도구가 아직 열린 노드
@@ -137,11 +138,23 @@ export function stageCandidates(level, tracks) {
 }
 
 /**
- * 단계에 맞는 곡 하나. recent = 최근 재생 곡 id(오래된 것 → 최근). 후보에서 직전 2곡을 피해 무작위,
+ * 테마별 풀: 지금 표현의 views 단계가 level 인 곡. 표현이 없거나·매니페스트에 views 가 없거나·그 단계에 테마 곡이 없으면
+ * 전체 풀(stage, stageCandidates — 가까운 단계 폴백 포함)
+ */
+export function viewCandidates(level, tracks, view = null) {
+  if (tracks && themed(tracks, view)) {
+    const c = tracks.filter((t) => viewStages(t, view).includes(level));
+    if (c.length) return c.map((t) => t.id);
+  }
+  return stageCandidates(level, tracks);
+}
+
+/**
+ * 단계에 맞는 곡 하나(view 를 주면 그 표현의 테마 풀, viewCandidates). recent = 최근 재생 곡 id(오래된 것 → 최근). 후보에서 직전 2곡을 피해 무작위,
  * 다 피하면 직전 1곡만 피하고, 그래도 없으면(후보 하나) 그 곡. keep = 지금 곡이 후보에 있으면 그대로 둘지
  */
-export function pickForLevel(level, tracks, { recent = [], cur = null, keep = false, rand = Math.random } = {}) {
-  const c = stageCandidates(level, tracks);
+export function pickForLevel(level, tracks, { recent = [], cur = null, keep = false, rand = Math.random, view = null } = {}) {
+  const c = viewCandidates(level, tracks, view);
   if (!c.length) return null;
   if (keep && cur && c.includes(cur)) return cur;
   const last = [...recent, ...(cur && recent[recent.length - 1] !== cur ? [cur] : [])]; // cur 가 이미 최근 끝이면 두 번 세지 않음

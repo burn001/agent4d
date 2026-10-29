@@ -263,7 +263,7 @@ function scopeOf(url) {
   return s === 'all' ? 'all' : 'bad';
 }
 
-export function createServer({ token, manager, webRoot = WEB_ROOT, project = null, limits = null, update = null, adminSecret = null }) {
+export function createServer({ token, manager, webRoot = WEB_ROOT, project = null, limits = null, update = null, adminSecret = null, errorLingerSec = null }) {
   const SEC = { 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
   const control = new ControlHub({ manager }); // 화면 등록·명령 전달·ack
   const srv = http.createServer(async (req, res) => {
@@ -274,7 +274,9 @@ export function createServer({ token, manager, webRoot = WEB_ROOT, project = nul
       if (p === '/healthz') {
         // update {current, latest, newer, url} — 마지막 확인이 성공했을 때만(꺼짐·실패면 키 없음)
         const u = update ? update.get() : null;
-        return sendJson(res, 200, u ? { ok: true, version: VERSION, update: u } : { ok: true, version: VERSION }, SEC);
+        const body = u ? { ok: true, version: VERSION, update: u } : { ok: true, version: VERSION };
+        if (errorLingerSec != null) body.errorLingerSec = errorLingerSec; // 문제 있게 끝난 노드가 남는 시간(config.errorLingerSec)
+        return sendJson(res, 200, body, SEC);
       }
       // 명령 보내기·화면 목록: 로컬 관리자만(루프백 + 프록시 표지 없음 + adminSecret). 보기 토큰과 무관하게 먼저 판정
       if (p === '/control' || p === '/control/clients') { await handleControlAdmin(req, res, url, control, { adminSecret, sendJson, SEC }); return; }
@@ -433,7 +435,8 @@ async function main() {
   // 업데이트 확인: 기동 시 + 1시간마다 캐시를 보고 24시간 지났을 때만 네트워크, 꺼짐이면 네트워크 0. --demo 는 AGENT4D_FAKE_UPDATE 가짜 값만
   const update = new UpdateChecker({ home: path.dirname(args.config || defaultConfigPath()), current: VERSION, slug: repoSlugOf(),
     cfg: { updateCheck: cfg.updateCheck }, offline: !!args.demo }).start();
-  const server = createServer({ token: cfg.viewToken, manager, webRoot: args.webRoot || WEB_ROOT, project, limits, update, adminSecret: cfg.adminSecret });
+  const server = createServer({ token: cfg.viewToken, manager, webRoot: args.webRoot || WEB_ROOT, project, limits, update, adminSecret: cfg.adminSecret,
+    errorLingerSec: cfg.errorLingerSec != null && Number.isFinite(+cfg.errorLingerSec) && +cfg.errorLingerSec >= 0 ? +cfg.errorLingerSec : null });
   server.keepAliveTimeout = 65_000;
   server.headersTimeout = 70_000;
   server.requestTimeout = 0;

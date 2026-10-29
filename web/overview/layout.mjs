@@ -36,15 +36,20 @@ export function isRecentRoot(n) {
   return m.tier === 'recent' || m.live === false;
 }
 
-/** 독립 기동기를 띄운 메인 노드: 같은 rootSessionId 의 s:<id>, 없으면 spawnedBy 가 속한 루트 */
+/** 독립 기동기를 띄운 메인 노드: spawnedBy 가 화면에 있으면 그 노드가 속한 루트, 없으면 같은 rootSessionId 의 s:<id>.
+ *  /clear 승계로 서버가 spawnedBy 를 새 메인으로 바꿔도 rootSessionId 는 옛 메인 그대로라, 예전처럼 rootSessionId 를 먼저 보면
+ *  기동기가 희미한(recent) 옛 메인을 따라 러너·회차·서브에이전트와 함께 통째로 숨었다 */
 export function spawnerMain(n, byId, rootOf) {
   if (!n) return null;
+  const sp = n.meta && n.meta.spawnedBy;
+  if (sp && byId.has(sp) && sp !== n.id) {
+    const r = rootOf && rootOf.get(sp);
+    const m = byId.get(r || sp);
+    if (m && m !== n) return m;
+  }
   const m = n.rootSessionId && byId.get('s:' + n.rootSessionId);
   if (m && m !== n) return m;
-  const sp = n.meta && n.meta.spawnedBy;
-  if (!sp) return null;
-  const r = rootOf && rootOf.get(sp);
-  return byId.get(r || sp) || null;
+  return null;
 }
 
 /**

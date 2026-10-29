@@ -111,7 +111,7 @@ function request(port, method, p, secret, body, timeoutMs) {
 
 function stateBrief(s) {
   if (!s) return '';
-  const parts = [s.scopeLabel || s.scope, s.view && `${s.view}${s.dim ? ' ' + s.dim : ''}`, s.theme && `theme ${s.theme}`, s.sound && `sound ${s.sound}`,
+  const parts = [s.scopeLabel || s.scope, s.view && `${s.view}${s.dim ? ' ' + s.dim : ''}`, s.theme && `theme ${s.theme}`, s.sound && `sound ${s.sound}${s.sound === 'on' && (s.music === 'off' || s.sfx === 'off') ? ` (${[s.music === 'off' && 'music off', s.sfx === 'off' && 'sfx off'].filter(Boolean).join(', ')})` : ''}`,
     s.paused ? 'paused' : null, s.replaying ? 'replay' : null, s.accept === false ? 'remote-off' : null].filter(Boolean);
   return parts.join(' · ');
 }

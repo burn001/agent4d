@@ -19,6 +19,9 @@ import { isJobVis, drawJobPill, jobLevel } from './job2d.js'; // 작업 칩(알�
 import { isProcVis, procLevel, drawProcRig, drawProcFx, procTip } from './proc2d.js'; // 분리 프로세스 장치
 import { RIG, RigWatch, RigTicks, superviseText, supervisorSets } from '../flowview/proc-rig-core.mjs';
 import { escapeHtml } from '../html-util.mjs';
+import { silOf, silOutline, SIL_DIM, assignMainShapes, mainSetSig, ctxFrac, reactorFills, bandWords, toolBand } from '../flowview/shape-core.mjs'; // 3D 와 같은 모양 표
+import { flowLegend } from '../flowview/flow-legend.js';
+import { jobOf } from '../job-core.mjs';
 
 const TOP_ACTIVE = 6;
 
@@ -41,6 +44,8 @@ export class Flow2DView extends FlatView {
     this._ticks = [];
     this._supIds = new Set(); this._watchIds = new Set();
     for (const v of this.vis.values()) if (isProcVis(v)) v.procRig = true;
+    this._mainShapes = new Map(); this._mainSig = '';
+    flowLegend(true);
     this.applyTheme();
   }
 
@@ -172,6 +177,7 @@ export class Flow2DView extends FlatView {
   // ---------- 그리기 ----------
   _drawScene(ctx, now) {
     const W = this.W, H = this.H, P = this.P, t = this.tokens;
+    if (!this._legOk) this._legOk = flowLegend(true);
     this._font = null; ctx.font = '10px sans-serif';
     ctx.fillStyle = P.void;
     ctx.fillRect(0, 0, W, H);
@@ -317,16 +323,17 @@ export class Flow2DView extends FlatView {
     if (R < 1.6) { ctx.globalAlpha = alpha; ctx.fillStyle = col; ctx.fillRect(x - 1, y - 1, 2, 2); ctx.globalAlpha = 1; return; }
     const foc = v.id === this.focusId || v.id === this.hoverId;
     if (v.device) { this._drawDevice(ctx, v, x, y, R, col, alpha, now); return; }
-    const hp = this._hp || (this._hp = new Array(12));
-    // 옅은 바깥 육각(글로우 대신) — 작은 칩은 생략
+    if (v.kind === 'main') { this._drawMain(ctx, v, x, y, R, st, col, alpha, now, foc); return; }
+    const sil = silOf(v.kind, { job: !!jobOf(v.node) }); // 실루엣 문법(3D 와 같은 표)
+    // 옅은 바깥 외곽(글로우 대신) — 작은 칩은 생략
     if (R > 8 || foc) {
-      hexPath(ctx, x, y, R * (foc ? 1.32 : 1.2), hp);
+      this._silPath(ctx, sil, x, y, R * (foc ? 1.32 : 1.2));
       ctx.globalAlpha = alpha * (foc ? 0.3 : st === NODE_STATE.thinking || st === NODE_STATE.tool ? 0.16 : 0.08);
       ctx.fillStyle = col;
       ctx.fill();
     }
     // 몸체: 어두운 안쪽 + 상태색 테두리(완료 점선·오류 맥동·중지 회색 얇게)
-    hexPath(ctx, x, y, R, hp);
+    this._silPath(ctx, sil, x, y, R);
     ctx.globalAlpha = alpha * (L ? 0.92 : 0.88);
     ctx.fillStyle = P.interior; ctx.fill();
     ctx.globalAlpha = alpha;
@@ -339,8 +346,18 @@ export class Flow2DView extends FlatView {
     if (st === NODE_STATE.done) ctx.setLineDash([Math.max(2, R * 0.28), Math.max(2, R * 0.2)]);
     ctx.stroke();
     if (st === NODE_STATE.done) ctx.setLineDash([]);
+    // 실루엣 덧그림: 두 단 = 안쪽 윗단 육각(종류색) · 깎인 육각 = 삼각 표 · 퍽 = 퍼지는 파동
+    const kcol = this.kindColor(v.kind);
+    if (sil === 'tier2' && R > 4) { this._silPath(ctx, 'hex', x, y, R * SIL_DIM.tier2.top); ctx.strokeStyle = kcol; ctx.lineWidth = Math.max(1, R * 0.06); ctx.globalAlpha = alpha * 0.8; ctx.stroke(); ctx.globalAlpha = alpha; }
+    else if (sil === 'cham' && R > 6) { const tx = x + R * 0.5, ty = y - R * 0.29, ts = R * 0.17; ctx.fillStyle = kcol; ctx.beginPath(); ctx.moveTo(tx, ty - ts); ctx.lineTo(tx + ts * 0.9, ty + ts * 0.6); ctx.lineTo(tx - ts * 0.9, ty + ts * 0.6); ctx.closePath(); ctx.fill(); }
+    else if (sil === 'puck' && R > 6) {
+      const spd = st === NODE_STATE.thinking || st === NODE_STATE.tool ? 0.55 : 0.18;
+      ctx.strokeStyle = kcol; ctx.lineWidth = Math.max(1, R * 0.04);
+      for (let i = 0; i < 3; i++) { const u = this.reduced ? 0.3 + i * 0.2 : (now * spd + i / 3 + v.seed) % 1; ctx.globalAlpha = alpha * 0.5 * (1 - u); ctx.beginPath(); ctx.arc(x, y, R * (0.25 + u * 1.25), 0, Math.PI * 2); ctx.stroke(); }
+      ctx.globalAlpha = alpha;
+    }
     // 가운데 종류 아이콘
-    if (R > 6) this._icon(ctx, kindIcon(v.kind), x, y, R * 0.62, this.kindColor(v.kind), now);
+    if (R > 6) this._icon(ctx, kindIcon(v.kind), x, y, R * 0.62 * (sil === 'tier2' ? 0.66 : 1), kcol, now);
     // 도구 사용 중: 도는 호(스피너), 생각 중: 도는 점 하나
     if (!this.reduced && R > 5) {
       if (st === NODE_STATE.tool) {
@@ -402,7 +419,95 @@ export class Flow2DView extends FlatView {
     ctx.globalAlpha = 1;
   }
 
+  /** 메인 모양(3D MainRigs 와 같은 배정 — 같은 메인은 같은 모양) */
+  mainShapeOf(id) {
+    const mains = [];
+    for (const v of this.vis.values()) if (v.kind === 'main' && !v.device) mains.push({ id: v.id, projectId: v.projectId ?? v.node.projectId ?? null, status: v.node.status, startedAt: v.node.startedAt });
+    const sig = mainSetSig(mains);
+    if (sig !== this._mainSig) { this._mainSig = sig; this._mainShapes = assignMainShapes(mains); }
+    return this._mainShapes.get(id) || 'reactor';
+  }
+  /** 2D 실루엣 외곽(3D 윗면과 같은 꼴) */
+  _silPath(ctx, sil, x, y, R) {
+    if (sil === 'puck') { ctx.beginPath(); ctx.arc(x, y, R * SIL_DIM.puck.top, 0, Math.PI * 2); return; }
+    const P = silOutline(sil, R);
+    ctx.beginPath(); ctx.moveTo(x + P[0][0], y + P[0][1]);
+    for (let i = 1; i < P.length; i++) ctx.lineTo(x + P[i][0], y + P[i][1]);
+    ctx.closePath();
+  }
+  /** 메인 2D: 반응로 = 육각 틀(세션 색) + 원 코어(상태색) + 막대 여섯(컨텍스트) · 기둥 = 세로 막대 게이지(액체) + 글 띠(최근/지금 도구) */
+  _drawMain(ctx, v, x, y, R, st, col, alpha, now, foc) {
+    const P = this.P, L = this.tokens.isLight, hp = this._hp || (this._hp = new Array(12));
+    const shape = this.mainShapeOf(v.id);
+    const sess = v.sessC && !v.node.parentId && st !== NODE_STATE.done && st !== NODE_STATE.error && st !== NODE_STATE.stopped ? v.sessC : this.kindColor('main');
+    const scol = this._stateCol[st];
+    const f = ctxFrac(v.node), tone = f == null ? null : f < 0.5 ? P.thinking : f < 0.75 ? P.tool : P.error;
+    const pulse = st === NODE_STATE.error && !this.reduced ? 0.6 + 0.4 * Math.sin(now * 6) : 1;
+    ctx.lineWidth = Math.max(1, R * (foc ? 0.1 : 0.07));
+    if (shape === 'reactor') {
+      hexPath(ctx, x, y, R, hp);
+      ctx.globalAlpha = alpha * (L ? 0.92 : 0.88); ctx.fillStyle = P.interior; ctx.fill();
+      ctx.globalAlpha = alpha; ctx.strokeStyle = sess; if (st === NODE_STATE.done) ctx.setLineDash([Math.max(2, R * 0.28), Math.max(2, R * 0.2)]); ctx.stroke(); ctx.setLineDash([]);
+      // 막대 여섯(꼭짓점 안쪽, 컨텍스트만큼 아래서 채움)
+      const fills = reactorFills(f ?? 0), bh = R * 0.5, bw = Math.max(1.5, R * 0.09);
+      for (let i = 0; i < 6; i++) {
+        const a = -Math.PI / 2 + (Math.PI / 3) * i, bx = x + Math.cos(a) * R * 0.72, by = y + Math.sin(a) * R * 0.72 + bh / 2;
+        ctx.globalAlpha = alpha * 0.25; ctx.fillStyle = P.textDim; ctx.fillRect(bx - bw / 2, by - bh, bw, bh);
+        if (tone && fills[i] > 0) { ctx.globalAlpha = alpha * (tone === P.error ? 0.6 + 0.4 * pulse : 0.9); ctx.fillStyle = tone; ctx.fillRect(bx - bw / 2, by - bh * fills[i], bw, bh * fills[i]); }
+      }
+      // 원 코어 + 빛
+      const cr = R * 0.32 * (st === NODE_STATE.thinking || st === NODE_STATE.tool ? 1 + (this.reduced ? 0 : 0.06 * Math.sin(now * 4)) : 1);
+      ctx.globalAlpha = alpha * 0.25 * pulse; ctx.fillStyle = scol; ctx.beginPath(); ctx.arc(x, y, cr * 1.7, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = alpha * (st === NODE_STATE.done ? 0.55 : 0.95) * pulse; ctx.beginPath(); ctx.arc(x, y, cr, 0, Math.PI * 2); ctx.fill();
+      // 자이로 고리(도구 중 빠르게)
+      if (R > 8) {
+        const sp = this.reduced || st === NODE_STATE.done || st === NODE_STATE.stopped ? 0 : st === NODE_STATE.tool ? 3.2 : st === NODE_STATE.thinking ? 1 : 0.3;
+        ctx.globalAlpha = alpha * 0.7; ctx.strokeStyle = scol; ctx.lineWidth = Math.max(1, R * 0.035);
+        ctx.beginPath(); ctx.ellipse(x, y, cr * 1.9, cr * 0.7, now * sp, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.ellipse(x, y, cr * 1.6, cr * 0.6, -now * sp * 0.8 + 1.1, 0, Math.PI * 2); ctx.stroke();
+      }
+    } else {
+      // 데이터 기둥: 세로 막대(유리) + 아래서 차오르는 액체 + 가로 글 띠
+      const w = R * 1.25, h = R * 1.8, x0 = x - w / 2, y0 = y - h / 2, rr = Math.min(6, R * 0.18);
+      rrect(ctx, x0, y0, w, h, rr);
+      ctx.globalAlpha = alpha * (L ? 0.92 : 0.88); ctx.fillStyle = P.interior; ctx.fill();
+      if (tone) {
+        const lh = h * Math.max(0.03, f);
+        ctx.save(); rrect(ctx, x0, y0, w, h, rr); ctx.clip();
+        ctx.globalAlpha = alpha * (L ? 0.3 : 0.25) * (tone === P.error ? pulse : 1); ctx.fillStyle = tone; ctx.fillRect(x0, y0 + h - lh, w, lh);
+        ctx.globalAlpha = alpha; ctx.fillRect(x0, y0 + h - lh, w, Math.max(1, R * 0.05));
+        ctx.restore();
+      }
+      ctx.globalAlpha = alpha; ctx.strokeStyle = sess; if (st === NODE_STATE.done) ctx.setLineDash([Math.max(2, R * 0.28), Math.max(2, R * 0.2)]);
+      rrect(ctx, x0, y0, w, h, rr); ctx.stroke(); ctx.setLineDash([]);
+      // 위 뚜껑 = 상태색 띠
+      ctx.fillStyle = scol; ctx.globalAlpha = alpha * pulse; ctx.fillRect(x0 + rr * 0.5, y0, w - rr, Math.max(2, R * 0.12));
+      // 글 띠 한 줄(도구 중 = 지금 도구 호박, 아니면 최근 도구)
+      if (R > 10) {
+        const cur = st === NODE_STATE.tool ? toolBand(v.icons) : '';
+        const words = cur ? [cur] : bandWords(v.hist, 3);
+        const fs = Math.round(Math.max(8, Math.min(11, R * 0.32)));
+        const by = y + h * 0.08;
+        ctx.globalAlpha = alpha * (cur ? 0.25 : 0.12); ctx.fillStyle = cur ? P.tool : scol; ctx.fillRect(x0 - 2, by - fs * 0.8, w + 4, fs * 1.6);
+        ctx.save(); ctx.beginPath(); ctx.rect(x0, by - fs, w, fs * 2); ctx.clip();
+        setFont(this, ctx, `600 ${fs}px ${MONO}`); ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.globalAlpha = alpha * (cur ? 1 : 0.75); ctx.fillStyle = cur ? P.tool : P.text;
+        const txt = (words.length ? words.join('  ·  ') : '▮▯▮▮▯') + '  ·  ';
+        const tw = ctx.measureText(txt).width || 1, off = this.reduced ? 0 : (now * (cur ? 28 : 10)) % tw;
+        ctx.fillText(txt + txt, x0 + 2 - off, by);
+        ctx.restore();
+      }
+    }
+    // 생각 중: 도는 점 하나 · 도구 중: 도는 호(서브와 같은 어휘)
+    if (!this.reduced && R > 5) {
+      if (st === NODE_STATE.tool) { ctx.globalAlpha = alpha; ctx.strokeStyle = P.tool; ctx.lineWidth = Math.max(1.2, R * 0.06); const a0 = now * 4 + v.seed; ctx.beginPath(); ctx.arc(x, y, R * 1.15, a0, a0 + 1.3); ctx.stroke(); }
+      else if (st === NODE_STATE.thinking) { const a0 = now * 2.4 + v.seed; ctx.globalAlpha = alpha; ctx.fillStyle = scol; ctx.beginPath(); ctx.arc(x + Math.cos(a0) * R * 1.15, y + Math.sin(a0) * R * 1.15, Math.max(1.2, R * 0.07), 0, Math.PI * 2); ctx.fill(); }
+    }
+    ctx.globalAlpha = 1;
+  }
+
   dispose() {
+    flowLegend(false);
     this.bubbles.dispose();
     super.dispose();
   }

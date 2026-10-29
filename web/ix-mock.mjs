@@ -33,19 +33,20 @@ const SC = [
   { user: 'turn' },   // 사용자 → 메인 → 답변
   { user: 'ask' },    // AskUserQuestion → 선택
   { user: 'mid' },    // 턴 중 끼어듦 · 자동 알림 · 거부
+  { user: 'auto' },   // 예약 시계 → Monitor 출력 패킷 → 작업 결과 패킷
 ];
 
 function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 const IX = (o, phase) => ({ v: 1, ...o, phase: o.phase || phase });
 
 /** gen = MockGenerator. 첫 시나리오 6초 뒤, 그다음 5～9초마다 하나씩(살아 있는 에이전트 중 하나) */
-export function ixMockScript(gen, { first = 6000 } = {}) {
+export function ixMockScript(gen, { first = 6000, start = 0 } = {}) {
   const r = rng(6868);
-  let k = 0;
+  let k = 0; // ?ixsc=<번호> — 헤드리스 확인용으로 그 시나리오만 되풀이(예: 17 = 자동 턴). 0 이면 차례대로
   const tick = (out) => {
     const alive = [...gen.nodes.values()].filter((n) => (n.status === 'active' || n.status === 'idle') && (n.kind === 'main' || n.kind === 'subagent'));
-    if (alive.length) playOne(gen, out, SC[k++ % SC.length], alive[Math.floor(r() * alive.length)].id);
-    gen.at(5000 + r() * 4000, tick);
+    if (alive.length) playOne(gen, out, SC[start > 0 ? start % SC.length : k++ % SC.length], alive[Math.floor(r() * alive.length)].id);
+    gen.at(start > 0 ? 12000 : 5000 + r() * 4000, tick);
   };
   gen.at(first, tick);
 }
@@ -60,6 +61,13 @@ function playUser(gen, out, s, M) {
     const toolUseId = gen.tuid();
     gen.emit(out, { type: 'tool-start', nodeId: M, toolUseId, tool: 'AskUserQuestion', cat: 'other', skill: null, text: '어느 쪽으로 할까요?', brief: '어느 쪽으로 할까요?', ix: { v: 1, cat: 'user', op: 'ask', q: 1, opts: 3, text: '배치를 어느 쪽으로 할까요?', phase: 'start' } });
     gen.at(3200, (o) => gen.emit(o, { type: 'tool-end', nodeId: M, toolUseId, tool: 'AskUserQuestion', cat: 'other', ok: true, durationMs: 3200, text: '답함', brief: '답함', ix: U({ op: 'ask', q: 1, opts: 3, pick: 1, answer: '가로로 넓게', ok: true }) }));
+  } else if (s.user === 'auto') { // 서버 _notifyIx·scheduled_task_fire 와 같은 꼴
+    const live = [...gen.nodes.values()].filter((n) => n.id !== M && (n.status === 'active' || n.status === 'idle'));
+    const mon = live.find((n) => n.kind === 'monitor') || live[0];
+    const src = live.find((n) => n.kind === 'subagent' || n.kind === 'bash-bg') || live[0];
+    gen.emit(out, { type: 'user', nodeId: M, origin: 'schedule', text: '정시 보고 — 루프와 회차 상태를 두세 줄로 보고', ix: U({ op: 'auto', src: 'schedule', text: '정시 보고 — 루프와 회차 상태를 두세 줄로 보고' }) });
+    if (mon) gen.at(3400, (o) => gen.emit(o, { type: 'user', nodeId: M, origin: 'task-notification', text: 'Monitor event: "세션 모니터"', ix: U({ op: 'auto', src: 'monitor', from: mon.id, text: '[커밋] 3c4d5e6 fix: 흐름 연출' }) }));
+    if (src) gen.at(6600, (o) => gen.emit(o, { type: 'user', nodeId: M, origin: 'task-notification', text: 'Background command "npm test" completed (exit code 0)', ix: U({ op: 'auto', src: 'notify', from: src.id, st: 'ok', text: 'npm test completed' }) }));
   } else {
     gen.emit(out, { type: 'user', nodeId: M, origin: 'task-notification', text: 'Background command completed', ix: U({ op: 'auto', src: 'notify' }) });
     gen.at(900, (o) => say(o, { op: 'midturn' }, '아, 라이트 테마도 같이 봐 줘'));
