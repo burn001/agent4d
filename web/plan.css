@@ -12,6 +12,7 @@
   box-shadow: 0 8px 22px rgba(0, 0, 0, .45), 0 0 0 1px color-mix(in srgb, var(--pk, var(--accent)) 25%, transparent);
   color: var(--text); font: calc(12px * var(--pbk))/1.3 var(--font, system-ui, sans-serif); pointer-events: auto; cursor: zoom-in;
   transform-origin: 0 0; will-change: transform; user-select: none; transition: border-color .4s ease, box-shadow .4s ease;
+  -webkit-text-size-adjust: none; text-size-adjust: none; /* 모바일 글자 키움(안드로이드 Chrome 글자 크기 설정·자동 크기 조정, iOS 가로 글자 키움)이 판 글자만 키워 고정 크기 판에서 넘치던 것 — 판은 월드 크기 × 배율로 글자와 함께 줄고 늘므로 브라우저 키움을 받지 않음 */
 }
 :root[data-theme="light"] .pb { --pb-hold: #7c3aed; box-shadow: 0 6px 18px rgba(15, 23, 42, .18), 0 0 0 1px color-mix(in srgb, var(--pk, var(--accent)) 30%, transparent); }
 @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .pb { --pb-hold: #7c3aed; box-shadow: 0 6px 18px rgba(15, 23, 42, .18), 0 0 0 1px color-mix(in srgb, var(--pk, var(--accent)) 30%, transparent); } }

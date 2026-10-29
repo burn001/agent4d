@@ -338,3 +338,14 @@ test('§119 크게 보기: 항목이 많으면 지금 항목 앞 끝난 것은 �
   const css = readFileSync(new URL('../plan.css', import.meta.url), 'utf8');
   assert.match(css, /\.ins-plan-big \.ipb-list \{ max-height: min\(60vh, 560px\); overflow: auto; \}/);
 });
+
+test('§115.5 모바일 글자 키움(text-size-adjust)을 판이 받지 않음 — 판은 배율로 글자와 함께 줄고 는다', async () => {
+  const { readFileSync: rf } = await import('node:fs');
+  const css = rf(new URL('../plan.css', import.meta.url), 'utf8');
+  const pb = /\n\.pb \{([^}]*)\}/.exec(css.replace(/\r/g, ''));
+  assert.ok(pb, '.pb 규칙');
+  assert.match(pb[1], /-webkit-text-size-adjust: none;/);
+  assert.match(pb[1], /(^|[^-])text-size-adjust: none;/);
+  assert.match(pb[1], /overflow|transform-origin: 0 0/); // 고정 상자 + scale 배율 방식 그대로
+  assert.ok(!/\.ins-plan-big \{[^}]*text-size-adjust/.test(css), '크게 보기 카드는 브라우저 키움을 그대로 받음');
+});
