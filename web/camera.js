@@ -1,7 +1,7 @@
 // 카메라: OrbitControls + 자동 투어 + 수동 조작 10초 규칙
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { STALE_DWELL, isShown, isLive, isBusy, pickBest, shotLost, shotStale, shownAncestor, fitFrame, flightPose, boxCenter, requiredDist, refineFit, FitHold, safeBand, ZOOM, autoFloor, nearestKids, FIT, isFitActive, pickFitIds, PanelMemo, boxCorners, pxToE, shotFitScope, workScore, busyAlt, ShotHold, shotKey } from './camera-core.mjs';
+import { STALE_DWELL, isShown, isLive, isBusy, pickBest, shotLost, shotStale, shownAncestor, fitFrame, flightPose, boxCenter, requiredDist, refineFit, FitHold, safeBand, ZOOM, autoFloor, nearestKids, FIT, isFitActive, pickFitIds, PanelMemo, boxCorners, pxToE, shotFitScope, workScore, busyAlt, ShotHold, shotKey, CycleSlots } from './camera-core.mjs';
 import { stageInsets } from './screen-insets.js';
 import { bestPose, perspPose, needRepack } from './overview/fill-pack.mjs';
 import { legacyPack } from './overview/pack-view.js';
@@ -600,6 +600,14 @@ export class CameraDirector {
       if (b) { const w = ((b.x1 - b.x0) * (b.y1 - b.y0)) / 4; for (const q of boxCorners(p, b, B.R, B.U)) { q.aux = true; q.w = w; pts.push(q); } } // 패널 = 보조 점, 넓이를 네 모서리에 나눠 무게중심에
     }
     if (gh && gh.length) for (const id of gh) for (const q of this._ixPts(id)) pts.push({ p: { x: q.x, y: q.y, z: q.z }, r: q.r, aux: true }); // 원격 저장소 포털·발송대
+    // 회차 사이(앞 회차 끝 ～ 다음 회차 시작)에도 활성 기동기의 마지막 회차 자리를 담는다 — 회차마다 좁혔다 넓히지 않게
+    const cs = this._cycSlots || (this._cycSlots = new Map()), ck = sc ? (sc.pid || '') + '|' + (sc.sid || '') : 'g';
+    const slots = cs.get(ck) || (cs.set(ck, new CycleSlots()), cs.get(ck));
+    const extra = slots.step(list, (x) => { const w = view.vis.get(x); return w ? w.node : null; }, (x) => {
+      const p = view.nodeTarget ? view.nodeTarget(x) : null;
+      return p ? { p, r: (view.fitNodeR ? view.fitNodeR(x) : view.nodeRadius ? view.nodeRadius(x) : 1) * FIT.NODE_K + FIT.NODE_PAD } : null;
+    });
+    if (!(gh && gh.length)) for (const q of extra) pts.push(q);
     return pts;
   }
 

@@ -74,7 +74,9 @@ export function computeLayout(nodes, rootId, opts = {}) {
     if (!kids.has(p)) kids.set(p, []);
     kids.get(p).push(n);
   }
-  for (const arr of kids.values()) arr.sort((a, b) => (a._order ?? 0) - (b._order ?? 0));
+  // 기동기(배치 장치)는 형제 중 맨 앞 자리 — 예전엔 _order 순 자리(황금각 i × 137.5°)라 기동기보다 먼저 생긴 형제(서브에이전트 등)가
+  // 퇴장할 때마다 기동기와 그 사슬(러너·회차·자율 루프 판)이 메인 둘레를 137.5° 씩 건너뛰었다
+  for (const arr of kids.values()) arr.sort((a, b) => (isLauncherNode(b) - isLauncherNode(a)) || (a._order ?? 0) - (b._order ?? 0));
 
   const visited = new Set();
   const place = (id, p, depth, outX, outZ) => {

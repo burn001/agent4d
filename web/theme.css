@@ -64,12 +64,15 @@
   --label-shadow: 0 0 4px #f5f6fa, 0 0 8px #f5f6fa;
 }
 
+/* UI 글꼴 한 곳 — body·계획판(.pb)·툴팁이 이 값을 쓴다. 웹 글꼴 없음(시스템 글꼴만 — 불러오기 경합 없음) */
+:root { --ui-font: "Pretendard", "Segoe UI", "Malgun Gothic", system-ui, sans-serif; }
+
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; }
 body {
   background: var(--bg);
   color: var(--text);
-  font: 13px/1.45 "Pretendard", "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
+  font: 13px/1.45 var(--ui-font);
   -webkit-font-smoothing: antialiased;
 }
 button, select, input { font: inherit; color: inherit; }

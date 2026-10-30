@@ -77,6 +77,7 @@ export function mainRoleLabel(cwd, projectDir) {
 }
 
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const INHERIT_RETRY_MS = 10_000; // /clear 승계 다시 보는 간격
 
 /**
  * claude -p 세션의 프로젝트 { path, temp }. cwd 가 어떤 세션의 임시 폴더(<tmp>/claude/<enc>/<sid>/…)면 그 부모 세션의
@@ -373,7 +374,7 @@ export class RootRuntime {
       meta: { cwd: head.cwd, title: subtitle ? sessionTitleMeta(subtitle) : null, ...(e.customTitle ? { customTitle: true } : {}) },
     }, startTs);
     this.addWatcher({ sessionId: this.sessionId, file: e.file, nodeId: `s:${this.sessionId}`, kind: 'main' });
-    if (!isSdk) { try { await this._inheritFromClear(e, head); } catch (err) { log('inherit', err?.message || err); } }
+    if (!isSdk) { this._inheritPending = { since: Date.now() }; await this._tryInherit(e); }
 
     for (let round = 0; round < 30; round++) {
       const before = this.tails.size + this.watchers.size;
@@ -394,8 +395,34 @@ export class RootRuntime {
    * 같고 meta.inheritedFrom = 띄운 세션. 끝 알림은 이 세션 기록으로 오므로 기존 규칙(taskMap·알림·출력·서브에이전트 기록)이 그대로 끝낸다.
    * 기동기·claude -p 를 띄운 Bash 는 옛 트리에 둔다(회차 매칭·인계 와 허브 가 맡음).
    */
+  /**
+   * 승계 판정을 머리가 다 쓰일 때까지 다시 해 본다(라이브). /clear 직후 새 transcript 는 이어받은 메타 기록(custom-title·
+   * agent-name·mode·bridge-session)만 먼저 적히고 SessionStart:clear 훅·/clear 명령 기록은 몇 초 뒤에 온다(실측 2026-10-29,
+   * 2.1.31x). 그 사이에 런타임이 붙으면 clearAt 이 없어 승계를 한 번도 하지 않았다 — 새 메인에 자식이 없고 옛 메인에 남음.
+   * 다시 보는 간격은 INHERIT_RETRY_MS(10초). 사슬을 찾았거나, 머리를 다 봤는데 표지가 없거나, 10분이 지나면 그만 본다. 재생(offline)은 머리가 이미 다 있어 한 번이면 된다.
+   */
+  async _tryInherit(e) {
+    const P = this._inheritPending;
+    if (!P || this.closed) return;
+    P.nextAt = Date.now() + INHERIT_RETRY_MS;
+    try {
+      if (!this.offline && Date.now() - (this.index.lastRefresh || 0) > 1900) await this.index.refresh(); // 파일 크기(머리 다시 읽기 기준)
+      e = this.index.findSession(this.sessionId) || e;
+      if (!e) return;
+      const head = await this.index.ensureHead(e);
+      if (head?.clearAt) {
+        if (P.tried === head.clearAt && e.size === P.size) return; // 같은 머리·같은 크기면 다시 찾지 않는다
+        P.tried = head.clearAt; P.size = e.size;
+        if (e._pred && !e._pred.res) delete e._pred; // 앞 세션을 못 찾은 캐시(옛 꼬리가 아직 덜 쓰였을 수 있음)
+        await this._inheritFromClear(e, head);
+        if (this.inheritChain) { this._inheritPending = null; return; }
+      } else if (head && head.entrypoint && head.hasUser && head.scanned) { this._inheritPending = null; return; }
+    } catch (err) { log('inherit', err?.message || err); }
+    if (this.offline || Date.now() - P.since > 600_000) this._inheritPending = null;
+  }
+
   async _inheritFromClear(e, head) {
-    if (!head || !head.clearAt) return;
+    if (!head || !head.clearAt || this.inheritChain) return;
     const plan = await inheritPlan(this.index, e);
     if (!plan.chain.length) return;
     const g = this.graph;
@@ -423,6 +450,7 @@ export class RootRuntime {
       if (it.kind === 'agent') {
         id = `a:${it.id}`;
         hint(id);
+        this.inheritedIds.add(id); // 늦은 승계: node-add 가 허브에 바로 가므로 만들기 전에 적는다
         if (!g.has(id)) {
           const meta = await agentMetaFromChain(plan.chain, it.id);
           g.addNode({ id, parentId: owner, kind: 'subagent', label: meta?.description || it.description || it.id, sessionId: this.sessionId,
@@ -444,21 +472,24 @@ export class RootRuntime {
         if (L && ((it.toolUseId && this.index.launchPin?.(it.toolUseId)) || analyzeLaunch(L, resolveCwdGuess(head.cwd, L.cdGuess)))) continue;
         id = `b:${it.id}`;
         hint(id);
+        this.inheritedIds.add(id);
         this.ensureBg(it.id, on, w, tu, ts, it.bodyText || '', { timedOutAfterMs: it.timedOutAfterMs ?? null });
       } else if (it.kind === 'monitor') {
         id = `m:${it.id}`;
         hint(id);
+        this.inheritedIds.add(id);
         this.ensureMonitor(it.id, on, w, tu, ts, { timeoutMs: it.timeoutMs ?? null, persistent: !!it.persistent });
       } else if (it.kind === 'workflow') {
         id = `w:${it.id}`;
         hint(id);
+        this.inheritedIds.add(id);
         this.ensureWorkflow(w, it.id, { parent: owner, label: it.name || undefined, taskId: it.taskId || undefined, ts });
         this._inheritRuns.push(it.id);
       }
       if (id && g.has(id)) {
         if (g.get(id).meta.inheritedFrom !== it.from) g.updateNode(id, { meta: { inheritedFrom: it.from } }, ts);
         this.inheritedIds.add(id);
-      }
+      } else if (id) this.inheritedIds.delete(id);
     }
     await this._scanInheritedRuns();
   }
@@ -529,6 +560,7 @@ export class RootRuntime {
         w._scanDue = now + (now - grew < 60_000 ? 0 : 10_000);
         await w.scan();
       }
+      if (this._inheritPending && Date.now() >= (this._inheritPending.nextAt || 0)) await this._tryInherit(); // 10초마다
       await this._scanInheritedRuns();
       if (this.children.some((c) => !c.matched && !c.dead)) {
         if (Date.now() - this.index.lastRefresh > 1900) await this.index.refresh();
@@ -2211,6 +2243,10 @@ export class RootRuntime {
     if (!this.launchNodes.size && !canAdopt) return;
     let since = canAdopt ? Date.parse(rootHead.firstTs) : Infinity;
     for (const L of this.launchNodes.values()) if (L.tsMs < since) since = L.tsMs;
+    // /clear 승계: 앞 세션 사슬이 띄웠거나 이어받은 기동기의 회차도 본다(앞 세션들이 시작한 뒤부터)
+    const inh = canAdopt && this.inheritedFrom?.size ? this.inheritedFrom : null;
+    const clearMs = inh ? this.inheritChain?.[0]?.clearMs : null;
+    if (inh) for (const c of this.inheritChain || []) { const ce = this.index.findSession(c.sessionId); const t0 = Date.parse(ce?.head?.firstTs || ''); if (t0 < since) since = t0; }
     const dirs = new Set([...this.launchNodes.values()].map((L) => L.projectDir).filter(Boolean));
     if (canAdopt) dirs.add(rootE.projectDir);
     const until = this.offline && this.childWindow ? this.childWindow[1] : Infinity;
@@ -2219,13 +2255,30 @@ export class RootRuntime {
         && e.head?.firstTs && Date.parse(e.head.firstTs) >= since - 2000)
       .sort((a, b) => Date.parse(a.head.firstTs) - Date.parse(b.head.firstTs));
     const plan = new Map(); // L → [{e, a}]
+    const assigned = [];
     for (const e of cands) {
       const a = await li.assign(e);
-      if (!a || a.none) continue;
+      if (a && !a.none) assigned.push({ e, a });
+    }
+    // 앞 세션 사슬(같은 프로세스가 /clear 로 이어 쓴 세션들)의 기동기 중 /clear 를 넘어 살아 있는 것(회차가 /clear 뒤까지
+    // 기록하거나 /clear 뒤에 시작) → 이 메인이 이어받은 기동기(b:adopt-<기동 tool_use id>)로, 그 기동기의 앞 회차까지 함께.
+    // 옛 메인 트리의 같은 노드는 허브가 넘겨받는다(inheritedIds). 끝난 기동기는 옛 메인에 둔다. 기록만 본다(재생 같은 답)
+    const fromChain = (a) => !!inh && (a.adopter ? inh.has(a.adopter) : inh.has(a.sessionId));
+    const carry = new Set();
+    if (inh && Number.isFinite(clearMs)) {
+      for (const { e, a } of assigned) {
+        if (!fromChain(a) && a.adopter !== this.sessionId) continue;
+        if (a.adopter === this.sessionId) { carry.add(a.toolUseId); continue; } // 새 회차가 이미 이 메인으로 인계됨 — 앞 회차도 같은 기동기로
+        await this.index.ensureTitle(e).catch(() => {});
+        const last = Math.max(Date.parse(e.lastTs) || 0, this.offline ? 0 : e.mtimeMs || 0);
+        if (Date.parse(e.head.firstTs) > clearMs || last >= clearMs) carry.add(a.toolUseId);
+      }
+    }
+    for (const { e, a } of assigned) {
       let L = null;
-      if (a.adopter) {
-        if (a.adopter === this.sessionId && canAdopt) L = this._adoptLauncher(a);
-      } else {
+      if (a.adopter === this.sessionId || (carry.has(a.toolUseId) && fromChain(a))) {
+        if (canAdopt) L = this._adoptLauncher(a, carry.has(a.toolUseId));
+      } else if (!a.adopter) {
         L = this.launchNodes.get(a.toolUseId) || null;
       }
       if (!L || !L.nodeId || !this.graph.has(L.nodeId)) continue;
@@ -2256,6 +2309,7 @@ export class RootRuntime {
           L.cycles.set(e.sessionId, { sessionId: e.sessionId, nodeId: null, startMs, endMs: Math.max(startMs, endMs), status: 'done' });
           continue;
         }
+        if (L.inherit) this.inheritedIds.add(`s:${e.sessionId}`); // 옛 메인 트리의 같은 회차는 허브가 넘겨받는다
         const c = { toolUseId: a.toolUseId, owner: R ? R.nodeId : L.nodeId, watcher: L.watcher, tsMs: startMs, endTsMs: null, isError: false,
           sessionIdHint: null, promptHint: null, promptHints: [], cwdGuess: null, stdoutIds: [], matched: null, dead: false, launcher: L.nodeId };
         this.children.push(c);
@@ -2289,6 +2343,7 @@ export class RootRuntime {
       this.runnerByNode.set(id, R);
       const ts = new Date(startMs).toISOString();
       if (this.offline && !this.spawnHints.has(id)) this.spawnHints.set(id, ts);
+      if (L.inherit) this.inheritedIds.add(id);
       if (!this.graph.has(id)) {
         this.graph.addNode({ id, parentId: L.nodeId, kind: 'bash-bg', label: `러너 · ${script}`, sessionId: L.watcher.sessionId,
           startedAt: ts, lastActivityAt: ts,
@@ -2301,17 +2356,28 @@ export class RootRuntime {
   }
 
   /** 인계: 끝난 세션이 띄운 기동기를 이 루트(메인) 아래 '이어받은 기동기' 노드로 */
-  _adoptLauncher(a) {
+  _adoptLauncher(a, inherit = false) {
     const key = `adopt:${a.toolUseId}`;
     let L = this.launchNodes.get(key);
-    if (L) return L;
+    if (L) {
+      if (inherit && !L.inherit) { L.inherit = true; this._markInheritedLauncher(L, a); }
+      return L;
+    }
     const w = this.watchers.get(this.sessionId);
     const root = this.graph.get(`s:${this.sessionId}`);
     if (!w || !root) return null;
     const id = `b:adopt-${a.toolUseId}`;
+    // 앞 세션 사슬이 맡던 기동기를 /clear 로 이어받음: 옛 메인 트리에 같은 id(옛 메인도 이어받은 기동기였으면)·같은 회차가 있다
+    // → 허브가 옛 쪽을 걷고 이 루트가 갖도록 노드를 만들기 전에 inheritedIds 에 적는다(만들면 바로 허브로 node-add 가 간다)
+    if (inherit && this.inheritChain) {
+      this.inheritedIds.add(id);
+      const clearIso = new Date(this.inheritChain[0].clearMs).toISOString();
+      if (this.offline && !this.spawnHints.has(id)) this.spawnHints.set(id, clearIso); // 재생: 새 메인 시작과 함께
+    }
     const via = (a.via || []).map((x) => String(x).split('/').pop());
     L = { nodeId: id, tsMs: a.tsMs, key: a.key, script: a.script, cwd: a.cwd || null, watcher: w, owner: root.id,
-      projectDir: this.index.findSession(this.sessionId)?.projectDir ?? null, toolUseId: a.toolUseId, via, adopted: true };
+      projectDir: this.index.findSession(this.sessionId)?.projectDir ?? null, toolUseId: a.toolUseId, via, adopted: true,
+      inherit: !!(inherit && this.inheritChain) };
     this.launchNodes.set(key, L);
     this.launcherByNode.set(id, L);
     const ts = new Date(a.tsMs).toISOString();
@@ -2321,9 +2387,20 @@ export class RootRuntime {
       this.graph.addNode({ id, parentId: null, kind: 'bash-bg', label: `기동기 · ${a.script}`, sessionId: this.sessionId,
         startedAt: ts, lastActivityAt: ts,
         meta: { toolUseId: a.toolUseId, background: true, detached: true, spawnedBy: root.id, launcher: { script: a.script, via },
-          adopted: { fromSession: a.sessionId, launchedAt: ts } } }, ts);
+          adopted: { fromSession: a.sessionId, launchedAt: ts }, ...(L.inherit ? { inheritedFrom: a.adopter || a.sessionId } : {}) } }, ts);
     }
     return L;
+  }
+
+  /**
+   * 먼저 평범한 인계로 만든 기동기가 뒤에 /clear 승계 대상으로 밝혀진 경우(늦은 승계): 그 기동기·러너·회차 id 를
+   * inheritedIds 에 적고 meta.inheritedFrom 을 갱신한다 — 허브는 그 node-update 를 보고 옛 루트의 같은 노드를 넘겨받는다
+   */
+  _markInheritedLauncher(L, a) {
+    if (!this.inheritedIds) return;
+    const ids = [L.nodeId, ...(L.runners || []).map((r) => r.nodeId), ...[...(L.cycles?.values() || [])].map((c) => c.nodeId).filter(Boolean)];
+    for (const id of ids) this.inheritedIds.add(id);
+    if (this.graph.has(L.nodeId)) this.graph.updateNode(L.nodeId, { meta: { inheritedFrom: a.adopter || a.sessionId } }, this.nowIso());
   }
 
   /**
@@ -2340,7 +2417,8 @@ export class RootRuntime {
   _claimedElsewhere(sid) {
     if (!this.index.claimedChildren.has(sid)) return false;
     const p = this.index.childParent?.get(sid);
-    return !(p && (p === this.sessionId || this.watchers.has(p)));
+    // /clear 앞 세션(같은 프로세스) 런타임이 붙인 회차는 이 메인이 이어받을 수 있다
+    return !(p && (p === this.sessionId || this.watchers.has(p) || this.inheritedFrom?.has?.(p)));
   }
 
   attachChild(c, e, link = null, cycleNo = null) {
@@ -3061,6 +3139,15 @@ export class RootRuntime {
    * 설정 묶음 files(예: 러너 출력 파일)의 꼬리 — 라이브만(기록 밖 파일이라 재생·보관함에는 없다). 읽기 전용.
    * 주인 = 끝나지 않은 마지막 러너(없으면 기동기) · 'launcher' · 'main'. 경로는 루트 cwd 기준.
    */
+  /** 파일 꼬리 옛 주인 아래 작업 닫기. 끝 시각 = 옛 주인이 끝났으면 그 끝, 아니면 새 주인 시작(없으면 지금) */
+  _jobFileClose(prevId, streamKey, next) {
+    const prev = this.graph.get(prevId);
+    if (!prev || !this._jobs) return;
+    const ts = (isEnded(prev.status) && prev.endedAt) || next?.startedAt || this.nowIso();
+    const key = this._jobOwnerKey(prevId);
+    for (const u of this._jobs.closeStream(key, streamKey, ts, next ? '주인 바뀜 — 다음 주인 아래에서 이어짐' : '주인 끝남')) this._jobEmit(prev, key, u, ts);
+  }
+
   _jobFiles() {
     if (this.closed) return;
     const book = this._jobBook();
@@ -3078,6 +3165,9 @@ export class RootRuntime {
         else if (f.owner === 'launcher') owner = latest((n) => n.meta?.launcher);
         else owner = this.graph.get(`s:${this.sessionId}`);
         let ent = F.get(f.path);
+        // 주인이 바뀌면(다음 러너·기동기 교체·주인 없어짐) 옛 주인 아래 이 파일의 끝나지 않은 작업을 닫는다 — 안 닫으면 끝난 러너 아래
+        // running 으로 남아 교체된 기동기가 퇴장하지 못한다
+        if (ent && ent.ownerId && ent.ownerId !== owner?.id) this._jobFileClose(ent.ownerId, 'file:' + f.path, owner);
         if (!owner) { if (ent) ent.ownerId = null; continue; }
         if (!ent) {
           const abs = path.isAbsolute(f.path) ? f.path : (ctx.cwd ? path.resolve(ctx.cwd, f.path) : null);

@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { placeLabels, boxDisc, boxHit, labelBox } from '../label-place.mjs';
+import { placeLabels, boxDisc, boxHit, labelBox, LABEL_SHIFTS, LABEL_FAR_SHIFTS } from '../label-place.mjs';
 import { safeBand, overlayInsets } from '../camera-core.mjs';
 import { computeOverview } from '../overview/layout.mjs';
 
@@ -92,4 +92,37 @@ test('실황 줄: 첫 줄 시간·에이전트명, 내용은 둘째 줄 에이�
   assert.match(css, /\.ln \.msg \{ grid-column: 2; grid-row: 2; \}/);
   const tl = fs.readFileSync(new URL('../timeline.mjs', import.meta.url), 'utf8');
   assert.match(tl, /<div class="tt-row"><time>/);
+});
+
+// 계획 보드 → 라벨 → 자동 맞춤 되먹임 끊기: 맞춤용 배치(fit)는 보드 상자와 무관, 실제 배치(placed)는 보드를 비킴
+test('§125 placeLabelsBoard: 맞춤용 배치는 보드(카메라 거리마다 크기·자리가 바뀌는 월드 고정 판)와 무관', async () => {
+  const { placeLabelsBoard } = await import('../label-place.mjs');
+  const opts = { shifts: LABEL_SHIFTS, farShifts: LABEL_FAR_SHIFTS, bounds: [0, 1000], vbounds: [0, 800], rects: [] };
+  // 원근 모형: 세계 (x, y) → 화면 = 가운데 + 세계 × f / 거리. 재기동기 L(0,0)·러너 R(1.5,1.6), 보드 왼쪽 아래 모서리 (1.0, 0.5)·한 변 2.2(월드 고정)
+  const scr = (x, y, D) => ({ x: 500 + (x * 1600) / D, y: 300 + (y * 1600) / D });
+  const placedL = new Set(), fitL = new Set();
+  for (const D of [20, 24, 28, 32, 36, 40]) {
+    const L = scr(0, 0, D), R = scr(1.5, 1.6, D), b0 = scr(1.0, 0.5, D), s = (2.2 * 1600) / D;
+    const cands = [
+      { id: 'L', ...L, up: false, gap: 14, pin: true, modes: [{ w: 120, h: 30 }, { w: 80, h: 18, compact: true }] },
+      { id: 'R', ...R, up: false, gap: 10, pin: 'soft', modes: [{ w: 110, h: 30 }, { w: 70, h: 18, compact: true }] },
+    ];
+    const discs = [{ id: 'L', ...L, r: 14 }, { id: 'R', ...R, r: 9 }];
+    const board = [[b0.x, b0.y - s, b0.x + s, b0.y]];
+    const { placed, fit } = placeLabelsBoard(cands, discs, opts, board);
+    const base = placeLabels(cands, discs, opts);
+    for (const id of ['L', 'R']) {
+      assert.deepEqual(fit.get(id), base.get(id), `맞춤용 배치 = 보드 없을 때 배치(D=${D}, ${id})`);
+      const p = placed.get(id);
+      if (p) assert.ok(!boxHit(p.box, board[0]), `실제 배치는 보드를 비킴(D=${D}, ${id})`);
+    }
+    const p = placed.get('L'), f = fit.get('L');
+    placedL.add(p ? p.dx + ',' + p.dy : 'hidden'); fitL.add(f ? f.dx + ',' + f.dy : 'hidden');
+  }
+  // 대조(수리 전 맞춤 점): 실제 배치는 거리마다 제자리 ↔ 옆 ↔ 아래로 바뀜 → 맞춤이 따라 움직이면 보드 상자가 또 바뀌는 되먹임
+  assert.ok(placedL.size >= 3, `실제 배치는 거리마다 자리가 바뀜: ${[...placedL]}`);
+  assert.equal(fitL.size, 1, '맞춤용 배치는 거리와 무관하게 하나');
+  // 보드가 없으면 배치를 한 번만(같은 Map)
+  const one = placeLabelsBoard([{ id: 'a', x: 10, y: 10, up: false, gap: 4, modes: [{ w: 20, h: 10 }] }], [], opts, []);
+  assert.equal(one.fit, one.placed);
 });

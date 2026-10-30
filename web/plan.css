@@ -10,7 +10,7 @@
   border-radius: 9px; border: 2px solid color-mix(in srgb, var(--pk, var(--accent)) 75%, transparent);
   background: color-mix(in srgb, var(--panel-bg) 94%, var(--bg));
   box-shadow: 0 8px 22px rgba(0, 0, 0, .45), 0 0 0 1px color-mix(in srgb, var(--pk, var(--accent)) 25%, transparent);
-  color: var(--text); font: calc(12px * var(--pbk))/1.3 var(--font, system-ui, sans-serif); pointer-events: auto; cursor: zoom-in;
+  color: var(--text); font: calc(12px * var(--pbk))/1.3 var(--ui-font, system-ui, sans-serif); /* UI 글꼴 한 곳(theme.css --ui-font) — 12px 는 PLAN_FIT.FONT_PX 와 같아야 함(시험) */ pointer-events: auto; cursor: zoom-in;
   transform-origin: 0 0; will-change: transform; user-select: none; transition: border-color .4s ease, box-shadow .4s ease;
   -webkit-text-size-adjust: none; text-size-adjust: none; /* 모바일 글자 키움(안드로이드 Chrome 글자 크기 설정·자동 크기 조정, iOS 가로 글자 키움)이 판 글자만 키워 고정 크기 판에서 넘치던 것 — 판은 월드 크기 × 배율로 글자와 함께 줄고 늘므로 브라우저 키움을 받지 않음 */
 }
@@ -25,7 +25,7 @@
 .pb-t { font-weight: 700; font-size: 1.05em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pb-o { font-size: .82em; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pb-dot { display: inline-block; width: .55em; height: .55em; border-radius: 50%; margin-right: .35em; background: var(--pk, var(--accent)); }
-.pb-n { flex: none; font-variant-numeric: tabular-nums; line-height: 1; padding-top: .05em; }
+.pb-n { flex: none; font-variant-numeric: tabular-nums; line-height: 1; padding-top: .05em; white-space: nowrap; font-size: calc(1em * var(--pbn, 1)); } /* 자릿수 맞춤(countFit) */
 .pb-n b { display: inline-block; font-size: 1.9em; font-weight: 800; color: var(--text); }
 .pb-n small { font-size: 1.1em; font-weight: 600; color: var(--muted); margin-left: 1px; }
 .all-done .pb-n b { color: var(--pb-ok); }
@@ -128,6 +128,10 @@
 .pb.lod .pb-ti, .pb.lod .pb-lines, .pb.lod .pb-chips { display: none; }
 .pb.lod .pb-h { justify-content: space-between; align-items: center; }
 .pb.lod .pb-g { width: 2.6em; height: 2.6em; font-size: 2.2em; }
+.pb.lod .pb-n { font-size: calc(1em * var(--pbn-lod, 1)); } /* 간략 판 자릿수 맞춤 — 세 자리(155/161)가 판 밖으로 넘쳐 잘리던 것 */
+.pb.lod.pb-long .pb-g { display: none; } /* 긴 완료/전체는 간략에서 글리프 자리까지 씀 */
+.pb.lod.pb-long .pb-h { justify-content: center; }
+.pb.lod .pb-x { display: none; } /* 간략엔 칸만 — 앞서 끝난 수 '✓n'·'+n' 작은 글자가 큰 칸 위에 겹치던 것 */
 .pb.lod .pb-n b { font-size: 4.6em; }
 .pb.lod .pb-n small { font-size: 2.4em; }
 .pb.lod .pb-bar { height: 1.5em; margin: .9em 0; }

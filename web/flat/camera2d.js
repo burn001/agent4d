@@ -1,7 +1,7 @@
 // 2D(저사양) 표현의 카메라. 3D CameraDirector 와 같은 바깥 모양(app.js 가 쓰는 메서드·필드)을
 // three 없이 2D 팬·줌으로: 휠(커서 기준)·끌기·핀치·WASD/QE, 자동 카메라 = 살아 있는 노드 전체 맞춤(2D판, FitHold 히스테리시스),
 // '따라가기'는 활동 노드를 8초마다 확대(간이), 수동 조작 10초 뒤 복귀, 빈 곳 클릭 즉시 복귀(resumeAuto), 일시정지 얼림(enabled=false).
-import { isShown, isLive, pickBest, shotLost, FitHold, safeBand, ZOOM, autoFloor, nearestKids, FIT, isFitActive, pickFitIds, PanelMemo, pxToE, shotFitScope, workScore, ShotHold, shotKey } from '../camera-core.mjs';
+import { isShown, isLive, pickBest, shotLost, FitHold, safeBand, ZOOM, autoFloor, nearestKids, FIT, isFitActive, pickFitIds, PanelMemo, pxToE, shotFitScope, workScore, ShotHold, shotKey, CycleSlots } from '../camera-core.mjs';
 import { stageInsets } from '../screen-insets.js';
 import { t } from '../i18n.mjs';
 import { promptCamPlan } from '../camera-core.mjs'; // 입력 때 메인으로(Follow my prompts)
@@ -310,12 +310,20 @@ export class Director2D {
       const nr = view.fitNodeR ? view.fitNodeR(id) : v.r;
       const c = cur.get(id);
       if (c) { memo.put(id, now, c.b); anc.set(id, { dx: c.dx, dz: c.dz }); }
-      if (v.labelOn && v._lrel) { const r = v._lrel; lmemo.put(id, now, { x0: r[0], y0: r[1], x1: r[2], y1: r[3] }); }
+      if (v._lfit) { const r = v._lfit; lmemo.put(id, now, { x0: r[0], y0: r[1], x1: r[2], y1: r[3] }); } // 보드를 뺀 맞춤용 라벨 상자
       pts.push({ p: v.target, r: nr * FIT.NODE_K + FIT.NODE_PAD, e: pxToE(lmemo.get(id, now), unit) });
       const b = memo.get(id, now), a = b && anc.get(id);
       if (b && a) pts.push({ p: { x: v.target.x + a.dx, y: 0, z: v.target.z + a.dz }, r: 0, e: pxToE(b, unit), panel: true, aux: true });
     }
     if (gh && gh.length) for (const id of gh) for (const q of this._ixPts(id)) pts.push({ p: { x: q.x, y: 0, z: q.z }, r: q.r, aux: true }); // 원격 저장소 포털·발송대
+    // 회차 사이에도 활성 기동기의 마지막 회차 자리(라벨 몫 포함)를 담는다 — 회차마다 좁혔다 넓히지 않게
+    const cs = this._cycSlots || (this._cycSlots = new Map()), ck = sc ? (sc.pid || '') + '|' + (sc.sid || '') : 'g';
+    const slots = cs.get(ck) || (cs.set(ck, new CycleSlots()), cs.get(ck));
+    const extra = slots.step(list, (x) => { const w = view.vis.get(x); return w ? w.node : null; }, (x) => {
+      const w = view.vis.get(x);
+      return w ? { p: w.target, r: (view.fitNodeR ? view.fitNodeR(x) : w.r) * FIT.NODE_K + FIT.NODE_PAD, e: pxToE(lmemo.get(x, now), unit) } : null;
+    });
+    if (!(gh && gh.length)) for (const q of extra) pts.push(q);
     return pts;
   }
   _fitFrame(now, sc = null, hold = this.fit) {

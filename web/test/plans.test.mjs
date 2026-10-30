@@ -349,3 +349,47 @@ test('§115.5 모바일 글자 키움(text-size-adjust)을 판이 받지 않음 
   assert.match(pb[1], /overflow|transform-origin: 0 0/); // 고정 상자 + scale 배율 방식 그대로
   assert.ok(!/\.ins-plan-big \{[^}]*text-size-adjust/.test(css), '크게 보기 카드는 브라우저 키움을 그대로 받음');
 });
+
+test('§115.6 완료/전체 자릿수 맞춤: 어떤 자릿수도 보통·간략 판 안에 들어감 · 짧으면 그대로 · 간략에서 길면 글리프 뺌', async () => {
+  const { countFit, PLAN_FIT, planInnerEm } = await import('../plan-core.mjs');
+  const F = PLAN_FIT, inner = planInnerEm();
+  const w = (d, t, B, S) => F.CH * (String(d).length * B + (1 + String(t).length) * S);
+  for (const [d, t] of [[0, 1], [3, 7], [12, 20], [99, 100], [155, 161], [999, 1000], [12345, 67890]]) {
+    const f = countFit(d, t);
+    assert.ok(f.k > 0 && f.k <= 1 && f.kLod > 0 && f.kLod <= 1, `${d}/${t} 배율 범위`);
+    assert.ok(w(d, t, F.FULL.B, F.FULL.S) * f.k <= inner * F.FULL.SHARE + 1e-6, `${d}/${t} 보통 판: 숫자가 제목 몫을 넘지 않음`);
+    const room = f.long ? inner : inner - F.LOD.GLYPH - F.GAP;
+    assert.ok(w(d, t, F.LOD.B, F.LOD.S) * f.kLod <= room + 1e-6, `${d}/${t} 간략 판: 판 안`);
+  }
+  assert.deepEqual(countFit(3, 7), { k: 1, kLod: 1, long: false }, '한 자리는 예전 크기 그대로');
+  const big = countFit(155, 161); // 실데이터(자율 루프 156축) — 예전엔 간략 판에서 '/161' 이 판 밖으로 잘림
+  assert.equal(big.long, true); assert.ok(big.kLod >= 0.85, '글리프를 빼고 거의 제 크기');
+  assert.ok(countFit(155, 161).k < 1 && countFit(155, 161).k > 0.8);
+});
+
+test('§115.6 판 글꼴·크기 규칙이 한 곳: CSS 글자 px·간략 em·여백·테가 PLAN_FIT 과 같고, 글꼴은 theme.css --ui-font', async () => {
+  const { readFileSync: rf } = await import('node:fs');
+  const { PLAN_FIT: F } = await import('../plan-core.mjs');
+  const css = rf(new URL('../plan.css', import.meta.url), 'utf8').replace(/\r/g, '');
+  const theme = rf(new URL('../theme.css', import.meta.url), 'utf8').replace(/\r/g, '');
+  const pb = /\n\.pb \{([^}]*)\}/.exec(css)[1];
+  const has = (s, sub, msg) => assert.ok(s.includes(sub), msg || sub);
+  has(pb, `font: calc(${F.FONT_PX}px * var(--pbk))/1.3 var(--ui-font, `, '판 글자 px·글꼴 변수');
+  has(pb, `padding: calc(7px * var(--pbk)) calc(${F.PAD_X}px * var(--pbk))`);
+  has(pb, `border-radius: 9px; border: ${F.BORDER}px solid`);
+  assert.ok(!/var\(--font[,)]/.test(css), '정의 없는 --font 를 쓰지 않음(예전엔 늘 system-ui 로 떨어져 UI·크게 보기 카드와 다른 글꼴)');
+  assert.match(theme, /:root \{ --ui-font: "Pretendard", [^}]*\}/);
+  assert.match(theme, /body \{[^}]*font: 13px\/1\.45 var\(--ui-font\);/);
+  const em = (sel, prop) => { const i = css.indexOf('\n' + sel + ' {'); assert.ok(i >= 0, sel); const body = css.slice(i, css.indexOf('}', i)); const m = new RegExp(prop + ': ([0-9.]+)em').exec(body); assert.ok(m, sel + ' ' + prop); return +m[1]; };
+  assert.equal(em('.pb-n b', 'font-size'), F.FULL.B); assert.equal(em('.pb-n small', 'font-size'), F.FULL.S);
+  assert.equal(em('.pb.lod .pb-n b', 'font-size'), F.LOD.B); assert.equal(em('.pb.lod .pb-n small', 'font-size'), F.LOD.S);
+  assert.equal(em('.pb.lod .pb-g', 'width') * em('.pb.lod .pb-g', 'font-size'), F.LOD.GLYPH);
+  assert.match(css, /\.pb-n \{[^}]*font-size: calc\(1em \* var\(--pbn, 1\)\)/);
+  assert.match(css, /\.pb\.lod \.pb-n \{ font-size: calc\(1em \* var\(--pbn-lod, 1\)\)/);
+  assert.match(css, /\.pb\.lod\.pb-long \.pb-g \{ display: none; \}/);
+  assert.match(css, /\.pb\.lod \.pb-x \{ display: none; \}/);
+  const ui = rf(new URL('../plan-ui.js', import.meta.url), 'utf8');
+  assert.match(ui, /const fit = countFit\(m\.done, m\.total\)/);
+  assert.match(ui, /class="pb-n" style="--pbn:\$\{fit\.k\};--pbn-lod:\$\{fit\.kLod\}"/);
+  assert.ok(!/getBoundingClientRect\(\)[^\n]*pb-n|measureText/.test(ui), '측정 없이 글자 수로(글꼴·배율 경합 없음)');
+});

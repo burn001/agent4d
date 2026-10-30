@@ -13,7 +13,7 @@ import { escapeHtml as esc } from './html-util.mjs';
 import { t } from './i18n.mjs';
 import {
   PLAN_UI, PLAN_STORE_KEY, PLAN_ST_LABEL, planInitial, diffPlans, PlanFx, gatherPlans, boardWorld, boardScreen, boardCard, sheetInspectModel, PLAN_CAM,
-  planInspectModel, boardAnchor, liveCycleOf, boardHoles, holesMask,
+  planInspectModel, boardAnchor, liveCycleOf, boardHoles, holesMask, countFit,
 } from './plan-core.mjs';
 
 let cssDone = false;
@@ -171,6 +171,8 @@ export function mountPlans(h) {
     b.el.style.setProperty('--pk', `var(--k-${(h.nodes().get(m.owner) || {}).kind || 'main'}, var(--accent))`);
     b.el.classList.toggle('hot', m.hot);
     b.el.classList.toggle('all-done', m.allDone);
+    const fit = countFit(m.done, m.total); // 자릿수로 완료/전체 크기 맞춤(측정 없음 — 글꼴·배율과 무관하게 같은 결과)
+    b.el.classList.toggle('pb-long', fit.long);
     b.el.title = `${m.title} — ${m.srcLabel} · ${m.ownerLabel} · ${t('boards.plan.tipDone', { n: m.count })}${m.more ? ` · ${t('boards.plan.tipMore', { n: m.more })}` : ''} ${t('boards.plan.tipClick')}`;
     const cells = m.cells.map((c) => `<i class="pc st-${c.st}${c.cur ? ' cur' : ''}${c.live ? ' live' : ''}${c.fx ? ' fx-' + c.fx : ''}" title="${esc(c.st === 'hold' ? t('boards.plan.st.hold') : PLAN_ST_LABEL[c.s] || '')} · ${esc(c.t)}${c.cy != null ? ` · ${esc(t('boards.plan.cycle', { n: c.cy }))}` : ''}"></i>`).join('');
     const dels = m.dels.map(() => '<i class="pc st-pending fx-del"></i>').join('');
@@ -181,7 +183,7 @@ export function mountPlans(h) {
     const chips = [m.liveCy != null ? `<span class="pb-chip live">${esc(t('boards.plan.liveChip', { n: m.liveCy }))}</span>` : '', m.hold ? `<span class="pb-chip hold">${esc(t('boards.plan.holdChip', { n: m.hold }))}</span>` : '', m.more ? `<span class="pb-chip">${esc(t('boards.plan.moreChip', { n: m.more }))}</span>` : ''].filter(Boolean).join('');
     b.el.innerHTML = `<header class="pb-h"><span class="pb-g" aria-hidden="true">${esc(m.glyph)}</span><span class="pb-ti"><span class="pb-t">${esc(m.title)}</span>` +
       `<span class="pb-o"><i class="pb-dot"></i>${esc(m.ownerLabel)} · ${esc(m.srcLabel)}</span></span>` +
-      `<span class="pb-n" aria-label="${esc(t('boards.plan.countAria', { done: m.done, total: m.total }))}"><b>${m.done}</b><small>/${m.total}</small></span></header>` +
+      `<span class="pb-n" style="--pbn:${fit.k};--pbn-lod:${fit.kLod}" aria-label="${esc(t('boards.plan.countAria', { done: m.done, total: m.total }))}"><b>${m.done}</b><small>/${m.total}</small></span></header>` +
       `<div class="pb-bar"><i class="d" style="width:${(m.fracDone * 100).toFixed(1)}%"></i><i class="p" style="width:${(m.fracProg * 100).toFixed(1)}%"></i></div>` +
       `<div class="pb-cells">${m.before ? `<span class="pb-x pre" title="${esc(t('boards.plan.before', { n: m.before }))}">✓${m.before}</span>` : ''}${cells}${dels}${m.extra ? `<span class="pb-x">+${m.extra}</span>` : ''}</div>` +
       `<div class="pb-lines">${lines}</div>` + (chips ? `<div class="pb-chips">${chips}</div>` : '');

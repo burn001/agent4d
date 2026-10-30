@@ -1,6 +1,6 @@
 // 말풍선·이름표·방 문패 — CSS2D. DOM 은 미리 만든 풀을 돌려 쓴다(프레임마다 생성 0).
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { placeLabels, textWidth as textPx } from '../label-place.mjs';
+import { placeLabelsBoard, textWidth as textPx } from '../label-place.mjs';
 import { planLabelRects } from '../plan-core.mjs'; // 계획 보드 = 라벨의 고정 장애물
 import { QUIP, rankQuips } from './quip-core.mjs'; // 생각·말풍선
 
@@ -132,6 +132,7 @@ export class Bubbles {
     const items = this.lpool.items, cands = [];
     for (let i = 0; i < n && i < items.length; i++) {
       const it = items[i];
+      it._fitOn = null; // 이번 배치에 안 든 이름표는 예전 규칙(보이는지)으로
       if (!it.o.visible) continue;
       // 크기는 글이 바뀔 때 잰다. 아직 그려지지 않은(display:none) 이름표는 0 이라 추정만 쓰고 기억하지 않는다(— 예전엔 80px 로 굳어 겹침)
       if (it._mw == null || it._mwHtml !== it.html || !it._mwOk) {
@@ -147,10 +148,11 @@ export class Bubbles {
     const rects = [];
     const pl = this._placed || [];
     for (let j = 0; j + 3 < pl.length; j += 4) rects.push([pl[j], pl[j + 1], pl[j + 2], pl[j + 3]]);
-    planLabelRects(rects); // 계획 보드(라벨이 비킴)
-    const placed = placeLabels(cands, discs, { shifts: VX_SHIFTS, farShifts: VX_FAR, bounds: [0, W], rects });
+    // + 계획 보드(라벨이 비킴). 맞춤(fitLabels)은 보드를 뺀 배치로 — 보드 때문에 숨은 이름표가 맞춤에서 드나들지 않게
+    const { placed, fit } = placeLabelsBoard(cands, discs, { shifts: VX_SHIFTS, farShifts: VX_FAR, bounds: [0, W], rects }, planLabelRects([]));
     for (const c of cands) {
       const it = items[c.i], r = placed.get(c.id);
+      it._fitOn = fit.has(c.id);
       const dy = r ? r.dy : 0, dx = r ? r.dx : 0, dim = !r || r.dim;
       const off = dx + ',' + dy;
       if (it.off !== off) { it.off = off; it.el.style.transform = dy || dx ? `translate(${dx}px, ${dy}px)` : ''; }
@@ -196,7 +198,7 @@ export class Bubbles {
    *  잠깐 뜨는 말풍선은 담지 않는다(뜰 때마다 줌이 드나들지 않게) */
   fitLabels(out) {
     for (const it of this.lpool.items) {
-      if (!it.o.visible || !it.key || it.el.style.visibility === 'hidden') continue;
+      if (!it.o.visible || !it.key || (it._fitOn != null ? !it._fitOn : it.el.style.visibility === 'hidden')) continue; // 보드를 뺀 배치 기준
       const w = (it._mw || 80) + 4, h = it._mh || 18, p = it.o.position;
       push(out, it.key, { p: { x: p.x, y: p.y, z: p.z }, b: { x0: -w / 2, x1: w / 2, y0: 0, y1: h + 6 } });
     }

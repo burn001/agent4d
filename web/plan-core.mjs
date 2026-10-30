@@ -241,6 +241,30 @@ export function boardScreen(p, ppw, wb, vw, vh) {
 }
 
 /**
+ * 판 글꼴·완료/전체 자릿수 맞춤 — plan.css 와 같은 값(시험이 CSS 와 대조). 판은 기준 폭 BASE_PX·글자 FONT_PX 로 짜고
+ * 화면 크기는 transform scale 하나로만 바뀌므로, 넘침은 화면 배율이 아니라 **글자 수**로 정해진다 → 측정(글꼴 불러오기·배율에 따라 달라짐) 없이 글자 수로 계산.
+ * em 단위는 판 글자(FONT_PX). CH = 굵은 tabular 숫자·빗금 한 자 폭(넉넉히).
+ */
+export const PLAN_FIT = {
+  FONT_PX: 12, PAD_X: 9, BORDER: 2, CH: 0.62, GAP: 0.5,
+  FULL: { B: 1.9, S: 1.1, GLYPH: 1.6 * 1.05, SHARE: 0.42 }, // 보통 판: 숫자는 내용 폭의 SHARE 까지(나머지는 제목)
+  LOD: { B: 4.6, S: 2.4, GLYPH: 2.6 * 2.2, MIN_K: 0.7 },     // 간략 판: 글리프 옆에 넣으면 MIN_K 아래로 줄 때 글리프를 빼고(pb-long) 내용 폭 전부
+};
+/** 판 내용 폭(em) */
+export const planInnerEm = () => (PLAN_UI.BASE_PX - 2 * (PLAN_FIT.PAD_X + PLAN_FIT.BORDER)) / PLAN_FIT.FONT_PX;
+/** 완료/전체 숫자 배율 {k(보통), kLod(간략), long(간략에서 글리프 뺌)} — k ≤ 1, 늘 판 안에 들어감 */
+export function countFit(done, total) {
+  const F = PLAN_FIT, inner = planInnerEm();
+  const nb = String(done ?? '').length, ns = 1 + String(total ?? '').length; // '/' 포함
+  const wFull = F.CH * (nb * F.FULL.B + ns * F.FULL.S), wLod = F.CH * (nb * F.LOD.B + ns * F.LOD.S);
+  const k = Math.min(1, (inner * F.FULL.SHARE) / wFull);
+  let kLod = Math.min(1, (inner - F.LOD.GLYPH - F.GAP) / wLod), long = false;
+  if (kLod < F.LOD.MIN_K) { long = true; kLod = Math.min(1, inner / wLod); }
+  const r3 = (v) => Math.floor(v * 1000) / 1000;
+  return { k: r3(k), kLod: r3(kLod), long };
+}
+
+/**
  * 메인 옆 보드(작은 판) 모델: 가장 앞 계획 하나(gatherPlans 순서) — 제목·주인·완료/전체·막대·항목 칸 띠(≤MAX_CELLS)·지금 줄(진행 중 ≤2,
  * 없으면 보류 아닌 대기 첫째, 다 끝나면 '모두 완료')·외부 대기 수·다른 계획 수. 칸은 회차 선 끝.
  * opts = {nowMs, fx(PlanFx), labelOf(id), mainId, liveCy(진행 중 회차 번호 — 지금 칸 강조·'회차 N 진행 중' 표시, 선 대신)}

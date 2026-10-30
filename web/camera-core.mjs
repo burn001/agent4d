@@ -421,6 +421,47 @@ export class FitHold {
   }
 }
 
+// ---------------- 회차 사이 자리 붙잡기(기동기 루프) ----------------
+/**
+ * 자율 루프(기동기 → 러너 → 회차 claude -p)는 회차가 끝나는 순간(프로세스 종료) 회차 노드가 맞춤 활성 집합에서 빠지고, 몇 초 뒤
+ * 다음 회차가 **같은 사슬 자리**에 뜬다. 그 사이 '구도: 전체'는 기동기·러너만으로 좁혀(필요 거리 약 0.6～0.8배 → FitHold 2초 뒤 다가감)
+ * 다음 회차가 뜨자마자 다시 넓혔다(GROW 즉시) — 회차마다 한 번씩 들어갔다 나오는 움찔거림.
+ * 기동기가 아직 활성인데(서버: 회차가 돌면 active, 아니면 마지막 회차 활동 + 60초까지) 진행 중 회차가 없으면, 그 기동기의 마지막
+ * 진행 회차 자리(그때의 맞춤 점)를 맞춤에 남긴다. 기동기가 쉬거나(대기·끝남) 범위에서 빠지면 버림. 진행 중 회차가 다시 있으면 그 자리로 갱신.
+ */
+export const isCycleNode = (n) => !!(n && (n.kind === 'claude-p' || (n.meta && n.meta.cycle != null)));
+export class CycleSlots {
+  constructor() { this.m = new Map(); }
+  clear() { this.m.clear(); }
+  /**
+   * list = [[id, active]](범위 안 보이는 노드), nodeOf(id) → 서버 노드, ptOf(id) → 그 노드 맞춤 점 {p, r, e?}(없으면 null).
+   * 반환: 더할 맞춤 점 배열(진행 중 회차가 없는 활성 기동기마다 마지막 회차 자리 하나)
+   */
+  step(list, nodeOf, ptOf) {
+    const act = new Set();
+    for (const [id, a] of list) if (a) act.add(id);
+    const launcherOf = (id) => {
+      let n = nodeOf(id);
+      for (let i = 0; n && i < 8; i++) { if (n.meta && n.meta.launcher) return n.id; n = n.parentId ? nodeOf(n.parentId) : null; }
+      return null;
+    };
+    const live = new Set();
+    for (const id of act) {
+      if (!isCycleNode(nodeOf(id))) continue;
+      const L = launcherOf(id), q = L && ptOf(id);
+      if (!q || live.has(L)) continue;
+      this.m.set(L, { p: { x: q.p.x, y: q.p.y || 0, z: q.p.z }, r: q.r, e: q.e ? { ...q.e } : undefined });
+      live.add(L);
+    }
+    const out = [];
+    for (const [L, s] of this.m) {
+      if (!act.has(L)) { this.m.delete(L); continue; }
+      if (!live.has(L)) { const q = { p: { ...s.p }, r: s.r, slot: true }; if (s.e) q.e = { ...s.e }; out.push(q); }
+    }
+    return out;
+  }
+}
+
 // ---------------- 좁은 구도(노드 샷·초점·따라가기) 목표 붙잡기 ----------------
 /**
  * 노드 샷 구도(중심·거리)는 매 프레임 그 노드 + 가까운 자식 + 일하는 하위 노드 + 라벨 자리로 다시 재서, 상태가 바뀔 때마다(작업 중 ↔ 쉼,

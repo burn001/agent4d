@@ -152,3 +152,16 @@ export function smoothReserve(prev, next) {
   if (!prev) return { top: q(next.top), bottom: q(next.bottom), left: q(next.left), right: q(next.right) };
   return { top: f(prev.top, next.top), bottom: f(prev.bottom, next.bottom), left: f(prev.left, next.left), right: f(prev.right, next.right) };
 }
+
+/**
+ * 계획 보드(월드 고정 판 — 화면 상자가 카메라에 따라 커지고 작아지고 옮겨 감)를 피한 실제 배치와, 보드를 빼고 놓은 **맞춤용 배치**를 함께.
+ * 자동 카메라 맞춤(라벨 점· 라벨 자리)은 맞춤용 배치를 쓴다 — 실제 배치를 쓰면 카메라 이동 → 보드 화면 상자 변화 →
+ * 라벨이 옆·먼 자리로 밀리거나 숨음 → 맞춤 점 변화 → 카메라 이동의 되먹임이 생겨, 보드나 그 곁 러너·회차 라벨이 걸릴 때마다 구도가 움찔거렸다.
+ * board 가 비면 한 번만 배치(fit === placed). opts.rects = 보드 아닌 장애물(도구 패널·말풍선·섬 이름표).
+ * @returns {{placed: Map, fit: Map}}
+ */
+export function placeLabelsBoard(cands, discs, opts = {}, board = []) {
+  if (!board || !board.length) { const placed = placeLabels(cands, discs, opts); return { placed, fit: placed }; }
+  const placed = placeLabels(cands, discs, { ...opts, rects: [...(opts.rects || []), ...board] });
+  return { placed, fit: placeLabels(cands, discs, opts) };
+}

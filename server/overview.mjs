@@ -321,9 +321,31 @@ export class OverviewHub {
   _onRootEvent(R, e) {
     if (this.roots.get(R.sid) !== R) return;
     if (e.type === 'node-add') { if (!this._claim(R, e.nodeId)) return; }
-    else if (this.owner.get(e.nodeId) !== R.sid) return;
+    else if (this.owner.get(e.nodeId) !== R.sid) {
+      // 늦은 승계: 이 루트가 뒤늦게 이어받은 노드(먼저 옛 루트 소유로 거절됐던 것)면 지금 넘겨받아 그 노드와 자손을 node-add
+      if (e.type === 'node-update' && this._lateTakeover(R, e.nodeId)) return;
+      return;
+    }
     this._emit(R, e);
     if (e.type === 'tool-start') this._sessionTouch(R, e);
+    // 새 메인이 뒤늦게 /clear 승계를 판정하면(meta.clearedFrom) 옛 루트의 살아 있는 기동기 자리도 그때 새 메인 옆으로
+    if (e.type === 'node-update' && e.nodeId === R.rootNodeId && e.patch?.meta?.clearedFrom) this._announceHandoff(R);
+  }
+
+  /** R 이 이어받은 id(inheritedIds)를 옛 루트가 갖고 있으면 넘겨받고, R 그래프의 그 노드·자손을 내보낸다 */
+  _lateTakeover(R, id) {
+    const o = this.owner.get(id);
+    if (!o || o === R.sid || !R.rt?.inheritedIds?.has?.(id) || !R.rt.inheritedFrom?.has?.(o)) return false;
+    const g = R.rt.graph;
+    if (!g.has(id) || !this._claim(R, id)) return false;
+    const ts = new Date().toISOString();
+    this._emit(R, { ts, type: 'node-add', nodeId: id, node: structuredClone(g.get(id)) });
+    for (const nid of g.order) {
+      if (nid === id || !g.isAncestor(id, nid) || this.owner.get(nid) === R.sid) continue;
+      if (!this._claim(R, nid)) continue;
+      this._emit(R, { ts, type: 'node-add', nodeId: nid, node: structuredClone(g.get(nid)) });
+    }
+    return true;
   }
 
   // ───────────── 같은 파일 충돌·세션 간 메시지 ─────────────

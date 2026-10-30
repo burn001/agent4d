@@ -12,7 +12,7 @@ import { exitEligible, exitWalls, endedBadly, badEndDueAt, catColor } from './fl
 import { HoloLayer } from './holo.js';
 import { CAT_LABEL } from './icons.js';
 import { actLine, sayBrief, pushHist, panelPx } from './holo-core.mjs';
-import { placeLabels, LABEL_SHIFTS, LABEL_FAR_SHIFTS, textWidth, labelReserve, smoothReserve } from './label-place.mjs';
+import { placeLabelsBoard, LABEL_SHIFTS, LABEL_FAR_SHIFTS, textWidth, labelReserve, smoothReserve } from './label-place.mjs';
 import { planLabelRects, PLAN_PUNCH, PLAN_SHADOW, punchCorners, labelBoardCut, labelCutPath } from './plan-core.mjs'; // 계획 보드 = 라벨의 고정 장애물 · 판 깊이(구멍 사각형)
 import { spawnLinks, dashSpans, spawnTag } from './spawn-link.mjs';
 
@@ -1183,8 +1183,8 @@ export class SceneView {
   fitLabels(out) {
     out.clear();
     for (const v of this.vis.values()) {
-      if (!v.labelOn || !v._lrel || !v.label) continue;
-      const g = v.group.position, l = v.label.position, r = v._lrel;
+      if (!v._lfit || !v.label) continue; // 보드를 뺀 맞춤용 배치(보드 때문에 밀리거나 숨은 라벨도 제자리 몫으로)
+      const g = v.group.position, l = v.label.position, r = v._lfit;
       out.set(v.id, [{ p: { x: g.x + l.x, y: g.y + l.y, z: g.z + l.z }, b: { x0: r[0], y0: r[1], x1: r[2], y1: r[3] } }]);
     }
     return out;
@@ -1313,9 +1313,9 @@ export class SceneView {
       cands.push({ id: v.id, x, y, up: v.label.center.y !== 0, gap: this._labelGapPx(v, px), force, pin, modes });
     }
     // 피할 사각형: 홀로그램 도구 패널·말풍선·섬 이름표
-    const rects = planLabelRects(this._obstacleRects(W, H)); // + 계획 보드(라벨이 비킴)
-    const placed = placeLabels(cands, discs, { shifts: LABEL_SHIFTS, farShifts: LABEL_FAR_SHIFTS, bounds: [0, W], vbounds: [0, H], rects });
-    this._labRes = smoothReserve(this._labRes, labelReserve(placed, cands, discs)); // 맞춤에 라벨 자리 포함
+    // + 계획 보드(라벨이 비킴). 자동 맞춤(라벨 점·라벨 자리)은 보드를 뺀 배치로 — 보드 화면 상자는 카메라를 따라 바뀌므로 되먹임
+    const { placed, fit } = placeLabelsBoard(cands, discs, { shifts: LABEL_SHIFTS, farShifts: LABEL_FAR_SHIFTS, bounds: [0, W], vbounds: [0, H], rects: this._obstacleRects(W, H) }, planLabelRects([]));
+    this._labRes = smoothReserve(this._labRes, labelReserve(fit, cands, discs)); // 맞춤에 라벨 자리 포함
     const candOf = new Map(cands.map((c) => [c.id, c]));
     const want = new Set(placed.keys());
     for (const [id, r] of placed) {
@@ -1333,6 +1333,8 @@ export class SceneView {
       v._lrel = c ? [r.box[0] - c.x, r.box[1] - c.y, r.box[2] - c.x, r.box[3] - c.y] : null; // 라벨 상자(노드 화면 자리 기준) — 말풍선이 비킴
     }
     for (const v of this.vis.values()) {
+      const fr = fit.get(v.id), fc = fr && candOf.get(v.id);
+      v._lfit = fc ? [fr.box[0] - fc.x, fr.box[1] - fc.y, fr.box[2] - fc.x, fr.box[3] - fc.y] : null; // 맞춤용 라벨 상자(보드를 뺀 배치)
       if (!want.has(v.id)) v._lrel = null;
       if (v.sat) v.sat.label.visible = want.has(v.id);
       const on = want.has(v.id);

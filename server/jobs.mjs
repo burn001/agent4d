@@ -333,6 +333,8 @@ export class JobBook {
       }
       if (!ev) { if (auto) autoLines.push(line); continue; }
       const r = this._apply(ownerKey, ev, line, tsIso, tsMs);
+      const jj = this.jobs.get(ownerKey)?.get(ev.id);
+      if (jj) jj._stream = streamKey; // 파일 꼬리 주인이 바뀌면 이 스트림이 세운 작업을 닫는다(closeStream)
       if (!r) continue;
       const prev = changed.get(r.jobId);
       changed.set(r.jobId, prev ? { ...r, isNew: prev.isNew || r.isNew, beatOnly: prev.beatOnly && r.beatOnly } : r);
@@ -422,6 +424,25 @@ export class JobBook {
     return { jobId: job.id, job: publicJob(job), isNew: false, beatOnly: false };
   }
 
+  /**
+   * 파일 꼬리(`files`)의 주인이 바뀌었거나(다음 러너·기동기 교체) 주인이 없어졌을 때: 그 스트림이 옛 주인 아래 세운
+   * 끝나지 않은 작업을 done 으로 닫는다(정체 표시 없이 — 실패가 아니라 주인 교체). 끝 시각 = tsIso(마지막 박동보다 앞서지 않게).
+   * 같은 작업은 새 주인 아래 같은 id 로 이어 선다. 바뀐 작업 목록을 돌려준다
+   */
+  closeStream(ownerKey, streamKey, tsIso, phase = null) {
+    const map = this.jobs.get(ownerKey);
+    if (!map) return [];
+    const out = [];
+    for (const job of map.values()) {
+      if (job._stream !== streamKey || isJobEnded(job.state)) continue;
+      const at = job.beatAt && Date.parse(job.beatAt) > Date.parse(tsIso) ? job.beatAt : tsIso;
+      job.state = 'done'; job.endedAt = at; job.until = null; job.stale = false;
+      if (phase != null && this.privacy !== 'minimal') job.phase = clean(phase, JOB.PHASE_MAX);
+      out.push({ jobId: job.id, job: publicJob(job), isNew: false, beatOnly: false });
+    }
+    return out;
+  }
+
   _setsFor(owner, file, streamKey) {
     const R = this.rules;
     if (!R || !R.sets.length) return [];
@@ -507,7 +528,7 @@ export class JobBook {
 
 /** 노드 meta.job 에 싣는 모양(내부 필드 뺌) */
 export function publicJob(j) {
-  const { _beatEmit, _laneEmit, _dirty, ...rest } = j;
+  const { _beatEmit, _laneEmit, _dirty, _stream, ...rest } = j;
   if (rest.lanes) rest.lanes = rest.lanes.map((l) => ({ ...l, last: l.last ? { ...l.last } : null }));
   return rest;
 }
