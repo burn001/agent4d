@@ -88,7 +88,7 @@ When the user asks to change what the open viewer shows, run `$A4D ctl <command>
 | "Korean UI" / "English UI" | `$A4D ctl lang ko` / `$A4D ctl lang en` |
 | "close the popups" / "reload the viewer" / "show 'meeting starts' on screen" | `$A4D ctl close` / `$A4D ctl reload` / `$A4D ctl toast "meeting starts"` |
 
-More: camera (`auto|manual|fit|follow`), `focus <node or session>`, `bgm auto|<track>`, `artifacts on|off`, `plans on|off` (loop board), `weather auto|off|fog|rain|snow`, `grid on|off`, `noise on|off|0-100`, `panel open|close`, `timeline show|hide`, `done on|off`. Full list: `$A4D ctl help`.
+More: camera (`auto|manual|fit|follow`), `focus <node or session>`, `bgm auto|<track>`, `artifacts on|off`, `plans on|off` (loop board), `weather auto|off|fog|rain|snow`, `grid on|off`, `panel open|close`, `timeline show|hide`, `done on|off`. Full list: `$A4D ctl help`.
 
 - If more than one viewer is open and the user means only one ("just the meeting-room TV"), run `$A4D ctl clients` first and add `--client <id prefix or part of its name>`. Viewers can be named in their ⚙ menu.
 - If a project or session name matches several, the command prints the candidates and changes nothing. **Ask the user which one** instead of guessing, then send it again with the exact name or id.

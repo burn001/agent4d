@@ -58,15 +58,56 @@ python music/compose.py --wav 미리듣기.wav          # WAV 사본도(레포�
 | swing | 점심 빅밴드 | 점심시간 빅밴드 | `compose_swing.py` | `bgm-swing.mp3`·`.json` | 192 · F major | 자체 작곡 |
 | caper | 오피스 소동 | 오피스 소동 | `compose_caper.py` | `bgm-caper.mp3`·`.json` | 160 · C major (추격 구간 A minor) | 자체 작곡 |
 
-표에 없는 곡(dawn·orbit·drive·deephouse·funk·liquid·uplift)은 매니페스트 참고. 새 10곡(pulse～caper, 2026-10-28)은 표현별 세 에이전트가 만든 곡입니다.
+| glacier | 빙하 위의 코드 | 빙하 위의 코드 | `compose_glacier.py` | `bgm-glacier.mp3`·`.json` | 68 · B minor | 자체 작곡 |
+| cursor | 깜빡이는 커서 | 깜빡이는 커서 | `compose_cursor.py` | `bgm-cursor.mp3`·`.json` | 76 · F# minor | 자체 작곡 |
+| refactor | 리팩터 루프 | 리팩터 루프 | `compose_refactor.py` | `bgm-refactor.mp3`·`.json` | 88 · G# minor | 자체 작곡 |
+| queue | 빌드 대기열 | 빌드 대기열 | `compose_queue.py` | `bgm-queue.mp3`·`.json` | 105 (3/4) · Bb minor | 자체 작곡 |
+| stack | 스택 트레이스 | 스택 트레이스 | `compose_stack.py` | `bgm-stack.mp3`·`.json` | 124 · C# minor | 자체 작곡 |
+| sprint | 스프린트 | 스프린트 | `compose_sprint.py` | `bgm-sprint.mp3`·`.json` | 132 · Eb minor | 자체 작곡 |
+| hotfix | 핫픽스 | 핫픽스 | `compose_hotfix.py` | `bgm-hotfix.mp3`·`.json` | 148 · D phrygian | 자체 작곡 |
+| deadline | 마감 질주 | 마감 질주 | `compose_deadline.py` | `bgm-deadline.mp3`·`.json` | 156 · Bb major | 자체 작곡 |
+| aurora | 오로라 장막 | 오로라 장막 | `compose_aurora.py` | `bgm-aurora.mp3`·`.json` | 52 · Ab major | 자체 작곡 |
+| deepfield | 심우주 관측 | 심우주 관측 | `compose_deepfield.py` | `bgm-deepfield.mp3`·`.json` | 66 (3/4) · C# minor | 자체 작곡 |
+| comet | 혜성 꼬리 | 혜성 꼬리 | `compose_comet.py` | `bgm-comet.mp3`·`.json` | 92 · Bb lydian | 자체 작곡 |
+| satellite | 위성 교신 | 위성 교신 | `compose_satellite.py` | `bgm-satellite.mp3`·`.json` | 100 · G mixolydian | 자체 작곡 |
+| ionstorm | 이온 폭풍 | 이온 폭풍 | `compose_ionstorm.py` | `bgm-ionstorm.mp3`·`.json` | 120 · F minor | 자체 작곡 |
+| gravity | 중력 선회 | 중력 선회 | `compose_gravity.py` | `bgm-gravity.mp3`·`.json` | 124 · Eb major | 자체 작곡 |
+| supernova | 초신성 | 초신성 | `compose_supernova.py` | `bgm-supernova.mp3`·`.json` | 136 · F# minor | 자체 작곡 |
+| hyperspace | 초공간 질주 | 초공간 질주 | `compose_hyperspace.py` | `bgm-hyperspace.mp3`·`.json` | 144 · B minor | 자체 작곡 |
+| rainwindow | 창가의 비 | 창가의 비 | `compose_rainwindow.py` | `bgm-rainwindow.mp3`·`.json` | 56 · Eb major | 자체 작곡 |
+| teatime | 오후의 찻잔 | 오후의 찻잔 | `compose_teatime.py` | `bgm-teatime.mp3`·`.json` | 84 (3/4) · A major | 자체 작곡 |
+| typewriter | 타자기 산책 | 타자기 산책 | `compose_typewriter.py` | `bgm-typewriter.mp3`·`.json` | 108 · Ab major | 자체 작곡 |
+| espresso | 에스프레소 한 잔 | 에스프레소 한 잔 | `compose_espresso.py` | `bgm-espresso.mp3`·`.json` | 88 · G minor | 자체 작곡 |
+| meeting | 회의실 스카 | 회의실 스카 | `compose_meeting.py` | `bgm-meeting.mp3`·`.json` | 152 · E major | 자체 작곡 |
+| copier | 복사기 디스코 | 복사기 디스코 | `compose_copier.py` | `bgm-copier.mp3`·`.json` | 124 · Db major | 자체 작곡 |
+| pantry | 탕비실 대소동 | 탕비실 대소동 | `compose_pantry.py` | `bgm-pantry.mp3`·`.json` | 176 · D harmonic minor | 자체 작곡 |
+| mambo | 금요일 맘보 | 금요일 맘보 | `compose_mambo.py` | `bgm-mambo.mp3`·`.json` | 184 · C minor | 자체 작곡 |
+
+표에 없는 곡(dawn·orbit·drive·deephouse·funk·liquid·uplift)은 매니페스트 참고. 새 10곡(pulse～caper, 2026-10-28)은 표현별 세 에이전트가 만든 곡이고,
+glacier～mambo 24곡(2026-10-30)은 표현 × 단계마다 2곡씩 더한 곡입니다(지금 46곡). 3/4 곡(queue·deepfield·teatime)은 매니페스트에 `beats: 3` 이 있어
+자동 단계 전환 크로스페이드가 실제 마디 경계에 맞춥니다.
 
 **테마별 풀**: 곡마다`views`(표현별 단계)를 두고, 자동 선곡은 지금 보고 있는 표현의 풀에서만 고릅니다(그 단계에 곡이 없으면 `stage` 전체 풀로 폴백).
 
 | 표현 | 0 한가 | 1 보통 | 2 활발 | 3 매우 활발 |
 |---|---|---|---|---|
-| flow (Intense 코딩) | lofi·pulse | lofi·deephouse·circuit | drive·deephouse | liquid·uplift·overclock |
-| planet (Cosmic Ambient) | orbit·ambient | stardust·nebula | drive·pulsar | uplift·warp |
-| voxel (카페·사무실) | dawn·bossa | jazz·chillhop·lofi | city·funk | swing·caper |
+| flow (Intense 코딩) | lofi·pulse·glacier·cursor | lofi·deephouse·circuit·refactor·queue | drive·deephouse·stack·sprint | liquid·uplift·overclock·hotfix·deadline |
+| planet (Cosmic Ambient) | orbit·ambient·aurora·deepfield | stardust·nebula·comet·satellite | drive·pulsar·ionstorm·gravity | uplift·warp·supernova·hyperspace |
+| voxel (카페·사무실) | dawn·bossa·rainwindow·teatime | jazz·chillhop·lofi·typewriter·espresso | city·funk·meeting·copier | swing·caper·pantry·mambo |
+
+### 공용 엔진 `bgmkit.py` (2026-10-30 24곡)
+
+glacier～mambo 24곡의 `compose_<id>.py` 는 곡마다 설정·편곡(`setup(...)`·`build()`)만 두고 합성은 `music/bgmkit.py` 를 씁니다
+(Planet 묶음의 층·섹션 곡선·사이드체인·에코·리버브·마스터링 + 복셀 묶음의 화음 파서·보이싱·가산 악기·드럼을 한 모듈로).
+4/4 외에 `beats=3`(3/4)도 되고, 마디 수 × 박 × 60/BPM 이 정확히 300초가 아니면 시작하지 않습니다. 곡 하나에 약 3분, 메모리 약 2GB.
+
+```
+python music/compose_glacier.py --out <임시폴더>/bgm-glacier.mp3      # mp3·json·report-glacier.json
+python music/tracks.py copy glacier --from <임시폴더> --stage 0 --energy 0.18 --views "flow:0" --label "빙하 위의 코드"     --label-en "Code on Ice" --title-en "Code on Ice" --mood-en "…"
+```
+
+`report-<id>.json` 에 LUFS·샘플 피크·클리핑 샘플 수·루프 이음매(마지막↔처음 샘플 차와 그 근처 보통 최대 차)·15초 창 RMS·스펙트럼 중심이 남고,
+−16±0.5 LUFS·피크 −1.5 dBFS 이하·클리핑 0·이음매 차 ≤ max(3×보통 차, 0.02)·300±0.5초·128kbps CBR 을 못 넘으면 종료 코드 1 입니다.
 
 `python music/tracks.py copy <id> --from <폴더> --stage 1 --energy 0.4 --views "flow:0,1;voxel:1" [--key-en "…"]` 로 넣거나, 이미 있는 곡은 매니페스트 `views` 를 고친 뒤 `manifest` 를 돌립니다.
 

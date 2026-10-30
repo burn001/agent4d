@@ -2,28 +2,42 @@
 // 육각 칩(상태색 테두리·완료 점선·중지 회색·오류 맥동·종류 아이콘·도구 스피너·컨텍스트 고리) · 곡선 빔(부모→자식, 작업 중 밝게, 추정 연결 점선,
 // 퇴장 때 자식 끝부터 감김) · 흐름 패킷(가벼운 점 + 잔광 점 2개) · 말풍선(DOM) · 배치 장치 칩(진행 막대·표시등·상태 띠 5칸) ·
 // 도구 카드(방향 슬롯, 실제 출력 panel.lines/marks, 자물쇠, 가까우면 본문·멀면 머리줄) · 전체 보기 섬(원판·고리·이름표).
-// 생략: 글로우 셰이더·깊이 입자·육각 격자 맥동·바닥 조명·퇴장 입자·신호 열화 후처리·기상 — 대신 옅은 바깥 육각·단색 고리로.
+// 생략: 글로우 셰이더·깊이 입자·육각 격자 맥동·바닥 조명·퇴장 입자·기상 — 대신 옅은 바깥 육각·단색 고리로.
 import { FlatView } from './flat-view.js';
 import { t } from '../i18n.mjs';
 import { FlatArt } from './art2d.js'; // 작업 대상 층(켤 때만 만든다)
 import { paletteOf, nodeVisualStateAt, runStaleOf, stateColor, kindIcon, breathe, NODE_STATE, BEAM, beamControls, beamPoint, beamAlpha, flowDash, FLOW_DASH, packetWobble } from '../flowview/flow-style.mjs';
 import { FLOW, PacketPool, planFlow, easeInOut, linkPackets } from '../flow-core.mjs';
 import { isGuessLink, isLauncher } from '../batch-core.mjs';
-import { DEG, degOf, degOfLink, packetGone, lineFlicker, brokenDash } from '../degrade-core.mjs';
-const DG_DASH = [0, 0, 0, 0]; // 끊긴 선 무늬(재사용)
 
-import { toScreen, camScale, hexPath, bezPrefix, bezSuffix, ctxRingTone } from './flat-core.mjs';
+import { toScreen, camScale, hexPath, bezPrefix, bezSuffix } from './flat-core.mjs';
 import { MONO, rrect, setFont, drawCards, drawRings, drawDeviceFace, drawIslands, BubbleLayer } from './flat-draw.js';
 import { JOB2D } from './flat-core.mjs';
 import { isJobVis, drawJobPill, jobLevel } from './job2d.js'; // 작업 칩(알약)
 import { isProcVis, procLevel, drawProcRig, drawProcFx, procTip } from './proc2d.js'; // 분리 프로세스 장치
 import { RIG, RigWatch, RigTicks, superviseText, supervisorSets } from '../flowview/proc-rig-core.mjs';
 import { escapeHtml } from '../html-util.mjs';
-import { silOf, silOutline, SIL_DIM, assignMainShapes, mainSetSig, ctxFrac, reactorFills, bandWords, toolBand } from '../flowview/shape-core.mjs'; // 3D 와 같은 모양 표
+import { silOf, silOutline, SIL_DIM, assignMainShapes, mainSetSig, ctxFrac, ctxTone, reactorFills, bandWords, toolBand } from '../flowview/shape-core.mjs'; // 3D 와 같은 모양 표
+import { HeatBook, CRIT_H } from '../heat-core.mjs'; // 노드별 과열 보간
+import { heatLook, heatColor, smokeColor, heatPulse, puffAt, hazeAt, emberAt, rippleAt, heatEligible, rgbCss } from '../flowview/heat-fx-core.mjs'; // 3D 와 같은 과열 표
 import { flowLegend } from '../flowview/flow-legend.js';
 import { jobOf } from '../job-core.mjs';
 
 const TOP_ACTIVE = 6;
+const CTX_TONE = ['thinking', 'tool', 'error']; // ctxTone 0·1·2 → 팔레트 키(경계 30·70%)
+/** 부드러운 연기 덩이 그림(테마별 한 장, 회색) — 프레임마다 그라디언트를 만들지 않게 */
+const _blob = new Map();
+function smokeBlob(light) {
+  let c = _blob.get(light);
+  if (c || typeof document === 'undefined') return c || null;
+  c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'), rgb = smokeColor(0.6, light), col = rgbCss(rgb).slice(4, -1);
+  const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, `rgba(${col},1)`); gr.addColorStop(0.45, `rgba(${col},0.6)`); gr.addColorStop(1, `rgba(${col},0)`);
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+  _blob.set(light, c);
+  return c;
+}
 
 export class Flow2DView extends FlatView {
   static modeId = 'flow';
@@ -45,6 +59,7 @@ export class Flow2DView extends FlatView {
     this._supIds = new Set(); this._watchIds = new Set();
     for (const v of this.vis.values()) if (isProcVis(v)) v.procRig = true;
     this._mainShapes = new Map(); this._mainSig = '';
+    this.heat = new HeatBook(); this._heatT = null; this._hot = []; this._hlook = {}; this._hp = {}; this._hrgb = [0, 0, 0];
     flowLegend(true);
     this.applyTheme();
   }
@@ -88,6 +103,7 @@ export class Flow2DView extends FlatView {
     super.reset();
     if (this.pool) { this.pool.clear(); this.flowState.lastUp.clear(); this.flowState.lastOut.clear(); this.bubbles.clear(); }
     if (this.rigWatch) { this.rigWatch.reset(); this.rigTicks.clear(); this._ticks.length = 0; }
+    if (this.heat) { this.heat.clear(); this._heatT = null; } // seek·보관함: 다음 값은 바로 목표
   }
   addNode(node, spawn = true) {
     const had = this.vis.has(node.id);
@@ -169,6 +185,7 @@ export class Flow2DView extends FlatView {
       for (const id of new Set([...prev, ...this._supIds])) { const v = this.vis.get(id); if (v) this._labelText(v); }
     }
     if (this.pool.active.length) level = 2;
+    level = Math.max(level, this._stepHeat(now));
     level = Math.max(level, this.bubbles.level(now));
     if (this.scope.mode === 'all' && !this.reduced) for (const c of this._clusterV.values()) if (c.busy) { level = Math.max(level, 1); break; }
     return level;
@@ -197,7 +214,9 @@ export class Flow2DView extends FlatView {
     drawProcFx(this, ctx, now, this._pulses, this._ticks); // 감독 스캔·기다림 고리·진행 줄 눈금 패킷(빔 위, 칩 아래)
     this._drawPackets(ctx, now);
     this.sess.drawUnder(ctx, now); // 충돌 곡선·세션 간 메시지
+    for (const v of this._hot) if (v._on) this._drawHeatUnder(ctx, v, now); // 열 글로우·경고 파문(칩 아래)
     for (const v of this.vis.values()) if (v._on) this._drawChip(ctx, v, now);
+    for (const v of this._hot) if (v._on) this._drawSmoke(ctx, v, now); // 연기·불티(칩 위로 피어오름)
     this.sess.drawOver(ctx, now); // 파일명 칩
     drawRings(this, ctx, now, s);
     drawCards(this, ctx, now, s, this._cardAnchorFn || (this._cardAnchorFn = (v) => (v.procRig && v._sp ? { x: v._sp.x, y: v._sp.y, R: v._R * 1.5 } : null))); // 넓은 장치 상자는 카드를 그만큼 더 띄움
@@ -245,14 +264,11 @@ export class Flow2DView extends FlatView {
         ctx.strokeStyle = col; ctx.lineWidth = wpx + Math.max(3, BEAM.glowW * s * wScale);
         ctx.stroke();
       }
-      // 신호 열화: 그 세션 빔은 끊긴 토막으로 깜빡인다
-      const dg = DEG.on ? degOf(cv.id) : 0, tt = DEG.reduced ? 0 : DEG.t, sd = dg > 0 ? (cv.seed * 1e6) | 0 : 0;
-      ctx.globalAlpha = Math.min(1, al * 1.4) * (dg > 0 ? lineFlicker(sd, tt, dg) : 1);
+      ctx.globalAlpha = Math.min(1, al * 1.4);
       ctx.strokeStyle = col; ctx.lineWidth = wpx;
       if (dashed) ctx.setLineDash([6, 5]);
-      else if (dg > 0) ctx.setLineDash(brokenDash(sd, tt, dg, Math.max(3, s * 0.5), DG_DASH));
       ctx.stroke();
-      if (dashed || dg > 0) ctx.setLineDash([]);
+      if (dashed) ctx.setLineDash([]);
       // 선 위를 늘 흐르는 가는 대시(부모 → 자식, 상태별 속도·밝기). 끝남·중지·점선·퇴장은 멈춤
       const fd = !dashed && !exiting && sk >= 0.5 && !this.reduced ? flowDash(st) : null;
       if (fd && fd.speed) {
@@ -288,7 +304,6 @@ export class Flow2DView extends FlatView {
       if (!fv || !tv || fv.hidden || tv.hidden) { dead.push(k); continue; }
       const u = (now - k.t0) / k.dur;
       if (u >= 1) { dead.push(k); continue; }
-      if (DEG.on && !DEG.reduced && packetGone((k.t0 * 1000) | 0, u, degOfLink(k.from, k.to))) continue; // 패킷 중간 소실
       const e = easeInOut(Math.max(0, u));
       // 호출은 부모→자식, 결과는 같은 빔을 거꾸로(곡선 빔 위)
       const pa = k.up ? tv.pos : fv.pos, pb = k.up ? fv.pos : tv.pos;
@@ -346,6 +361,7 @@ export class Flow2DView extends FlatView {
     if (st === NODE_STATE.done) ctx.setLineDash([Math.max(2, R * 0.28), Math.max(2, R * 0.2)]);
     ctx.stroke();
     if (st === NODE_STATE.done) ctx.setLineDash([]);
+    this._heatRim(ctx, v, alpha, now); // 테두리 달아오름(같은 경로를 열 색으로 덧그림)
     // 실루엣 덧그림: 두 단 = 안쪽 윗단 육각(종류색) · 깎인 육각 = 삼각 표 · 퍽 = 퍼지는 파동
     const kcol = this.kindColor(v.kind);
     if (sil === 'tier2' && R > 4) { this._silPath(ctx, 'hex', x, y, R * SIL_DIM.tier2.top); ctx.strokeStyle = kcol; ctx.lineWidth = Math.max(1, R * 0.06); ctx.globalAlpha = alpha * 0.8; ctx.stroke(); ctx.globalAlpha = alpha; }
@@ -375,7 +391,7 @@ export class Flow2DView extends FlatView {
     if (c && c.limit && R > 5) {
       const f = Math.min(1, Math.max(0, c.used / c.limit));
       if (f > 0.005) {
-        ctx.strokeStyle = P[ctxRingTone(f * 100)]; ctx.lineWidth = Math.max(1.2, R * 0.07);
+        ctx.strokeStyle = P[CTX_TONE[ctxTone(f)]]; ctx.lineWidth = Math.max(1.2, R * 0.07);
         ctx.globalAlpha = alpha * 0.85;
         ctx.beginPath(); ctx.arc(x, y, R * 1.3, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2); ctx.stroke();
       }
@@ -441,13 +457,14 @@ export class Flow2DView extends FlatView {
     const shape = this.mainShapeOf(v.id);
     const sess = v.sessC && !v.node.parentId && st !== NODE_STATE.done && st !== NODE_STATE.error && st !== NODE_STATE.stopped ? v.sessC : this.kindColor('main');
     const scol = this._stateCol[st];
-    const f = ctxFrac(v.node), tone = f == null ? null : f < 0.5 ? P.thinking : f < 0.75 ? P.tool : P.error;
+    const f = ctxFrac(v.node), tone = f == null ? null : P[CTX_TONE[ctxTone(f)]];
     const pulse = st === NODE_STATE.error && !this.reduced ? 0.6 + 0.4 * Math.sin(now * 6) : 1;
     ctx.lineWidth = Math.max(1, R * (foc ? 0.1 : 0.07));
     if (shape === 'reactor') {
       hexPath(ctx, x, y, R, hp);
       ctx.globalAlpha = alpha * (L ? 0.92 : 0.88); ctx.fillStyle = P.interior; ctx.fill();
       ctx.globalAlpha = alpha; ctx.strokeStyle = sess; if (st === NODE_STATE.done) ctx.setLineDash([Math.max(2, R * 0.28), Math.max(2, R * 0.2)]); ctx.stroke(); ctx.setLineDash([]);
+      this._heatRim(ctx, v, alpha, now);
       // 막대 여섯(꼭짓점 안쪽, 컨텍스트만큼 아래서 채움)
       const fills = reactorFills(f ?? 0), bh = R * 0.5, bw = Math.max(1.5, R * 0.09);
       for (let i = 0; i < 6; i++) {
@@ -480,6 +497,7 @@ export class Flow2DView extends FlatView {
       }
       ctx.globalAlpha = alpha; ctx.strokeStyle = sess; if (st === NODE_STATE.done) ctx.setLineDash([Math.max(2, R * 0.28), Math.max(2, R * 0.2)]);
       rrect(ctx, x0, y0, w, h, rr); ctx.stroke(); ctx.setLineDash([]);
+      this._heatRim(ctx, v, alpha, now);
       // 위 뚜껑 = 상태색 띠
       ctx.fillStyle = scol; ctx.globalAlpha = alpha * pulse; ctx.fillRect(x0 + rr * 0.5, y0, w - rr, Math.max(2, R * 0.12));
       // 글 띠 한 줄(도구 중 = 지금 도구 호박, 아니면 최근 도구)
@@ -504,6 +522,88 @@ export class Flow2DView extends FlatView {
       else if (st === NODE_STATE.thinking) { const a0 = now * 2.4 + v.seed; ctx.globalAlpha = alpha; ctx.fillStyle = scol; ctx.beginPath(); ctx.arc(x + Math.cos(a0) * R * 1.15, y + Math.sin(a0) * R * 1.15, Math.max(1.2, R * 0.07), 0, Math.PI * 2); ctx.fill(); }
     }
     ctx.globalAlpha = 1;
+  }
+
+  // ---------- 에이전트 과열(3D HeatFx 와 같은 은유: 열 글로우·테두리 물듦·연기·불티·경고 파문) ----------
+  /** 노드별 보간 heat(v._heatK)·뜨거운 노드 목록. 반환 = 화면 갱신 등급(연기·맥동 1 = 15fps, 식는 중도 1, 없으면 0) */
+  _stepHeat(now) {
+    const dt = this._heatT == null ? 0 : Math.min(0.5, Math.max(0, now - this._heatT));
+    this._heatT = now;
+    const hot = this._hot; hot.length = 0;
+    let moving = false;
+    for (const v of this.vis.values()) {
+      if (!heatEligible(v) || (v.scopeK ?? 1) < 0.5) { if (v._heatK) moving = true; v._heatK = 0; continue; }
+      const had = this.heat.m.has(v.id), prev = this.heat.get(v.id);
+      const h = this.heat.step(v.id, v.node, dt);
+      if (!had ? h > 0.002 : Math.abs(h - prev) > 0.0005) moving = true;
+      v._heatK = h > 0.002 ? h : 0;
+      if (v._heatK) hot.push(v);
+    }
+    if (this.heat.size > this.vis.size) this.heat.prune(this.vis);
+    if (moving) return 1;
+    return hot.length && !this.reduced ? 1 : 0;
+  }
+  _heatA(v) { return (v.exitF ?? 1) * Math.min(1, (v.scopeK ?? 1) * 1.3) * (v.stale ? 0.7 : 1); }
+  _heatEst(v) { const c = v.node.meta && v.node.meta.ctx; return !!(c && c.estimated); }
+  /** 칩 아래: 열 글로우(다크 빛 더하기 · 라이트 곱하기 잉크) + 위험 경고 파문 */
+  _drawHeatUnder(ctx, v, now) {
+    const h = v._heatK, R = v._R, a = this._heatA(v);
+    if (!h || R < 1.6 || a < 0.05) return;
+    const L = this.tokens.isLight, look = heatLook(h, R, this.reduced, this._heatEst(v), this._hlook);
+    if (!look.stage) return;
+    const { x, y } = v._sp, hc = rgbCss(heatColor(h, L, this._hrgb)), pul = heatPulse(h, now, v.seed || 0, this.reduced);
+    const gr = R * (2.4 + 0.5 * h) * (v.kind === 'main' ? 1.15 : 1); // 3D 와 같은 크기(데움부터 몸 밖으로)
+    ctx.save();
+    ctx.globalCompositeOperation = L ? 'multiply' : 'lighter';
+    const g = ctx.createRadialGradient(x, y, R * 0.5, x, y, gr);
+    g.addColorStop(0, hc); g.addColorStop(1, L ? 'rgba(255,255,255,0)' : 'rgba(0,0,0,0)');
+    ctx.globalAlpha = (L ? 0.38 : 0.5) * look.glow * pul * a;
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, gr, 0, Math.PI * 2); ctx.fill();
+    if (look.ripple) {
+      const u = rippleAt(now, v.seed || 0);
+      ctx.globalAlpha = (L ? 0.6 : 0.55) * (1 - u) * (1 - u) * a; ctx.strokeStyle = hc; ctx.lineWidth = Math.max(1, R * 0.06);
+      ctx.beginPath(); ctx.arc(x, y, R * (1.2 + 1.4 * u), 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  /** 칩 테두리 경로(바로 앞에서 그린 경로)를 열 색으로 덧그림 — 데움은 옅게, 과열부터 맥동 */
+  _heatRim(ctx, v, alpha, now) {
+    const h = v._heatK;
+    if (!h) return;
+    const look = heatLook(h, v._R, this.reduced, this._heatEst(v), this._hlook);
+    if (!look.stage) return;
+    ctx.save();
+    ctx.strokeStyle = rgbCss(heatColor(h, this.tokens.isLight, this._hrgb));
+    ctx.globalAlpha = Math.min(1, alpha * look.tint * 1.3 * heatPulse(h, now, v.seed || 0, this.reduced));
+    ctx.stroke();
+    ctx.restore();
+  }
+  /** 칩 위: 아지랑이(데움) · 연기 가닥/기둥(과열·위험) · 불티. 움직임 줄이기면 그리지 않음(정지 글로우만) */
+  _drawSmoke(ctx, v, now) {
+    const h = v._heatK, R = v._R, a = this._heatA(v);
+    if (!h || R < 4 || a < 0.05 || this.reduced) return;
+    const L = this.tokens.isLight, look = heatLook(h, R, false, this._heatEst(v), this._hlook);
+    if (!look.haze && !look.puffs && !look.embers) return;
+    const blob = smokeBlob(L), p = this._hp, seed = v.seed || 0;
+    const x = v._sp.x, top = v._sp.y - R * (v.kind === 'main' ? 0.85 : 0.6);
+    ctx.save();
+    ctx.globalCompositeOperation = L ? 'multiply' : 'source-over';
+    const draw = (cx, cy, rr, al) => { if (al < 0.004 || !blob) return; ctx.globalAlpha = Math.min(1, al); ctx.drawImage(blob, cx - rr, cy - rr, rr * 2, rr * 2); };
+    for (let i = 0; i < look.haze; i++) { hazeAt(i, now, seed, p); draw(x + p.x * R, top - p.y * R, p.size * R, p.alpha * (L ? 0.26 : 0.18) * look.wisp * a); }
+    const dens = h >= CRIT_H ? (L ? 0.5 : 0.42) : look.stage >= 2 ? (L ? 0.36 : 0.3) : (L ? 0.26 : 0.22) * look.wisp; // 데움 50%↑ 옅은 가닥
+    for (let i = 0; i < look.puffs; i++) { puffAt(i, look.puffs, now, seed, h, p); draw(x + p.x * R, top - p.y * R + p.z * R * 0.3, p.size * R * 0.75, p.alpha * dens * a); }
+    if (look.embers) {
+      ctx.globalCompositeOperation = L ? 'source-over' : 'lighter';
+      const hc = rgbCss(heatColor(h, L, this._hrgb)), ec = L ? '#b8320a' : '#ffd27a';
+      for (let i = 0; i < look.embers; i++) {
+        emberAt(i, now, seed, h, p);
+        if (!p.on || p.alpha < 0.02) continue;
+        ctx.globalAlpha = p.alpha * a; ctx.fillStyle = i % 2 ? hc : ec;
+        const r = Math.max(1, p.size * R * 1.4);
+        ctx.beginPath(); ctx.arc(x + p.x * R, top - p.y * R + p.z * R * 0.3, r, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    ctx.restore();
   }
 
   dispose() {

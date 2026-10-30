@@ -171,7 +171,7 @@ test('탭 복귀(visibilitychange): 켜져 있는데 멈춘 음악은 이어서,
   assert.ok(f.win.listeners.has('keydown'));
 });
 
-test('신호 열화 필터 컨텍스트(routeCtx)가 멈추면 음악은 조용 → 대기, 동작에서 같이 resume', async () => {
+test('배경음악 경로 컨텍스트(routeCtx)가 멈추면 음악은 조용 → 대기, 동작에서 같이 resume', async () => {
   const f = fakes(); realSfx(f);
   const s = new Sound({ ...f, storage: mem({ [KEY]: j({ on: true }) }), search: '' });
   f.nav.userActivation.hasBeenActive = true;

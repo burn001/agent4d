@@ -34,6 +34,8 @@ test('전환 일정: 자동 4.5+4.5 겹침 3초·마디 맞춤, 수동 1.5초, �
   assert.deepEqual({ out: a.out, in: a.in, delay: a.delay }, { out: 4.5, in: 4.5, delay: 1.5 });
   near(a.overlap, 3); near(a.wait, 1.5);
   assert.equal(planXfade('auto', { pos: 1, bpm: null }).wait, 0, 'bpm 없으면 맞춤 생략');
+  near(planXfade('auto', { pos: 1, bpm: 84, beats: 3 }).wait, 180 / 84 - 1, 1e-9, '3/4 곡(84 BPM)은 마디 2.14초 경계에 맞춤');
+  near(planXfade('auto', { pos: 1, bpm: 96, beats: 4 }).wait, 1.5);
   const m = planXfade('manual', { pos: 1, bpm: 96 });
   assert.deepEqual({ out: m.out, in: m.in, delay: m.delay, wait: m.wait }, { out: 1.5, in: 1.5, delay: 0, wait: 0 });
   near(m.overlap, 1.5);
@@ -120,14 +122,15 @@ test('전환 도중 새 요청: 같음·바꿔 걸기·되돌아가기·세 번�
   assert.equal(takeover({ ...xf, started: false }, 'a'), 'retarget', '시작 전이면 나가던 곡도 바꿔 걸기로(되돌림 없음)');
 });
 
-test('audio.js 연결: 두 덱·등전력 차선·마디 맞춤·끝 미리 넘기기·필터 끼움·볼륨 노드', () => {
+test('audio.js 연결: 두 덱·등전력 차선·마디 맞춤·끝 미리 넘기기·볼륨 노드', () => {
   const src = readFileSync(new URL('../audio.js', import.meta.url), 'utf8');
   assert.match(src, /from '\.\/bgm-xfade\.mjs'/);
   assert.match(src, /planXfade\(kind/);
+  assert.match(src, /planXfade\(kind, \{ pos: out\.el\.currentTime, bpm, beats,/, '박자(3/4 곡)도 넘김');
   assert.match(src, /shouldLeadEnd\(/);
   assert.match(src, /cancelScheduledValues\(now\)/);
   assert.match(src, /linearRampToValueAtTime/);
-  assert.match(src, /setInsert\(node\)/);
+  assert.doesNotMatch(src, /setInsert/, '신호 열화 로우패스 폐지(§127) — 끼움 자리 없음');
   assert.match(src, /kind: 'auto'/);
   assert.match(src, /kind: 'manual'/);
   assert.match(src, /kind: 'ended'/);

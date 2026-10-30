@@ -2,7 +2,6 @@
 // 도구 사용은 홀로그램 모니터(holo.js)가 맡는다(예전 '도구 가지'는 없앰). 그리기는 InstancedMesh 2개(머리·잔광) — 그리기 호출 2번.
 import * as THREE from 'three';
 import { FLOW, PacketPool, planFlow, linkPoint, trailUs, easeInOut } from './flow-core.mjs';
-import { DEG, degOfLink, packetGone } from './degrade-core.mjs';
 
 const HEAD_R = 0.3;
 
@@ -106,8 +105,6 @@ export class FlowLayer {
       const u = t / s.dur;
       if (u >= 1) { dead.push(s); continue; }
       const e = easeInOut(Math.max(0, u));
-      // 신호 열화: 그 세션 흐름선 위 패킷이 중간 구간에서 사라졌다 다시 나타남(소실)
-      if (DEG.on && !DEG.reduced && packetGone((s.t0 * 1000) | 0, u, degOfLink(s.from, s.to))) continue;
       const a = view.linkEnd ? view.linkEnd(fv, true) : fv.group.position, b = view.linkEnd ? view.linkEnd(tv, false) : tv.group.position; // 흐름 3D 세운 장치 변
       const col = this._colorOf(s);
       const lp = view.linkPath || linkPoint; // 흐름 표현은 곡선 빔 위로

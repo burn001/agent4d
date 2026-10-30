@@ -10,16 +10,17 @@ import { HoloText } from '../holo-text.js';
 import { catColor } from '../flow-core.mjs';
 import { MON, monitorWanted, stepOpen, openShape, popShape } from './office-core.mjs';
 import { DESK_TOP } from './props.js';
+import { bodyTintOf, heatHueOf } from './vx-heat-core.mjs'; // 모니터 테두리 단계색
 import { BATCH, deviceInfo, fmtDur, cycleProgress } from '../batch-core.mjs';
 import { t as _t } from '../i18n.mjs';
 
 const CAP = 320, THREAD_CAP = 160;
 
 const VS = `
-attribute vec3 iColor; attribute vec3 iFlash; attribute vec4 iA;
-varying vec2 vUv; varying vec3 vCol; varying vec3 vFl; varying vec4 vA; varying vec2 vSz;
+attribute vec3 iColor; attribute vec3 iFlash; attribute vec4 iA; attribute vec4 iHeat;
+varying vec2 vUv; varying vec3 vCol; varying vec3 vFl; varying vec4 vA; varying vec2 vSz; varying vec4 vHt;
 void main() {
-  vUv = uv; vCol = iColor; vFl = iFlash; vA = iA;
+  vUv = uv; vCol = iColor; vFl = iFlash; vA = iA; vHt = iHeat;
   vec4 c = modelViewMatrix * vec4(instanceMatrix[3].xyz, 1.0);
   vec2 sz = vec2(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz));
   vSz = sz;
@@ -28,7 +29,7 @@ void main() {
 }`;
 const FS = `
 uniform float uTime; uniform float uLight;
-varying vec2 vUv; varying vec3 vCol; varying vec3 vFl; varying vec4 vA; varying vec2 vSz;
+varying vec2 vUv; varying vec3 vCol; varying vec3 vFl; varying vec4 vA; varying vec2 vSz; varying vec4 vHt;
 float sdBox(vec2 p, vec2 b) { vec2 d = abs(p) - b; return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0); }
 float h1(float n) { return fract(sin(n * 12.9898) * 43758.5453); }
 void main() {
@@ -37,8 +38,9 @@ void main() {
   float r = 0.045;
   float d = sdBox(P, vec2(asp * 0.5 - r, 0.5 - r)) - r;
   if (d > 0.0) discard;
-  float edge = 1.0 - smoothstep(0.0, 0.035, -d);
+  float edge = 1.0 - smoothstep(0.0, 0.035 + 0.045 * vHt.w, -d); // §127.8 과열 직원 모니터는 테두리가 굵고 단계색
   vec3 c = mix(vCol, vFl, vA.y);
+  vec3 ec = mix(c, vHt.rgb, vHt.w);
   float kind = vA.z;
   float head = step(0.8, vUv.y) * step(kind, 1.5);
   float scan = 0.5 + 0.5 * sin(vUv.y * 160.0 - uTime * 5.0);
@@ -53,12 +55,13 @@ void main() {
   }
   vec3 col; float a;
   if (uLight < 0.5) {
-    col = c * (0.3 + 0.06 * scan) + c * edge * 1.0 + c * head * 0.6 + c * lines * 0.6;
+    col = c * (0.3 + 0.06 * scan) + ec * edge * 1.0 + c * head * 0.6 + c * lines * 0.6;
     a = (0.5 + 0.45 * edge + 0.3 * head + 0.3 * lines) * vA.x;
   } else {
     vec3 paper = vec3(0.96, 0.975, 1.0);
     col = mix(paper, c, 0.16 + 0.03 * scan);
-    col = mix(col, c * 0.72, edge * 0.95 + head * 0.8 + lines * 0.5);
+    col = mix(col, c * 0.72, head * 0.8 + lines * 0.5);
+    col = mix(col, ec * 0.72, edge * 0.95);
     a = (0.72 + 0.25 * edge + 0.05 * head) * vA.x;
   }
   gl_FragColor = vec4(col, a);
@@ -74,7 +77,8 @@ export class VxHolo {
     this.aFlash = new THREE.InstancedBufferAttribute(new Float32Array(CAP * 3), 3).setUsage(THREE.DynamicDrawUsage);
     this.aA = new THREE.InstancedBufferAttribute(new Float32Array(CAP * 4), 4).setUsage(THREE.DynamicDrawUsage);
     const geo = new THREE.PlaneGeometry(1, 1);
-    geo.setAttribute('iColor', this.aColor); geo.setAttribute('iFlash', this.aFlash); geo.setAttribute('iA', this.aA);
+    this.aHeat = new THREE.InstancedBufferAttribute(new Float32Array(CAP * 4), 4).setUsage(THREE.DynamicDrawUsage); // 테두리 단계색(rgb, 세기)
+    geo.setAttribute('iColor', this.aColor); geo.setAttribute('iFlash', this.aFlash); geo.setAttribute('iA', this.aA); geo.setAttribute('iHeat', this.aHeat);
     this.uniforms = { uTime: { value: 0 }, uLight: { value: 0 } };
     this.mat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: VS, fragmentShader: FS, transparent: true, depthWrite: false, side: THREE.DoubleSide });
     this.mesh = new THREE.InstancedMesh(geo, this.mat, CAP);
@@ -93,6 +97,7 @@ export class VxHolo {
     this._tc = [];
     this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._s = new THREE.Vector3(); this._p = new THREE.Vector3();
     this._c = new THREE.Color(); this._c2 = new THREE.Color();
+    this._hc = new THREE.Color(); this._hw = 0; this._hWarm = new THREE.Color(); this._hRed = new THREE.Color();
     this._catC = new Map(); this._ink = new Map();
     this._fa = 1; // 지금 그리는 자리의 프로젝트 페이드(_put·_thread 가 곱함)
     this._dash = new Map(); // 기동기 id → 대시보드 패널 항목(같은 객체 유지 → 글 칸 재사용)
@@ -103,6 +108,7 @@ export class VxHolo {
   applyTheme(t) {
     this.tokens = t;
     this.uniforms.uLight.value = t.isLight ? 1 : 0;
+    this._hWarm.set(t.isLight ? 0xe8850f : 0xffa63a); this._hRed.set(t.isLight ? 0xe0311f : 0xff3b2f); // 과열 테두리 호박 → 빨강
     this.text.setLight(!!t.isLight);
     this.mat.blending = THREE.NormalBlending;
     this.tMat.blending = t.isLight ? THREE.NormalBlending : THREE.AdditiveBlending;
@@ -154,6 +160,8 @@ export class VxHolo {
     const C = this.aColor.array, F = this.aFlash.array, A = this.aA.array;
     C[n * 3] = col.r; C[n * 3 + 1] = col.g; C[n * 3 + 2] = col.b;
     F[n * 3] = flashC.r; F[n * 3 + 1] = flashC.g; F[n * 3 + 2] = flashC.b;
+    const Ht = this.aHeat.array, hw = this._hw || 0; // 지금 그리는 직원의 과열 테두리(_hw = 0 이면 없음)
+    Ht[n * 4] = this._hc.r; Ht[n * 4 + 1] = this._hc.g; Ht[n * 4 + 2] = this._hc.b; Ht[n * 4 + 3] = hw;
     A[n * 4] = alpha * this._fa; A[n * 4 + 1] = flash; // _fa = 그 자리 동의 프로젝트 페이드 A[n * 4 + 2] = kind; A[n * 4 + 3] = hasText ? 1 : 0;
   }
   _thread(nt, a, bx, by, bz, col, k) {
@@ -182,6 +190,8 @@ export class VxHolo {
     for (const ch of v.chars.values()) {
       if (ch.state === 'gone' || !ch.placed || ch.offstage || !ch.seat || v._isDim(ch.id)) { ch._monK = 0; continue; }
       this._fa = v._fxA ? v._fxA(ch.seat.deskX, ch.seat.deskZ) : 1; // 프로젝트 페이드(문턱 대신 투명도)
+      { const hs = ch._heat && ch._heat.on ? ch._heat : null; // 과열 직원 모니터 테두리 = 단계색(데움 호박 → 과열 주황 → 위험 빨강)
+        this._hw = hs ? Math.min(1, 0.5 + bodyTintOf(hs)) : 0; if (hs) this._hc.copy(this._hWarm).lerp(this._hRed, heatHueOf(hs)); }
       const arr = book.list(ch.id);
       let main = null, mt = -Infinity, has = false;
       for (const e of arr) {
@@ -262,6 +272,7 @@ export class VxHolo {
     for (const m of v.machines.values()) {
       if (m.type !== 'batch' || m.released || !m.pos || v._isDim(m.id) || n >= CAP) continue;
       this._fa = v._fxA ? v._fxA(m.pos.x, m.pos.z) : 1;
+      this._hw = 0; // 기동기 대시보드는 과열 테두리 없음
       const H = 0.95, W = 1.6;
       const x = m.pos.x + 0.1 * BATCH.DEVICE_K, z = m.pos.z, y = 1.6 * BATCH.DEVICE_K + H / 2 + 0.12; // 복합기 윗면(0.75배) 위
       const dist = Math.hypot(x - cp.x, y - cp.y, z - cp.z);
@@ -282,7 +293,7 @@ export class VxHolo {
     }
     this._fa = 1;
     this.mesh.count = n;
-    if (n) { this.mesh.instanceMatrix.needsUpdate = true; this.aColor.needsUpdate = true; this.aFlash.needsUpdate = true; this.aA.needsUpdate = true; }
+    if (n) { this.mesh.instanceMatrix.needsUpdate = true; this.aColor.needsUpdate = true; this.aFlash.needsUpdate = true; this.aA.needsUpdate = true; this.aHeat.needsUpdate = true; }
     const tf = this.text.update(this._tc, ntc, now);
     let tn = 0;
     for (let i = 0; i < ntc; i++) { const c0 = this._tc[i]; if (c0.e._txf !== tf) this.aA.array[c0.inst * 4 + 3] = 0; else tn++; }

@@ -85,7 +85,7 @@ export class PlanetView extends SceneView {
     const v = this.vis.get(id);
     if (v && patch.meta && patch.meta.proc && this.deco && this.deco.proc) this.deco.proc.nodeChanged(v.node);
   }
-  reset() { super.reset(); if (this.deco && this.deco.proc) this.deco.proc.clear(); }
+  reset() { super.reset(); if (this.deco && this.deco.proc) this.deco.proc.clear(); if (this.deco && this.deco.heat) this.deco.heat.clear(); } // seek·세션 바꿈 뒤 과열은 그 시점 값으로 바로
   /** 노드 라벨 셋째 줄: 분리 프로세스를 들여다보는 중이면(또는 도구 없이 띄운 프로세스가 돌면) `감독 · probe_branches.py · 48,000 바퀴` */
   _actHtml(v) {
     const pid = this._supOf(v);

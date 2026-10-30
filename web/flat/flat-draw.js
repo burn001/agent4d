@@ -17,7 +17,6 @@ import { BubbleBook, BUBBLE } from '../flowview/flow-style.mjs';
 import { islandStyle, PULSE_AMP, islandOutline, zoneRayLen } from '../overview/pick-core.mjs';
 import { toScreen, cardOffset, cardPx } from './flat-core.mjs';
 import { dodgeBox } from '../label-place.mjs';
-import { DEG, degOf, glitchAt, seedOf } from '../degrade-core.mjs';
 import { t } from '../i18n.mjs';
 
 export const MONO = 'ui-monospace, "Cascadia Mono", Consolas, "D2Coding", "Malgun Gothic", monospace';
@@ -148,9 +147,6 @@ function drawCard(view, ctx, { e, v, ph, hPx }, now, L, anchorOf) {
   setFont(view, ctx, `700 ${fs}px ${MONO}`);
   const cols = Math.max(3, Math.floor((w - 10) / (fs * 0.62)));
   const title = secret ? (e.label && e.label.tool) || e.tool || '' : panel.title || ((e.label && e.label.tool) || e.tool || '') + (e.label && e.label.target ? ' · ' + e.label.target : '');
-  // 신호 열화: 그 세션 카드 글이 가끔 ▒·? 로 깨졌다 돌아옴(표시만, 원문 그대로)
-  const dg = DEG.on && !DEG.reduced ? degOf(e.node) : 0, gs = dg > 0 ? (e._gs ?? (e._gs = seedOf(e.id))) : 0;
-  const gl = (str, i) => (dg > 0 ? glitchAt(str, dg, DEG.t, gs + i * 131) : str);
   let tcols = cols;
   if (e.runHead && !secret) { // 셸 경과: 머리 띠 오른쪽 [링] 3:42
     const rc = e.runStale ? (L ? '#c2410c' : '#fb923c') : ink;
@@ -168,7 +164,7 @@ function drawCard(view, ctx, { e, v, ph, hPx }, now, L, anchorOf) {
     ctx.textAlign = 'left'; ctx.fillStyle = ink;
     tcols = Math.max(3, cols - Math.ceil(used / (fs * 0.62)));
   }
-  ctx.fillText(gl(fitChars((secret ? '🔒 ' : '') + title, tcols), 0), x0 + 5, y0 + hh / 2 + 1);
+  ctx.fillText(fitChars((secret ? '🔒 ' : '') + title, tcols), x0 + 5, y0 + hh / 2 + 1);
   // 본문: 가까우면(카드 높이 ≥ PANEL.TITLE_PX) 실제 출력 줄, 멀면 머리줄만. 글 칸은 점수 높은 TEXT_MAX 장만
   if ((h < PANEL.TITLE_PX && !(e.mini && h >= 22)) || !e._txt) { ctx.globalAlpha = 1; return; } // 작은 상태는 낮아도 한 줄
   const bodyY = y0 + hh + 4, bodyH = h - hh - 7, bodyW = w - 12;
@@ -186,7 +182,7 @@ function drawCard(view, ctx, { e, v, ph, hPx }, now, L, anchorOf) {
     ctx.fillStyle = L ? '#1b2433' : '#d6e2ef';
     setFont(view, ctx, `600 ${f2}px ${MONO}`);
     const t2 = (e.label && e.label.target) || (panel.lines && panel.lines[0]) || '';
-    ctx.fillText(gl(fitChars(t2, Math.floor(bodyW / (f2 * 0.62))), 1), x0 + 6, bodyY + bodyH / 2);
+    ctx.fillText(fitChars(t2, Math.floor(bodyW / (f2 * 0.62))), x0 + 6, bodyY + bodyH / 2);
     ctx.globalAlpha = 1;
     return;
   }
@@ -203,7 +199,7 @@ function drawCard(view, ctx, { e, v, ph, hPx }, now, L, anchorOf) {
     ctx.globalAlpha = alpha * (ms.dim ? 0.8 : 1);
     ctx.fillStyle = ms.color || ink;
     setFont(view, ctx, ms.bold ? fB : fN);
-    ctx.fillText(gl(fitChars((ln.mark === '$' ? '$ ' : '') + ln.text, lcols), i + 2), x0 + 6, ly + lh / 2);
+    ctx.fillText(fitChars((ln.mark === '$' ? '$ ' : '') + ln.text, lcols), x0 + 6, ly + lh / 2);
   }
   ctx.globalAlpha = 1;
 }

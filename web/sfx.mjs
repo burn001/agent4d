@@ -274,7 +274,6 @@ export const SOUNDS = {
   tick: { dur: 0.06, register: 'mid', desc: '아주 짧은 클릭' },
   'end-tick': { dur: 0.06, register: 'mid', desc: '작은 클릭, 게인 0.3' },
   blip: { dur: 0.07, register: 'high', desc: '아주 작은 블립' },
-  glitch: { dur: 0.34, register: 'low', desc: '신호 열화 문턱: 끊기는 노이즈 지직 4토막 + 사각파 하강 블립' },
   stop: { dur: 0.3, register: 'low', desc: '중지됨: 사인 한 음이 5도 아래로 미끄러지며 꺼짐(lowpass, 작게)' },
   // 특별 상호작용
   'ix-push': { dur: 0.36, register: 'mid', desc: 'push: 대역 노이즈 상승 휘슁 + 사인 한 옥타브 상승' },
@@ -487,14 +486,6 @@ export function synth(ctx, dest, name, t0, { notes = scaleNotes(null), pitchInde
       noise(ctx, t0, 0.035, dest, 0.12 * G * k, { type: 'bandpass', f: 3000, q: 2 });
       osc(ctx, 'sine', 2000, t0, 0.035, dest, 0.05 * G * k);
       return t0 + 0.06;
-    }
-    case 'glitch': {
-      // 지직: 대역 노이즈 짧은 토막 4개(간격 불규칙) + 낮은 사각파가 떨어짐(비트 깨진 느낌)
-      const gaps = [0, 0.045, 0.11, 0.2], lens = [0.03, 0.05, 0.025, 0.07];
-      for (let i = 0; i < 4; i++) noise(ctx, t0 + gaps[i], lens[i], dest, (0.26 - i * 0.03) * G, { type: 'bandpass', f: 1800 + i * 900, q: 0.9 });
-      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1600; lp.connect(dest);
-      osc(ctx, 'square', mtof(n0 + 12), t0 + 0.02, 0.24, lp, 0.07 * G, { freqEnd: mtof(n0 - 5) });
-      return t0 + 0.32;
     }
     case 'blip':
       osc(ctx, 'sine', mtof(n0 + 12), t0, 0.05, dest, 0.06 * G);

@@ -260,7 +260,7 @@ export class Panel {
         else if (p.meta && 'skill' in p.meta && p.meta.skill) msg = `<span class="tag skill">${t('app.panel.tag.skill')}</span>${escapeHtml(t('app.panel.skillInUse', { name: p.meta.skill }))}`;
         else if (p.parentId) msg = `<span class="tag">${t('app.panel.tag.link')}</span><span class="dim">${t('app.panel.reparent')}</span>`;
         else if (ev.ctxNote && p.meta && p.meta.ctx) {
-          // 컨텍스트 사용률: 50·70·90% 를 넘을 때와 급락(compact)만 한 줄
+          // 컨텍스트 사용률: 30·70·90% 를 넘을 때와 급락(compact)만 한 줄
           const c = p.meta.ctx, k = ev.ctxNote;
           const tok = `<span class="dim">${Math.round(c.used / 1000)}k / ${Math.round(c.limit / 1000)}k${c.estimated ? t('app.panel.ctxEstimated') : ''}</span>`;
           msg = k.kind === 'drop'

@@ -5,7 +5,6 @@ import * as THREE from 'three';
 import { BEAM, FLOW_DASH, flowDash, beamControls, beamWidth, paletteOf, beamAlpha, packetGlow, beamY } from './flow-style.mjs';
 import { linkPackets } from '../flow-core.mjs';
 import { isGuessLink } from '../batch-core.mjs';
-import { DEG, degOf, lineGap, lineFlicker, lineJitter } from '../degrade-core.mjs';
 import { jobOf, jobCode } from '../job-core.mjs';
 import { jobBeamStyle } from './job-chip-core.mjs'; // 주인 → 작업 빔은 은은하게
 
@@ -75,7 +74,7 @@ export class Beams {
     this.uni.uAdd.value = this.isLight ? 0 : 1;
   }
   /** 리본 하나 쓰기: a(부모)→b(자식), 굵기 w0→w1, 색 c·불투명도 al. tEnd < 1 이면 곡선을 그 비율까지만(퇴장 때 자식 끝부터 감김) */
-  _ribbon(r, a, b, w0, w1, c, al, tEnd = 1, dashed = false, es = null, fl = null, dg = 0, seed = 0) {
+  _ribbon(r, a, b, w0, w1, c, al, tEnd = 1, dashed = false, es = null, fl = null) {
     const cp = beamControls(a, b);
     const P = this.pos, C = this.col, S = this.sArr, F = this.flow;
     let o = r * VPR * 3, q = r * VPR * 4, so = r * VPR, fo = r * VPR * 2;
@@ -85,8 +84,6 @@ export class Beams {
     let sLen = 0, px = a.x, py = a.y, pz = a.z;
     // 다크(가산)는 알파를 색에 곱해 넣고, 라이트(일반)는 알파 채널로
     const add = !this.isLight;
-    // 신호 열화(dg>0): 조각마다 끊김(거의 투명)·밝기 잡음·옆으로 흔들림. 움직임 줄이기면 고정 무늬(시각 0)
-    const dt = DEG.reduced ? 0 : DEG.t, fk = dg > 0 ? lineFlicker(seed, dt, dg) : 1;
     // 높이 계층: 위층(부모) → 아래층(자식)으로 떨어지는 3D 곡선(beamY). 굵기 방향은 카메라를 향하게(접선 × 시선) — 수직 구간도 납작해지지 않게
     const cam = this.view.camera.position, lift = a.noLift ? 0 : cp.dist; // 세운 배치 장치 아래 변에서는 떠오르지 않고 곧장 내려감
     for (let i = 0; i <= SEG; i++) {
@@ -105,15 +102,13 @@ export class Beams {
       if (nl < 1e-6) { nx = -tz; ny = 0; nz = tx; nl = Math.hypot(nx, nz) || 1; }
       const hw = beamWidth(t, w0, w1) / 2;
       nx *= hw / nl; ny *= hw / nl; nz *= hw / nl;
-      const jj = dg > 0 ? lineJitter(seed, i, dt, dg) * 0.5 : 0, jl = jj / (hw || 1), jx = nx * jl, jy = ny * jl, jz = nz * jl;
-      P[o++] = x + nx + jx; P[o++] = y + ny + jy; P[o++] = z + nz + jz;
-      P[o++] = x - nx + jx; P[o++] = y - ny + jy; P[o++] = z - nz + jz;
+      P[o++] = x + nx; P[o++] = y + ny; P[o++] = z + nz;
+      P[o++] = x - nx; P[o++] = y - ny; P[o++] = z - nz;
       // 양 끝(노드 안쪽)은 옅게
       const edge = Math.min(1, t * 8, (tEnd - t) * 8 + (tEnd < 1 ? 0.6 : 0));
       // 추정 연결은 점선: 정점 두 개씩 켜고 끔
       // 패킷이 지나가는 구간만 잠깐 밝게
-      let k = Math.min(1, al * (0.35 + 0.65 * edge) * (dashed && (i >> 1) % 2 ? 0.08 : 1) + (es ? packetGlow(t, es) * edge : 0));
-      if (dg > 0) k *= lineGap(seed, i >> 1, dt, dg) ? 0.04 : fk;
+      const k = Math.min(1, al * (0.35 + 0.65 * edge) * (dashed && (i >> 1) % 2 ? 0.08 : 1) + (es ? packetGlow(t, es) * edge : 0));
       for (let j = 0; j < 2; j++) {
         if (add) { C[q++] = c.r * k; C[q++] = c.g * k; C[q++] = c.b * k; C[q++] = 1; }
         else { C[q++] = c.r; C[q++] = c.g; C[q++] = c.b; C[q++] = k; }
@@ -150,18 +145,17 @@ export class Beams {
       const dashed = isGuessLink(cv.node) || !!cv.procRig; // 띄운 노드 → 분리 프로세스 장치는 띄움 점선(떼어 띄운 관계)
       if (dashed && sk >= 0.5 && !exiting) al = Math.max(al, BEAM.idleAlpha * 1.6); // 점선은 비는 칸이 있어 조금 더 진하게
       const es = pk && sk >= 0.5 ? pk.get(pv.id + '|' + cv.id) : null;
-      const dg = DEG.on ? degOf(cv.id) : 0, sd = dg > 0 ? (cv.seed * 1e6) | 0 : 0; // 그 세션 열화
       // 작업: 주인의 하위 정보라 가늘고 옅게, 색 = 작업 칩 색(표시 상태 — chips.update 가 보관한 값, 없으면 지금 시계로), 글로우 빔 없음
       const job = jobOf(cv.node);
       if (job) {
         const code = cv._jobChip ? cv._jobChip.code : jobCode(job, view.clock ? view.clock() : Date.now());
         const js = jobBeamStyle(code);
         if (view.chips) c = view.chips.jobColor(code);
-        this._ribbon(r++, a, b, BEAM.startW * ws * js.widthK, BEAM.endW * ws * js.widthK, c, al * js.alphaK, tEnd, dashed, es, exiting || dashed || sk < 0.5 ? null : js.dash, dg, sd);
+        this._ribbon(r++, a, b, BEAM.startW * ws * js.widthK, BEAM.endW * ws * js.widthK, c, al * js.alphaK, tEnd, dashed, es, exiting || dashed || sk < 0.5 ? null : js.dash);
         continue;
       }
-      this._ribbon(r++, a, b, BEAM.startW * ws, BEAM.endW * ws, c, al * pulse, tEnd, dashed, es, exiting || dashed || sk < 0.5 ? null : flowDash(st), dg, sd);
-      if (active && !dashed) this._ribbon(r++, a, b, (BEAM.startW + BEAM.glowW) * ws, (BEAM.endW + BEAM.glowW * 0.4) * ws, c, BEAM.glowAlpha * (this.isLight ? 1.5 : 1) * (exiting ? cv.exitF ?? 1 : 1), tEnd, false, null, null, dg, sd);
+      this._ribbon(r++, a, b, BEAM.startW * ws, BEAM.endW * ws, c, al * pulse, tEnd, dashed, es, exiting || dashed || sk < 0.5 ? null : flowDash(st));
+      if (active && !dashed) this._ribbon(r++, a, b, (BEAM.startW + BEAM.glowW) * ws, (BEAM.endW + BEAM.glowW * 0.4) * ws, c, BEAM.glowAlpha * (this.isLight ? 1.5 : 1) * (exiting ? cv.exitF ?? 1 : 1), tEnd, false, null, null);
     }
     this.geo.setDrawRange(0, r * SEG * 6);
     if (r) { const A = this.geo.attributes; A.position.needsUpdate = true; A.color.needsUpdate = true; A.aS.needsUpdate = true; A.aFlow.needsUpdate = true; }

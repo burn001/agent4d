@@ -43,11 +43,11 @@ export function barWait(pos, bpm, { beats = 4, tol = 0.06 } = {}) {
  * 전환 일정. kind = 'auto'|'manual'|'ended'. pos = 나가는 곡 재생 위치, bpm = 나가는 곡 BPM, duration·remaining 은 'ended' 용.
  * @returns {{kind, wait, out, in, delay, overlap}} 모두 초. wait 뒤 나가기 시작 → delay 뒤 새 곡 시작.
  */
-export function planXfade(kind, { pos = 0, bpm = null, remaining = null } = {}) {
+export function planXfade(kind, { pos = 0, bpm = null, beats = 4, remaining = null } = {}) {
   const P = XFADE[kind] || XFADE.manual;
   let out = P.out;
   if (kind === 'ended' && Number.isFinite(remaining)) out = Math.max(0.5, Math.min(P.out, remaining));
-  const wait = P.bar ? barWait(pos, bpm) : 0;
+  const wait = P.bar ? barWait(pos, bpm, { beats }) : 0;
   const overlap = Math.max(0, Math.min(out, P.delay + P.in) - P.delay);
   return { kind: XFADE[kind] ? kind : 'manual', wait, out, in: P.in, delay: P.delay, overlap };
 }

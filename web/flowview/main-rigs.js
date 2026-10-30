@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { MAIN_RIG, mainLook } from './main-rig-core.mjs';
 import { assignMainShapes, mainSetSig, ctxFrac, ctxTone, reactorFills, bandWords, toolBand } from './shape-core.mjs';
 import { nodeVisualStateAt, paletteOf, stateColor, NODE_STATE } from './flow-style.mjs';
+import { heatColor, heatPulse } from './heat-fx-core.mjs'; // 과열 물듦
 
 const R = MAIN_RIG.R, CC = MAIN_RIG.C;
 const HEXA = Array.from({ length: 6 }, (_, i) => { const a = (Math.PI / 3) * i; return [Math.sin(a), Math.cos(a)]; }); // 꼭짓점이 ±z(CylinderGeometry 6각과 같은 방위)
@@ -235,7 +236,18 @@ export class MainRigs {
       const st = nodeVisualStateAt(v.node, v.icons ? v.icons.size : 0, nowMs);
       const look = mainLook(st, now + (v.seed || 0), reduced);
       const sc = this._c.set(stateColor(st, L));
-      const sess = v.sessC && !v.node.parentId && !look.done && !look.err && !look.stop ? v.sessC : view.kindColor('main');
+      // 과열: 코어·자이로·띠(상태색 자리)가 그리는 heat 만큼 주황 → 빨강으로 물듦(과열부터 맥동, 컨텍스트 채움 기둥은 그대로)
+      const hk = v._heatK || 0;
+      let hw = 0;
+      if (hk) {
+        const hr = heatColor(hk, L, this._hrgb || (this._hrgb = [0, 0, 0]));
+        const pul = heatPulse(hk, now, v.seed || 0, reduced);
+        // 2026-10-30 데움이 잘 보이게: 30% 0.32 → 40% ≈0.45 → 70% ≈0.66 → 85%↑ 0.77(예전 0.08 → 0.19 → 0.53 → 0.75)
+        hw = (0.32 + 0.45 * Math.pow(Math.min(1, hk / 0.85), 0.7)) * (0.75 + 0.25 * pul);
+        sc.lerp((this._hc || (this._hc = new THREE.Color())).setRGB(hr[0], hr[1], hr[2]), hw);
+      }
+      let sess = v.sessC && !v.node.parentId && !look.done && !look.err && !look.stop ? v.sessC : view.kindColor('main');
+      if (hw) sess = (this._sc3 || (this._sc3 = new THREE.Color())).copy(sess).lerp(this._hc, Math.min(0.85, hw * 1.3)); // 틀·뚜껑·테두리도 호박 → 빨강으로(세션 색 위에)
       const dim = 1 - (v.tierDim || 0);
       for (const m of r.mats) {
         const base = m.userData.base ?? 1;

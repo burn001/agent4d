@@ -102,7 +102,6 @@ test('audio.js: 선택기·ended·저장 키·<audio> 두 덱(§73 크로스페�
   assert.match(html, /<audio id="bgm"/);
   const ctxUi = readFileSync(new URL('../ctx-ui.js', import.meta.url), 'utf8');
   assert.doesNotMatch(ctxUi, /createMediaElementSource/, '요소 연결은 audio.js 한 곳에서');
-  assert.match(ctxUi, /music\.setInsert\(this\.filter\)/);
 });
 
 test('영어 화면(§86): 매니페스트 *_en 필드로 곡 이름·제목·설명, 없으면 기존 이름 · 단계·묶음·자동 문구·구간 이름', async () => {

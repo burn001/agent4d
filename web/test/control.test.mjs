@@ -34,8 +34,7 @@ test('정규화: 값 목록·별칭·켬/끔 동의어·범위 밖', () => {
   assert.deepEqual(normalizeCmd('music', { value: 1 }).args, { value: 1 });
   assert.equal(normalizeCmd('music', { value: 'loud' }).error, 'bad_value');
   assert.deepEqual(parseCtl(['sfx', 'off']).args, { power: 'off' });
-  assert.deepEqual(normalizeCmd('noise', { value: 'off' }).args, { on: false });
-  assert.deepEqual(normalizeCmd('noise', { value: '70' }).args, { amount: 70 });
+  assert.equal(normalizeCmd('noise', { value: 'off' }).ok, false, '신호 열화 폐지(§127) — noise 명령 없음');
   assert.deepEqual(normalizeCmd('popup', {}), { ok: true, cmd: 'close', args: {} });
   assert.deepEqual(normalizeCmd('toast', { text: ' 빌드\n끝 ', sec: 99 }).args, { text: '빌드 끝', sec: 30 });
   assert.equal(normalizeCmd('replay', { session: 'abc', speed: 64 }).error, 'bad_value');
@@ -101,7 +100,7 @@ test('디스패처: 명령마다 같은 이름의 hook 을 정규화된 인자�
     ['lang', { value: 'ko' }, { value: 'ko' }], ['camera', { value: 'follow' }, { value: 'follow' }], ['focus', { value: 'off' }, { value: 'off' }],
     ['pause', {}, {}], ['resume', {}, {}], ['live', {}, {}], ['replay', { session: 'current' }, { session: 'current', at: null, speed: null }],
     ['artifacts', { value: 'on' }, { value: 'on' }], ['plans', { value: 'off' }, { value: 'off' }], ['weather', { value: 'snow' }, { value: 'snow' }],
-    ['grid', { value: 'off' }, { value: 'off' }], ['noise', { value: 50 }, { amount: 50 }], ['panel', { value: 'open' }, { value: 'open' }],
+    ['grid', { value: 'off' }, { value: 'off' }], ['panel', { value: 'open' }, { value: 'open' }],
     ['timeline', { value: 'show' }, { value: 'show' }], ['done', { value: 'on' }, { value: 'on' }], ['close', {}, {}],
     ['toast', { text: 'hi' }, { text: 'hi', sec: 5 }],
   ];

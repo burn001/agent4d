@@ -1,47 +1,18 @@
-// 컨텍스트 게이지·신호 열화 순수 규칙: 단계 매핑·세기·급락 감지·게이지 대상·국소 대상·mock 합성
+// 컨텍스트 게이지 순수 규칙: 급락 감지·패널 메모·게이지 대상·문구·기준선·mock 합성. 신호 열화는 폐지 — 과열 단계는 heat.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  stageOf, gaugeLevel, noiseParams, noiseNeeded, isCtxDrop, ctxNote, bandOf, pickGaugeNode, rankRegions, degradeRoots,
-  purgeProgress, PURGE_MS, ctxShort, ctxTitle, fmtTokens, STAGES,
+  gaugeLevel, isCtxDrop, ctxNote, bandOf, pickGaugeNode, ctxShort, ctxTitle, fmtTokens, heatName, baseOf, grownOf, FALLBACK_BASE,
 } from '../ctx-core.mjs';
-import { MockCtx, MOCK_LIMIT } from '../ctx-mock.mjs';
+import { MockCtx, MOCK_LIMIT, SUB_TIERS } from '../ctx-mock.mjs';
+import { heatStageOf } from '../heat-core.mjs';
 
 const C = (pct, extra = {}) => ({ used: pct * 2000, limit: 200000, pct, estimated: false, basis: 'family', ...extra });
-
-test('단계 매핑: ～30 선명 → 그레인 → 50 주사선 → 70 색수차 → 90%↑ 데이터모시', () => {
-  assert.deepEqual([0, 14.9, 29.9, 30, 49.9, 50, 69.9, 70, 89.9, 90, 100].map(stageOf), [0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4]);
-  assert.equal(stageOf(null), 0);
-  assert.equal(STAGES[4].key, 'mosh');
-});
 
 test('게이지 색: 한도 게이지와 같은 70/90 경계', () => {
   assert.deepEqual([69.9, 70, 89.9, 90].map(gaugeLevel), ['ok', 'warn', 'warn', 'danger']);
 });
 
-test('효과 세기: 단계별로 켜지고 세기 배율·로우패스·험', () => {
-  const a = noiseParams(28), b = noiseParams(40), c = noiseParams(60), d = noiseParams(80), e = noiseParams(98);
-  assert.equal(a.grain + a.scan + a.chroma + a.mosh, 0);
-  assert.ok(b.grain > 0 && b.scan === 0);
-  assert.ok(c.scan > 0 && c.chroma === 0);
-  assert.ok(d.chroma > 0 && d.glitch > 0 && d.mosh === 0 && d.lowpassHz < 20000);
-  assert.ok(e.mosh > 0 && e.hum > 0 && e.lowpassHz < 1500);
-  assert.equal(noiseParams(69).lowpassHz, 20000);
-  // 그레인은 천천히 시작: 기본 세기 35% 는 50% 의 1/5 미만, 30% 미만은 0
-  assert.ok(noiseParams(35).grain < noiseParams(50).grain / 5);
-  assert.equal(noiseParams(29.9).grain, 0);
-  assert.ok(noiseParams(80, 1).chroma > noiseParams(80, 0.25).chroma);
-  assert.equal(noiseParams(95, 0).grain, 0);
-  assert.equal(noiseParams(95, 0).lowpassHz, 20000);
-});
-
-test('후처리 필요 여부: 꺼짐·세기 0·30% 미만이면 건너뜀(비용 0), 정화 중이면 필요', () => {
-  assert.equal(noiseNeeded([10, 29.9]), false);
-  assert.equal(noiseNeeded([10, 30]), true);
-  assert.equal(noiseNeeded([90], { enabled: false }), false);
-  assert.equal(noiseNeeded([90], { strength: 0 }), false);
-  assert.equal(noiseNeeded([5], { purging: true }), true);
-});
 
 test('급락 감지: compact 같은 큰 하락만, 작은 흔들림·낮은 구간은 아님', () => {
   assert.equal(isCtxDrop(C(85), C(12)), true);
@@ -52,8 +23,8 @@ test('급락 감지: compact 같은 큰 하락만, 작은 흔들림·낮은 구�
   assert.equal(isCtxDrop(null, C(5)), false);
 });
 
-test('패널 메모: 50·70·90 을 넘을 때와 급락만', () => {
-  assert.deepEqual([0, 49, 50, 70, 90].map(bandOf), [0, 0, 1, 2, 3]);
+test('패널 메모: 30·70·90 을 넘을 때와 급락만', () => {
+  assert.deepEqual([0, 29, 30, 50, 70, 90].map(bandOf), [0, 0, 1, 1, 2, 3]);
   assert.equal(ctxNote(C(40), C(45)), null);
   assert.deepEqual(ctxNote(C(68), C(71)), { kind: 'up', pct: 71, level: 'warn' });
   assert.equal(ctxNote(C(71), C(75)), null);
@@ -102,25 +73,15 @@ test('§39.9 게이지 대상: /clear 앞 세션(지난 메인)의 큰 값은 �
   assert.deepEqual(pickGaugeNode({ nodes, streamAll: true, sel: { scope: 'all' }, roots: past }), { id: 's:new', why: 'max' });
 });
 
-test('국소 대상: 30% 이상·정화 중만, 정화 먼저·높은 순, 최대 개수', () => {
-  const r = rankRegions([{ id: 1, pct: 29 }, { id: 2, pct: 50 }, { id: 3, pct: 90 }, { id: 4, pct: 5, purging: 1 }, { id: 5, pct: 30 }], 3);
-  assert.deepEqual(r.map((x) => x.id), [4, 3, 2]);
-});
-
-test('정화 진행도: 0→1 뒤 끝(null)', () => {
-  assert.equal(purgeProgress(null, 5), null);
-  assert.equal(purgeProgress(1000, 1000), 0);
-  assert.ok(Math.abs(purgeProgress(1000, 1000 + PURGE_MS / 2) - 0.5) < 1e-9);
-  assert.equal(purgeProgress(1000, 1000 + PURGE_MS), null);
-});
-
 test('표시 문구: 토큰 줄임·추정 표시·툴팁', () => {
   assert.equal(fmtTokens(84_321), '84k');
   assert.equal(fmtTokens(1_000_000), '1M');
   assert.equal(fmtTokens(1_250_000), '1.3M');
   assert.equal(ctxShort({ used: 84_000, limit: 200_000, pct: 42, estimated: true }), '42% · 84k/200k?');
-  assert.match(ctxTitle(C(92)), /세션 정리 권장/);
-  assert.doesNotMatch(ctxTitle(C(89)), /세션 정리 권장/);
+  assert.match(ctxTitle(C(92)), /에이전트 과열: 위험/);
+  assert.match(ctxTitle(C(72)), /에이전트 과열: 과열/);
+  assert.match(ctxTitle(C(10)), /에이전트 과열: 평상/);
+  assert.doesNotMatch(ctxTitle(C(92)), /열화|정리 권장/);
   assert.match(ctxTitle({ ...C(20), basis: 'default', estimated: true }), /추정/);
 });
 
@@ -149,41 +110,45 @@ test('mock 합성: 결정적, 메인은 오르다 97% 넘으면 12% 로(급락),
   assert.ok(new Set(snap.nodes.map((n) => n.meta.ctx.pct)).size >= 2);
 });
 
-test('영어 화면(§86): 툴팁·단계 이름·창 근거·천 단위(Intl)', async () => {
+test('영어 화면(§86): 툴팁·과열 단계 이름·창 근거·천 단위(Intl)', async () => {
   const { _setLangForTest } = await import('../i18n.mjs');
-  const { STAGES } = await import('../ctx-core.mjs');
   _setLangForTest('en');
   try {
     const t = ctxTitle({ used: 184_000, limit: 200_000, pct: 92, basis: 'default', estimated: true });
-    assert.match(t, /^Context 92% used \(184,000 \/ 200,000 tokens\)\nWindow size: no evidence → default 200k \(estimated\)\nDegradation: Datamosh · hum · consider wrapping up the session\n/);
-    assert.equal(STAGES[1].name, 'Film grain');
+    assert.match(t, /^Context 92% used \(184,000 \/ 200,000 tokens\)\nWindow size: no evidence → default 200k \(estimated\)\nAgent heat: Critical\n/);
+    assert.equal(heatName(1), 'Warming');
     assert.equal(ctxTitle(null), 'No context data');
   } finally { _setLangForTest('ko'); }
-  assert.equal(STAGES[1].name, '필름 그레인');
+  assert.equal(heatName(heatStageOf(75)), '과열');
 });
 
-test('§76 열화 대상 루트: live 세션의 지금 값만 — 지난(recent)·/clear 앞 세션의 큰 ctx 는 섬 열화에 안 씀(10.28.)', () => {
-  // 실측 모양(2026-10-28 /state?scope=all): 같은 섬에 지난 메인 33.3%(recent) + live 7.9%. 예전엔 33.3% 로 섬이 열화됐다
-  const nodes = new Map([
-    ['s:old', { id: 's:old', kind: 'main', projectId: 'q', meta: { ctx: C(33.3) } }],
-    ['s:cur', { id: 's:cur', kind: 'main', projectId: 'q', meta: { ctx: C(7.9) } }],
-    ['s:pre', { id: 's:pre', kind: 'main', projectId: 'w', meta: { ctx: C(92) } }],
-    ['s:new', { id: 's:new', kind: 'main', projectId: 'w', meta: { clearedFrom: 'pre', ctx: C(15) } }],
-  ]);
-  const roots = [
-    { sessionId: 'old', projectId: 'q', live: false, tier: 'recent' },
-    { sessionId: 'cur', projectId: 'q', live: true, tier: 'live' },
-    // /clear 앞 세션이 잠깐 live 로 남은 틈에도 빠진다(새 메인 clearedFrom)
-    { sessionId: 'pre', projectId: 'w', live: true, tier: 'live' },
-    { sessionId: 'new', projectId: 'w', live: true, tier: 'live' },
-  ];
-  const ids = degradeRoots(roots, nodes).map((r) => r.sessionId);
-  assert.deepEqual(ids, ['cur', 'new']);
-  // ctx-ui 와 같은 흐름: 남은 루트로 국소 대상을 고르면 문턱(30%) 넘는 섬이 없다
-  const ents = ids.map((sid) => ({ id: 's:' + sid, pct: nodes.get('s:' + sid).meta.ctx.pct }));
-  assert.deepEqual(rankRegions(ents), []);
-  // live 가 하나도 없으면 열화 대상도 없다(게이지 알약은 대로 지난 값 중 최고를 보일 수 있음)
-  assert.deepEqual(degradeRoots([{ sessionId: 'old', live: false }], nodes), []);
-  assert.deepEqual(degradeRoots([], nodes), []);
-  assert.deepEqual(degradeRoots(null, nodes), []);
+test('기준선(카드·툴팁 표시): 서버 base → 본 최솟값 → min(지금, 60k)', () => {
+  assert.equal(baseOf({ used: 150_000, base: 63_000 }), 63_000);
+  assert.equal(baseOf({ used: 150_000 }, 70_000), 70_000);
+  assert.equal(baseOf({ used: 150_000 }), FALLBACK_BASE);
+  assert.equal(baseOf({ used: 20_000 }), 20_000);
+  assert.equal(grownOf({ used: 150_000, base: 63_000 }), 87_000);
+  assert.equal(grownOf(null), 0);
+});
+
+test('§127 mock: 하위 에이전트는 나타난 순서대로 오름·60·80·95% 갈래, ?ctx= 고정이면 메인은 그대로', () => {
+  assert.deepEqual(SUB_TIERS, [null, 0.6, 0.8, 0.95]);
+  const nodes = new Map();
+  const mc = new MockCtx({ mainStart: 0.85, mainStep: 0 });
+  const get = (id) => nodes.get(id);
+  const addEv = (m, id, kind, parentId) => { const node = { id, kind, parentId }; nodes.set(id, node); return m.after({ type: 'node-add', nodeId: id, ts: 't', node }, get)[0].patch.meta.ctx.pct; };
+  assert.equal(addEv(mc, 's:m', 'main', null), 85);
+  const subs = ['a:1', 'a:2', 'a:3', 'a:4', 'a:5', 'a:6'].map((id) => addEv(mc, id, 'subagent', 's:m'));
+  assert.ok(subs[0] < 20 && subs[4] < 20);
+  assert.deepEqual([subs[1], subs[2], subs[3], subs[5]], [60, 80, 95, 60]);
+  assert.deepEqual(subs.map(heatStageOf), [0, 1, 2, 3, 0, 1]);
+  // 메인은 ?ctx= 고정 — 응답이 와도 갱신 없음, 60·80% 갈래도 머묾, 95% 갈래는 기어 올라 99% 넘으면 compact(식음)
+  for (const id of ['s:m', 'a:2', 'a:3']) assert.equal(mc.after({ type: 'text', nodeId: id }, get).length, 0);
+  let p = 95, dropped = false;
+  for (let i = 0; i < 40 && !dropped; i++) { const n = mc.after({ type: 'text', nodeId: 'a:4' }, get)[0].patch.meta.ctx.pct; if (n < p) dropped = true; p = n; }
+  assert.ok(dropped && p === 12);
+  // 결정적: 같은 순서면 같은 값
+  const mc2 = new MockCtx({ mainStart: 0.85, mainStep: 0 });
+  const again = ['a:1', 'a:2', 'a:3', 'a:4'].map((id) => addEv(mc2, id, 'subagent', 's:m'));
+  assert.deepEqual(again, subs.slice(0, 4));
 });

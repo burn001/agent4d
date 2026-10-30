@@ -7,11 +7,8 @@
 import { PLINKS, stateKey, stepState, laserLook, orbitLook, endGaps } from '../plinks-core.mjs';
 import { toScreen, mixColor } from './flat-core.mjs';
 import { isGuessLink } from '../batch-core.mjs';
-import { DEG, degOf, lineFlicker, brokenDash } from '../degrade-core.mjs';
 import { hash01 } from '../planet-core.mjs';
 import { orbitExtent } from './planet-orbits2d.js';
-
-const DG_DASH = [0, 0, 0, 0];
 
 /** 노드 궤도계 겉 반지름(화면 px) — 카드 기준점(_cardAnchor)과 같은 식 */
 export function outerPx(v) { return (v._R || 0) * (v._po ? Math.max(1, Math.min(orbitExtent(v), 3.4) * 0.9) : 1); }
@@ -60,8 +57,6 @@ export function drawPlanetLinks2D(view, ctx, now, s, mix) {
     const sk = cv.scopeK ?? 1, sD = cv.scopeD ?? sk;
     let m = (sD < 1 ? 0.2 + 0.8 * sD : 1) * (cv.projA ?? 1);
     if (cv.exitF < 1) m *= cv.exiting != null ? 1 - 0.65 * (1 - cv.exitF) : cv.exitF;
-    const dg = DEG.on ? degOf(cv.id) : 0, tt = DEG.reduced ? 0 : DEG.t, sd = dg > 0 ? (cv.seed * 1e6) | 0 : 0;
-    if (dg > 0) m *= lineFlicker(sd, tt, dg);
     if (m < 0.02) continue;
     toScreen(view.cam, view.W, view.H, pv.pos.x, pv.pos.z, a);
     toScreen(view.cam, view.W, view.H, cv.pos.x, cv.pos.z, b);
@@ -85,7 +80,7 @@ export function drawPlanetLinks2D(view, ctx, now, s, mix) {
         // 빔 바탕
         ctx.globalAlpha = Math.min(1, L.a * 1.6) * m * wL;
         ctx.lineWidth = cp ? Math.max(1, lw * 0.75) : lw;
-        if (guess) ctx.setLineDash([6, 5]); else if (dg > 0) ctx.setLineDash(brokenDash(sd, tt, dg, Math.max(3, s * 0.4), DG_DASH)); else ctx.setLineDash([]);
+        ctx.setLineDash(guess ? [6, 5] : []);
         ctx.beginPath(); ctx.moveTo(A.x + ox, A.y + oy); ctx.lineTo(B.x + ox, B.y + oy); ctx.stroke();
         // 펄스(흐르는 대시)
         if (L.p > 0.02 && !guess) {
@@ -131,7 +126,6 @@ export function drawPlanetLinks2D(view, ctx, now, s, mix) {
         const N = 6;
         ctx.lineWidth = cp ? Math.max(1, lw * 0.9) : lw;
         if (cp || guess || O.dash) ctx.setLineDash(cp ? [4, 4] : guess ? [6, 5] : [3, 5]);
-        else if (dg > 0) ctx.setLineDash(brokenDash(sd, tt, dg, Math.max(3, s * 0.4), DG_DASH));
         for (let i = 0; i < N; i++) {
           const u0 = i / N, u1 = (i + 1) / N;
           if (u0 >= keep) break;

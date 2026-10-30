@@ -78,7 +78,7 @@ test('메인 몸: 컨텍스트 통합(기둥 여섯·액체) · 띠 글 = 실제
   assert.deepEqual(reactorFills(1), [1, 1, 1, 1, 1, 1]);
   assert.equal(ctxFrac({ meta: { ctx: { used: 50, limit: 200 } } }), 0.25);
   assert.equal(ctxFrac({ meta: {} }), null);
-  assert.deepEqual([0.2, 0.6, 0.9].map(ctxTone), [0, 1, 2]);
+  assert.deepEqual([0.2, 0.29, 0.3, 0.6, 0.69, 0.7, 0.9].map(ctxTone), [0, 0, 1, 1, 1, 2, 2]); // 호박 시작 = HEAT.WARM_PCT 30
   // 이력 최신순 · 중복 제거 · minimal(대상 없음)이면 도구 이름만
   const hist = [{ label: 'Read · web/a.js' }, { label: 'Edit · web/b.js' }, { label: 'Read · web/a.js' }, { label: 'Bash' }];
   assert.deepEqual(bandWords(hist), ['Bash', 'Read · web/a.js', 'Edit · web/b.js']);

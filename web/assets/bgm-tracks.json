@@ -562,6 +562,561 @@
       },
       "energy": 0.88,
       "source": "자체 작곡(music/compose_caper.py)"
+    },
+    {
+      "id": "glacier",
+      "label": "빙하 위의 코드",
+      "title": "빙하 위의 코드",
+      "mood": "한가 · 미니멀 글리치 앰비언트 — 유리 같은 FM 키, 성긴 마이크로 클릭, 서브 드론, 여린 심장 킥",
+      "label_en": "Code on Ice",
+      "title_en": "Code on Ice",
+      "mood_en": "Idle · minimal glitch ambient — glassy FM keys, sparse micro-clicks, sub drone, a faint heartbeat kick",
+      "file": "bgm-glacier.mp3",
+      "meta": "bgm-glacier.json",
+      "bpm": 68,
+      "key": "B minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 0,
+      "views": {
+        "flow": [
+          0
+        ]
+      },
+      "energy": 0.18,
+      "source": "자체 작곡(music/compose_glacier.py)"
+    },
+    {
+      "id": "cursor",
+      "label": "깜빡이는 커서",
+      "title": "깜빡이는 커서",
+      "mood": "한가 · 느린 덥 테크노 — 뒷박 화음 스탭과 긴 에코, 바늘 잡음, 여린 킥, 서브 베이스",
+      "label_en": "Blinking Cursor",
+      "title_en": "Blinking Cursor",
+      "mood_en": "Idle · slow dub techno — off-beat chord stabs smeared by long echoes, vinyl crackle, soft kick, sub bass",
+      "file": "bgm-cursor.mp3",
+      "meta": "bgm-cursor.json",
+      "bpm": 76,
+      "key": "F# minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 0,
+      "views": {
+        "flow": [
+          0
+        ]
+      },
+      "energy": 0.25,
+      "source": "자체 작곡(music/compose_cursor.py)"
+    },
+    {
+      "id": "refactor",
+      "label": "리팩터 루프",
+      "title": "리팩터 루프",
+      "mood": "보통 · 트립합 — 먼지 낀 브레이크비트, 깊은 핑거 베이스, 펠트 피아노 단조 화음, 현악 패드, 비브라폰 선율",
+      "label_en": "Refactor Loop",
+      "title_en": "Refactor Loop",
+      "mood_en": "Steady · trip-hop — dusty breakbeat, deep finger bass, felt-piano minor chords, string pad, vibraphone line",
+      "file": "bgm-refactor.mp3",
+      "meta": "bgm-refactor.json",
+      "bpm": 88,
+      "key": "G# minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 1,
+      "views": {
+        "flow": [
+          1
+        ]
+      },
+      "energy": 0.38,
+      "source": "자체 작곡(music/compose_refactor.py)"
+    },
+    {
+      "id": "queue",
+      "label": "빌드 대기열",
+      "title": "빌드 대기열",
+      "mood": "보통 · 3/4 미니멀 폴리미터 — 5음 주기 16분 마림바, 7음 주기 칼림바, 여린 킥·셰이커, 서브 베이스, 넓은 패드",
+      "label_en": "Build Queue",
+      "title_en": "Build Queue",
+      "mood_en": "Steady · 3/4 minimal polymeter — 16th marimba in a 5-note cycle, kalimba in a 7-note cycle, soft kick and shaker, sub, wide pad",
+      "file": "bgm-queue.mp3",
+      "meta": "bgm-queue.json",
+      "bpm": 105,
+      "beats": 3,
+      "key": "Bb minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 1,
+      "views": {
+        "flow": [
+          1
+        ]
+      },
+      "energy": 0.48,
+      "source": "자체 작곡(music/compose_queue.py)"
+    },
+    {
+      "id": "stack",
+      "label": "스택 트레이스",
+      "title": "스택 트레이스",
+      "mood": "활발 · 일렉트로 프로그레시브 — 공진 필터 16분 톱니 아르페지오, 뒷박 베이스, 포온더플로어 킥·클랩, 사각파 리드",
+      "label_en": "Stack Trace",
+      "title_en": "Stack Trace",
+      "mood_en": "Busy · electro progressive — resonant 16th saw arpeggio, off-beat bass, four-on-the-floor kick and clap, square lead",
+      "file": "bgm-stack.mp3",
+      "meta": "bgm-stack.json",
+      "bpm": 124,
+      "key": "C# minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 2,
+      "views": {
+        "flow": [
+          2
+        ]
+      },
+      "energy": 0.62,
+      "source": "자체 작곡(music/compose_stack.py)"
+    },
+    {
+      "id": "sprint",
+      "label": "스프린트",
+      "title": "스프린트",
+      "mood": "활발 · UK 투스텝 개러지 — 건너뛰는 킥, 셔플 햇, 엇박 오르간 스탭, 합창 조각, 움직이는 서브 베이스",
+      "label_en": "Sprint",
+      "title_en": "Sprint",
+      "mood_en": "Busy · UK two-step garage — skipping kick, shuffled hats, syncopated organ stabs, vocal chops, moving sub bass",
+      "file": "bgm-sprint.mp3",
+      "meta": "bgm-sprint.json",
+      "bpm": 132,
+      "key": "Eb minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 2,
+      "views": {
+        "flow": [
+          2
+        ]
+      },
+      "energy": 0.68,
+      "source": "자체 작곡(music/compose_sprint.py)"
+    },
+    {
+      "id": "hotfix",
+      "label": "핫픽스",
+      "title": "핫픽스",
+      "mood": "매우 활발 · 애시드 테크노 — 꽥꽥대는 16분 애시드 베이스, 묵직한 킥, 16분 햇·클랩, 금속성 타악, 잡음 상승",
+      "label_en": "Hotfix",
+      "title_en": "Hotfix",
+      "mood_en": "Very busy · acid techno — squelchy 16th acid bass, heavy kick, 16th hats and clap, metallic percussion, noise risers",
+      "file": "bgm-hotfix.mp3",
+      "meta": "bgm-hotfix.json",
+      "bpm": 148,
+      "key": "D phrygian",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 3,
+      "views": {
+        "flow": [
+          3
+        ]
+      },
+      "energy": 0.9,
+      "source": "자체 작곡(music/compose_hotfix.py)"
+    },
+    {
+      "id": "deadline",
+      "label": "마감 질주",
+      "title": "마감 질주",
+      "mood": "매우 활발 · 핸즈업 하드 댄스 — 뒷박 톱니 베이스, 3-3-2 슈퍼소 화음, 밝은 사각파 리드, 킥·클랩·라이드",
+      "label_en": "Deadline Run",
+      "title_en": "Deadline Run",
+      "mood_en": "Very busy · hands-up hard dance — off-beat saw bass, 3-3-2 supersaw stabs, bright square lead, kick, clap and ride",
+      "file": "bgm-deadline.mp3",
+      "meta": "bgm-deadline.json",
+      "bpm": 156,
+      "key": "Bb major",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 3,
+      "views": {
+        "flow": [
+          3
+        ]
+      },
+      "energy": 0.95,
+      "source": "자체 작곡(music/compose_deadline.py)"
+    },
+    {
+      "id": "aurora",
+      "label": "오로라 장막",
+      "title": "오로라 장막",
+      "mood": "한가 · 비트 없는 코스믹 앰비언트 — 포먼트 합창 화음, 높은 유리 벨의 반짝임, 바람 질감, 서브 드론",
+      "label_en": "Aurora Veil",
+      "title_en": "Aurora Veil",
+      "mood_en": "Idle · beatless cosmic ambient — formant choir chords, sparkling high glass bells, wind, sub drone",
+      "file": "bgm-aurora.mp3",
+      "meta": "bgm-aurora.json",
+      "bpm": 52,
+      "key": "Ab major",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 0,
+      "views": {
+        "planet": [
+          0
+        ]
+      },
+      "energy": 0.08,
+      "source": "자체 작곡(music/compose_aurora.py)"
+    },
+    {
+      "id": "deepfield",
+      "label": "심우주 관측",
+      "title": "심우주 관측",
+      "mood": "한가 · 3/4 우주 관측 앰비언트 — 긴 에코의 소나 핑, 성긴 펠트 피아노, 첼로 지속음, 낮은 패드, 테이프 쉿",
+      "label_en": "Deep Field",
+      "title_en": "Deep Field",
+      "mood_en": "Idle · 3/4 deep-space ambient — sonar pings with long echoes, sparse felt piano, sustained cello, low pad, tape hiss",
+      "file": "bgm-deepfield.mp3",
+      "meta": "bgm-deepfield.json",
+      "bpm": 66,
+      "beats": 3,
+      "key": "C# minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 0,
+      "views": {
+        "planet": [
+          0
+        ]
+      },
+      "energy": 0.14,
+      "source": "자체 작곡(music/compose_deepfield.py)"
+    },
+    {
+      "id": "comet",
+      "label": "혜성 꼬리",
+      "title": "혜성 꼬리",
+      "mood": "보통 · 3-3-2 리듬 다운템포 코스믹 — 부드러운 킥·서브, 에코로 끌리는 칼림바 아르페지오, 플루트 선율, 넓은 패드",
+      "label_en": "Comet Tail",
+      "title_en": "Comet Tail",
+      "mood_en": "Steady · 3-3-2 downtempo cosmic — soft kick and sub, kalimba arpeggios trailing echoes, flute melody, wide pad",
+      "file": "bgm-comet.mp3",
+      "meta": "bgm-comet.json",
+      "bpm": 92,
+      "key": "Bb lydian",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 1,
+      "views": {
+        "planet": [
+          1
+        ]
+      },
+      "energy": 0.36,
+      "source": "자체 작곡(music/compose_comet.py)"
+    },
+    {
+      "id": "satellite",
+      "label": "위성 교신",
+      "title": "위성 교신",
+      "mood": "보통 · 하프타임 스페이스 다운템포 — 느긋한 킥·스네어, 텔레메트리 블립, 트레몰로 일렉트릭 피아노, 넓은 패드",
+      "label_en": "Satellite Link",
+      "title_en": "Satellite Link",
+      "mood_en": "Steady · half-time space downtempo — laid-back kick and snare, telemetry blips, tremolo electric piano, wide pad",
+      "file": "bgm-satellite.mp3",
+      "meta": "bgm-satellite.json",
+      "bpm": 100,
+      "key": "G mixolydian",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 1,
+      "views": {
+        "planet": [
+          1
+        ]
+      },
+      "energy": 0.45,
+      "source": "자체 작곡(music/compose_satellite.py)"
+    },
+    {
+      "id": "ionstorm",
+      "label": "이온 폭풍",
+      "title": "이온 폭풍",
+      "mood": "활발 · 코스믹 브로큰비트 — 엇갈리는 킥·스네어, 옥타브 8분 톱니 베이스, 합창 패드, FM 벨 선율, 정전기 잡음 상승",
+      "label_en": "Ion Storm",
+      "title_en": "Ion Storm",
+      "mood_en": "Busy · cosmic broken beat — staggered kick and snare, octave eighth-note saw bass, choir pad, FM bell melody, static risers",
+      "file": "bgm-ionstorm.mp3",
+      "meta": "bgm-ionstorm.json",
+      "bpm": 120,
+      "key": "F minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 2,
+      "views": {
+        "planet": [
+          2
+        ]
+      },
+      "energy": 0.6,
+      "source": "자체 작곡(music/compose_ionstorm.py)"
+    },
+    {
+      "id": "gravity",
+      "label": "중력 선회",
+      "title": "중력 선회",
+      "mood": "활발 · 멜로딕 프로그레시브 — 3개 묶음 16분 플럭 아르페지오, 롤링 서브, 부드러운 킥·셰이커, 현악 화음, 비브라폰",
+      "label_en": "Gravity Assist",
+      "title_en": "Gravity Assist",
+      "mood_en": "Busy · melodic progressive — 16th pluck arpeggio in threes, rolling sub, soft kick and shaker, string chords, vibraphone",
+      "file": "bgm-gravity.mp3",
+      "meta": "bgm-gravity.json",
+      "bpm": 124,
+      "key": "Eb major",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 2,
+      "views": {
+        "planet": [
+          2
+        ]
+      },
+      "energy": 0.66,
+      "source": "자체 작곡(music/compose_gravity.py)"
+    },
+    {
+      "id": "supernova",
+      "label": "초신성",
+      "title": "초신성",
+      "mood": "매우 활발 · 코스믹 트랜스 — 8분 게이트 슈퍼소 패드, 롤링 베이스, 킥·오픈 햇·클랩, 긴 톱니 리드, 잡음 상승",
+      "label_en": "Supernova",
+      "title_en": "Supernova",
+      "mood_en": "Very busy · cosmic trance — eighth-gated supersaw pad, rolling bass, kick, open hats and clap, long saw lead, risers",
+      "file": "bgm-supernova.mp3",
+      "meta": "bgm-supernova.json",
+      "bpm": 136,
+      "key": "F# minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 3,
+      "views": {
+        "planet": [
+          3
+        ]
+      },
+      "energy": 0.88,
+      "source": "자체 작곡(music/compose_supernova.py)"
+    },
+    {
+      "id": "hyperspace",
+      "label": "초공간 질주",
+      "title": "초공간 질주",
+      "mood": "매우 활발 · 사이키델릭 트랜스 — 킥 뒤로 구르는 16분 베이스, 떨어지는 우주 잽, 16분 햇·클랩, 톱니 시퀀스, 높은 합창",
+      "label_en": "Hyperspace Run",
+      "title_en": "Hyperspace Run",
+      "mood_en": "Very busy · psychedelic trance — 16th rolling bass behind the kick, falling space zaps, hats and clap, saw sequence, high choir",
+      "file": "bgm-hyperspace.mp3",
+      "meta": "bgm-hyperspace.json",
+      "bpm": 144,
+      "key": "B minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 3,
+      "views": {
+        "planet": [
+          3
+        ]
+      },
+      "energy": 0.93,
+      "source": "자체 작곡(music/compose_hyperspace.py)"
+    },
+    {
+      "id": "rainwindow",
+      "label": "창가의 비",
+      "title": "창가의 비",
+      "mood": "한가 · 빗소리 창가의 서정 — 펠트 피아노 분산화음과 노래, 첼로 대선율, 창밖 빗소리",
+      "label_en": "Rain on the Window",
+      "title_en": "Rain on the Window",
+      "mood_en": "Idle · a rainy window seat — felt-piano broken chords and song, cello counter-melody, rain outside",
+      "file": "bgm-rainwindow.mp3",
+      "meta": "bgm-rainwindow.json",
+      "bpm": 56,
+      "key": "Eb major",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 0,
+      "views": {
+        "voxel": [
+          0
+        ]
+      },
+      "energy": 0.1,
+      "source": "자체 작곡(music/compose_rainwindow.py)"
+    },
+    {
+      "id": "teatime",
+      "label": "오후의 찻잔",
+      "title": "오후의 찻잔",
+      "mood": "한가 · 느린 왈츠 — 오르골 선율, 나일론 기타 쿵·짝·짝, 피치카토 베이스, 현악 화음과 클라리넷 대선율",
+      "label_en": "Afternoon Tea",
+      "title_en": "Afternoon Tea",
+      "mood_en": "Idle · slow waltz — music-box melody, nylon guitar oom-pah-pah, pizzicato bass, strings and clarinet",
+      "file": "bgm-teatime.mp3",
+      "meta": "bgm-teatime.json",
+      "bpm": 84,
+      "beats": 3,
+      "key": "A major",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 0,
+      "views": {
+        "voxel": [
+          0
+        ]
+      },
+      "energy": 0.2,
+      "source": "자체 작곡(music/compose_teatime.py)"
+    },
+    {
+      "id": "typewriter",
+      "label": "타자기 산책",
+      "title": "타자기 산책",
+      "mood": "보통 · 가벼운 스윙 — 타자기 타건과 줄 끝 벨, 피치카토 컴핑, 클라리넷 주제, 업라이트 베이스 2비트, 브러시",
+      "label_en": "Typewriter Stroll",
+      "title_en": "Typewriter Stroll",
+      "mood_en": "Steady · light swing — typewriter keys and the end-of-line bell, pizzicato comping, clarinet theme, upright bass, brushes",
+      "file": "bgm-typewriter.mp3",
+      "meta": "bgm-typewriter.json",
+      "bpm": 108,
+      "key": "Ab major",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 1,
+      "views": {
+        "voxel": [
+          1
+        ]
+      },
+      "energy": 0.4,
+      "source": "자체 작곡(music/compose_typewriter.py)"
+    },
+    {
+      "id": "espresso",
+      "label": "에스프레소 한 잔",
+      "title": "에스프레소 한 잔",
+      "mood": "보통 · 네오소울 — 뒤로 눕는 16분 스윙 드럼, 로즈 9화음, 미끄러지는 핑거 베이스, 부드러운 색소폰 선율",
+      "label_en": "One Espresso",
+      "title_en": "One Espresso",
+      "mood_en": "Steady · neo-soul — laid-back swung 16th drums, Rhodes ninth chords, sliding finger bass, soft sax melody",
+      "file": "bgm-espresso.mp3",
+      "meta": "bgm-espresso.json",
+      "bpm": 88,
+      "key": "G minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 1,
+      "views": {
+        "voxel": [
+          1
+        ]
+      },
+      "energy": 0.45,
+      "source": "자체 작곡(music/compose_espresso.py)"
+    },
+    {
+      "id": "meeting",
+      "label": "회의실 스카",
+      "title": "회의실 스카",
+      "mood": "활발 · 스카 — 뒷박 스캥크 기타, 오르간 버블, 걷는 베이스, 림 스네어, 금관 섹션 주제",
+      "label_en": "Meeting Room Ska",
+      "title_en": "Meeting Room Ska",
+      "mood_en": "Busy · ska — off-beat skank guitar, organ bubble, walking bass, rim snare, brass section theme",
+      "file": "bgm-meeting.mp3",
+      "meta": "bgm-meeting.json",
+      "bpm": 152,
+      "key": "E major",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 2,
+      "views": {
+        "voxel": [
+          2
+        ]
+      },
+      "energy": 0.68,
+      "source": "자체 작곡(music/compose_meeting.py)"
+    },
+    {
+      "id": "copier",
+      "label": "복사기 디스코",
+      "title": "복사기 디스코",
+      "mood": "활발 · 누디스코 — 옥타브 8분 베이스, 포온더플로어 킥·오픈 햇·클랩, 16분 기타 촙, 금관 스탭, 디스코 현악",
+      "label_en": "Copier Disco",
+      "title_en": "Copier Disco",
+      "mood_en": "Busy · nu-disco — octave eighth-note bass, four-on-the-floor kick, open hats and clap, 16th guitar chops, brass stabs, disco strings",
+      "file": "bgm-copier.mp3",
+      "meta": "bgm-copier.json",
+      "bpm": 124,
+      "key": "Db major",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 2,
+      "views": {
+        "voxel": [
+          2
+        ]
+      },
+      "energy": 0.72,
+      "source": "자체 작곡(music/compose_copier.py)"
+    },
+    {
+      "id": "pantry",
+      "label": "탕비실 대소동",
+      "title": "탕비실 대소동",
+      "mood": "매우 활발 · 폴카·발칸풍 소동 — 튜바 쿵·아코디언 짝, 화성단음계로 내달리는 클라리넷, 실로폰 응수, 행진 스네어·탬버린",
+      "label_en": "Pantry Panic",
+      "title_en": "Pantry Panic",
+      "mood_en": "Very busy · polka-Balkan chaos — tuba oom and accordion pah, racing harmonic-minor clarinet, xylophone replies, marching snare, tambourine",
+      "file": "bgm-pantry.mp3",
+      "meta": "bgm-pantry.json",
+      "bpm": 176,
+      "key": "D harmonic minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 3,
+      "views": {
+        "voxel": [
+          3
+        ]
+      },
+      "energy": 0.9,
+      "source": "자체 작곡(music/compose_pantry.py)"
+    },
+    {
+      "id": "mambo",
+      "label": "금요일 맘보",
+      "title": "금요일 맘보",
+      "mood": "매우 활발 · 빠른 맘보·살사 — 피아노 몬투노, 툼바오 베이스, 3-2 클라베, 콩가·카우벨·팀발레, 금관·색소폰 주제",
+      "label_en": "Friday Mambo",
+      "title_en": "Friday Mambo",
+      "mood_en": "Very busy · fast mambo-salsa — piano montuno, tumbao bass, 3-2 clave, congas, cowbell and timbales, brass and sax theme",
+      "file": "bgm-mambo.mp3",
+      "meta": "bgm-mambo.json",
+      "bpm": 184,
+      "key": "C minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "stage": 3,
+      "views": {
+        "voxel": [
+          3
+        ]
+      },
+      "energy": 0.94,
+      "source": "자체 작곡(music/compose_mambo.py)"
     }
   ]
 }

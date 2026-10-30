@@ -10,7 +10,6 @@ import {
   FLAT, capDpr, toScreen, toWorld, zoomAt, panBy, camScale, boxCenterXZ, fitNeed, fitMinD, flyPose, dampTo,
   pickNearest, hexPoints, bezPrefix, cardOffset, cardPx, ctxRingTone, tickInterval,
 } from '../flat/flat-core.mjs';
-import { PurgeBook, MAX_REGIONS } from '../ctx-core.mjs';
 import { escapeHtml } from '../html-util.mjs';
 import { islandLabelHtml } from '../overview/island-label.mjs';
 
@@ -160,7 +159,7 @@ test('2D 경로는 three.js 를 정적으로 끌어오지 않는다(app.js·2D �
     assert.deepEqual(bare, [], `${e}: ${bare.join(', ')}`);
   }
   const { files } = staticClosure('app.js');
-  for (const f of ['scene.js', 'camera.js', 'noise.js', 'env/ground.js', 'env/weather.js', 'overview/islands.js']) assert.ok(!files.includes(f), `app.js 가 ${f} 를 정적으로`);
+  for (const f of ['scene.js', 'camera.js', 'env/ground.js', 'env/weather.js', 'overview/islands.js']) assert.ok(!files.includes(f), `app.js 가 ${f} 를 정적으로`);
   // index.html: three·3D 모듈 미리 받기는 정적 태그가 아니라 3D 일 때만 스크립트가 넣는다
   const html = readFileSync(path.join(WEB, 'index.html'), 'utf8');
   const staticPre = [...html.matchAll(/<link rel="modulepreload" href="([^"]+)"/g)].map((m) => m[1]);
@@ -169,13 +168,8 @@ test('2D 경로는 three.js 를 정적으로 끌어오지 않는다(app.js·2D �
   assert.match(html, /d === '2d'/);
 });
 
-test('공통 순수 모듈로 옮긴 것: escapeHtml·PurgeBook·섬 이름표(3D 결과 같음)', () => {
+test('공통 순수 모듈로 옮긴 것: escapeHtml·섬 이름표(3D 결과 같음)', () => {
   assert.equal(escapeHtml(`<a href="x">'&'</a>`), '&lt;a href=&quot;x&quot;&gt;&#39;&amp;&#39;&lt;/a&gt;');
-  assert.equal(MAX_REGIONS, 6);
-  const b = new PurgeBook();
-  b.start('k', 0.8, 1000);
-  assert.ok(b.get('k', 1100).oldL === 0.8);
-  assert.equal(b.get('k', 1000 + 1e6), null);
   const html = islandLabelHtml({ projectId: 'p', name: 'Projects\\2026', busy: true, live: true, mains: [1, 2] });
   assert.match(html, /ov-dot busy/); assert.match(html, /세션 2/);
   // 2D 전용 CSS: 배경 흐림 끔은 data-dim="2d" 일 때만

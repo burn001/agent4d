@@ -78,15 +78,19 @@ export class CtxTracker {
 // ───────────── --demo 합성 값 ─────────────
 const DEMO_KINDS = new Set(['main', 'claude-p', 'subagent', 'workflow-agent']);
 const DEMO_MAIN_BASE = { '': 0.22, 'a1-': 0.8, 'a2-': 0.47, 'b1-': 0.63, 'c1-': 0.12 };
+// 과열 미리 보기: 메인 아닌 에이전트는 그래프 순서대로 네 갈래 — 4～44%·60(데움)·80(과열)·95(위험)% 에서 시작
+const DEMO_SUB_HOT = [null, 0.6, 0.8, 0.95];
 const hash01 = (s) => { let h = 2166136261; for (const c of String(s)) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return ((h >>> 0) % 1000) / 1000; };
 
-/** 데모 그래프의 에이전트류 노드에 처음 값을 넣는다(메인은 런타임마다 다른 수준 → 전체 보기 섬마다 열화 정도가 다름) */
+/** 데모 그래프의 에이전트류 노드에 처음 값을 넣는다(메인은 런타임마다 다른 수준, 서브에이전트 일부는 60·80·95% 근처 — 과열 표현이 섬·노드마다 다르게) */
 export function seedDemoCtx(g, px = '', ts) {
+  let sub = 0;
   for (const n of g.nodes.values()) {
     if (!DEMO_KINDS.has(n.kind)) continue;
     const isMain = n.kind === 'main';
     const limit = contextWindow(n.model).limit;
-    const frac = isMain ? (DEMO_MAIN_BASE[px] ?? 0.3) : 0.04 + hash01(n.id) * 0.4;
+    const hot = isMain ? null : DEMO_SUB_HOT[sub++ % DEMO_SUB_HOT.length];
+    const frac = isMain ? (DEMO_MAIN_BASE[px] ?? 0.3) : hot ?? 0.04 + hash01(n.id) * 0.4;
     const used = Math.round(limit * frac);
     // 기준선: 데모는 대화가 이미 진행된 세션처럼 시작값의 60% 를 첫 응답으로 둔다(섬마다 늘어난 양이 다르게)
     g.updateNode(n.id, { meta: { ctx: { ...ctxValue(used, n.model), base: Math.round(used * 0.6) } } }, ts);

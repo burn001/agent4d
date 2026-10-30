@@ -892,8 +892,7 @@ export class FlatView {
     if (this.ix && this.ix.animating(now)) level = 2; // 연출 중 30fps
     const sub = this._updateExtra ? this._updateExtra(now, dt) : 0;
     const sl = this.sess ? this.sess.level(now) : 0; // 충돌 칩 왕복·메시지 패킷
-    const dg = this.degradeFx && this.degradeFx.active ? this.degradeFx.level : 0; // 신호 열화(ctx-ui 가 붙임)
-    return Math.max(level, sub, sl, dg, fading || this.pf.busy ? 2 : 0); // 페이드 중 30fps
+    return Math.max(level, sub, sl, fading || this.pf.busy ? 2 : 0); // 페이드 중 30fps
   }
   /** 펼침·섬광·접힘 중인 카드가 있나(그동안 30fps) */
   _holoAnimating(now) {
@@ -911,7 +910,6 @@ export class FlatView {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this._drawScene(ctx, now);
     if (this.ix) this.ix.draw(ctx, now); // 노드·라벨 위
-    if (this.degradeFx && this.degradeFx.active) this.degradeFx.draw(this, ctx, now); // 신호 열화(장면 위 덧그림)
     this._placeLabels();
   }
   _drawScene() {}

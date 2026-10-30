@@ -101,7 +101,7 @@ _스크린샷과 움직이는 화면은 모두 내장 가짜 데이터(`?mock=1&
 - **장면 속의 나.** 메인 에이전트마다 작은 **사용자 콘솔**이 있습니다(흐름: 섬 위 단말, Planet: 지상 관제소, 복셀 오피스: 사무실 벽 의뢰인 스크린). 평소에도 마지막으로 보낸 말의 첫 몇 단어와 지금 상태("메인 작업 중 · 2분", "5분 전 답함", "나에게 질문 · 선택지 3")를 보여 주고, 메시지는 금빛 빔으로 메인에 닿고 답은 콘솔로 돌아옵니다. 마우스를 올리면 요약, 누르면 최근 메시지·나에게 온 질문·마지막 최종 답변 카드. 프롬프트를 보내면 받는 메인으로 카메라가 옮겨 갑니다(⚙ **내 입력 따라가기**, 기본 켬, 카메라를 직접 조작 중이면 건너뜀).
 - **도구 실황.** 노드 옆 패널에 지금 쓰는 도구(셸·읽기·편집·검색·웹·에이전트·스킬 등)와 한 줄 요약이 뜨고, 접는 사이드 패널에 실황 텍스트가 흐릅니다.
 - **재생.** 지난 세션이나 진행 중인 세션을 처음부터 0.5～32배속으로 다시 봅니다. 쉬는 구간 압축, 타임라인 스크럽, 볼거리 표시, 연속 재생을 지원합니다. 선택 사항인 읽기 전용 **보관함** 폴더에 transcript 를 남겨 두면 원본이 지워진 뒤에도 재생할 수 있습니다(`agent4d archive add`).
-- **게이지.** 세션별 **컨텍스트 사용률** 게이지(컨텍스트가 찰수록 화면이 신호처럼 열화하는 연출은 선택)와, 옵트인 **사용 한도** 게이지(5시간·7일)가 있습니다.
+- **게이지.** 세션별 **컨텍스트 사용률** 게이지와 — 에이전트(메인·서브에이전트·`claude -p`)마다 자기 컨텍스트 창이 찰수록 달아오르는 모습(30% 데움·70% 과열·90% 위험, compact 하면 식음) — 옵트인 **사용 한도** 게이지(5시간·7일)가 있습니다.
 - **소리**(켜기 전에는 꺼져 있음). 코드로 합성한 배경음악 12곡과, 브라우저에서 실시간 합성하는 효과음.
 - **언어.** 웹 화면과 CLI 모두 기본은 영어이고, 한국어 로케일이면 한국어로 나옵니다. 둘 다 강제로 고를 수 있습니다([자주 묻는 질문](#자주-묻는-질문문제-해결) 참고).
 - **원격 접속**(선택). Cloudflare quick tunnel 과 작은 Cloudflare Worker 로, 재시작해도 바뀌지 않는 토큰 보호 고정 링크를 만듭니다.
@@ -190,7 +190,7 @@ node bin/agent4d.mjs update --yes     # 묻지 않고 갱신
 
 ## 배경음악
 
-22곡(`bgm.mp3`, `bgm-bossa.mp3`, `bgm-caper.mp3`, `bgm-chillhop.mp3`, `bgm-circuit.mp3`, `bgm-city.mp3`, `bgm-dawn.mp3`, `bgm-deephouse.mp3`, `bgm-drive.mp3`, `bgm-funk.mp3`, `bgm-jazz.mp3`, `bgm-liquid.mp3`, `bgm-lofi.mp3`, `bgm-nebula.mp3`, `bgm-orbit.mp3`, `bgm-overclock.mp3`, `bgm-pulsar.mp3`, `bgm-pulse.mp3`, `bgm-stardust.mp3`, `bgm-swing.mp3`, `bgm-uplift.mp3`, `bgm-warp.mp3`, 곡당 약 4.6MB)은 레포가 아니라 [최신 릴리스](https://github.com/burn001/agent4d/releases/latest) 자산으로 올려 두었습니다. `web/assets/` 에 넣으면 됩니다. 없어도 화면은 그대로 동작하고 음악만 나오지 않습니다(효과음은 나옴).
+46곡(`bgm-aurora.mp3`, `bgm-bossa.mp3`, `bgm-caper.mp3`, `bgm-chillhop.mp3`, `bgm-circuit.mp3`, `bgm-city.mp3`, `bgm-comet.mp3`, `bgm-copier.mp3`, `bgm-cursor.mp3`, `bgm-dawn.mp3`, `bgm-deadline.mp3`, `bgm-deepfield.mp3`, `bgm-deephouse.mp3`, `bgm-drive.mp3`, `bgm-espresso.mp3`, `bgm-funk.mp3`, `bgm-glacier.mp3`, `bgm-gravity.mp3`, `bgm-hotfix.mp3`, `bgm-hyperspace.mp3`, `bgm-ionstorm.mp3`, `bgm-jazz.mp3`, `bgm-liquid.mp3`, `bgm-lofi.mp3`, `bgm-mambo.mp3`, `bgm-meeting.mp3`, `bgm-nebula.mp3`, `bgm-orbit.mp3`, `bgm-overclock.mp3`, `bgm-pantry.mp3`, `bgm-pulsar.mp3`, `bgm-pulse.mp3`, `bgm-queue.mp3`, `bgm-rainwindow.mp3`, `bgm-refactor.mp3`, `bgm-satellite.mp3`, `bgm-sprint.mp3`, `bgm-stack.mp3`, `bgm-stardust.mp3`, `bgm-supernova.mp3`, `bgm-swing.mp3`, `bgm-teatime.mp3`, `bgm-typewriter.mp3`, `bgm-uplift.mp3`, `bgm-warp.mp3`, `bgm.mp3`, 곡당 약 4.6MB)은 레포가 아니라 [최신 릴리스](https://github.com/burn001/agent4d/releases/latest) 자산으로 올려 두었습니다. `web/assets/` 에 넣으면 됩니다. 없어도 화면은 그대로 동작하고 음악만 나오지 않습니다(효과음은 나옴).
 
 ```bash
 # 클론 안에서 GitHub CLI 로

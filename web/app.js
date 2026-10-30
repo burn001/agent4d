@@ -59,7 +59,7 @@ const MODE = flag('demo') ? 'demo' : flag('mock') ? 'mock' : 'live';
 const STRESS = Number(params.get('stress') || 0) || 0;
 const TOKEN = params.get('t'); // 보통 서버가 302 로 지우고 쿠키로 바꾼다. 남아 있으면 API 에도 붙인다.
 const SHOW_FPS = flag('fps');
-// ?mock=1&ctx=85: 메인 컨텍스트 사용률을 고정(열화 단계 미리 보기·시험)
+// ?mock=1&ctx=85: 메인 컨텍스트 사용률을 고정(과열 단계 미리 보기·시험)
 const CTX_FIX = params.has('ctx') && isFinite(Number(params.get('ctx'))) ? Math.max(0, Math.min(100, Number(params.get('ctx')))) : null;
 const mockCtxOpts = () => (CTX_FIX != null ? { mainStart: CTX_FIX / 100, mainStep: 0 } : {});
 // 3차: 전체 보기. live 는 기본 '전체', mock 은 ?scope= 가 있을 때만(기존 ?mock=1 화면은 그대로)
@@ -84,7 +84,7 @@ function relApi(path, q = {}) {
 const store = { nodes: new Map(), root: null, seq: 0, sessionId: null, projects: [], roots: [] };
 const getNode = (id) => store.nodes.get(id);
 let timeline = null; // 화면 아래 이벤트 타임라인, 장면을 만든 뒤 붙인다
-let ctxUi = null;    // 컨텍스트 게이지·신호 열화
+let ctxUi = null;    // 컨텍스트 게이지
 const pauseBuf = new PauseBuffer(); // 실시간 일시정지
 let catchSaved = null, catchShownAt = 0; // 따라잡기 칩(연결 칩 원래 문구)
 let pendingSnap = null;             // 정지 중 도착한 스냅샷(mock 재개용)
@@ -633,7 +633,7 @@ function onEvent(ev, opts = {}) {
   // 빠른 재생에서는 포커스 노드만 말풍선
   const sayOk = fx && (speed < 16 || ev.nodeId === focusId);
   const n = store.nodes.get(ev.nodeId);
-  if (ctxUi && ev.type === 'node-update' && ev.patch && ev.patch.meta && ev.patch.meta.ctx) ctxUi.noteCtx(ev, n, opts); // 병합 전 값과 비교(급락 → 정화)
+  if (ctxUi && ev.type === 'node-update' && ev.patch && ev.patch.meta && ev.patch.meta.ctx) ctxUi.noteCtx(ev, n); // 병합 전 값과 비교(30·70·90% 첫 넘김·급락 → 패널 줄)
   if (plans && plans.on && (ev.type === 'node-update' || ev.type === 'node-add')) plans.event(ev, ev.type === 'node-add' ? store.nodes.get(ev.nodeId) : n, { quiet }); // 병합 전 값과 비교(항목 연출)
   switch (ev.type) {
     case 'node-add': {
@@ -1463,7 +1463,7 @@ window.__ccviz = {
   inspector,
 };
 
-ctxUi = mountCtx({ store, getView: () => view, getState: () => ({ focusId, streamAll, sel, paused: pauseBuf.paused }), music, sfx });
+ctxUi = mountCtx({ store, getState: () => ({ focusId, streamAll, sel }) });
 window.__ccvizSettings = mountSettings(); // 상단 바는 꼭 필요한 것만, 나머지는 ⚙ 메뉴로(버튼 DOM 을 그대로 옮김)
 plinksUi = mountPlanetLinks({ viewMode: () => viewMode }); // ⚙ `관계선` 줄(Planet 일 때만)·범례
 window.__ccvizSoundPop = mountSoundPop({ music, sound }); // 곡·재생 방식·음량(기존 조작을 모음)
@@ -1590,14 +1590,6 @@ const ctlHooks = {
   grid: ({ value }) => { env.setGrid(value === 'on'); return {}; },
   quips: ({ value }) => { setQuipsOn(value === 'on'); return viewMode === 'voxel' ? {} : { detail: 'saved (voxel only)' }; },
   plinks: ({ value }) => { setPlinksPref(value); return viewMode === 'planet' ? {} : { detail: 'saved (planet only)' }; },
-  noise: ({ on, amount }) => {
-    const b = $('btn-noise'), amt = $('noise-amt');
-    if (!b) return { ok: false, error: 'not_ready' };
-    const cur = () => lsGet('ccviz.noise') !== 'off';
-    if (amount != null) { if (amt) { amt.value = String(amount / 100); amt.dispatchEvent(new Event('input')); } if (amount > 0 && !cur()) b.click(); return {}; }
-    if (cur() !== on) b.click();
-    return {};
-  },
   panel: ({ value }) => { panel.setCollapsed(value === 'close'); return {}; },
   timeline: ({ value }) => { document.body.classList.toggle('tl-show', value === 'show'); return {}; },
   done: ({ value }) => { setShowDone(value === 'on'); return {}; },

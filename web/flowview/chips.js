@@ -14,6 +14,8 @@ import { RIG, heatRgb, rigCode } from './proc-rig-core.mjs'; // 분리 프로세
 import { procState, procJobId, jobHeat } from '../job-core.mjs';
 import { SIL, SIL_NAMES, SIL_DIM, silOf, silOutline } from './shape-core.mjs'; // 실루엣 문법
 import { MAIN_RIG } from './main-rig-core.mjs'; // 메인 몸 높이
+import { HEAT, HOT_H, CRIT_H } from '../heat-core.mjs'; // 과열 경계(셰이더에 숫자로 박음)
+import { warmTintGlsl, warmGlowGlsl } from './heat-fx-core.mjs'; // 데움 곡선(heatLook tint·glow 와 같은 식)
 
 const QUAD = 1.9; // 노드 반지름 대비 사각형 반폭(글로우·고리 여백)
 
@@ -90,7 +92,12 @@ void main() {
 
 const FS = `
 uniform float uTime; uniform float uLight; uniform vec3 uInterior; uniform vec3 uHolo; uniform vec3 uWarn; uniform vec3 uErr; uniform vec3 uOk; uniform vec3 uStop;
-uniform vec3 uFog; uniform float uFogMax;
+uniform vec3 uFog; uniform float uFogMax; uniform float uStill;
+// §127.6 과열 색(heat-fx-core heatColor 와 같은 표): 호박 → 주황 → 빨강
+vec3 heatC(float h, bool light) {
+  vec3 a = light ? vec3(0.86, 0.50, 0.06) : vec3(1.0, 0.72, 0.30), b = light ? vec3(0.85, 0.32, 0.04) : vec3(1.0, 0.46, 0.16), c = light ? vec3(0.78, 0.12, 0.06) : vec3(1.0, 0.20, 0.12);
+  return h < ${HOT_H.toFixed(6)} ? mix(a, b, h / ${HOT_H.toFixed(6)}) : mix(b, c, clamp((h - ${HOT_H.toFixed(6)}) / ${(CRIT_H - HOT_H).toFixed(6)}, 0.0, 1.0));
+}
 varying vec2 vP; varying vec3 vColor; varying vec3 vKind; varying vec4 vA; varying vec4 vB; varying vec4 vC; varying vec4 vD;
 varying float vPart; varying float vFace; varying float vShade; varying float vFog; varying float vShape;
 // 아래층일수록 어둡게(다크)·옅게(라이트) + 거리 안개(장면 안개 색 = 배경)
@@ -213,6 +220,12 @@ void main() {
   float jc = floor(vC.y + 0.5);
   float T = uTime + seed * 10.0;
   vec3 C = vColor;
+  // §127.6 과열: 그리는 heat(vB.w)만큼 테두리·옆면 띠·글로우가 주황 → 빨강으로 물들고, 과열(HOT_H↑ = 70%)부터 맥동(움직임 줄이기면 정지)
+  float hk = vB.w, hpul = 1.0;
+  if (hk > 0.004) {
+    if (uStill < 0.5 && hk >= ${HOT_H.toFixed(6)}) hpul = 1.0 - (hk >= ${CRIT_H.toFixed(6)} ? 0.45 : 0.3) * (0.5 - 0.5 * cos(6.2831853 * (uTime * (hk >= ${CRIT_H.toFixed(6)} ? 2.0 : 1.1) + seed)));
+    C = mix(C, heatC(hk, light), ${warmTintGlsl('hk')} * (0.75 + 0.25 * hpul)); // heat-fx-core warmTint 와 같은 곡선(30% 부터 뚜렷, 40% 면 한눈에)
+  }
   if (vPart > 2.5) {             // 기둥줄: 아래로 흐르는 점선, 가운데 진하게
     float lineA = smoothstep(1.0, 0.15, abs(p.x));
     float dash = step(0.5, fract(p.y * 0.7 + uTime * 0.35));
@@ -275,7 +288,7 @@ void main() {
   if (job) { vec4 jt = jobTop(p, d, l, C, T, light, foc, glowK, jc, vC.z, vC.w); gl_FragColor = finish(jt.rgb, jt.a); return; }
   vec3 col = vec3(0.0); float al = 0.0;
   // 바깥 글로우(상태색)
-  float ga = (foc > 0.5 ? 0.42 : st > 0.5 && st < 2.5 ? 0.24 : 0.12) * glowK;
+  float ga = max((foc > 0.5 ? 0.42 : st > 0.5 && st < 2.5 ? 0.24 : 0.12) * glowK, (hk > 0.004 ? ${warmGlowGlsl('hk')} : 0.0) * (light ? 0.3 : 0.5) * hpul); // §127.6 데움 글로우(warmGlow)
   float glow = exp(-max(d - 1.0, 0.0) * 3.2) * step(1.0, d) * ga;
   col = C; al = glow;
   // 옅은 바깥 육각
@@ -370,13 +383,13 @@ void main() {
     float arc = line(l, 1.38, 0.04) * step(da, 1.6) * (0.35 + 0.65 * (da / 1.6));
     col = mix(col, C, arc); al = max(al, arc * 0.85);
   }
-  // 컨텍스트 사용률 고리(위에서 시계 방향, 50% 미만 하늘·75% 미만 호박·그 이상 빨강 맥동)
+  // 컨텍스트 사용률 고리(위에서 시계 방향, 30% 미만 하늘·70% 미만 호박·그 이상 빨강 맥동)
   if (ctxp > 0.001) {
     float a = atan(p.x, p.y); a = a < 0.0 ? a + 6.2831853 : a;
     float track = line(l, 1.55, 0.035);
     float fill = track * step(a / 6.2831853, ctxp);
-    vec3 cc = ctxp < 0.5 ? uHolo : ctxp < 0.75 ? uWarn : uErr;
-    float pul = ctxp >= 0.75 ? 0.75 + 0.25 * sin(T * 6.0) : 1.0;
+    vec3 cc = ctxp < ${(HEAT.WARM_PCT / 100).toFixed(4)} ? uHolo : ctxp < ${(HEAT.HOT_PCT / 100).toFixed(4)} ? uWarn : uErr; // §127.6 과열 단계(30 데움·70 과열)와 같은 경계(shape-core ctxTone)
+    float pul = ctxp >= ${(HEAT.HOT_PCT / 100).toFixed(4)} && uStill < 0.5 ? 0.75 + 0.25 * sin(T * 6.0) : 1.0;
     col = mix(col, uHolo, track * 0.12 * (1.0 - fill)); al = max(al, track * 0.12);
     col = mix(col, cc, fill); al = max(al, fill * 0.9 * pul);
   }
@@ -534,7 +547,7 @@ export class NodeChips {
     this.view = view;
     this.cap = cap;
     this.uniforms = { uTime: { value: 0 }, uLight: { value: 0 }, uInterior: { value: new THREE.Color() }, uHolo: { value: new THREE.Color() }, uWarn: { value: new THREE.Color() }, uErr: { value: new THREE.Color() }, uOk: { value: new THREE.Color() }, uStop: { value: new THREE.Color() },
-      uFog: { value: new THREE.Color() }, uFogNear: { value: 80 }, uFogFar: { value: 300 }, uFogMax: { value: 0.5 }, uStemW: { value: 0.08 } };
+      uFog: { value: new THREE.Color() }, uFogNear: { value: 80 }, uFogFar: { value: 300 }, uFogMax: { value: 0.5 }, uStemW: { value: 0.08 }, uStill: { value: 0 } };
     // 재질 둘(색·깊이)을 모든 실루엣 묶음과 그림자가 나눠 쓴다(같은 셰이더 = 프로그램 하나)
     this.mat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: VS, fragmentShader: FS, transparent: true, depthWrite: false, side: THREE.DoubleSide });
     this.dmat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: VS, fragmentShader: FS_DEPTH, transparent: true, depthWrite: true, colorWrite: false, side: THREE.DoubleSide });
@@ -594,6 +607,7 @@ export class NodeChips {
   update(now) {
     const view = this.view;
     this.uniforms.uTime.value = now % 1000;
+    this.uniforms.uStill.value = view.reduced ? 1 : 0;
     const dt = this._t0 != null ? Math.min(0.25, Math.max(0, now - this._t0)) : 0; this._t0 = now;
     const T = this._t, C = T.iColor, K = T.iKind, A = T.iA, B = T.iB, D = T.iC, E = T.iD;
     const nowMs = view.clock ? view.clock() : Date.now();
@@ -641,7 +655,7 @@ export class NodeChips {
       A[0] = st; A[1] = kindIcon(v.kind); A[2] = (v.exitF ?? 1) * Math.min(1, sk * 1.3) * (jm ? JOB_CHIP.ALPHA[jm.code] ?? 1 : endK) * near; A[3] = jm ? 0 : ctxp;
       v._alphaK = A[2]; // 메인 몸·네모 터미널 앞면 글이 같은 투명도를 쓴다
       const foc = v.id === view.focusId || v.id === view.hoverId ? 1 : 0;
-      B[0] = v.seed; B[1] = foc; B[2] = (v.stale ? 0.4 : 1) * (jm ? JOB_CHIP.GLOW[jm.code] ?? 1 : 1); B[3] = 0;
+      B[0] = v.seed; B[1] = foc; B[2] = (v.stale ? 0.4 : 1) * (jm ? JOB_CHIP.GLOW[jm.code] ?? 1 : 1); B[3] = jm || rg ? 0 : v._heatK || 0; // 과열(HeatFx.step 이 적은 보간 heat)
       if (jm) jobChipAttr(D, 0, jm, nowMs); // 작업 칩: (2, 표시 상태, 진행 | -1, 대기 차오름 | -1)
       else if (rg) { D[0] = RIG.FLAG; D[1] = rg.code; D[2] = rg.heat; D[3] = -1; A[3] = 0; }
       else if (v.device && v.devInfo) {

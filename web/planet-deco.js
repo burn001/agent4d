@@ -19,7 +19,9 @@ import { jobLook, jobRingFill, jobBlink, jobLod, jobTether, ringAt, JOB_RING_GEO
 import { JOB_GLYPH, jobWeightK, TRACK, trackSlots, trackRadius, trackModel, trackGates, trackLabels } from './planet-core.mjs'; // 글리프·무게·항로
 import { cycleProgress } from './batch-core.mjs'; // G3 기동기 회차 고리
 import { ProcFx } from './planet-proc.js';
-import { VariantField, makeVariant, unmakeVariant, stepVariant, emitterWorld } from './planet-variants.js'; // 서브·claude -p 시안 궤도계
+import { VariantField, makeVariant, unmakeVariant, stepVariant, emitterWorld } from './planet-variants.js';
+import { PHEAT, warmGlsl } from './planet-heat-core.mjs'; // 셰이더 과열 경계(HOT_H·CRIT_H, 30% 기준)
+import { PlanetHeat } from './planet-heat.js'; // 에이전트 과열(글로우·연기·표면 uHeat) // 서브·claude -p 시안 궤도계
 import { variantFamily, variantOfVis, variantMode, VARIANT_EXTENT, VARIANT_CORE } from './planet-core.mjs'; // 분리 프로세스 = 채굴 드릴 플랫폼 · 자동 진행 = 계기 홀로그램 · 컨베이어 · 들여다보기
 
 const TAU = Math.PI * 2;
@@ -626,7 +628,7 @@ const BEGIN_V = /* glsl */`#include <begin_vertex>
 vMP = position;`;
 const COMMON_F = /* glsl */`#include <common>
 varying vec3 vMP;
-uniform float uT, uGlow, uLights, uHatch, uDetail, uLight, uPulse, uSpin;
+uniform float uT, uGlow, uLights, uHatch, uDetail, uLight, uPulse, uSpin, uHeat, uHeatT;
 float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }`;
 
 // 기계 행성: 위도 9 띠 × 띠마다 경도 칸(극으로 갈수록 적게), 칸마다 명암, 이음선은 화면 1～2px 어두운 선 + 코어 광
@@ -668,6 +670,18 @@ const MECH_F = /* glsl */`#include <emissivemap_fragment>
   float u = fract(lonN * 3.0 + dir * uT * 0.05 * (0.4 + uLights) + h21(vec2(bandI, 7.0)));
   float spot = exp(-pow((u - 0.5) / 0.012, 2.0));
   totalEmissiveRadiance += vec3(1.0, 0.95, 0.85) * spot * nearY * clamp(uLights, 0.0, 1.0) * mix(1.4, 0.7, uLight);
+  // §127.7 과열: 데움 = 이음선·테두리 주황, 과열 = 칸 몇 개가 용암빛으로 맥동, 위험 = 더 붉고 빠르게
+  if (uHeat > 0.001) {
+    float hw = ${warmGlsl('uHeat')}, hh = smoothstep(${PHEAT.HOT_H.toFixed(6)}, ${(PHEAT.HOT_H + PHEAT.RAMP).toFixed(6)}, uHeat), hcr = smoothstep(${PHEAT.CRIT_H.toFixed(6)}, ${(PHEAT.CRIT_H + PHEAT.RAMP * 0.75).toFixed(6)}, uHeat); // planet-heat-core warmOf·HOT_H·CRIT_H
+    vec3 hc = mix(vec3(1.0, 0.55, 0.16), vec3(1.0, 0.2, 0.07), smoothstep(${PHEAT.RGB_LO.toFixed(6)}, ${PHEAT.RGB_HI.toFixed(6)}, uHeat));
+    float hp = 0.72 + 0.28 * sin(uHeatT * (2.6 + 3.0 * hcr) + ph * 6.2831853);
+    float fres = pow(1.0 - abs(dot(normal, normalize(vViewPosition))), 2.0);
+    diffuseColor.rgb = mix(diffuseColor.rgb, mix(diffuseColor.rgb * vec3(1.0, 0.7, 0.55), hc * 0.8, 0.3 + 0.3 * hh), hw * 0.55); // 몸 전체 물듦(멀리서 몸 색으로 읽힘)
+    totalEmissiveRadiance += hc * hw * (0.16 + 0.22 * hh + 0.12 * hcr) * mix(1.0, 0.45, uLight);
+    totalEmissiveRadiance += hc * (seam * (0.55 + 0.9 * hh) * hp + fres * (0.35 + 0.5 * hh)) * hw * mix(1.15, 0.75, uLight);
+    float hotCell = step(1.0 - 0.3 * hh - 0.15 * hcr, h21(cell + 5.1)) * (1.0 - seam);
+    totalEmissiveRadiance += hc * hotCell * hh * (0.4 + 0.4 * hcr) * hp * mix(1.0, 0.7, uLight);
+  }
 }`;
 
 // 서브 행성: 위도 띠 + 차등 회전으로 흐르는 구름 + 활동 발광 맥동
@@ -698,7 +712,7 @@ function inject(mat, kind, U) {
   mat.customProgramCacheKey = () => 'planet-' + kind;
   mat.needsUpdate = true;
 }
-const mkU = () => ({ uT: { value: 0 }, uGlow: { value: 0 }, uLights: { value: 0 }, uHatch: { value: 0 }, uDetail: { value: 1 }, uLight: { value: 0 }, uPulse: { value: 1 }, uSpin: { value: 1 }, uShrink: { value: 1 } });
+const mkU = () => ({ uT: { value: 0 }, uGlow: { value: 0 }, uLights: { value: 0 }, uHatch: { value: 0 }, uDetail: { value: 1 }, uLight: { value: 0 }, uPulse: { value: 1 }, uSpin: { value: 1 }, uShrink: { value: 1 }, uHeat: { value: 0 }, uHeatT: { value: 0 } });
 
 // 대기 테두리 빛(프레넬)
 const ATMO_V = /* glsl */`varying vec3 vN; varying vec3 vV;
@@ -708,7 +722,7 @@ varying vec3 vN; varying vec3 vV;
 void main() { float r = 1.0 - abs(dot(vN, vV)); float a = pow(r, 2.6) * uOpacity; gl_FragColor = vec4(uColor, a); }`;
 
 const _wp = new THREE.Vector3(), _dir = new THREE.Vector3(), _p2 = new THREE.Vector3();
-const _c = new THREE.Color(), _c2 = new THREE.Color(), _jc2 = new THREE.Color();
+const _c = new THREE.Color(), _c2 = new THREE.Color(), _jc2 = new THREE.Color(), _hc = new THREE.Color(); // _hc = 궤도·시안 단계색
 
 export class PlanetDeco {
   /** view = PlanetView(SceneView) */
@@ -721,6 +735,7 @@ export class PlanetDeco {
     this.proc = new ProcFx(view, this.sparks);
     this.gates = new GateField(view.world); // 항로 관문(장면 공용 인스턴싱)
     this.vf = new VariantField(view.scene); // 시안 부품(장면 공용 인스턴싱)
+    this.heat = new PlanetHeat(view, this); // 과열(장면 공용 글로우·연기 인스턴싱)
     this._res = { value: new THREE.Vector2(1, 1) }; this._dpr = { value: 1 }; // 항로 띠 화면 폭(모든 JobTrack 이 같은 uniform 객체)
     this._slots = new Set(); this._slotAt = -1e9; // 항로 자리(주인마다 끝나지 않은 작업 TRACK.PER_OWNER 개 — 0.5초마다)
   }
@@ -906,7 +921,7 @@ export class PlanetDeco {
       d.act = (d.act || 0) + (act - (d.act || 0)) * Math.min(1, dt * 3);
       // 위성 군단: 도구 때 산개
       d.orbits.spread = d.subType === 'swarm' ? 1 + 0.32 * d.act : 1;
-      if (olod >= 1) d.orbits.setColors(v.mat.color, L);
+      if (olod >= 1) d.orbits.setColors(this.heat ? this.heat.tintColor(v.id, v.mat.color, _hc) : v.mat.color, L); // 궤도 링·위성 단계색
       d.orbits.step(dt, olod, oc, op, (s * pxK) / Math.max(0.01, dist), reduced, settle, dpr, pxK, s);
       if (d.deck) { d.deck.colors(view.tokens || {}, v.mat.color, L); if (d.deck.kind) d.deck.stepRearm(v, op, olod); else d.deck.stepDevice(view, v, dt, op, olod, reduced, clockMs); } // G3·G4
       // 도구 입자: 궤도 위성에서 연결선(부모) 쪽으로
@@ -964,6 +979,7 @@ export class PlanetDeco {
     this.gates.end();
     this.vf.end();
     this.proc.update(now, dt, pctx);
+    if (this.heat) this.heat.update(now, dt, { cam, H, L, reduced, sparks: this.sparks }); // 과열(불티는 sparks 로 — 아래 update 전에)
     this.sparks.update(dt, pxK * 0.12 * dpr);
     st.ms = performance.now() - t0;
   }
@@ -981,7 +997,7 @@ export class PlanetDeco {
     const mode = variantMode(v.node.status, icons, !!v.scopeRecent);
     const pm = planetMode(v.node.status, icons, !!v.scopeRecent);
     const op = v.mat.opacity, t = view.tokens || {};
-    stepVariant(this.vf, d.var, v, { dt, now, mode, s, px, op, L, reduced, col: v.mat.color, red: t.error, green: t.ok });
+    stepVariant(this.vf, d.var, v, { dt, now, mode, s, px, op, L, reduced, col: this.heat ? this.heat.tintColor(v.id, v.mat.color, _hc) : v.mat.color, red: t.error, green: t.ok }); // 시안 부품 단계색
     const oc = approach(d.ocur, ORBIT[pm], dt, 2.5);
     const act = pm === 'tool' ? 1 : 0;
     d.act = (d.act || 0) + (act - (d.act || 0)) * Math.min(1, dt * 3);
@@ -1040,5 +1056,5 @@ export class PlanetDeco {
     this.sparks.emit(_p2, _dir, reach * 1.6, 0.12, 0.85, _c.copy(v.mat.color).lerp(_c2.set(0xffffff), 0.45), 1.6);
   }
 
-  dispose() { for (const id of [...this.map.keys()]) { const v = this.view.vis.get(id); if (v) this.detach(v); } this.map.clear(); if (this.vf) { this.vf.dispose(); this.vf = null; } if (this.sparks) { this.sparks.dispose(); this.sparks = null; } if (this.cages) { this.cages.dispose(); this.cages = null; } if (this.proc) { this.proc.dispose(); this.proc = null; } if (this.gates) { this.gates.dispose(); this.gates = null; } }
+  dispose() { for (const id of [...this.map.keys()]) { const v = this.view.vis.get(id); if (v) this.detach(v); } this.map.clear(); if (this.vf) { this.vf.dispose(); this.vf = null; } if (this.sparks) { this.sparks.dispose(); this.sparks = null; } if (this.cages) { this.cages.dispose(); this.cages = null; } if (this.proc) { this.proc.dispose(); this.proc = null; } if (this.gates) { this.gates.dispose(); this.gates = null; } if (this.heat) { this.heat.dispose(); this.heat = null; } }
 }

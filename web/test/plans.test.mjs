@@ -265,8 +265,6 @@ test('§115 판 DOM 은 3D 구멍 모드에서 캔버스 아래(.under, z -1)', 
   assert.match(sc, /alpha: true/);
   assert.match(sc, /blendSrc: THREE\.ZeroFactor, blendDst: THREE\.OneMinusSrcAlphaFactor/);
   assert.match(sc, /_cutLabels\(\); \/\/ §115\.3/, '렌더 뒤 판 뒤 라벨 잘라내기');
-  const nz = readFileSync(new URL('../noise.js', import.meta.url), 'utf8');
-  assert.match(nz, /gl_FragColor = vec4\(col \* aOut, aOut\)/, '신호 열화 후처리도 구멍 알파를 지킴');
 });
 
 test('§115.2 판 평면 네 모서리: 카메라와 나란한 한 깊이 · 상자 모서리와 정확히 겹침 · 그림자 여백', async () => {

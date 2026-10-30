@@ -9,6 +9,7 @@
 //  · 지오메트리는 한 번만 만들어 모든 노드가 같이 쓴다(BufferGeometryUtils 없이 직접 합침 — importmap SRI 목록을 늘리지 않음).
 import * as THREE from 'three';
 import { TOURB_GEO as TG, GEAR_M, PINION_R, ESC_ARBOR, pinionAngle } from './tourbillon-core.mjs';
+import { PHEAT, warmOf } from './planet-heat-core.mjs'; // 과열 곡선(30% 기준)
 
 const TAU = Math.PI * 2;
 let G = null;
@@ -358,6 +359,18 @@ export class TourbMain {
     this.mBlue.color.set(C.blue); this.mBlue.emissive.set(C.blue).multiplyScalar(L ? 0.1 : 0.3);
     this.mHair.color.set(C.hair); this.mHair.emissive.set(C.hair).multiplyScalar(L ? 0.1 : 0.35);
     setRim(this.U, L, _c.set(C.rim).lerp(nodeColor, 0.25));
+    this._fE = this.mFrame.emissive.clone(); this._gE = this.mGold.emissive.clone(); this._sE = this.mSteel.emissive.clone(); // 과열 기준값
+    if (this._heat) { const h = this._heat; this._heat = 0; this.heat(h, L); }
+  }
+  /** 과열(0..1): 프레임·금·강철 부품 발광이 주황 → 빨강으로 달아오름(테마 기준값 위에 더함). 같은 값이면 아무것도 안 함 */
+  heat(h, L) {
+    h = Math.max(0, Math.min(1, h || 0));
+    if (h === (this._heat || 0) || !this._fE) { this._heat = h; return; }
+    this._heat = h;
+    const k = h <= 0 ? 0 : warmOf(h) * (L ? 0.35 : 0.6); // planet-heat-core 데움 곡선(30% 아주 옅게 → 70% 꽉)
+    const t = Math.max(0, Math.min(1, (h - PHEAT.RGB_LO) / (PHEAT.RGB_HI - PHEAT.RGB_LO))), r = 1, g = 0.55 - 0.35 * t, b = 0.16 - 0.09 * t;
+    const add = (m, base, w) => m.emissive.setRGB(base.r + r * w, base.g + g * w, base.b + b * w);
+    add(this.mFrame, this._fE, k); add(this.mGold, this._gE, k * 0.8); add(this.mSteel, this._sE, k * 0.45);
   }
   /** es = Escapement 값, lod = tourbLod, op = 몸체 투명도 */
   step(es, lod, op) {

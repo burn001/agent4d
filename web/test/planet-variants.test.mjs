@@ -101,5 +101,5 @@ test('배선: 3D(planet-deco)·2D(planet-orbits2d)가 같은 variantOfVis·형�
   assert.match(pv, /new THREE\.InstancedMesh\(g, mat, 1\)/);
   assert.doesNotMatch(pv.split('export function stepVariant')[1], /new THREE\.(Mesh|MeshStandardMaterial|ShaderMaterial)\(/); // 프레임마다 메시·재질을 만들지 않음
   const p2 = readFileSync(new URL('../flat/planet2d.js', import.meta.url), 'utf8');
-  assert.match(p2, /drawVariant2D\(this, ctx, v, vn, x, y, R, alpha, now, col, 0\)/);
+  assert.match(p2, /drawVariant2D\(this, ctx, v, vn, x, y, R, alpha, now, colO?, 0\)/); // colO = 과열 단계색(뜨겁지 않으면 col 그대로)
 });

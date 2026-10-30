@@ -4,7 +4,6 @@
 //       프레임마다 하는 일은 자리·크기·투명도 uniform 갱신뿐. 꼬리 갱신의 '위로 흐름'도 uniform 하나(uScroll)로.
 import * as THREE from 'three';
 import { PANEL, shapeLayout, panelRows, fallbackPanel, markStyle, textRows, jobRowHits, jobLinesKey, jobLineStyle } from './holo-core.mjs';
-import { DEG, degOf } from './degrade-core.mjs';
 import { t as tr } from './i18n.mjs';
 import { runRing } from './run-core.mjs'; // 셸 머리줄 진행 링
 
@@ -49,29 +48,13 @@ void main() {
 }`;
 const FS = `
 uniform sampler2D uMap; uniform float uAlpha; uniform float uSwap; uniform vec4 uBody; uniform float uScroll; uniform float uLight;
-uniform float uDeg; uniform float uT; uniform vec2 uCells;
 varying vec2 vUv;
-float hh(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 void main() {
   vec2 uv = vUv;
   if (uv.y < uSwap) discard;                   // 이어받기 갈림 띠 아래는 아직 앞 내용(틀만)
   bool inBody = uv.x >= uBody.x && uv.x <= uBody.z && uv.y >= uBody.y && uv.y <= uBody.w;
   if (inBody && uScroll > 0.0) { uv.y += uScroll; if (uv.y > uBody.w) discard; } // 꼬리: 새 줄이 아래에서 밀고 올라옴
-  // §76 신호 열화(uDeg>0): 줄이 가끔 옆으로 밀리고, 글자 칸 일부가 잠깐 ▒(망점) 으로 바뀐다
-  float cellOn = 0.0;
-  vec2 cell = floor(uv * uCells);
-  if (uDeg > 0.001) {
-    float row = cell.y, fr = floor(uT * 7.0);
-    uv.x += (hh(vec2(row, fr)) - 0.5) * 0.05 * uDeg * step(1.0 - 0.35 * uDeg, hh(vec2(row * 1.7, fr + 3.0)));
-    cellOn = step(hh(cell + floor(uT * (2.0 + 6.0 * uDeg) + hh(cell) * 9.0) * vec2(3.1, 7.7)), 0.09 * uDeg);
-  }
   vec4 t = texture2D(uMap, uv);
-  if (cellOn > 0.5) {
-    vec4 cc = texture2D(uMap, (cell + 0.5) / uCells);
-    vec2 f = fract(uv * uCells * vec2(2.0, 3.0));
-    float dots = step(0.5, fract((floor(f.x * 2.0) + floor(f.y * 2.0)) * 0.5)); // 체크 망점(▒)
-    if (cc.a > 0.08 || t.a > 0.08) t = vec4(max(cc.rgb, t.rgb) * 1.15, max(cc.a, t.a) * (0.45 + 0.55 * dots));
-  }
   float sl = uLight > 0.5 ? 0.975 + 0.025 * sin(vUv.y * 230.0) : 0.9 + 0.1 * sin(vUv.y * 230.0);
   gl_FragColor = vec4(t.rgb * (uLight > 0.5 ? 1.0 : sl), t.a * uAlpha);
 }`;
@@ -215,8 +198,7 @@ export class HoloText {
       cv.width = Math.round(PANEL.CH * 1.5); cv.height = PANEL.CH;
       const tex = this._tex(cv);
       const mat = new THREE.ShaderMaterial({
-        uniforms: { uMap: { value: tex }, uAlpha: { value: 1 }, uSwap: { value: 0 }, uBody: { value: new THREE.Vector4(0, 0, 1, 1) }, uScroll: { value: 0 }, uLight: { value: 0 },
-          uDeg: { value: 0 }, uT: { value: 0 }, uCells: { value: new THREE.Vector2(40, 14) } }, // 신호 열화(글 칸 수: 가로 ≈ 글자 수, 세로 ≈ 줄 수)
+        uniforms: { uMap: { value: tex }, uAlpha: { value: 1 }, uSwap: { value: 0 }, uBody: { value: new THREE.Vector4(0, 0, 1, 1) }, uScroll: { value: 0 }, uLight: { value: 0 } },
         vertexShader: VS, fragmentShader: FS, transparent: true, depthWrite: false, side: THREE.DoubleSide,
       });
       const mesh = new THREE.Mesh(this.geo, mat);
@@ -289,9 +271,6 @@ export class HoloText {
       }
       const u = s.mat.uniforms;
       u.uAlpha.value = c.alpha; u.uSwap.value = c.swap;
-      const dg = DEG.on && !DEG.reduced ? degOf(e.node) : 0; // 그 세션 열화(움직임 줄이기면 깨짐 없음)
-      if (u.uDeg.value !== dg) { u.uDeg.value = dg; if (dg) u.uCells.value.set(Math.round(26 * (e.asp || 1.5)), Math.max(6, (rows || 0) + 3)); }
-      if (dg) u.uT.value = DEG.t;
       // 꼬리 갱신: 밀려 올라간 줄 수만큼 아래에서 시작해 제자리로(ease-out)
       let sc = 0;
       if (e.scrollAt != null && rows > 0 && now - e.scrollAt < PANEL.SCROLL) {

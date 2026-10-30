@@ -1,4 +1,4 @@
-/* 컨텍스트 사용률 게이지·신호 열화 문구. 색 규칙은 한도 게이지와 같다(70%↑ --warn, 90%↑ --error) */
+/* 컨텍스트 사용률 게이지 (신호 열화 은 2026-10-30 폐지 → 에이전트 과열). 색 규칙은 한도 게이지와 같다(70%↑ --warn, 90%↑ --error) */
 .ctxg { position: relative; display: inline-flex; align-items: center; flex: none; margin-left: 2px; font-variant-numeric: tabular-nums; }
 .ctxg[hidden] { display: none !important; }
 .ctxg-pill {
@@ -8,8 +8,6 @@
   font-size: 12px; line-height: 28px; overflow: hidden; cursor: pointer; color: var(--text); font-family: inherit;
 }
 .ctxg-pill:hover { background: var(--hover); }
-.ctxg-off { color: var(--muted); font-size: 11px; text-decoration: line-through; }
-.ctxg-off[hidden] { display: none; }
 .ctxg-name { color: var(--muted); font-weight: 500; }
 .ctxg-pct { font-weight: 700; }
 .ctxg-who { color: var(--muted); font-size: 11.5px; max-width: 9em; overflow: hidden; text-overflow: ellipsis; }
@@ -32,12 +30,9 @@
 .ctxg-card h4 { margin: 0 0 4px; font-size: 12px; font-weight: 650; }
 .ctxg-card h4 small { color: var(--muted); font-weight: 500; margin-left: 4px; }
 .ctxg-cdet { margin: 0 0 8px; color: var(--muted); white-space: pre-line; font-size: 11.5px; line-height: 1.45; }
-.ctxn { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-.ctxn-amt { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
-#noise-amt { width: 110px; accent-color: var(--accent); }
-#noise-amt:disabled { opacity: .4; }
 .ctxg-stages { margin: 0 0 6px; padding: 0; list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px; font-size: 11.5px; }
 .ctxg-stages b { display: inline-block; min-width: 2.6em; color: var(--muted); font-weight: 600; }
+.ctxg-stages li.cur { color: var(--text); font-weight: 650; }
 .ctxg-note { margin: 0; padding-top: 6px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; line-height: 1.45; }
 
 /* 실시간 일시정지 버튼(app.js 가 만듦). 재생 막대의 ⏸/▶ 와 구분: 상단 바, "실시간" 라벨 */
@@ -59,26 +54,6 @@
 #ctx-tip b.lv-danger { color: var(--error); }
 #ctx-tip small { color: var(--muted); font-size: 11px; }
 
-/* "세션 정리 권장": 화면 전체 열화일 때 상단 가운데 띠, 전체 보기는 섬 위 꼬리표 */
-#ctx-banner {
-  position: fixed; top: calc(var(--topbar-h, 48px) + 46px); left: 50%; transform: translateX(-50%); z-index: 30; pointer-events: none;
-  padding: 4px 14px; border-radius: 6px; font: 600 13px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: .04em;
-  color: var(--error); background: color-mix(in srgb, var(--chip-bg) 80%, transparent); border: 1px solid color-mix(in srgb, var(--error) 60%, transparent);
-  text-shadow: 1.5px 0 color-mix(in srgb, #ff2d55 55%, transparent), -1.5px 0 color-mix(in srgb, #2dd4ff 55%, transparent);
-  animation: ctx-jitter 2.6s steps(1) infinite;
-}
-#ctx-banner[hidden] { display: none; }
-.ctx-tag {
-  position: absolute; left: 0; top: 0; z-index: 3; pointer-events: none; padding: 2px 8px; border-radius: 5px; white-space: nowrap;
-  font: 600 11.5px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; color: var(--error);
-  background: color-mix(in srgb, var(--chip-bg) 82%, transparent); border: 1px solid color-mix(in srgb, var(--error) 55%, transparent);
-  text-shadow: 1px 0 color-mix(in srgb, #ff2d55 50%, transparent), -1px 0 color-mix(in srgb, #2dd4ff 50%, transparent);
-}
-.ctx-tag[hidden] { display: none; }
-@keyframes ctx-jitter { 0%, 91%, 100% { margin-left: 0; opacity: 1; } 92% { margin-left: 3px; opacity: .75; } 94% { margin-left: -2px; } 96% { margin-left: 1px; opacity: .9; } }
-#ctx-banner.still { animation: none; }
-@media (prefers-reduced-motion: reduce) { #ctx-banner { animation: none; } }
-
 /* 상단 바가 넘치지 않게: 1600px 미만은 짧은 표기 */
 @media (max-width: 1919px) {
   .ctxg-who, .ctxg-name { display: none; }
@@ -87,7 +62,6 @@
 @media (max-width: 1599px) { .ctxg-pill::before { content: none; } .ctxg-pill { padding: 0 8px; } }
 @media (max-width: 719px) {
   .ctxg-card { position: fixed; top: calc(var(--topbar-h, 88px) + 6px); left: 12px; right: 12px; width: auto; }
-  #ctx-banner { top: calc(var(--topbar-h, 75px) + 8px); font-size: 12px; }
 }
 /* 게이지·실시간 정지 버튼 자리를 만들려고 1920px 미만에선 로고 옆 글자를 숨긴다(로고·제목 풍선은 그대로) */
 @media (min-width: 720px) and (max-width: 1099px) { #topbar .brand .txt { display: none; } }
@@ -108,20 +82,3 @@
 #pause-badge i { font-style: normal; font-weight: 600; color: var(--accent); }
 #pause-badge:hover { background: color-mix(in srgb, var(--warn, #f59e0b) 26%, var(--chip-bg)); }
 @media (max-width: 719px) { #pause-badge span { display: none; } }
-
-/* ── 신호 열화 2차 ── */
-/* 글자 깨짐(degrade-text.js): 원래 글자는 투명하게(자리·textContent·접근성 이름 그대로), 깨진 글을 ::after 로 덮음.
-   content 의 '/ ""' 는 대체 글 — 스크린리더가 깨진 글을 읽지 않게 */
-.ccv-gx { -webkit-text-fill-color: transparent; }
-.ccv-gxr { position: relative; } /* 원래 위치 지정이 없던 요소만(absolute 등은 그대로) */
-.ccv-gx::after { content: attr(data-ccv-g); content: attr(data-ccv-g) / ""; position: absolute; left: 0; top: 0; white-space: pre; pointer-events: none;
-  -webkit-text-fill-color: currentColor; text-shadow: 1.2px 0 rgba(255, 45, 85, .75), -1.2px 0 rgba(45, 212, 255, .75); }
-/* 지속 표시: 1 색 갈라짐 · 2 + 번짐 · 3 + 흔들림(움직임 줄이기면 흔들림 없음) */
-[data-ccv-deg="1"] { text-shadow: .7px 0 rgba(255, 45, 85, .42), -.7px 0 rgba(45, 212, 255, .42); }
-[data-ccv-deg="2"] { text-shadow: 1.2px 0 rgba(255, 45, 85, .55), -1.2px 0 rgba(45, 212, 255, .55); filter: blur(.25px); }
-[data-ccv-deg="3"] { text-shadow: 1.8px 0 rgba(255, 45, 85, .65), -1.8px 0 rgba(45, 212, 255, .65); filter: blur(.45px); }
-[data-ccv-deg="3"] > * { animation: ccv-shake 1.7s steps(1) infinite; }
-[data-ccv-deg="2"] > .act, [data-ccv-deg="2"] > small { animation: ccv-shake 3.1s steps(1) infinite; }
-@keyframes ccv-shake { 0%, 84%, 100% { translate: 0 0; } 86% { translate: 1.5px 0; } 89% { translate: -2px .5px; } 92% { translate: 1px -.5px; } 95% { translate: -1px 0; } }
-body.ccv-still [data-ccv-deg] > * { animation: none !important; }
-@media (prefers-reduced-motion: reduce) { [data-ccv-deg] > * { animation: none !important; } }

@@ -1,5 +1,6 @@
 // 흐름(Flow) 노드 모양 — 순수 부분(three·DOM 없음). 3D(chips.js·main-rigs.js)와 2D(flat/flow2d.js)가 같은 표를 읽는다.
 // 사용자 결정(2026-10-28): 메인 = 반응로 코어·데이터 띠 기둥 두 가지를 노드 id 시드로 결정적 배정, 서브 = '실루엣 문법'(종류마다 몸 모양).
+import { HEAT } from '../heat-core.mjs'; // 컨텍스트 색 경계(ctxTone)
 
 /** FNV-1a 32비트 → 0..2^32-1 (같은 id 는 새로고침·재생·보관함·3D⇄2D 어디서나 같은 값) */
 export function fnv(s) {
@@ -96,8 +97,8 @@ export function silOutline(sil, R) {
 }
 
 // ── 메인 반응로 · 데이터 기둥 공용 값 ──
-/** 컨텍스트 사용률 → 단계(0 하늘 <50 · 1 호박 <75 · 2 빨강 맥동) */
-export const ctxTone = (f) => (f < 0.5 ? 0 : f < 0.75 ? 1 : 2);
+/** 컨텍스트 사용률 → 단계(0 하늘 <30 · 1 호박 <70 · 2 빨강 맥동) — 과열 단계(HEAT.WARM_PCT 30 데움·HOT_PCT 70 과열)와 같은 경계(예전 50·75) */
+export const ctxTone = (f) => (f < HEAT.WARM_PCT / 100 ? 0 : f < HEAT.HOT_PCT / 100 ? 1 : 2);
 /** 컨텍스트 비율 0..1 (값이 없으면 null) */
 export function ctxFrac(node) {
   const c = node && node.meta && node.meta.ctx;

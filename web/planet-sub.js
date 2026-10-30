@@ -5,6 +5,7 @@
 //  crystal 결정(다면체 면마다 반짝임, 도구 = 면 번쩍임 물결).
 // 몸체 셰이더는 프로그램 하나(planet-subt)에 유형 uniform 분기. 상태: 생각 = 표면 흐름 빨라짐, 대기 = 느려지고 어두워짐(uDim), 완료 = 정리 연출 후 진정.
 import * as THREE from 'three';
+import { PHEAT, warmGlsl } from './planet-heat-core.mjs'; // 셰이더 과열 경계(HOT_H·CRIT_H, 30% 기준)
 
 const TAU = Math.PI * 2;
 export const TYPE_ID = { gas: 0, lava: 1, ice: 2, ringed: 3, binary: 4, swarm: 5, comet: 6, crystal: 7 };
@@ -29,7 +30,7 @@ const BEGIN_V = /* glsl */`#include <begin_vertex>
 vMP = position;`;
 const COMMON_F = /* glsl */`#include <common>
 varying vec3 vMP;
-uniform float uT, uGlow, uSpin, uDetail, uLight, uType, uAct, uDim, uSettle;
+uniform float uT, uGlow, uSpin, uDetail, uLight, uType, uAct, uDim, uSettle, uHeat, uHeatT;
 float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float h31(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
 float vn(vec3 p) { vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
@@ -111,6 +112,20 @@ const SUBT_F = /* glsl */`#include <emissivemap_fragment>
   diffuseColor.rgb *= 1.0 - 0.2 * uDim;
   totalEmissiveRadiance *= 1.0 - 0.45 * uDim;
   totalEmissiveRadiance += em * uSettle * 1.2;
+  // §127.7 과열: 데움 = 테두리(대기 쪽) 주황, 과열 = 표면 균열 용암빛 맥동, 위험 = 더 붉고 넓게
+  if (uHeat > 0.001) {
+    float hw = ${warmGlsl('uHeat')}, hh = smoothstep(${PHEAT.HOT_H.toFixed(6)}, ${(PHEAT.HOT_H + PHEAT.RAMP).toFixed(6)}, uHeat), hcr = smoothstep(${PHEAT.CRIT_H.toFixed(6)}, ${(PHEAT.CRIT_H + PHEAT.RAMP * 0.75).toFixed(6)}, uHeat); // planet-heat-core warmOf·HOT_H·CRIT_H
+    vec3 hc = mix(vec3(1.0, 0.55, 0.16), vec3(1.0, 0.2, 0.07), smoothstep(${PHEAT.RGB_LO.toFixed(6)}, ${PHEAT.RGB_HI.toFixed(6)}, uHeat));
+    float fres = pow(1.0 - abs(dot(normal, normalize(vViewPosition))), 2.0);
+    diffuseColor.rgb = mix(diffuseColor.rgb, mix(diffuseColor.rgb * vec3(1.0, 0.68, 0.52), hc * 0.8, 0.3 + 0.3 * hh), hw * 0.55); // 몸 전체 물듦(멀리서 몸 색으로 읽힘)
+    totalEmissiveRadiance += hc * hw * (0.16 + 0.22 * hh + 0.12 * hcr) * lightK;
+    totalEmissiveRadiance += hc * fres * hw * (0.55 + 0.7 * hh) * lightK;
+    float hn = vn(pn * 4.2 + vec3(0.0, uHeatT * 0.04, 0.0));
+    float crack = (1.0 - smoothstep(0.0, 0.05 + 0.05 * hcr, abs(hn - 0.5))) * hh * max(uDetail, 0.35);
+    float hp = 0.7 + 0.3 * sin(uHeatT * (2.4 + 3.0 * hcr) + hn * 12.0);
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.35, crack * 0.5);
+    totalEmissiveRadiance += hc * crack * hp * (0.9 + 0.9 * hcr) * lightK;
+  }
 }`;
 
 export function injectSubType(mat, U) {
@@ -127,7 +142,7 @@ export function injectSubType(mat, U) {
   mat.needsUpdate = true;
   return U;
 }
-export const mkSubU = (type) => ({ uT: { value: 0 }, uGlow: { value: 0 }, uSpin: { value: 1 }, uDetail: { value: 1 }, uLight: { value: 0 }, uType: { value: TYPE_ID[type] ?? 0 }, uAct: { value: 0 }, uDim: { value: 0 }, uSettle: { value: 0 } });
+export const mkSubU = (type) => ({ uT: { value: 0 }, uGlow: { value: 0 }, uSpin: { value: 1 }, uDetail: { value: 1 }, uLight: { value: 0 }, uType: { value: TYPE_ID[type] ?? 0 }, uAct: { value: 0 }, uDim: { value: 0 }, uSettle: { value: 0 }, uHeat: { value: 0 }, uHeatT: { value: 0 } });
 
 // 넓은 납작 고리: 띠·간극·덩어리(돌며 보임)·행성 그림자·광택
 const RING_V = /* glsl */`varying vec3 vP; varying vec3 vW; varying vec3 vN;

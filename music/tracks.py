@@ -42,7 +42,7 @@ BUILTIN = [
      "source": "작성자의 이전 프로젝트 곡(city) 편곡"},
 ]
 DEFAULT = "lofi"
-FIELDS = ["id", "label", "title", "mood", "label_en", "title_en", "mood_en", "file", "meta", "bpm", "key", "key_en", "duration", "bytes",
+FIELDS = ["id", "label", "title", "mood", "label_en", "title_en", "mood_en", "file", "meta", "bpm", "beats", "key", "key_en", "duration", "bytes",
           "stage", "views", "energy", "source"]
 
 # 영어 화면용 곡 이름·제목·설명. 매니페스트 항목에 label_en·title_en·mood_en(key_en) 이 이미 있으면 그쪽 우선,
@@ -156,6 +156,15 @@ def parse_views(s: str | None):
     return norm_views(out) or {}
 
 
+def meter_beats(meter):
+    """메타 json meter "3/4" → 3. 4/4·없음은 None(매니페스트에 beats 를 쓰지 않음 = 4)"""
+    try:
+        b = int(str(meter).split("/")[0])
+    except (TypeError, ValueError):
+        return None
+    return b if 2 <= b <= 12 and b != 4 else None
+
+
 def build_manifest(ents: list[dict] | None = None) -> dict:
     out = []
     for t in ents if ents is not None else entries():
@@ -178,6 +187,7 @@ def build_manifest(ents: list[dict] | None = None) -> dict:
             "file": t["file"],
             "meta": t.get("meta"),
             "bpm": meta.get("bpm", t.get("bpm")),
+            "beats": meter_beats(meta.get("meter")) or t.get("beats"),
             "key": meta.get("key", t.get("key")),
             "duration": meta.get("duration", t.get("duration")),
             "bytes": os.path.getsize(mp3),
@@ -191,7 +201,7 @@ def build_manifest(ents: list[dict] | None = None) -> dict:
             e[k] = t.get(k) or en.get(k)
         if not e["title_en"] and e["label_en"] and e["title"] == e["label"]:
             e["title_en"] = e["label_en"]
-        out.append({k: e[k] for k in FIELDS if e[k] is not None or k not in ("label_en", "title_en", "mood_en", "key_en", "views")})
+        out.append({k: e[k] for k in FIELDS if e[k] is not None or k not in ("label_en", "title_en", "mood_en", "key_en", "views", "beats")})
         for sec in meta.get("sections") or []:
             n = sec.get("name") if isinstance(sec, dict) else None
             if n and n not in SECTIONS_EN and not n.isascii():

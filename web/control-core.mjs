@@ -30,7 +30,6 @@ export const CTL_COMMANDS = {
   plans: { values: ['on', 'off'], usage: 'plans on|off' },
   weather: { values: ['auto', 'off', 'fog', 'rain', 'snow'], usage: 'weather auto|off|fog|rain|snow' },
   grid: { values: ['on', 'off'], usage: 'grid on|off' },
-  noise: { usage: 'noise on|off|<0-100>' },
   panel: { values: ['open', 'close'], alias: { closed: 'close', collapse: 'close', fold: 'close', expand: 'open', unfold: 'open' }, usage: 'panel open|close' },
   timeline: { values: ['show', 'hide'], usage: 'timeline show|hide' },
   done: { values: ['on', 'off'], usage: 'done on|off   (show finished nodes)' },
@@ -134,13 +133,6 @@ export function normalizeCmd(cmd, args = {}) {
       const v = String(a.value ?? '').trim();
       if (!v) return bad();
       return { ok: true, cmd: c, args: { value: v.slice(0, 120) } };
-    }
-    case 'noise': {
-      const b = onoff(a.value);
-      if (b != null) return { ok: true, cmd: c, args: { on: b } };
-      const n = Number(String(a.value ?? '').replace(/%$/, ''));
-      if (!Number.isFinite(n) || n < 0 || n > 100) return bad();
-      return { ok: true, cmd: c, args: { amount: Math.round(n) } };
     }
     case 'replay': {
       const s = String(a.session ?? a.value ?? '').trim();

@@ -33,11 +33,12 @@ import { Vx2DProcs } from './vx2d-proc.js'; // 분리 프로세스 = 생산 라�
 import { roleOf, overseeSpot } from '../voxel/office-core.mjs';
 import { SpotBook, takeStation, takeBreak, releaseSpot, separate } from '../voxel/crowd-core.mjs'; // 겹침 막기(3D 와 같음)
 import { watchPhase } from '../voxel/vx-proc-core.mjs';
-import { DEG, degOf, glitchAt, seedOf } from '../degrade-core.mjs';
 import { t as tr } from '../i18n.mjs';
 import { VxQuips } from '../voxel/quips.js'; // 생각·말풍선
 import { drawStencils2D } from './vx2d-stencil.js'; // 바닥 스텐실(프로젝트 이름)
 import { onStencil } from '../voxel/stencil-pref.mjs';
+import { TiredBook } from '../voxel/vx-heat-core.mjs'; // 지친 직원(컨텍스트 과열)
+import { drawHeatUnder, drawHeatOver, headLean, flushSkin, heatBody } from './vx2d-heat.js';
 
 const MACHINE_KIND = { 'bash-bg': 'rack', monitor: 'screen', workflow: 'board' };
 const KNOWN = new Set(['main', 'subagent', 'workflow', 'workflow-agent', 'claude-p', 'bash-bg', 'monitor']);
@@ -85,6 +86,7 @@ export class Voxel2DView extends FlatView {
     this._layoutVer = 0;
     this.vx = new Vx2DExtra(this); // 바닥 조명 라인·패킷·홀로그램 모니터·특별 상호작용·의뢰인 창구
     this.vxp = new Vx2DProcs(this); // 생산 라인
+    this.tired = new TiredBook(); // 직원별 과열 보간·몸짓(3D 와 같은 규칙)
     this._stencilOff = onStencil(() => { this._staticVer = (this._staticVer || 0) + 1; this.invalidate(); }); // ⚙ 켬/끔
     this.applyTheme();
   }
@@ -227,6 +229,7 @@ export class Voxel2DView extends FlatView {
     if (this.quips) this.quips.clear();
     if (this.vx) this.vx.clear();
     if (this.vxp) this.vxp.clear();
+    if (this.tired) this.tired.clear(); // 다음 값은 바로 목표(재생 seek·보관함 열기)
     super.reset();
   }
   // 퇴장은 캐릭터 걷기(바탕의 흐려짐 퇴장 안 씀)
@@ -566,6 +569,9 @@ export class Voxel2DView extends FlatView {
     this.vsess.stepConflicts(now);
     if (this.vsess.pairs.length && !this.reduced) level = Math.max(level, 1);
     if (this.vsess.livePlanes(now).length) level = 2;
+    // 직원별 컨텍스트 과열 — 움직이는 연출(땀·김·맥동·몸짓·식는 중)이면 낮은 fps, 움직임 줄이기면 바뀔 때만
+    const hr = this.tired.step(this.chars.values(), now, dt, { reduced: this.reduced });
+    if (hr.fx || hr.changed) level = Math.max(level, 1); // 데움(땀 점만)은 정지 — 바뀔 때만
     // 캐릭터 상태 머신(3D 와 같음)
     const ctx = this._ctx;
     ctx.now = now; ctx.dt = dt; ctx.ts = this.ts; ctx.clockMs = this.clock(); // meta.run 판정 시계
@@ -604,7 +610,6 @@ export class Voxel2DView extends FlatView {
     if (changed.size) level = Math.max(level, 2);
     if (this._holoAnimating(now)) level = 2;
     level = Math.max(level, this.bubbles.level(now));
-    if (this.degradeFx && this.degradeFx.active) level = Math.max(level, this.degradeFx.level); // 신호 열화
     if (this.vArt) level = Math.max(level, this.vArt.level(now)); // 작업 대상 층
     if (fading || this.pf.busy) level = 2;
     if (level === 0 && this._wasLevel > 0) this.invalidate(); // 걷기·깜빡임이 막 끝난 갱신도 한 번 그린다(마지막 자리)
@@ -888,8 +893,7 @@ export class Voxel2DView extends FlatView {
       ctx.fillText(kindName, lx, ly);
       const kw = ctx.measureText(kindName).width;
       ctx.font = `500 ${fs}px ${FONT}`; ctx.fillStyle = t.muted;
-      const dg = owner && DEG.on && !DEG.reduced ? degOf(r.ownerId) : 0; // 그 세션 문패 글 깨짐
-      ctx.fillText(' · ' + (dg > 0 ? glitchAt(fitChars(name, 24), dg, DEG.t, seedOf(r.id)) : fitChars(name, 24)), lx + kw, ly);
+      ctx.fillText(' · ' + fitChars(name, 24), lx + kw, ly);
       // 문패 = 세션 색 점 + git 브랜치/worktree
       if (sc && !r.past && owner) {
         const nw = ctx.measureText(' · ' + fitChars(name, 24)).width, bx = lx + kw + nw + 8;
@@ -1177,9 +1181,15 @@ export class Voxel2DView extends FlatView {
     // 머리 = 머리색·모자색(민머리면 없음). 종류 색은 팀원 테두리(예전 셔츠 색의 뜻), 팀장 테두리는 금색 그대로
     const role = roleOf(ch.kind, ch.seat ? ch.seat.kind : null, ch.lead);
     const ap = wardrobe.get(ch.id, role, ch.room ? ch.room.id : '');
-    const body = doneLead ? t.stopped : role === 'operator' ? pal.vest : ap.topC;
+    const hot = ch._heat && ch._heat.on ? ch._heat : null;
+    const body = doneLead ? t.stopped : hot ? heatBody(role === 'operator' ? pal.vest : ap.topC, hot, L) : role === 'operator' ? pal.vest : ap.topC; // 과열이면 옷이 단계색으로 물듦
     ctx.globalAlpha = alpha;
-    if (R < 2) { ctx.fillStyle = body; ctx.fillRect(x - 1, y - 1, 2, 2); ctx.globalAlpha = 1; return; }
+    if (R < 2) { // 아주 작게 보여도 과열은 바닥 원·김으로 남긴다(2026-10-30)
+      if (hot) drawHeatUnder(ctx, ch, x, y, R, now, this.reduced, L, alpha);
+      ctx.fillStyle = body; ctx.fillRect(x - 1, y - 1, 2, 2);
+      if (hot) drawHeatOver(ctx, ch, x, y, x, y, R, s, yawVec(ch.yaw || 0), now, this.reduced, L, alpha);
+      ctx.globalAlpha = 1; return;
+    }
     // 작업 중: 옅은 고리(맥동), 걷는 중: 그림자
     if (ch.state === 'work' && !doneLead) {
       const pulse = this.reduced ? 0.6 : 0.45 + 0.35 * Math.sin(now * 5 + ch.phase);
@@ -1188,6 +1198,7 @@ export class Voxel2DView extends FlatView {
       ctx.beginPath(); ctx.arc(x, y, R * 1.55, 0, Math.PI * 2); ctx.fill();
       ctx.globalAlpha = alpha;
     }
+    drawHeatUnder(ctx, ch, x, y, R, now, this.reduced, L, alpha); // 바닥 열기 원(데움 호박 → 과열 주황 → 위험 빨강)
     // 몸(위에서 본 어깨 원) + 머리(피부색 작은 원, 바라보는 쪽으로)
     ctx.fillStyle = body;
     ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.fill();
@@ -1196,11 +1207,12 @@ export class Voxel2DView extends FlatView {
     ctx.stroke();
     const dv = yawVec(ch.yaw || 0);
     const walkBob = (ch.state === 'walk' || ch.state === 'leave' || ch.state === 'enter') && !this.reduced ? Math.sin(ch.phase * 2) * 0.08 : 0;
-    ctx.fillStyle = ap.skin;
-    ctx.beginPath(); ctx.arc(x + dv.x * R * (0.42 + walkBob), y + dv.z * R * (0.42 + walkBob), R * 0.42, 0, Math.PI * 2); ctx.fill();
+    const hl = 0.42 + walkBob + headLean(ch._heat); // 구부정하면 머리가 앞으로
+    ctx.fillStyle = ch._heat && ch._heat.on ? flushSkin(ap.skin, ch._heat, L) : ap.skin;
+    ctx.beginPath(); ctx.arc(x + dv.x * R * hl, y + dv.z * R * hl, R * 0.42, 0, Math.PI * 2); ctx.fill();
     const hatC = role === 'operator' ? pal.cap : ap.hat === 'cap' || ap.hat === 'capBack' ? this.kindColor(ch.kind) : ap.hat ? ap.hatC : null;
     { // 머리(민머리 없음): 긴 머리는 뒤로 넓게, 쌍갈래·말총·땋은 머리·번은 점, 머리 장식 점
-      const st = ap.hairStyle, hx = x + dv.x * R * 0.3, hy = y + dv.z * R * 0.3;
+      const st = ap.hairStyle, hk = 0.3 + headLean(ch._heat), hx = x + dv.x * R * hk, hy = y + dv.z * R * hk;
       ctx.fillStyle = ap.hair;
       if (!hatC && /^(long|bangs|lob|curlylong)$/.test(st)) { ctx.beginPath(); ctx.arc(x + dv.x * R * 0.12, y + dv.z * R * 0.12, R * (st === 'curlylong' ? 0.44 : 0.38), 0, Math.PI * 2); ctx.fill(); }
       if (R > 4 && (st === 'twin')) for (const s2 of [-1, 1]) { ctx.beginPath(); ctx.arc(hx - dv.z * R * 0.38 * s2, hy + dv.x * R * 0.38 * s2, R * 0.13, 0, Math.PI * 2); ctx.fill(); }
@@ -1246,6 +1258,7 @@ export class Voxel2DView extends FlatView {
     }
     // 시설 없이 제자리 작업: 머리 위 작은 상자(종류 색)
     if (ch.state === 'work' && ch.inPlace && R > 3) { ctx.fillStyle = catColor(ch.workCat || 'other', L); ctx.fillRect(x + R * 0.6, y - R * 1.2, R * 0.5, R * 0.5); }
+    if (ch._heat && ch._heat.on) { const hk = 0.42 + headLean(ch._heat); drawHeatOver(ctx, ch, x, y, x + dv.x * R * hk, y + dv.z * R * hk, R, s, dv, now, this.reduced, L, alpha); } // 땀·김·연기·불티
     if (v.id === this.focusId || v.id === this.hoverId) { ctx.globalAlpha = 0.9; ctx.strokeStyle = t.text; ctx.lineWidth = 1.3; ctx.beginPath(); ctx.arc(x, y, R * 1.45 + 2, 0, Math.PI * 2); ctx.stroke(); }
     ctx.globalAlpha = 1;
   }

@@ -7,9 +7,6 @@ import { OFFICE_FX, ixSpot, floorRoute, routeCum, routeAt, dashStarts, lineStyle
 import { ClientDesk, clientOp, CLIENT } from '../voxel/client-core.mjs';
 import { userBook, consoleLines, hitRect } from '../user-core.mjs'; // 사용자 콘솔
 import * as IX from '../ix-core.mjs';
-import { DEG, degOf, degOfLink, packetGone, lineFlicker, brokenDash, seedOf } from '../degrade-core.mjs';
-const DG_DASH = [0, 0, 0, 0]; // 끊긴 선 무늬(재사용)
-
 
 const FONT = '"Pretendard", "Segoe UI", "Malgun Gothic", system-ui, sans-serif';
 const MIX = new Map();
@@ -170,10 +167,8 @@ export class Vx2DExtra {
       ctx.beginPath();
       if (r.air) { const A = r.pts[0], B = r.pts[1], mx = (A.x + B.x) / 2, mz = (A.z + B.z) / 2 - Math.hypot(B.x - A.x, B.z - A.z) * 0.18; ctx.moveTo(X(A.x), Y(A.z)); ctx.quadraticCurveTo(X(mx), Y(mz), X(B.x), Y(B.z)); }
       else { ctx.moveTo(X(r.pts[0].x), Y(r.pts[0].z)); for (let i = 1; i < r.pts.length; i++) ctx.lineTo(X(r.pts[i].x), Y(r.pts[i].z)); }
-      // 신호 열화: 그 세션 바닥 라인은 끊긴 토막으로 깜빡인다
-      const dg = DEG.on ? degOf(r.cid) : 0, tt = DEG.reduced ? 0 : DEG.t, sd = dg > 0 ? (r.seed ?? (r.seed = seedOf(r.cid))) : 0;
-      ctx.strokeStyle = lc; ctx.globalAlpha = Math.min(1, st.k * (L ? 1.6 : 1.1) * (dg > 0 ? (1 + dg) * lineFlicker(sd, tt, dg) : 1)) * (r.air ? 0.6 : 1) * fa;
-      ctx.lineWidth = Math.max(1, 0.07 * s); ctx.setLineDash(dg > 0 ? brokenDash(sd, tt, dg, Math.max(3, s * 0.35), DG_DASH) : r.air ? [Math.max(2, 0.3 * s), Math.max(2, 0.3 * s)] : []); ctx.stroke();
+      ctx.strokeStyle = lc; ctx.globalAlpha = Math.min(1, st.k * (L ? 1.6 : 1.1)) * (r.air ? 0.6 : 1) * fa;
+      ctx.lineWidth = Math.max(1, 0.07 * s); ctx.setLineDash(r.air ? [Math.max(2, 0.3 * s), Math.max(2, 0.3 * s)] : []); ctx.stroke();
       if (st.v && !v.reduced) { // 흐르는 대시(부모 → 자식)
         const gap = 4.2 * s, dl = 0.55 * s;
         ctx.setLineDash([dl, gap - dl]); ctx.lineDashOffset = -now * st.v * s;
@@ -193,7 +188,6 @@ export class Vx2DExtra {
       if (rv && (rv.hidden || pa <= 0)) continue;
       const u = (now - p.t0) / p.dur;
       if (u >= 1) { dead.push(p); continue; }
-      if (DEG.on && !DEG.reduced && packetGone((p.t0 * 1000) | 0, u, degOfLink(p.from, p.to))) continue; // 패킷 중간 소실
       const col = p.color === 'call' ? (t['flow-call'] || t.text) : p.color === 'ok' ? t.ok : p.color === 'error' ? t.error : p.color === 'stopped' ? t.stopped : t['k-bash-bg'];
       const e = easeInOut(Math.max(0, u));
       for (let i = 5; i >= 0; i--) {

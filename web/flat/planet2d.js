@@ -11,7 +11,6 @@ import { RADIUS } from '../layout.js';
 import { paletteOf } from '../flowview/flow-style.mjs';
 import { FLOW, PacketPool, planFlow, easeInOut } from '../flow-core.mjs';
 import { BATCH, isLauncher } from '../batch-core.mjs';
-import { DEG, degOfLink, packetGone } from '../degrade-core.mjs';
 
 import { toScreen, camScale, planetShape, planetColor, mixColor } from './flat-core.mjs';
 import { drawCards, drawRings, drawDeviceFace, drawIslands } from './flat-draw.js';
@@ -20,7 +19,7 @@ import { drawMechPlanet, drawSubPlanet, drawTourb2D } from './planet-deco2d.js';
 import { drawVariant2D, drawVariantCore } from './planet-variants2d.js'; // 서브·claude -p 시안 궤도계 // 행성 연출 · 뚜르비용
 import { TOURB_GEO } from '../tourbillon-core.mjs'; // 코어 축소 몫
 import { stepOrbits, drawOrbits, drawBursts, emitTool, nearestSat, orbitExtent, ELEV } from './planet-orbits2d.js'; // 궤도계
-import { bodyK } from '../planet-core.mjs';
+import { bodyK, VARIANT_CORE } from '../planet-core.mjs';
 import { runVis, runVisStatus } from '../run-core.mjs'; // 실행 중 셸
 import { FLAT, JOB2D } from './flat-core.mjs';
 import { isJobVis, drawJobMoon, jobLevel, drawJobTracks } from './job2d.js'; // 작업 = 주인 둘레 작은 위성 · 항로
@@ -31,6 +30,7 @@ import { cycleProgress } from '../batch-core.mjs'; // G3 회차 고리
 import { escapeHtml } from '../html-util.mjs';
 import { drawPlanetLinks2D, packetPoint2D } from './planet-links2d.js'; // 관계선: 레이저 ⇄ 궤도 고리
 import { plinksMix } from '../plinks-core.mjs';
+import { Heat2D } from './planet-heat2d.js'; // 에이전트 과열(글로우·균열·연기)
 
 const TOP_ACTIVE = 6;
 const ENDED_OK = (st) => st === 'done' || st === 'stopped';
@@ -52,6 +52,7 @@ export class Planet2DView extends FlatView {
     this._topActive = new Set();
     this.proc2d = new ProcFlat(this);
     this._supSet = new Set(); this._supAt = 0;
+    this.heat2d = new Heat2D(this);
     this.applyTheme();
   }
 
@@ -135,7 +136,7 @@ export class Planet2DView extends FlatView {
     const r = this.canvas.getBoundingClientRect();
     return this.proc2d.pickMeter(clientX - r.left, clientY - r.top);
   }
-  reset() { super.reset(); if (this.proc2d) this.proc2d.clear(); if (this.pool) { this.pool.clear(); this.flowState.lastUp.clear(); this.flowState.lastOut.clear(); } }
+  reset() { super.reset(); if (this.heat2d) this.heat2d.clear(); if (this.proc2d) this.proc2d.clear(); if (this.pool) { this.pool.clear(); this.flowState.lastUp.clear(); this.flowState.lastOut.clear(); } }
 
   _labelPass(now) {
     super._labelPass(now);
@@ -162,7 +163,7 @@ export class Planet2DView extends FlatView {
   /** 전체 맞춤이 담는 노드 겉 반지름: 궤도계 바깥(카드 기준점과 같은 식) */
   fitNodeR(id) { const v = this.vis.get(id); if (!v) return 1; return v.r * (v._po ? Math.max(1, Math.min(orbitExtent(v), 3.4) * 0.9) : 1); }
 
-  _updateExtra(now) {
+  _updateExtra(now, dt = 0) {
     // 도구 입자가 날면 30fps. 일하는 노드가 없어도 궤도가 아주 느리게 돌도록 쉬는 동안 약 7fps 로 다시 그림(_schedule)
     this._idleOrbit = !this.reduced && !this._frozen && this.vis.size > 0;
     if (this._idleOrbit) this.dirty = true;
@@ -174,8 +175,9 @@ export class Planet2DView extends FlatView {
       for (const id of new Set([...cur, ...this._supSet])) { const v = this.vis.get(id); if (v) this._labelText(v); }
       this._supSet = cur;
     }
+    const hl = this.heat2d ? this.heat2d.step(now, dt) : 0; // 과열: 연기가 움직이거나 식는 동안 15fps
     if (this._pb && this._pb.length) return 2;
-    let level = Math.max(jl, this.pool.active.length || (this._plMix && this._plMix.fading) ? 2 : 0); // 관계선 전환 페이드 동안 30fps
+    let level = Math.max(jl, hl, this.pool.active.length || (this._plMix && this._plMix.fading) ? 2 : 0); // 관계선 전환 페이드 동안 30fps
     if (this.pArt) level = Math.max(level, this.pArt.level(now));
     if (this.scope.mode === 'all' && !this.reduced) for (const c of this._clusterV.values()) if (c.busy) { level = Math.max(level, 1); break; }
     return level;
@@ -234,7 +236,6 @@ export class Planet2DView extends FlatView {
       if (!fv || !tv || fv.hidden || tv.hidden) { dead.push(k); continue; }
       const u = (now - k.t0) / k.dur;
       if (u >= 1) { dead.push(k); continue; }
-      if (DEG.on && !DEG.reduced && packetGone((k.t0 * 1000) | 0, u, degOfLink(k.from, k.to))) continue; // 패킷 중간 소실
       const e = easeInOut(Math.max(0, u));
       toScreen(this.cam, this.W, this.H, fv.pos.x, fv.pos.z, pa);
       toScreen(this.cam, this.W, this.H, tv.pos.x, tv.pos.z, pb);
@@ -252,6 +253,14 @@ export class Planet2DView extends FlatView {
     ctx.globalAlpha = 1;
   }
 
+  /** 연기 꼬리 방향: 부모 → 이 노드 화면 방향(단위), 부모가 없으면 null(오른쪽 위) */
+  _heatAway(v) {
+    const pv = v.node.parentId && this.vis.get(v.node.parentId);
+    if (!pv || !pv._sp || !v._sp) return null;
+    const dx = v._sp.x - pv._sp.x, dy = v._sp.y - pv._sp.y, l = Math.hypot(dx, dy);
+    if (l < 1e-3) return null;
+    const o = this._hAw || (this._hAw = {}); o.x = dx / l; o.y = dy / l; return o;
+  }
   /** 도구 입자가 향할 화면 점: 부모(연결선 쪽), 루트면 도구를 쓰는 자식, 없으면 null(바깥으로) */
   _emitTarget(v) {
     const pv = v.node.parentId && this.vis.get(v.node.parentId);
@@ -320,7 +329,10 @@ export class Planet2DView extends FlatView {
     const alpha = (v.baseOpacity ?? 1) * (v.exitF ?? 1);
     if (alpha < 0.01) return;
     const col = this._colorOf(v);
-    if (R < 1.6) { ctx.globalAlpha = alpha; ctx.fillStyle = col; ctx.fillRect(x - 1, y - 1, 2, 2); ctx.globalAlpha = 1; return; }
+    if (R < 1.6) { // 아주 작은 점: 과열이면 후광 원만 먼저(멀리서 읽히는 신호)
+      if ((v._ht || 0) > 0.002) this.heat2d.drawUnder(ctx, v, x, y, Math.max(1.2, R), alpha, now);
+      ctx.globalAlpha = alpha; ctx.fillStyle = col; ctx.fillRect(x - 1, y - 1, 2, 2); ctx.globalAlpha = 1; return;
+    }
     const foc = v.id === this.focusId || v.id === this.hoverId;
     // 밝기(3D 발광): 작업 중 밝게·맥동, 대기 보통, 완료 어둡게 — 2D 는 테두리 밝기로
     if (v._edgeK !== col + st + L) { // 색 문자열은 상태·테마가 바뀔 때만 다시 만든다
@@ -335,14 +347,20 @@ export class Planet2DView extends FlatView {
     // 궤도계 뒤 반쪽(몸체 전) — 서브 유형의 뒤 부품(고리 뒤·혜성 꼬리·짝 몸체 뒤)도
     const po = stepOrbits(this, v, now);
     const vn = po && po.spec.variant;
+    // 과열: 몸체 반지름(시안 = 작은 본체, 메인 = 뚜르비용까지) — 글로우는 몸체 전, 테두리·균열·연기는 맨 앞
+    const hot = (v._ht || 0) > 0.002;
+    const hRb = hot ? (vn ? Math.max(1.2, R * (VARIANT_CORE[vn] || 0.4)) : shape === 'box' ? R * 0.9 : R) : 0;
+    const hRs = vn ? Math.max(hRb, R * 0.55) : hRb;
+    if (hot) this.heat2d.drawUnder(ctx, v, x, y, hRb, alpha, now, hRs);
+    const colO = hot ? this.heat2d.tintCol(v, col) : col; // 궤도 링·위성·시안 부품 단계색
     if (vn) { // 시안: 뒤쪽 → 작은 본체 → 앞쪽(3D 와 같은 시안·상태)
-      drawVariant2D(this, ctx, v, vn, x, y, R, alpha, now, col, 0);
+      drawVariant2D(this, ctx, v, vn, x, y, R, alpha, now, colO, 0);
       drawVariantCore(this, ctx, v, vn, x, y, R, alpha, now, col, edge);
-      drawVariant2D(this, ctx, v, vn, x, y, R, alpha, now, col, 1);
+      drawVariant2D(this, ctx, v, vn, x, y, R, alpha, now, colO, 1);
     }
     const sub = shape === 'sphere';
     const oOpt = sub && v._pd && v._pd.type === 'swarm' ? { spread: 1 + 0.32 * (v._pd.toolK || 0) } : undefined; // 위성 군단: 도구 때 산개
-    if (!vn) drawOrbits(this, ctx, v, x, y, R, alpha, now, col, 0, oOpt);
+    if (!vn) drawOrbits(this, ctx, v, x, y, R, alpha, now, colO, 0, oOpt);
     if (sub && !vn) drawSubPlanet(this, ctx, v, x, y, R, alpha, now, col, edge, 0);
     ctx.globalAlpha = alpha;
     ctx.fillStyle = col; ctx.strokeStyle = edge; ctx.lineWidth = Math.max(1, R * (foc ? 0.12 : 0.07));
@@ -398,8 +416,9 @@ export class Planet2DView extends FlatView {
       ctx.fillRect(x - w * 0.44, y - h * 0.4, w * 0.88, h * 0.8);
       drawDeviceFace(this, ctx, v, x, y, w, h, R, alpha, now);
     }
-    if (!vn) drawOrbits(this, ctx, v, x, y, R, alpha, now, col, 1, oOpt); // 궤도계 앞 반쪽
+    if (!vn) drawOrbits(this, ctx, v, x, y, R, alpha, now, colO, 1, oOpt); // 궤도계 앞 반쪽
     if (v.device || v.kind === 'monitor') this._deckRing(ctx, v, x, y, R, alpha, now); // G3 회차 고리 · G4 재무장 눈금
+    if (hot) this.heat2d.drawOver(ctx, v, x, y, hRb, alpha, now, this._heatAway(v), hRs);
     if (active && v.icons && v.icons.size) emitTool(this, v, R, this._emitTarget(v), col);
     // 오류 고리: 처음 1.8초 깜빡, 10분 지난 오류는 옅게
     if (v.errorSince != null) {

@@ -99,7 +99,7 @@
 .vx-ix.done { opacity: .85; }
 
 /* 생각·말풍선 — 말풍선(q-say) = 뾰족 꼬리, 생각 풍선(q-think) = 구름(몸통 + 혹 둘) + 머리 쪽으로 작은 동그라미 둘.
-   글은 안쪽 span(.q-t, 글 하나만 든 잎 → 글자 깨짐이 그대로 덮음). 겹침 밀기(transform)와 겹치지 않게 등장은 scale 속성으로 */
+   글은 안쪽 span(.q-t, 글 하나만 든 잎). 겹침 밀기(transform)와 겹치지 않게 등장은 scale 속성으로 */
 .vx-bubble.q-say, .vx-bubble.q-think { overflow: visible; max-width: 250px; text-overflow: clip; }
 .vx-bubble .q-t { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vx-bubble.q-say { padding: 4px 10px; border-radius: 11px; font-weight: 600; }

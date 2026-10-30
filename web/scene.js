@@ -7,7 +7,6 @@ import { packView, packStale, camElev } from './overview/pack-view.js';
 import { Islands } from './overview/islands.js';
 import { projectAreaPad } from './overview/pick-core.mjs';
 import { FlowLayer } from './flow.js';
-import { DEG, degOf, lineGap, lineFlicker, lineJitter, packetGone } from './degrade-core.mjs';
 import { exitEligible, exitWalls, endedBadly, badEndDueAt, catColor } from './flow-core.mjs';
 import { HoloLayer } from './holo.js';
 import { CAT_LABEL } from './icons.js';
@@ -1554,30 +1553,14 @@ export class SceneView {
       const b = cv._linkK > 0 ? retractEnd(this._tmpV2, a, cv.group.position, cv._linkK) : cv.group.position;
       const o = i * 6;
       const dashed = isGuessLink(cv.node) && nDash < this.dashCap && !cv.projGone;
-      // 신호 열화: 그 세션 연결선은 네 토막으로 끊겨(토막마다 수시로 빠짐) 위아래로 떨리고 밝기가 튄다
-      const dg = DEG.on ? degOf(cv.id) : 0;
-      const broken = dg > 0 && !dashed && nDash < this.dashCap;
-      if (dashed || broken || cv.projGone || pv.projGone) { lp[o] = a.x; lp[o + 1] = a.y; lp[o + 2] = a.z; lp[o + 3] = a.x; lp[o + 4] = a.y; lp[o + 5] = a.z; }
+      if (dashed || cv.projGone || pv.projGone) { lp[o] = a.x; lp[o + 1] = a.y; lp[o + 2] = a.z; lp[o + 3] = a.x; lp[o + 4] = a.y; lp[o + 5] = a.z; }
       else { lp[o] = a.x; lp[o + 1] = a.y; lp[o + 2] = a.z; lp[o + 3] = b.x; lp[o + 4] = b.y; lp[o + 5] = b.z; }
       const st = cv.node.status;
       let col = ENDED_OK(st) || (st === 'error' && cv.stale) ? dim : (st === 'error' ? t.error : cv.sessC ? this._tmpC2.copy(cv.sessC).lerp(link, 0.35) : link); // 그 메인 서브트리는 세션 색
       if (cv.scopeK != null && cv.scopeK < 1) col = this._tmpC2.copy(col).lerp(bg, 1 - cv.scopeK * 0.8);
       if (cv.exitF < 1) col = this._tmpC2.copy(col).lerp(bg, cv.exiting != null ? 0.65 * (1 - cv.exitF) : 1 - cv.exitF); // 퇴장 중이면 선도 감기며 흐려짐
-      if (broken) col = this._tmpC2.copy(col).lerp(bg, 1 - lineFlicker((cv.seed * 1e6) | 0, DEG.reduced ? 0 : DEG.t, dg));
       lc[o] = col.r; lc[o + 1] = col.g; lc[o + 2] = col.b; lc[o + 3] = col.r; lc[o + 4] = col.g; lc[o + 5] = col.b;
-      if (broken) {
-        const sd = (cv.seed * 1e6) | 0, tt = DEG.reduced ? 0 : DEG.t;
-        for (let d = 0; d < 4; d++) {
-          const q = (nDash * 8 + d * 2) * 3;
-          const gap = lineGap(sd, d, tt, dg);
-          const u0 = d * 0.25 + 0.01, u1 = gap ? u0 : d * 0.25 + 0.24 - 0.06 * dg;
-          const j0 = lineJitter(sd, d * 2, tt, dg) * 0.5, j1 = lineJitter(sd, d * 2 + 1, tt, dg) * 0.5;
-          DP[q] = a.x + (b.x - a.x) * u0; DP[q + 1] = a.y + (b.y - a.y) * u0 + j0; DP[q + 2] = a.z + (b.z - a.z) * u0;
-          DP[q + 3] = a.x + (b.x - a.x) * u1; DP[q + 4] = a.y + (b.y - a.y) * u1 + j1; DP[q + 5] = a.z + (b.z - a.z) * u1;
-          DC[q] = DC[q + 3] = col.r; DC[q + 1] = DC[q + 4] = col.g; DC[q + 2] = DC[q + 5] = col.b;
-        }
-        nDash++;
-      } else if (dashed) {
+      if (dashed) {
         for (let d = 0; d < 4; d++) {
           const u0 = d * 0.25 + 0.02, u1 = d * 0.25 + 0.15, q = (nDash * 8 + d * 2) * 3;
           DP[q] = a.x + (b.x - a.x) * u0; DP[q + 1] = a.y + (b.y - a.y) * u0; DP[q + 2] = a.z + (b.z - a.z) * u0;
@@ -1590,7 +1573,6 @@ export class SceneView {
         const kc = this.kindColor(cv.kind);
         for (let j = 0; j < 3; j++) {
           const u = ((now * 0.55 + j / 3 + cv.seed) % 1);
-          if (dg > 0 && !DEG.reduced && packetGone(((cv.seed * 1e6) | 0) + j * 7 + Math.floor(now * 0.55 + j / 3 + cv.seed), u, dg)) continue; // 흐르는 점 소실
           const q = nd * 3;
           dp[q] = a.x + (b.x - a.x) * u; dp[q + 1] = a.y + (b.y - a.y) * u; dp[q + 2] = a.z + (b.z - a.z) * u;
           dc[q] = kc.r; dc[q + 1] = kc.g; dc[q + 2] = kc.b;

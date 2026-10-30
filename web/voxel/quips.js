@@ -5,7 +5,7 @@ import { situationOf, thoughtOf, enterKey, leaveKey, quipRole, priOf, valsOf, qu
 import { quipsOn, onQuips } from './quip-pref.mjs';
 import { loadQuips } from './quips/index.mjs';
 import { roleOf, idleAct } from './office-core.mjs';
-import { levelOf } from '../degrade-core.mjs';
+import { ctxPctOf } from '../heat-core.mjs';
 import { lang } from '../i18n.mjs';
 
 const TICK = 0.25; // 생각 풍선 판정 주기(초)
@@ -113,7 +113,7 @@ export class VxQuips {
         stretch: idleAct(ch.hash, now).act === 'stretch',
         toolCat: tool ? tool.cat : null, toolAge: tool ? now - tool.t0 : 0,
         thinkFor: ch.lastBusy != null ? now - ch.lastBusy : 0,
-        fails: this.dir.fails(id, now), ctxPct: levelOf(ch.node && ch.node.meta && ch.node.meta.ctx), hour,
+        fails: this.dir.fails(id, now), ctxPct: ctxPctOf(ch.node && ch.node.meta && ch.node.meta.ctx), hour,
       };
       const r = rng(hashStr(id) ^ Math.floor(clockMs / 1000))();
       const key = thoughtOf(st, r);

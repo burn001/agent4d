@@ -40,6 +40,8 @@ import { jobCardModel, jobLabelAlways, jobBoardYaw, JOBCARD } from './vx-job-cor
 import { drawJobCard } from './vx-jobs.js';
 import { VxProcs } from './vx-procs.js'; // 분리 프로세스 = 생산 라인 · 들여다보기 심부름
 import { VxStencil } from './vx-stencil.js'; // 바닥 스텐실(프로젝트 이름)
+import { TiredBook } from './vx-heat-core.mjs'; // 지친 직원(컨텍스트 과열)
+import { VxHeat3D } from './vx-heat.js';
 
 const _HEXC = new Map(); // 옷 색 '#hex' → 공유 THREE.Color(읽기 전용)
 const VX_DETAIL_DIST = 42; // 카메라 거리 이 안쪽 직원만 잔 장식
@@ -164,6 +166,8 @@ export class VoxelView {
     this.client = new VxClient(this);
     this.procs = new VxProcs(this);
     this.stencil = new VxStencil(this);
+    this.tired = new TiredBook(); // 직원별 과열 보간·몸짓
+    this.heatFx = new VxHeat3D(sc); // 김·연기·붉은 글로우·땀·불티
     this.raycaster = new THREE.Raycaster();
     this._ndc = new THREE.Vector2();
     this._tmpV = new THREE.Vector3();
@@ -227,6 +231,7 @@ export class VoxelView {
     if (this.holo) this.holo.applyTheme(t);
     if (this.ix) this.ix.applyTheme();
     if (this.vArt) this.vArt.applyTheme(t);
+    if (this.heatFx) this.heatFx.applyTheme(t.isLight);
     for (const ch of this.chars.values()) ch.look = null;
     this._dimLooks.clear();
     this.staticSig = '';
@@ -242,6 +247,7 @@ export class VoxelView {
     this.spots.clear();
     this.bubbles.clear(); this.quips.clear();
     this.holo.clear(); this.flow.clear(); this.ix.clear(); this.client.clear(); this.procs.clear();
+    this.tired.clear(); // 다음 값은 바로 목표(재생 seek·보관함 열기)
     this._lblUsed = null;
     this.focusId = null; this.hoverId = null;
     this.layoutDirty = true;
@@ -492,7 +498,7 @@ export class VoxelView {
     if (this._ro) this._ro.disconnect();
     this.bubbles.dispose(); this.quips.dispose();
     if (this.sess) this.sess.dispose();
-    this.holo.dispose(); this.ix.dispose(); this.client.dispose(); this.procs.dispose(); this.stencil.dispose();
+    this.holo.dispose(); this.ix.dispose(); this.client.dispose(); this.procs.dispose(); this.stencil.dispose(); this.heatFx.dispose();
     if (this.vArt) { this.vArt.dispose(); this.vArt = null; }
     for (const sg of this._signs) { sg.o.removeFromParent(); sg.el.remove(); }
     this._signs = [];
@@ -930,6 +936,8 @@ export class VoxelView {
       if (!m.released && m.endWall != null && now >= m.heldUntil && (m.removing || !this._held || !this._held.has(m.id))) { m.released = true; this.layoutDirty = true; } // 퇴장 대상 전이면 남음
     }
 
+    // 직원별 컨텍스트 과열(보간 heat·단계·몸짓·걸음 배율) — 상태 머신 앞(걸음 배율을 이번 프레임에 씀)
+    this.tired.step(this.chars.values(), now, dt, { reduced: this.reduced });
     // 캐릭터 상태 머신
     const ctx = this._ctx;
     ctx.now = now; ctx.dt = dt; ctx.ts = this.ts; ctx.clockMs = this.clock(); // meta.run 판정 시계
@@ -1082,6 +1090,9 @@ export class VoxelView {
     const fx = this._fx;
     fx.t = t; fx.now = now; fx.skill = tok.skill; fx.error = tok.error; fx.ok = tok.ok; fx.text = tok.text;
     fx.mugC = pal.mug; fx.coffeeC = pal.coffee; fx.bagC = pal.bag; fx.shoeC = pal.shoe; fx.cardC = pal.paper;
+    fx.reduced = this.reduced;
+    const HF = this.heatFx;
+    HF.begin(L.fade, this.camera.position); // 반투명 김·글로우 묶음(프로젝트 페이드 그대로, 카메라가 멀면 신호를 키움)
     const scoped = this.scope.mode === 'all';
     const far = !!this._farAll, cp = this.camera.position;
     for (const ch of this.chars.values()) {
@@ -1096,7 +1107,7 @@ export class VoxelView {
         continue;
       }
       fx.monK = ch._monK || 0;
-      if (lod && ch.id !== this.focusId) { drawCharacterFar(ch, this._look(ch), fx, L); continue; }
+      if (lod && ch.id !== this.focusId) { drawCharacterFar(ch, this._look(ch), fx, L); if (ch._heat && ch._heat.on) HF.draw(ch, G, now, this.reduced, true); continue; }
       fx.focus = ch.id === this.focusId; fx.hover = ch.id === this.hoverId;
       fx.detail = fx.focus || Math.hypot(ch.pos.x - cp.x, cp.y, ch.pos.z - cp.z) < VX_DETAIL_DIST; // 잔 장식(안경알·밑창·소매 끝 등)은 가까이서만
       fx.metaSkill = !!(n.meta && n.meta.skill) && ch.state !== 'leave';
@@ -1104,7 +1115,9 @@ export class VoxelView {
       fx.idle = runVisStatus(n, clockMs) === 'idle'; // 전경 셸이 도는 중이면 대기(고개 기울임)가 아니라 작업
       fx.catColor = ch.workCat === 'skill' ? tok.skill : this.kindColor('main');
       drawCharacter(ch, this._look(ch), fx, L, G);
+      if (ch._heat && ch._heat.on) HF.draw(ch, G, now, this.reduced, false);
     }
+    HF.end();
     this.procs.drawAll(B, now);    // 분리 프로세스 생산 라인·전광판·들여다보기 빛줄
     this.sess.drawDynamic(B, now); // 캐비닛 경고등·창·서류 더미·종이비행기
     this.ix.draw(B, now);          // 특별 상호작용 은유(발송대·문서고·부스·컨베이어·신호등)

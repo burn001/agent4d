@@ -151,9 +151,13 @@ test('§67 테마별 풀: 매니페스트 views 가 확정 분류와 같고, 지
   const { viewCandidates } = await import('../bgm-auto.mjs');
   const m = parseManifest(JSON.parse(readFileSync(new URL('../assets/bgm-tracks.json', import.meta.url), 'utf8')));
   const POOL = {
-    flow: [['lofi', 'pulse'], ['lofi', 'deephouse', 'circuit'], ['drive', 'deephouse'], ['liquid', 'uplift', 'overclock']],
-    planet: [['orbit', 'ambient'], ['stardust', 'nebula'], ['drive', 'pulsar'], ['uplift', 'warp']],
-    voxel: [['dawn', 'bossa'], ['jazz', 'chillhop', 'lofi'], ['city', 'funk'], ['swing', 'caper']],
+    // 2026-10-30 표현×단계 2곡씩 24곡 추가(뒤쪽 두 id)
+    flow: [['lofi', 'pulse', 'glacier', 'cursor'], ['lofi', 'deephouse', 'circuit', 'refactor', 'queue'], ['drive', 'deephouse', 'stack', 'sprint'],
+      ['liquid', 'uplift', 'overclock', 'hotfix', 'deadline']],
+    planet: [['orbit', 'ambient', 'aurora', 'deepfield'], ['stardust', 'nebula', 'comet', 'satellite'], ['drive', 'pulsar', 'ionstorm', 'gravity'],
+      ['uplift', 'warp', 'supernova', 'hyperspace']],
+    voxel: [['dawn', 'bossa', 'rainwindow', 'teatime'], ['jazz', 'chillhop', 'lofi', 'typewriter', 'espresso'], ['city', 'funk', 'meeting', 'copier'],
+      ['swing', 'caper', 'pantry', 'mambo']],
   };
   for (const [v, lv] of Object.entries(POOL)) {
     for (let i = 0; i < 4; i++) assert.deepEqual(viewCandidates(i, m.tracks, v).sort(), [...lv[i]].sort(), `${v} ${i}`);
@@ -202,8 +206,23 @@ test('§67 곡 목록: 지금 표현 곡이 위에 단계별, 다른 테마 곡�
     for (const x of o.slice(0, firstOther)) assert.ok(m.tracks.find((t) => t.id === x.value).views[v], `${v} ${x.value}`);
   }
   const f = optionList(m.tracks, 'flow').filter((x) => !isMode(x.value));
-  assert.equal(f[0].value, 'pulse'); // 흐름 한가: pulse(0.22) → lofi(0.35)
-  assert.equal(f[1].value, 'lofi');
+  assert.deepEqual(f.slice(0, 4).map((x) => x.value), ['glacier', 'pulse', 'cursor', 'lofi']); // 흐름 한가: energy 0.18 → 0.22 → 0.25 → 0.35
   assert.ok(f.every((x) => x.value !== 'orbit' || x.other));
   assert.ok(optionList(m.tracks).every((x) => !x.other)); // 표현 없으면 예전 목록
+});
+
+test('§67 2026-10-30 24곡: 표현×단계마다 4곡 이상 — 직전 2곡을 피해도 고를 곡이 2곡 이상 남고, 3/4 곡은 beats 3', async () => {
+  const { viewCandidates } = await import('../bgm-auto.mjs');
+  const m = parseManifest(JSON.parse(readFileSync(new URL('../assets/bgm-tracks.json', import.meta.url), 'utf8')));
+  assert.equal(m.tracks.length, 46);
+  for (const v of ['flow', 'planet', 'voxel']) for (let i = 0; i < 4; i++) {
+    const c = viewCandidates(i, m.tracks, v);
+    assert.ok(c.length >= 4, `${v} ${i}: ${c}`);
+    const picks = new Set();
+    for (let k = 0; k < 40; k++) picks.add(pickForLevel(i, m.tracks, { view: v, recent: c.slice(0, 2), cur: c[1], rand: () => k / 40 }));
+    assert.ok(!picks.has(c[0]) && !picks.has(c[1]) && picks.size >= 2, `${v} ${i}: ${[...picks]}`);
+  }
+  const beats = Object.fromEntries(m.tracks.map((t) => [t.id, t.beats]));
+  for (const id of ['queue', 'deepfield', 'teatime']) assert.equal(beats[id], 3, id);
+  assert.equal(beats.lofi, 4);
 });

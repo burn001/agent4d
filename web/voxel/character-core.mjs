@@ -320,8 +320,9 @@ export class Character {
       if (this.state === 'enter' && !this.path && (this.appearT0 == null || now - this.appearT0 >= APPEAR)) { this.state = 'seated'; this.target = null; }
       return;
     }
-    let step = WALK_SPEED * clamp(ts, 1, 6) * dt;
-    this.phase += dt * WALK_SPEED * clamp(ts, 1, 6) * 2.4;
+    const wk = this.walkK > 0 ? this.walkK : 1; // 지친 직원은 조금 느리게(vx-heat-core TiredBook 이 채움)
+    let step = WALK_SPEED * clamp(ts, 1, 6) * dt * wk;
+    this.phase += dt * WALK_SPEED * clamp(ts, 1, 6) * 2.4 * wk;
     while (step > 0 && this.pi < this.path.length) {
       const q = this.path[this.pi];
       const dx = q.x - this.pos.x, dz = q.z - this.pos.z;

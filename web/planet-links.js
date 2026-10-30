@@ -1,12 +1,11 @@
 // Planet 3D 관계선 — 레이저 통신 링크 ⇄ 궤도 공명 고리. 예전 1px 직선 + 흐르는 점(scene.js _updateLinks)을 대신한다.
 //  · 띠(ribbon) 하나를 정점 셰이더가 직선(빔) 또는 원호(고리)로 펴는 인스턴스 1호출: 화면을 향한 띠라 어느 각도에서나 원기둥처럼 보이고,
-//    멀어져도 최소 굵기(px)를 지킨다(가늘어진 만큼 옅게). 펄스·밝기 흐름·점선· 끊김은 조각 셰이더.
+//    멀어져도 최소 굵기(px)를 지킨다(가늘어진 만큼 옅게). 펄스·밝기 흐름·점선은 조각 셰이더.
 //  · 레이저 양 끝 작은 접시 안테나 = InstancedMesh 1호출(전환 때 접시가 줄었다 커짐).
 //  · 충돌 섬광 = 구 InstancedMesh 1호출. 칩은 SessionFx 가 그대로 두되 자리만 여기서 정한다(view.confHook).
 //  · 상태 박자·전환 시계는 plinks-core.mjs(2D 와 같은 값).
 import * as THREE from 'three';
 import { PLINKS, plinksMix, stateKey, stepState, laserLook, orbitLook, endGaps, circleMeet } from './plinks-core.mjs';
-import { DEG, degOf, lineGap, lineFlicker } from './degrade-core.mjs';
 import { isGuessLink } from './batch-core.mjs';
 import { hash01 } from './planet-core.mjs';
 
@@ -48,7 +47,6 @@ uniform float uLight;
 varying float vU; varying float vS; varying float vThin; varying vec4 vCol; varying vec4 vP; varying vec4 vD;
 void main() {
   if (vD.x > 0.0 && fract(vU * vD.x) > vD.y) discard;
-  if (vD.z > 0.5) { float seg = floor(clamp(vU, 0.0, 0.999) * 4.0); if (mod(floor(vD.z / exp2(seg)), 2.0) > 0.5) discard; }
   float x = 1.0 - abs(vS);
   float core = 0.32 * x * x * (3.0 - 2.0 * x) + 0.95 * smoothstep(0.45, 1.0, x); // 옅은 둘레 + 밝은 심(빔)
   float pulse = vP.z > 0.0 ? pow(fract(vU * vP.z - vP.y), vP.w) : 0.0;
@@ -159,7 +157,7 @@ export class PlanetLinks {
     X.iK.setXYZW(i, kind, span, wWorld, wPx);
     X.iCol.setXYZW(i, col.r, col.g, col.b, alpha);
     X.iP.setXYZW(i, P ? P.p : 0, P ? P.ph : 0, P ? P.rep : 0, P ? P.sharp : 4);
-    X.iD.setXYZW(i, D ? D.dash : 0, D ? D.on : 0.5, D ? D.mask : 0, D ? D.tail : 0);
+    X.iD.setXYZW(i, D ? D.dash : 0, D ? D.on : 0.5, 0, D ? D.tail : 0);
     X.iE.setXY(i, keep, endOff || 0);
   }
   _dish(at, toward, s) {
@@ -218,16 +216,9 @@ export class PlanetLinks {
       if (S.stop > 0.01) col.lerp(t.stopped, S.stop * 0.8);
       if (S.err > 0.01) col.lerp(t.error, S.err * (red ? 1 : 0.75 + 0.25 * Math.sin(now * 7)));
       if (light) col.multiplyScalar(0.85);
-      // 세기 배율: 희미·페이드, 퇴장, 신호 열화
+      // 세기 배율: 희미·페이드, 퇴장
       let m = cv.scopeK != null && cv.scopeK < 1 ? 0.2 + 0.8 * cv.scopeK : 1;
       if (cv.exitF < 1) m *= cv.exiting != null ? 1 - 0.65 * (1 - cv.exitF) : cv.exitF;
-      const dg = DEG.on ? degOf(cv.id) : 0;
-      let mask = 0;
-      if (dg > 0) {
-        const sd = (cv.seed * 1e6) | 0, tt = DEG.reduced ? 0 : DEG.t;
-        m *= lineFlicker(sd, tt, dg);
-        for (let d = 0; d < 4; d++) if (lineGap(sd, d, tt, dg)) mask += 1 << d;
-      }
       if (m < 0.02) continue;
       const keep = cv._linkK > 0 ? Math.max(0, 1 - cv._linkK) : 1; // 퇴장: 자식 끝부터 감김
       const guess = isGuessLink(cv.node); // 추정 연결은 점선
@@ -244,7 +235,7 @@ export class PlanetLinks {
         const len = Math.max(0.1, dist - ga - gb);
         const al = L.a * m * wL;
         const P = { p: L.p * m * wL, ph: L.ph, rep: L.rep * (len / Math.max(0.5, dist)), sharp: L.sharp };
-        const D = { dash: guess ? len * 1.3 : 0, on: 0.55, mask, tail: 0 };
+        const D = { dash: guess ? len * 1.3 : 0, on: 0.55, tail: 0 };
         if (cp) { // 금색 이중 빔
           const side = this._v3.crossVectors(this._v4.copy(B).sub(A), UP); if (side.lengthSq() < 1e-8) side.set(1, 0, 0);
           side.normalize().multiplyScalar(Math.max(0.12, wBase * 2.2));
@@ -253,7 +244,7 @@ export class PlanetLinks {
             this._put(0, a2, b2, null, 0, wBase, minPx, col, al, { ...P, ph: P.ph + (sg > 0 ? 0 : 0.5) }, D, keep, 0);
           }
         } else this._put(0, A, B, null, 0, wBase, minPx, col, al, P, D, keep, 0);
-        if (L.guide > 0.01) this._put(0, A, B, null, 0, wBase * 0.6, 1, col, L.guide * m * wL, null, { dash: len * 1.4, on: 0.35, mask, tail: 0 }, keep, 0);
+        if (L.guide > 0.01) this._put(0, A, B, null, 0, wBase * 0.6, 1, col, L.guide * m * wL, null, { dash: len * 1.4, on: 0.35, tail: 0 }, keep, 0);
         // 접시: 크기는 전환 무게로(줄었다 커짐), 자식 쪽은 감김을 따라
         const ds = Math.max(0.05, Math.min(0.15, 0.22 * Math.min(ga, gb), wBase * 1.4)) * Math.min(1, wL * 1.6) * (cv.exitF < 1 ? cv.exitF : 1) * (cv.scopeK != null && cv.scopeK < 0.5 ? 0 : 1);
         if (ds > 0.01 && camD < 420) {
@@ -264,7 +255,7 @@ export class PlanetLinks {
       // ---- 궤도 공명 고리 ----
       if (wO > 0.01) {
         const O = orbitLook(S, now, seed, red);
-        const D = { dash: guess ? 40 : O.dash, on: guess ? 0.5 : O.on, mask, tail: O.tail };
+        const D = { dash: guess ? 40 : O.dash, on: guess ? 0.5 : O.on, tail: O.tail };
         if (cp) { // 자기 초점(부모가 아님)의 금색 점선 호 + 부모에서 초점까지 옅은 실
           const F = this._v4.copy(b).sub(a).multiplyScalar(0.45).add(a);
           const side = this._v3.crossVectors(this._v.copy(b).sub(a), UP); if (side.lengthSq() < 1e-8) side.set(1, 0, 0);
@@ -272,9 +263,9 @@ export class PlanetLinks {
           const Fc = F.clone();
           const Lr = this._axes(Fc, b, seed, R, Y);
           const g = Math.min(0.6, gb / Math.max(0.1, Lr));
-          this._put(1, Fc, R, Y, PLINKS.CP_SPAN, wBase * 0.9, minPx, col, O.a * m * wO * 1.1, { p: O.p * m * wO, ph: O.ph, rep: O.rep, sharp: O.sharp }, { dash: 30, on: 0.55, mask, tail: D.tail }, keep, g);
+          this._put(1, Fc, R, Y, PLINKS.CP_SPAN, wBase * 0.9, minPx, col, O.a * m * wO * 1.1, { p: O.p * m * wO, ph: O.ph, rep: O.rep, sharp: O.sharp }, { dash: 30, on: 0.55, tail: D.tail }, keep, g);
           A.copy(Fc).sub(a).normalize().multiplyScalar(ga).add(a);
-          this._put(0, A, Fc, null, 0, wBase * 0.5, 1, col, 0.22 * m * wO * (1 - S.done * 0.5), null, { dash: Math.max(4, A.distanceTo(Fc) * 1.6), on: 0.3, mask: 0, tail: 0 }, 1, 0);
+          this._put(0, A, Fc, null, 0, wBase * 0.5, 1, col, 0.22 * m * wO * (1 - S.done * 0.5), null, { dash: Math.max(4, A.distanceTo(Fc) * 1.6), on: 0.3, tail: 0 }, 1, 0);
         } else {
           const Lr = this._axes(a, b, seed, R, Y);
           const g = Math.min(0.6, gb / Math.max(0.1, Lr));
@@ -311,11 +302,11 @@ export class PlanetLinks {
         const ping = this.view.reduced ? 0 : Math.pow(Math.max(0, Math.sin(now * 0.9 + seed * 6)), 30);
         this._a.copy(b).sub(a).multiplyScalar(ga / dist).add(a); this._b.copy(a).sub(b).multiplyScalar(gb / dist).add(b);
         const len = this._a.distanceTo(this._b);
-        this._put(0, this._a, this._b, null, 0, 0.04, 1, col, (0.3 + 0.6 * ping) * fade * wL, null, { dash: Math.max(3, len * 1.2), on: 0.4, mask: 0, tail: 0 }, 1, 0);
+        this._put(0, this._a, this._b, null, 0, 0.04, 1, col, (0.3 + 0.6 * ping) * fade * wL, null, { dash: Math.max(3, len * 1.2), on: 0.4, tail: 0 }, 1, 0);
       }
       if (wO > 0.01) {
         const Lr = this._axes(a, b, seed, this._v, this._v2);
-        this._put(1, a, this._v, this._v2, PLINKS.SPAWN_SPAN, 0.04, 1, col, 0.45 * fade * wO, null, { dash: 16, on: 0.5, mask: 0, tail: 0.5 }, 1, Math.min(0.5, gb / Math.max(0.1, Lr)));
+        this._put(1, a, this._v, this._v2, PLINKS.SPAWN_SPAN, 0.04, 1, col, 0.45 * fade * wO, null, { dash: 16, on: 0.5, tail: 0.5 }, 1, Math.min(0.5, gb / Math.max(0.1, Lr)));
       }
     }
   }
@@ -365,7 +356,7 @@ export class PlanetLinks {
           // 두 메인 둘레 바깥 호 중 겹치는 점 쪽 약 70°만(온 원을 그리면 먼 메인끼리 화면을 덮는다)
           const a = V.group.position, phi = Math.atan2(it.xo.z - a.z, it.xo.x - a.x), sp = 1.2;
           this._v.set(it.r, 0, 0); this._v2.set(0, 0, it.r);
-          this._put(1, a, this._v, this._v2, sp, 0.05, 1, col, 0.3 * k * wO, null, { dash: 10, on: 0.55, mask: 0, tail: 0 }, 1, -(phi + sp / 2));
+          this._put(1, a, this._v, this._v2, sp, 0.05, 1, col, 0.3 * k * wO, null, { dash: 10, on: 0.55, tail: 0 }, 1, -(phi + sp / 2));
         }
         this._flare(it.xo, fl * wO, fc);
       }

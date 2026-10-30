@@ -49,6 +49,7 @@ export function parseManifest(m) {
       file: t.file,
       meta: typeof t.meta === 'string' ? t.meta : null,
       bpm: Number.isFinite(t.bpm) ? t.bpm : null,
+      beats: Number.isInteger(t.beats) && t.beats >= 2 && t.beats <= 12 ? t.beats : 4, // 마디당 박 수(3/4 곡 = 3, 없으면 4)
       key: L.key,
       duration: Number.isFinite(t.duration) ? t.duration : null,
       stage: parseStage(t.stage, t.energy), // 자동 선곡 단계 목록(0 한가～3 매우 활발)

@@ -8,7 +8,7 @@
 //       수동 선택 = 1.5초 크로스페이드 · 곡 끝 = 끝 3초 전에 다음 곡을 미리 시작해 3초 겹침
 //       전환 도중 또 바뀌면 지금 값에서 이어 감(되돌아가기·새 곡 바꿔 걸기·세 번째 곡은 나가던 덱이 조용해진 뒤)
 //   - 소리 경로: AudioContext 가 돌고 있으면 덱마다 MediaElementSource → 덱 GainNode → 공용 버스(켜기·끄기 페이드) → 볼륨 GainNode
-//       → [신호 열화 필터(ctx-ui NoiseAudio 가 setInsert 로 끼움)] → 출력. 컨텍스트가 없거나 아직 멈춰 있으면 같은 곡선을 요소 volume 으로
+//       → 출력. 컨텍스트가 없거나 아직 멈춰 있으면 같은 곡선을 요소 volume 으로
 //   - 다 꺼진 덱은 pause() 만 하고 src·노드는 그대로 두어 다음 전환에 다시 쓴다(요소·노드는 덱 두 개분만 만든다)
 //   - 매니페스트가 없으면 예전 한 곡(bgm.mp3·bgm.json)으로 동작
 
@@ -53,7 +53,7 @@ export class Music {
     this.loading = false;     // play() 가 버퍼링을 기다리는 중
     this.onChange = null;     // 상태가 바뀌면 부름(소리 토글 문구 갱신)
     this.onAvailable = null;  // 파일 확인이 끝나면 부름
-    this.routeCtx = null;     // 음악이 지나가는 AudioContext(ctx-ui NoiseAudio 와 공용, sound.mjs 가 복원 때 resume)
+    this.routeCtx = null;     // 음악이 지나가는 AudioContext(sound.mjs 가 복원 때 resume)
     this.tracks = FALLBACK_TRACKS;
     this.def = 'ambient';
     this.sectionsEn = null;   // 구간 이름 영어 표(매니페스트 sections_en)
@@ -446,7 +446,8 @@ export class Music {
     const out = this.decks[from];
     const tr = this._trackOf(fromId);
     const bpm = (tr && tr.bpm) || (this._metaCache.get(fromId) || {}).bpm || null;
-    const plan = planXfade(kind, { pos: out.el.currentTime, bpm, remaining: (out.el.duration || NaN) - out.el.currentTime });
+    const beats = (tr && tr.beats) || 4; // 박자(3/4 곡은 3) — 마디 경계 맞춤
+    const plan = planXfade(kind, { pos: out.el.currentTime, bpm, beats, remaining: (out.el.duration || NaN) - out.el.currentTime });
     this._xf.plan = plan;
     if (plan.wait > 0) { this._note({ ev: 'bar-wait', wait: plan.wait, bpm }); await sleep(plan.wait); if (sid !== this._switchId) return; }
     if (!this.on || this.paused) return; // 그 사이 정지: _finalize 가 이미 처리
@@ -602,7 +603,7 @@ export class Music {
 
   /**
    * WebAudio 경로 연결(한 번). 사용자 동작(또는 자동재생 허용) 뒤 컨텍스트가 돌고 있을 때만 잇는다 — 멈춘 컨텍스트에 이으면 소리가 끊기므로
-   * 그 전에는 요소 volume 으로 같은 곡선을 낸다. 반환: 출력 노드(ctx-ui 가 필터를 끼움) 또는 null
+   * 그 전에는 요소 volume 으로 같은 곡선을 낸다. 반환: 출력 노드 또는 null
    */
   ensureGraph() {
     if (this._graph) return this._graph.out;
@@ -645,23 +646,13 @@ export class Music {
     const oldNow = perfNow(), now = ctx.currentTime;
     this.master.rebase(oldNow, now);
     for (const d of this.decks) d.lane.rebase(oldNow, now);
-    this._graph = { ctx, bus, volNode, out: volNode, insert: null };
+    this._graph = { ctx, bus, volNode, out: volNode };
     volNode.gain.value = this.volume;
     this._applyParam(this.master, bus.gain, now);
     this.decks.forEach((d, i) => { this._applyParam(d.lane, d.gain.gain, now); d.el.volume = 1; });
     this._note({ ev: 'graph' });
     this._pump();
     return volNode;
-  }
-
-  /** 출력과 스피커 사이에 노드 끼우기(ctx-ui 신호 열화 로우패스). node 는 부르는 쪽이 destination 에 잇는다. null 이면 바로 출력 */
-  setInsert(node) {
-    const g = this._graph;
-    if (!g) return false;
-    try { g.volNode.disconnect(); } catch (e) {}
-    g.volNode.connect(node || g.ctx.destination);
-    g.insert = node || null;
-    return true;
   }
 
   _changed() { if (this.onChange) this.onChange(); }

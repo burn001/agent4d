@@ -1,84 +1,28 @@
-// 컨텍스트 사용률 게이지·신호 열화의 순수 규칙. DOM·three 없음 — node --test 대상.
+// 컨텍스트 사용률 게이지의 순수 규칙. DOM·three 없음 — node --test 대상.
+// 신호 열화는 2026-10-30 폐지 — 에이전트별 과열 표현(heat-core.mjs)으로 대체.
 import { levelOf as limitLevel, WARN_PCT, DANGER_PCT } from './limits.js';
 import { t as tr, fmtNum } from './i18n.mjs';
+import { HEAT, HEAT_STAGES, heatStageOf } from './heat-core.mjs';
 
 export { WARN_PCT, DANGER_PCT };
 
-/**
- * 열화 단계 경계(창 대비 %) — 셰이더(noise.js)·2D(flat-degrade.js)·세기 D·그레인 진폭(degrade-core)·로우패스·험·권장 문구가
- * 모두 여기서 가져다 쓴다. 2026-10-26 "30% 넘으면 필름 그레인부터"로 20/40/58/75/95 → 30/50/70/90/98
- */
-export const GRAIN_PCT = 30;      // 필름 그레인 시작
-export const SCAN_PCT = 50;       // 주사선·색 바램
-export const CHROMA_PCT = 70;     // 색수차·비네팅·글리치·배경음악 로우패스 시작
-export const MOSH_PCT = 90;       // 데이터모시·험·"세션 정리 권장"
-export const TOP_PCT = 98;        // 데이터모시·세기 D 가 꽉 차는 곳
-export const GRAIN_FADE = [28, 32]; // 그레인이 0 에서 첫 진폭으로 켜지는 전이 구간
-
-// name 은 지금 언어(사전 sound.ctx.stage.<key>): 선명·필름 그레인·주사선·색 바램·색수차·비네팅·글리치·데이터모시·험
-const stage = (min, key) => ({ min, key, get name() { return tr(`sound.ctx.stage.${key}`); } });
-export const STAGES = [
-  stage(0, 'clean'),
-  stage(GRAIN_PCT, 'grain'),
-  stage(SCAN_PCT, 'scan'),
-  stage(CHROMA_PCT, 'chroma'),
-  stage(MOSH_PCT, 'mosh'),
-];
-export const NOISE_MIN_PCT = GRAIN_PCT;   // 이보다 낮으면 후처리 자체를 건너뛴다(비용 0)
-export const RECOMMEND_PCT = MOSH_PCT;    // "세션 정리 권장" 문구
-export const DEFAULT_STRENGTH = 0.5;
-
-/** 사용률 → 단계 번호(0～4) */
-export function stageOf(pct) {
-  if (pct == null || !isFinite(pct)) return 0;
-  let s = 0;
-  for (let i = 0; i < STAGES.length; i++) if (pct >= STAGES[i].min) s = i;
-  return s;
-}
+/** 급락(compact) 판정에 쓰는 이전 값 하한(%) — 이보다 낮던 세션의 하락은 패널에 '정리' 줄을 남기지 않는다 */
+export const DROP_MIN_PCT = 30;
 
 /** 게이지 색 단계: 기존 한도 게이지와 같은 규칙(70%↑ warn, 90%↑ danger) */
 export const gaugeLevel = (pct) => limitLevel(pct);
 
-const clamp01 = (x) => Math.max(0, Math.min(1, x));
-export function smoothstep(a, b, x) { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); }
-
-/**
- * 효과 세기(셰이더·오디오와 같은 식). strength 0～1(기본 0.5 = 배율 1).
- * @returns {{L, amp, grain, scan, fade, chroma, vignette, glitch, mosh, lowpassHz, hum}}
- */
-export function noiseParams(pct, strength = DEFAULT_STRENGTH) {
-  const L = clamp01((pct || 0) / 100);
-  const amp = Math.max(0, Math.min(1, strength)) * 2;
-  const G = GRAIN_PCT / 100, S = SCAN_PCT / 100, C = CHROMA_PCT / 100, M = MOSH_PCT / 100, T = TOP_PCT / 100;
-  const g0 = smoothstep(G, S, L), g = g0 * Math.sqrt(g0), s = smoothstep(S, C, L), c = smoothstep(C, M, L), m = smoothstep(M, T, L);
-  // 배경음악 로우패스: CHROMA_PCT(70%) 부터 20kHz → 100% 에서 약 700Hz(세기가 셀수록 더 많이 깎음)
-  const lp = smoothstep(C, 1.0, L) * Math.min(1, amp);
-  return {
-    L, amp,
-    grain: g * amp, scan: s * amp, fade: s * amp, chroma: c * amp, vignette: c * amp, glitch: c * amp, mosh: m * Math.min(amp, 1.5),
-    lowpassHz: Math.round(20000 * Math.pow(700 / 20000, lp)),
-    hum: m * Math.min(1, amp),
-  };
-}
-
-/** 후처리가 필요한가(하나라도 NOISE_MIN_PCT(30%) 이상이거나 정화 연출 중) */
-export function noiseNeeded(levels, { enabled = true, strength = DEFAULT_STRENGTH, purging = false } = {}) {
-  if (!enabled || !(strength > 0)) return false;
-  if (purging) return true;
-  return levels.some((p) => p >= NOISE_MIN_PCT);
-}
-
 /**
  * 급락(= /compact·자동 compact, 같은 세션에서 컨텍스트가 크게 줄어듦) 판정.
- * 이전 30%(NOISE_MIN_PCT) 이상에서 15%p 넘게, 그리고 이전의 70% 이하로 떨어졌을 때.
+ * 이전 30%(DROP_MIN_PCT) 이상에서 15%p 넘게, 그리고 이전의 70% 이하로 떨어졌을 때.
  */
 export function isCtxDrop(prev, next) {
   if (!prev || !next || !isFinite(prev.pct) || !isFinite(next.pct)) return false;
-  return prev.pct >= NOISE_MIN_PCT && prev.pct - next.pct >= 15 && next.pct <= prev.pct * 0.7;
+  return prev.pct >= DROP_MIN_PCT && prev.pct - next.pct >= 15 && next.pct <= prev.pct * 0.7;
 }
 
-/** 패널에 줄을 남길 구간(50·70·90 을 넘을 때만 — 매 응답마다 줄이 생기지 않게) */
-export const NOTE_BANDS = [50, WARN_PCT, DANGER_PCT];
+/** 패널에 줄을 남길 구간(30·70·90 을 넘을 때만 — 매 응답마다 줄이 생기지 않게) */
+export const NOTE_BANDS = [HEAT.WARM_PCT, WARN_PCT, DANGER_PCT]; // 첫 칸 = 과열 데움 시작(30)과 같게
 export function bandOf(pct) { let b = 0; for (const t of NOTE_BANDS) if (pct >= t) b++; return b; }
 
 /**
@@ -110,20 +54,19 @@ export function ctxShort(c) {
   if (!c) return '';
   return `${pctText(c.pct)} · ${fmtTokens(c.used)}/${fmtTokens(c.limit)}${c.estimated ? '?' : ''}`;
 }
-/** 툴팁 여러 줄 */
-// level: 열화 수준(기준 선택 — 절대량이면 늘어난 토큰으로 잰 값, 생략하면 pct), rec: 권장 문구 수준
-export function ctxTitle(c, name = '', level = null, rec = RECOMMEND_PCT) {
+/** 툴팁 여러 줄: 사용량 · 창 근거 · 과열 단계(창 대비 %) · 출처 */
+export function ctxTitle(c, name = '') {
   if (!c) return name ? `${name}\n${tr('sound.ctx.none')}` : tr('sound.ctx.none');
-  const lv = level == null ? c.pct : level;
-  const st = STAGES[stageOf(lv)];
   return [
     name && name,
     tr('sound.ctx.t.used', { pct: pctText(c.pct), used: fmtNum(Number(c.used)), limit: fmtNum(Number(c.limit)) }),
     tr('sound.ctx.t.window', { basis: basisText(c.basis) || (c.estimated ? tr('sound.ctx.estimated') : '') }),
-    tr('sound.ctx.t.degrade', { stage: st.name }) + (lv >= rec ? tr('sound.ctx.t.recommend') : ''),
+    tr('sound.ctx.t.heat', { stage: heatName(heatStageOf(c.pct)) }),
     tr('sound.ctx.t.source'),
   ].filter(Boolean).join('\n');
 }
+/** 과열 단계 이름(지금 언어): 평상·데움·과열·위험 */
+export const heatName = (stage) => tr(`sound.ctx.heat.${HEAT_STAGES[Math.max(0, Math.min(3, stage | 0))].key}`);
 
 const SESSION_KINDS = new Set(['main', 'claude-p']);
 /**
@@ -155,46 +98,16 @@ export function pickGaugeNode({ nodes, focusId = null, root = null, streamAll = 
   return best ? { id: best.id, why: 'max' } : null;
 }
 
-/**
- * 전체 보기 열화 대상 루트: 살아 있는(live === true) 세션만. 지난(recent)·끝난 루트와 /clear 로 끝난 앞 세션
- * (새 메인 meta.clearedFrom)은 뺀다 — 옛 노드의 큰 ctx 가 같은 섬에 남아 /clear 뒤에도 열화가 높게 남던 문제(10.28.).
- * 그 노드의 카드·툴팁 ctx 표시는 그대로다.
- * @returns {Array} roots 중 열화에 쓸 것(순서 유지)
- */
-export function degradeRoots(roots, nodes) {
-  if (!roots || !roots.length) return [];
-  const cleared = new Set();
-  if (nodes) for (const n of nodes.values()) { const cf = n && n.meta && n.meta.clearedFrom; if (cf) cleared.add(cf); }
-  return roots.filter((r) => r && r.live === true && !cleared.has(r.sessionId));
+// ── 기준선(첫 유효 응답 usage) — 카드·툴팁의 '시작 63k · 늘어난 양 +152k' 표시용(예전 degrade-core.mjs 에서 옮김) ──
+// compact 뒤에도 원래 기준선을 유지하되 그보다 작아지면 낮춘다(= 지금까지 본 최솟값).
+/** 기준선을 모를 때(서버가 base 를 안 보낸 예전 값·세션 중간에 처음 본 스냅샷) 쓰는 상한 — 첫 응답 실측 중앙값 근처 */
+export const FALLBACK_BASE = 60e3;
+/** 기준선: 서버 base → 이 화면에서 본 최솟값(seen) → min(지금 값, FALLBACK_BASE) */
+export function baseOf(c, seen = null) {
+  if (!c) return 0;
+  const u = Number(c.used) || 0;
+  if (c.base != null && isFinite(c.base)) return Math.min(u, c.base);
+  if (seen != null && isFinite(seen)) return Math.min(u, seen);
+  return Math.min(u, FALLBACK_BASE);
 }
-
-/** 전체 보기 국소 열화 대상: 세션(루트)별 사용률이 문턱 이상인 것 중 높은 순 max 개 */
-export function rankRegions(entries, max = 6, min = NOISE_MIN_PCT) {
-  return entries.filter((e) => e.pct >= min || e.purging).sort((a, b) => ((b.purging ? 1 : 0) - (a.purging ? 1 : 0)) || b.pct - a.pct).slice(0, max);
-}
-
-/** 정화 연출 진행도(0～1, 끝나면 null). durMs 동안 왼쪽→오른쪽으로 쓸려 나감 */
-export const PURGE_MS = 1400;
-export function purgeProgress(startMs, nowMs, durMs = PURGE_MS) {
-  if (startMs == null) return null;
-  const k = (nowMs - startMs) / durMs;
-  return k >= 1 || k < 0 ? null : k;
-}
-
-/** 신호 열화 국소 영역 상한(셰이더 배열 길이) — noise.js 에서 옮김 */
-export const MAX_REGIONS = 6;
-
-/** 정화 연출 상태(세션별). 급락을 보면 start, 프레임마다 get */
-export class PurgeBook {
-  constructor() { this.m = new Map(); }
-  start(key, oldL, nowMs = performance.now()) { this.m.set(key, { t0: nowMs, oldL }); }
-  get(key, nowMs = performance.now()) {
-    const e = this.m.get(key);
-    if (!e) return null;
-    const p = purgeProgress(e.t0, nowMs, PURGE_MS);
-    if (p == null) { this.m.delete(key); return null; }
-    return { p, oldL: e.oldL };
-  }
-  get size() { return this.m.size; }
-  clear() { this.m.clear(); }
-}
+export const grownOf = (c, seen = null) => (c ? Math.max(0, (Number(c.used) || 0) - baseOf(c, seen)) : 0);

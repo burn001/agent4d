@@ -6,7 +6,6 @@
 import * as THREE from 'three';
 import { FLOW, PacketPool, planFlow, easeInOut, linkPoint } from '../flow-core.mjs';
 import { floorRoute, routeCum, routeAt, dashStarts, lineStyle } from './office-core.mjs';
-import { DEG, degOf, degOfLink, lineGap, lineFlicker, packetGone, seedOf } from '../degrade-core.mjs';
 
 const ROUTE_CAP = 240, MAX_PACKETS = 160, DASH_LEN = 0.55, Y_LINE = 0.022, Y_PKT = 0.16;
 const PKT_SPEED = 9; // 바닥 패킷 속도(단위/초)
@@ -95,12 +94,9 @@ export class VxFlow {
       const ch = v.chars.get(r.cid);
       if (ch && (ch.state === 'gone' || ch.state === 'leave')) continue;
       const st = lineStyle(n.status), lc = this._lineColor(r.cid), lk = tok.isLight ? 1.6 : 1;
-      // 신호 열화: 그 세션 바닥 조명 라인은 꺾은선 토막이 수시로 꺼지고 밝기가 튄다
-      const dg = DEG.on ? degOf(r.cid) : 0, sd = dg > 0 ? (r.seed ?? (r.seed = seedOf(r.cid))) : 0, tt = DEG.reduced ? 0 : DEG.t;
       if (!r.air) {
-        const c = this._c.copy(floor).lerp(lc, Math.min(1, st.k * lk * (dg > 0 ? lineFlicker(sd, tt, dg) * (1 + dg) : 1)));
+        const c = this._c.copy(floor).lerp(lc, Math.min(1, st.k * lk));
         for (let i = 1; i < r.pts.length; i++) {
-          if (dg > 0 && lineGap(sd, i, tt, dg)) continue;
           const a = r.pts[i - 1], b = r.pts[i];
           const sx = Math.abs(b.x - a.x) + 0.05, sz = Math.abs(b.z - a.z) + 0.05;
           G.box((a.x + b.x) / 2, Y_LINE, (a.z + b.z) / 2, sx, 0.012, sz, c);
@@ -132,7 +128,6 @@ export class VxFlow {
       const u = (now - s.t0) / s.dur;
       if (u >= 1) { dead.push(s); continue; }
       if (v._isDim(r.cid)) continue;
-      if (DEG.on && !DEG.reduced && packetGone((s.t0 * 1000) | 0, u, degOfLink(s.from, s.to))) continue; // 패킷 중간 소실
       const e = easeInOut(Math.max(0, u));
       const col = s.color === 'call' ? (tok['flow-call'] || tok.text) : s.color === 'ok' ? tok.ok : s.color === 'error' ? tok.error : s.color === 'stopped' ? tok.stopped : tok['k-bash-bg'];
       const at = (w, out) => {

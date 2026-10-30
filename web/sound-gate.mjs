@@ -18,7 +18,7 @@ const parts = (s) => ({ ...s, musicAvailable: !!s.musicAvailable && s.musicPart 
  * @param {boolean} [s.sfxCapable]    효과음을 낼 수 있는 브라우저(AudioContext 있음)
  * @param {boolean} [s.sfxEnabled]    효과음이 켜져 있음(첫 동작 전엔 일부러 안 켬)
  * @param {string}  [s.sfxState]      효과음 AudioContext 상태: 'none'(아직 없음)|'suspended'|'running'|'interrupted'|'closed'
- * @param {string}  [s.routeState]    배경음악을 잇는 신호 열화 필터 컨텍스트(ctx-ui NoiseAudio) 상태: 'none'|…
+ * @param {string}  [s.routeState]    배경음악이 지나가는 AudioContext(audio.js routeCtx) 상태: 'none'|…
  * @param {boolean} [s.musicPart]     팝업 '음악' 토글(기본 켬) — 끄면 음악은 없는 것처럼 본다
  * @param {boolean} [s.sfxPart]       팝업 '효과음' 토글(기본 켬) — 끄면 효과음은 없는 것처럼 본다
  * @returns {'off'|'held'|'waiting'|'loading'|'on'}
@@ -29,7 +29,7 @@ export function soundStatus(s0) {
   if (s.held) return 'held';
   const stalled = (st) => st === 'suspended' || st === 'interrupted';
   if (s.musicAvailable && s.musicBlocked) return 'waiting';
-  if (s.musicAvailable && stalled(s.routeState)) return 'waiting'; // 필터에 이어진 음악은 그 컨텍스트가 멈추면 소리가 안 난다
+  if (s.musicAvailable && stalled(s.routeState)) return 'waiting'; // WebAudio 경로에 이어진 음악은 그 컨텍스트가 멈추면 소리가 안 난다
   if (s.sfxCapable && (!s.sfxEnabled || stalled(s.sfxState))) return 'waiting';
   if (s.musicAvailable && s.musicLoading) return 'loading';
   return 'on';
