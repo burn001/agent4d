@@ -94,7 +94,8 @@ export function splitTop(s, { ps = false } = {}) {
   return out.filter((x) => x.text.trim());
 }
 
-const OP_RE = /^(?:\d?>>?&\d+|&>>?|\*>>?|\d?>>?|<<?|\|&?)/;
+// 끈끈이(y): 자리마다 s.slice 로 복사하지 않는다(긴 명령에서 제곱 비용)
+const OP_RE = /(?:\d?>>?&\d+|&>>?|\*>>?|\d?>>?|\d?<<?|\|&?)/y;
 
 /** 단순 명령 → 낱말·연산자 [{op}|{w, q(따옴표 있었음)}] */
 export function tokenize(s, { ps = false } = {}) {
@@ -103,8 +104,10 @@ export function tokenize(s, { ps = false } = {}) {
   while (i < s.length) {
     while (i < s.length && /\s/.test(s[i])) i++;
     if (i >= s.length) break;
-    const m = OP_RE.exec(s.slice(i));
-    if (m && !(s[i] === '<' && ps)) { out.push({ op: m[0] }); i += m[0].length; continue; }
+    OP_RE.lastIndex = i;
+    const m = OP_RE.exec(s);
+    if (m && !(ps && /^\d?</.test(m[0]))) { out.push({ op: m[0] }); i += m[0].length; continue; }
+    const i0 = i;
     let w = '', quoted = false;
     while (i < s.length && !/\s/.test(s[i])) {
       const c = s[i];
@@ -116,11 +119,13 @@ export function tokenize(s, { ps = false } = {}) {
         i = end + 1;
         continue;
       }
-      if (/[|<>]/.test(c) || (c === '&' && !ps && /[>]/.test(s[i + 1] || ''))) break;
-      if (/\d/.test(c) && /[<>]/.test(s[i + 1] || '') && w === '') break;
+      if (/[|>]/.test(c) || (c === '<' && !ps) || (c === '&' && !ps && /[>]/.test(s[i + 1] || ''))) break;
+      if (/\d/.test(c) && /[<>]/.test(s[i + 1] || '') && w === '' && !(ps && s[i + 1] === '<')) break;
       if (c === '\\' && !ps && i + 1 < s.length && !/[A-Za-z0-9_.\-]/.test(s[i + 1])) { w += s[i + 1]; i += 2; continue; }
       w += c; i++;
     }
+    // 연산자도 낱말도 못 읽고 제자리면 한 글자를 낱말로 넘긴다 — 진행 없는 무한 반복 방지(PowerShell 의 `<`, `2<3` 등)
+    if (i === i0) { out.push({ w: s[i], q: false }); i++; continue; }
     if (w !== '' || quoted) out.push({ w, q: quoted });
   }
   return out;

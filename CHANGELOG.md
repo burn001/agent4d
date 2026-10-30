@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-30
+
+### Fixed
+- The server no longer freezes right after startup when a transcript has a shell command with a bare `<` (a PowerShell here-string or comparison) or a digit before `<` (`2<3`). The command splitter used to detect detached processes stopped advancing on these characters and spun forever, so `/healthz` and every view stopped answering; each restart hit the same line again. It now always moves forward, reads `N<` as an input redirect in Bash and `<` as a plain word in PowerShell, and no longer copies the rest of the command at every token.
+
 ## [0.7.0] - 2026-10-30
 
 ### Fixed

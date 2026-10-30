@@ -320,3 +320,28 @@ test('라이브·재생: 분리 프로세스 노드 · 로그 꼬리 → 레인 
     fs.rmSync(fx.root, { recursive: true, force: true });
   }
 });
+
+// 10.30. 상시 서버 멈춤: PowerShell 명령의 `<`·`2<3` 에서 tokenize 가 제자리를 돌아 이벤트 루프가 막혔다.
+// 무한 반복은 같은 스레드에서 잡을 수 없어 자식 프로세스로 시간 제한을 둔다.
+test('tokenize: `<`·숫자+`<` 에서 멈추지 않음(무한 반복 방지)', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { pathToFileURL } = await import('node:url');
+  const mod = pathToFileURL(path.join(import.meta.dirname, '..', 'procs.mjs')).href;
+  const cmds = [
+    ["if ($a -lt 3) { Write-Host '<x>' }; $h = @'\n<html>\n'@; python x.py < in.txt", 'PowerShell'],
+    ['python -c "print(1)" 2<3 & echo 1<2', 'Bash'],
+  ];
+  const code = `import { tokenize, detectProcLaunch } from ${JSON.stringify(mod)};
+const r = [tokenize('a < b', { ps: true }), tokenize('echo 2<3'), tokenize('x 2<in', { ps: true }), tokenize('cat 0<in.txt 2>&1 > out')];
+for (const [c, tool] of ${JSON.stringify(cmds)}) detectProcLaunch(c, { tool });
+detectProcLaunch('python x.py ' + 'a '.repeat(100000) + '> log &', { tool: 'Bash' });
+console.log(JSON.stringify(r));`;
+  const res = spawnSync(process.execPath, ['--input-type=module', '-e', code], { timeout: 15000, encoding: 'utf8' });
+  assert.equal(res.error?.code, undefined, '시간 안에 끝나야 함(무한 반복 없음)');
+  assert.equal(res.status, 0, res.stderr);
+  const [psLt, bashLt, psDigit, bashIn] = JSON.parse(res.stdout.trim());
+  assert.deepEqual(psLt.map((t) => t.w ?? t.op), ['a', '<', 'b'], 'PowerShell `<` 는 낱말');
+  assert.deepEqual(bashLt.map((t) => t.w ?? t.op), ['echo', '2<', '3'], 'Bash `2<` 는 입력 리다이렉트');
+  assert.deepEqual(psDigit.map((t) => t.w ?? t.op), ['x', '2<in']);
+  assert.deepEqual(bashIn.map((t) => t.w ?? t.op), ['cat', '0<', 'in.txt', '2>&1', '>', 'out']);
+});
