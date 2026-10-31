@@ -13,7 +13,7 @@ import { escapeHtml as esc } from './html-util.mjs';
 import { t } from './i18n.mjs';
 import {
   PLAN_UI, PLAN_STORE_KEY, PLAN_ST_LABEL, planInitial, diffPlans, PlanFx, gatherPlans, boardWorld, boardScreen, boardCard, sheetInspectModel, PLAN_CAM,
-  planInspectModel, boardAnchor, liveCycleOf, boardHoles, holesMask, countFit,
+  planInspectModel, boardAnchor, liveCycleOf, loopMerge, boardHoles, holesMask, countFit,
 } from './plan-core.mjs';
 
 let cssDone = false;
@@ -296,7 +296,8 @@ export function mountPlans(h) {
     for (const c of pick) {
       const pj = boardProject(view, c.aid);
       if (!pj) continue;
-      const m = boardCard(c.entries, { nowMs: wall, fx: lowMotion ? null : fx, labelOf, mainId: c.id, liveCy: liveCycleOf(c.entries[0].plan, nodes) });
+      const mg = loopMerge(c.entries, nodes); // 같은 설계서의 러너 계획은 축 큐에 합침('+ 계획 n' 에서 빠짐, 진행 중 회차는 판에)
+      const m = boardCard(mg.entries, { nowMs: wall, fx: lowMotion ? null : fx, labelOf, mainId: c.id, liveCy: liveCycleOf(mg.entries[0].plan, nodes) ?? mg.liveCy });
       if (!m) continue;
       keep.add(c.id);
       const b = boardEl(c.id);
@@ -375,25 +376,35 @@ export function mountPlans(h) {
 
 
   /** 크게 보기 항목 목록: 줄마다 상태·번호·제목(★ 강조)·메모·부가(일정·묶음)·문서·단계 진행(남은 단계)·회차·얼마 전.
-   *  항목이 SHEET_FOLD 넘으면 지금 항목 앞의 끝난 항목은 접힘(<details>) — 156축 큐도 지금 축이 바로 보이게. 목록은 카드 안에서 스크롤(CSS) */
+   *  항목이 SHEET_FOLD 넘으면 지금 항목 앞의 끝난 항목은 접힘(<details>) — 156축 큐도 지금 축이 바로 보이게. 목록은 카드 안에서 스크롤(CSS).
+   * 러너 단계 계획을 합친 축: 줄 아래 러너 한 줄(러너·진행 중 회차·관찰 시각), 펼친 단계마다 닫은 회차·얼마 전, 살아 있는 러너가 보는 축은 접지 않음 */
   function sheetItems(p, nodes) {
-    const row = (it, i) => `<li class="pr st-${esc(it.st)}${it.cur ? ' cur' : ''}${it.emph ? ' emph' : ''}"><i class="pl-m" aria-label="${esc(it.st === 'hold' ? t('boards.plan.st.hold') : it.st === 'skipped' ? t('boards.plan.st.skipped') : PLAN_ST_LABEL[it.s] || '')}">${esc(it.glyph)}</i><span class="ipb-i">${i + 1}</span><span class="pr-t">${esc(it.t)}</span>` +
+    const go = (id, label, cls) => (id && nodes.has(id) ? `<button type="button" class="ins-link ${cls}" data-goto="${esc(id)}">${esc(label)}</button>` : `<b class="${cls}">${esc(label)}</b>`);
+    const stepRow = (x) => `<li class="st-${esc(x.st)}${x.nx ? ' nx' : ''}"><i>${x.st === 'done' ? '✓' : x.st === 'current' ? '▶' : x.st === 'blocked' ? '⏸' : x.st === 'skipped' ? '⤼' : '○'}</i><span>${esc(x.t)}</span>` +
+      `${x.cy != null ? go(x.by, t('boards.plan.cycle', { n: x.cy }), 'pr-cy') : ''}${x.ago ? `<small class="ipb-ago">${esc(x.ago)}</small>` : ''}</li>`;
+    const runLine = (r) => `<span class="ipb-run">${esc(t('boards.plan.runBy'))} ${go(r.owner, r.label.slice(0, 24), 'ipb-by')}${r.n > 1 ? ` <small>${esc(t('boards.plan.runPlans', { n: r.n }))}</small>` : ''}` +
+      `${r.liveCy != null ? ` <b class="pb-chip live">${esc(t('boards.plan.liveChip', { n: r.liveCy }))}</b>` : r.seen ? ` · <small>${esc(t('boards.plan.seen', { ago: r.seen }))}</small>` : ''}</span>`;
+    const row = (it, i) => `<li class="pr st-${esc(it.st)}${it.cur ? ' cur' : ''}${it.emph ? ' emph' : ''}${it.run ? ' merged' : ''}"><i class="pl-m" aria-label="${esc(it.st === 'hold' ? t('boards.plan.st.hold') : it.st === 'skipped' ? t('boards.plan.st.skipped') : PLAN_ST_LABEL[it.s] || '')}">${esc(it.glyph)}</i><span class="ipb-i">${i + 1}</span><span class="pr-t">${esc(it.t)}</span>` +
       `${it.note ? `<b class="pr-hold">${esc(it.note)}</b>` : it.st === 'hold' ? `<b class="pr-hold">${esc(t('boards.plan.st.hold'))}</b>` : ''}` +
       `${it.steps ? `<span class="ipb-st" title="${esc(it.steps.cur || '')}"><span class="pb-sbar"><i style="width:${((it.steps.done / it.steps.total) * 100).toFixed(1)}%"></i></span>${esc(t('boards.plan.steps', { done: it.steps.done, total: it.steps.total }))}</span>` : ''}` +
-      `${it.cy != null ? (it.by && nodes.has(it.by) ? `<button type="button" class="ins-link pr-cy" data-goto="${esc(it.by)}">${esc(t('boards.plan.cycle', { n: it.cy }))}</button>` : `<b class="pr-cy">${esc(t('boards.plan.cycle', { n: it.cy }))}</b>`) : it.byLabel && it.s !== 'pending' ? (it.by && nodes.has(it.by) ? `<button type="button" class="ins-link ipb-by" data-goto="${esc(it.by)}">${esc(it.byLabel.slice(0, 22))}</button>` : `<small>${esc(it.byLabel.slice(0, 22))}</small>`) : ''}` +
+      `${it.cy != null ? go(it.by, t('boards.plan.cycle', { n: it.cy }), 'pr-cy') : it.byLabel && it.s !== 'pending' ? (it.by && nodes.has(it.by) ? `<button type="button" class="ins-link ipb-by" data-goto="${esc(it.by)}">${esc(it.byLabel.slice(0, 22))}</button>` : `<small>${esc(it.byLabel.slice(0, 22))}</small>`) : ''}` +
       `${it.ago ? `<small class="ipb-ago">${esc(it.ago)}</small>` : ''}` +
-      `${it.cur && it.steps && Array.isArray(it.steps.items) && it.steps.items.length ? `<ul class="ipb-steps">${it.steps.items.map((x) => `<li class="st-${esc(x.st)}"><i>${x.st === 'done' ? '✓' : x.st === 'current' ? '▶' : x.st === 'blocked' ? '⏸' : x.st === 'skipped' ? '⤼' : '○'}</i>${esc(x.t)}</li>`).join('')}</ul>` : ''}` +
-      `${it.meta && it.meta.length || it.doc || (it.steps && it.cur && it.steps.cur) ? `<span class="ipb-sub">${[...(it.meta || []), it.doc ? '▤ ' + it.doc : '', it.steps && it.cur && it.steps.cur ? '▶ ' + it.steps.cur : ''].filter(Boolean).map(esc).join(' · ')}</span>` : ''}</li>`;
+      `${it.run ? runLine(it.run) : ''}` +
+      `${it.open && it.steps && Array.isArray(it.steps.items) && it.steps.items.length ? `<ul class="ipb-steps">${it.steps.items.map(stepRow).join('')}</ul>` : ''}` +
+      // 펼친 단계 목록이 있으면 '▶ 지금 단계' 는 목록의 강조 줄이 대신함(— 같은 글 두 번 없음)
+      `${(it.meta && it.meta.length) || it.doc || (it.steps && it.cur && it.steps.cur && !(it.open && it.steps.items && it.steps.items.length)) ? `<span class="ipb-sub">${[...(it.meta || []), it.doc ? '▤ ' + it.doc : '', it.steps && it.cur && it.steps.cur && !(it.open && it.steps.items && it.steps.items.length) ? '▶ ' + it.steps.cur : ''].filter(Boolean).map(esc).join(' · ')}</span>` : ''}</li>`;
     const L = p.items;
     if (L.length <= SHEET_FOLD) return L.map(row).join('');
     const ci = L.findIndex((x) => x.cur);
     const cut = ci > 0 ? ci : L.findIndex((x) => x.s !== 'done');
     const k = cut > 0 ? cut : 0;
-    const head = L.slice(0, k), rest = L.slice(k);
-    const folded = head.length ? `<li class="pr-fold"><details><summary>${esc(t('boards.plan.doneGroup', { n: head.length }))}</summary><ol class="ipb-list" start="1">${head.map(row).join('')}</ol></details></li>` : '';
-    return folded + rest.map((it, j) => row(it, k + j)).join('');
+    const head = [], pin = [];
+    L.slice(0, k).forEach((it, i) => (it.open ? pin : head).push([it, i])); // 살아 있는 러너가 보는 축은 접힘 밖
+    const folded = head.length ? `<li class="pr-fold"><details><summary>${esc(t('boards.plan.doneGroup', { n: head.length }))}</summary><ol class="ipb-list" start="1">${head.map(([it, i]) => row(it, i)).join('')}</ol></details></li>` : '';
+    return folded + pin.map(([it, i]) => row(it, i)).join('') + L.slice(k).map((it, j) => row(it, k + j)).join('');
   }
-  /** 크게 보기(보드 전용 넓은 카드): {title, kindLine, pill, html} — 그 메인에 모인 계획 전부. 없으면 null */
+  /** 크게 보기(보드 전용 넓은 카드): {title, kindLine, pill, html} — 그 메인에 모인 계획 전부. 없으면 null.
+   * 같은 설계서의 러너 계획은 축 큐 항목에 합쳐 한 덩어리 · 머리 알약 = 지금 상태(진행 중 회차·외부 대기·쉬는 중) — 끝남/전체는 덩어리 머리에만 */
   function sheetHtml(mainId, nowMs) {
     if (!on) return null;
     const nodes = h.nodes();
@@ -401,16 +412,18 @@ export function mountPlans(h) {
     const entries = groups.get(mainId);
     if (!entries || !entries.length) return null;
     const labelOf = (id) => { const n = nodes.get(id); return n ? n.label || id : ''; };
-    const ms = sheetInspectModel(boardAnchor(entries, mainId, nodes).entries, { nowMs, labelOf, mainId }); // 판과 같은 순서(바깥 계획이 앞)
-    let done = 0, total = 0, prog = 0;
-    for (const p of ms) { done += p.done; total += p.total; prog += p.prog; }
-    const html = ms.map((p) => `<section class="ins-sec ins-plan ins-plan-big" style="--pk:var(--k-${(nodes.get(p.owner) || {}).kind || 'main'}, var(--accent))">` +
+    const ms = sheetInspectModel(boardAnchor(entries, mainId, nodes).entries, { nowMs, labelOf, mainId, nodes }); // 판과 같은 순서(바깥 계획이 앞)
+    const head = ms[0];
+    const html = ms.map((p, i) => `<section class="ins-sec ins-plan ins-plan-big${p.apart ? ' apart' : ''}" style="--pk:var(--k-${(nodes.get(p.owner) || {}).kind || 'main'}, var(--accent))">` +
+      (p.apart ? `<p class="ipb-apart">${esc(t('boards.plan.apart'))}</p>` : '') +
       `<h4><span class="pb-g" aria-hidden="true">${esc(p.glyph)}</span><span class="ipb-t">${esc(p.title)}</span><span class="ipb-n"><b>${p.done}</b>/${p.total}</span></h4>` +
-      `<p class="ipb-o">${nodes.has(p.owner) ? `<button type="button" class="ins-link" data-goto="${esc(p.owner)}"><i class="pb-dot"></i>${esc(p.ownerLabel)}</button>` : esc(p.ownerLabel)} · ${esc(p.src)}${p.updated ? ' · ' + esc(t('boards.plan.updated', { ago: p.updated })) : ''}${p.hold ? ` · <span class="ipb-hold">${esc(t('boards.plan.holdChip', { n: p.hold }))}</span>` : ''}</p>` +
+      `<p class="ipb-o">${nodes.has(p.owner) ? `<button type="button" class="ins-link" data-goto="${esc(p.owner)}"><i class="pb-dot"></i>${esc(p.ownerLabel)}</button>` : esc(p.ownerLabel)} · ${esc(p.src)}${p.mergedN ? ` · ${esc(t('boards.plan.mergedN', { n: p.mergedN }))}` : ''}${p.updated ? ' · ' + esc(t('boards.plan.updated', { ago: p.updated })) : ''}${p.hold && i > 0 ? ` · <span class="ipb-hold">${esc(t('boards.plan.holdChip', { n: p.hold }))}</span>` : ''}${p.liveCy != null && i > 0 ? ` · <b class="pb-chip live">${esc(t('boards.plan.liveChip', { n: p.liveCy }))}</b>` : ''}</p>` +
       `<div class="pb-bar ipb-bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(p.frac * 100)}" aria-label="${esc(t('boards.plan.progressAria'))}"><i class="d" style="width:${(p.fracDone * 100).toFixed(1)}%"></i><i class="p" style="width:${(p.fracProg * 100).toFixed(1)}%"></i></div>` +
       `<ol class="ipb-list">${sheetItems(p, nodes)}</ol>${p.more ? `<p class="ins-dim">${esc(t('boards.plan.moreItems', { n: p.more }))}</p>` : ''}</section>`).join('');
     const main = nodes.get(mainId);
-    return { title: t('boards.plan.sheetTitle'), kindLine: `${(main && main.label) || t('boards.plan.main')} · ${t('boards.plan.count', { n: ms.length })}`, pill: `${t('boards.plan.pillDone', { done, total })}${prog ? ` · ${t('boards.plan.pillProg', { n: prog })}` : ''}`, html };
+    // 알약 = 맨 앞 덩어리의 지금 상태(숫자 끝남/전체는 덩어리 머리에 이미 있음 — 여러 계획 합산은 뜻이 없어 쓰지 않음)
+    const pill = head.liveCy != null ? t('boards.plan.liveChip', { n: head.liveCy }) : head.hold ? t('boards.plan.holdChip', { n: head.hold }) : head.total && head.done === head.total ? t('boards.plan.allDone') : t('boards.plan.pillIdle');
+    return { title: t('boards.plan.sheetTitle'), kindLine: `${(main && main.label) || t('boards.plan.main')}${ms.length > 1 ? ` · ${t('boards.plan.count', { n: ms.length })}` : ''}`, pill, html };
   }
 
   if (on) setOn(true);

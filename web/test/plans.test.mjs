@@ -391,3 +391,50 @@ test('§115.6 판 글꼴·크기 규칙이 한 곳: CSS 글자 px·간략 em·�
   assert.match(ui, /class="pb-n" style="--pbn:\$\{fit\.k\};--pbn-lod:\$\{fit\.kLod\}"/);
   assert.ok(!/getBoundingClientRect\(\)[^\n]*pb-n|measureText/.test(ui), '측정 없이 글자 수로(글꼴·배율 경합 없음)');
 });
+
+test('§128 크게 보기 합치기: 러너 단계 계획의 설계서 = 축 항목 설계서 → 한 덩어리(단계별 닫은 회차·러너 보존) · 다른 설계서 → 따로(머리말) · 상태는 축 어댑터', async () => {
+  const { sheetInspectModel: sm, loopMerge, sameDoc, stepKey, boardCard: bc } = await import('../plan-core.mjs');
+  const nodes = new Map([['s:m', { id: 's:m', kind: 'main' }], ['b:L', { id: 'b:L', kind: 'bash-bg', status: 'active', meta: { launcher: {} } }],
+    ['b:R', { id: 'b:R', kind: 'bash-bg', parentId: 'b:L', status: 'active', label: '러너 · autopilot.sh', meta: { runner: 1 } }],
+    ['s:c7', { id: 's:c7', kind: 'claude-p', parentId: 'b:R', status: 'done', meta: { cycle: 7 } }], ['s:c8', { id: 's:c8', kind: 'claude-p', parentId: 'b:R', status: 'active', meta: { cycle: 8 } }]]);
+  const steps = (sts) => ({ done: sts.filter((s) => s === 'done').length, total: sts.length, items: sts.map((st, j) => ({ k: 's' + j, t: `단계 ${j} — 일 ${j}`, st })) });
+  const axes = { v: 2, id: 'pax', src: 'axes', title: '자율 루프 축', at: 1, n: 3, items: [
+    { k: 'a', t: '옛 축', st: 'done', s: 'done', doc: 'docs/plans/old-design.md', steps: steps(['done', 'done']) },
+    { k: 'b', t: '지금 축', st: 'current', s: 'in_progress', doc: 'docs\\plans\\Now-Design.md', steps: steps(['done', 'done', 'pending', 'pending']) },
+    { k: 'c', t: '다음 축', st: 'pending', s: 'pending', doc: 'docs/plans/next-design.md', steps: steps(['pending']) }] };
+  const R = (id, title, items, o = {}) => ({ owner: 'b:R', runner: true, plan: { v: 2, id, src: 'phases', title, at: 9000, by: 's:c8', cy: 8, n: items.length, items, ...o } });
+  // 러너 관찰: 단계 0 회차 7 · 단계 1 회차 8 · 단계 2 는 러너가 '끝남'으로 봤으나 축(지금 파일)은 대기 → 회차 붙이지 않음
+  const now = R('pnow', 'now-design.md', [{ k: 'x0', t: '단계 0 — 일 0', s: 'done', at: 1000, cy: 7, by: 's:c7' }, { k: 'x1', t: '단계 1', s: 'done', at: 5000, cy: 8, by: 's:c8' }, { k: 'x2', t: '단계 2 — 일 2', s: 'done', at: 6000, cy: 8, by: 's:c8' }]);
+  const other = R('pelse', 'elsewhere-design.md', [{ k: 'y', t: '단계 0', s: 'pending', at: 1 }]);
+  const X = { owner: 'b:L', runner: false, plan: axes };
+  assert.ok(sameDoc('docs\\plans\\Now-Design.md', now.plan)); assert.ok(!sameDoc('docs/plans/now-design.md.bak', now.plan)); assert.ok(!sameDoc('docs/plans/x-now-design.md', now.plan), '이름 끝이 같아도 경로 경계가 아니면 다름');
+  assert.equal(stepKey('단계 5의 몫 ㉮ — 새 층'), stepKey('단계 5 — R-02 부류'), '단계 번호로 맞춤');
+  const mg = loopMerge([X, now, other], nodes);
+  assert.deepEqual(mg.entries.map((e) => e.plan.id), ['pax', 'pelse'], '같은 설계서 러너 계획은 덩어리에서 빠짐');
+  assert.deepEqual([...mg.merged.keys()], [1]); assert.ok(mg.apart.has('pelse')); assert.equal(mg.liveCy, 8, '지금 축에 붙은 러너의 진행 중 회차');
+  const ms = sm([X, now, other], { nowMs: 65_000, mainId: 's:m', nodes, labelOf: (id) => (nodes.get(id) || {}).label || '' });
+  assert.equal(ms.length, 2, '축 덩어리 + 다른 설계서 하나');
+  const [a, b] = ms;
+  assert.equal(a.mergedN, 1); assert.equal(a.liveCy, 8); assert.ok(!a.apart); assert.ok(b.apart, '축 큐에 없는 설계서 → 머리말');
+  const cur = a.items[1];
+  assert.ok(cur.open && cur.run && cur.run.live); assert.equal(cur.run.owner, 'b:R'); assert.equal(cur.run.liveCy, 8);
+  assert.deepEqual(cur.steps.items.map((x) => [x.st, x.cy ?? null, x.by ?? null, !!x.nx]), [['done', 7, 's:c7', false], ['done', 8, 's:c8', false], ['pending', null, null, true], ['pending', null, null, false]], '회차 보존 · 어긋나면(축 대기) 회차 없음 · 다음 단계 표시');
+  assert.equal(cur.steps.items[0].ago, '1분 전');
+  assert.equal(cur.cy, null, '닫은 단계의 마지막 회차(8)가 진행 중 회차와 같으면 줄 끝에 다시 쓰지 않음(러너 줄 칩이 보임)');
+  const idle = new Map(nodes); idle.set('s:c8', { ...nodes.get('s:c8'), status: 'done' });
+  const ci = sm([X, now], { nowMs: 65_000, mainId: 's:m', nodes: idle })[0].items[1];
+  assert.equal(ci.cy, 8, '회차가 끝났으면 줄 끝 = 닫은 단계의 마지막 회차'); assert.equal(ci.by, 's:c8'); assert.equal(ci.run.liveCy, null);
+  assert.equal(cur.st, 'in_progress', '항목 상태는 축 어댑터 그대로');
+  assert.ok(!a.items[0].run && !a.items[0].open, '러너가 안 본 끝난 축은 접힘 대상');
+  // 판: 합친 러너 계획은 '+ 계획 n' 에서 빠지고 진행 중 회차가 축 판에
+  const m = bc(mg.entries, { mainId: 's:m', liveCy: mg.liveCy });
+  assert.equal(m.more, 1); assert.equal(m.liveCy, 8); assert.equal(m.done, 1); assert.equal(m.total, 3);
+  // 축 큐가 없으면 합칠 곳이 없어 그대로(머리말 없음)
+  const solo = sm([now], { mainId: 's:m', nodes });
+  assert.equal(solo.length, 1); assert.ok(!solo[0].apart); assert.equal(solo[0].items[0].cy, 7);
+  // 끝난 러너(퇴장)가 본 끝난 축: 그 줄에 회차만, 펼치지 않음
+  const gone = new Map(nodes); gone.set('b:R', { ...nodes.get('b:R'), status: 'done' });
+  const old = R('pold', 'old-design.md', [{ k: 'z', t: '단계 1', s: 'done', at: 3000, cy: 5, by: 's:c5' }]);
+  const [ao] = sm([X, old], { nowMs: 65_000, mainId: 's:m', nodes: gone });
+  assert.equal(ao.items[0].cy, 5); assert.ok(!ao.items[0].open); assert.ok(!ao.items[0].run.live);
+});

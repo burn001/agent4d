@@ -168,3 +168,11 @@
 .ipb-steps li.st-blocked i { color: var(--pb-hold, #a78bfa); }
 .pb-chip.auto { border-style: dashed; color: var(--muted); font-style: italic; } /* 자동 추정 — 확인된 설정과 구분 */
 .ipb-auto { margin: .1em 0 .3em; font-size: .82em; color: var(--muted); font-style: italic; }
+/* 축 항목에 합친 러너 단계 계획: 러너 한 줄 · 단계별 닫은 회차 · 다음 단계 강조 · 축 큐 밖 설계서 머리말 */
+.ipb-run { flex-basis: 100%; margin-left: 3.2em; font-size: .8em; color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: .1em .35em; }
+.ipb-run .pb-chip { font-size: .95em; }
+.ipb-steps li > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ipb-steps li .pr-cy, .ipb-steps li .ipb-ago { flex: none; font-size: .92em; }
+.ipb-steps li.nx { color: var(--text); font-weight: 600; }
+.ipb-steps li.nx.st-pending i { color: var(--pb-run, var(--warn)); }
+.ipb-apart { margin: 0 0 .3em; font-size: .8em; color: var(--muted); font-style: italic; }

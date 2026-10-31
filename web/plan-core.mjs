@@ -294,13 +294,14 @@ export function boardCard(entries, { nowMs = 0, fx = null, labelOf = null, mainI
       lines.push({ i, st, mark: PLAN_ST_GLYPH[st] || PLAN_ST_GLYPH.pending, t: x.t || t('boards.plan.item', { n: i + 1 }), up: true, ...(x.note ? { note: x.note } : {}) });
     }
   }
+  // liveCy: 축 큐 판도 합친 러너의 진행 중 회차(loopMerge)
   const ownerLabel = e.owner === mainId ? t('boards.plan.main') : (labelOf ? labelOf(e.owner) : '') || e.owner;
   return {
     pid: p.id, owner: e.owner, ownerLabel, src: p.src, srcLabel: PLAN_SRC_LABEL[p.src] || '', glyph: PLAN_SRC_GLYPH[p.src] || '☐', title: p.title || PLAN_SRC_LABEL[p.src] || t('boards.plan.plan'),
     done: pr.done, prog: pr.prog, total: pr.total, count: `${pr.done}/${pr.total}`, frac: pr.frac,
     fracDone: pr.total ? pr.done / pr.total : 0, fracProg: pr.total ? pr.prog / pr.total : 0, allDone: pr.total > 0 && pr.done === pr.total,
     cells, extra: Math.max(0, N - c0 - M), before: c0, lines, hold: p.items.filter((x) => x.s === 'pending' && x.hold).length,
-    more: entries.length - 1, runner: e.runner, liveCy: e.runner ? liveCy : null, hot: fx ? entries.some((x) => fx.isHot(x.owner, nowMs)) : false,
+    more: entries.length - 1, runner: e.runner, liveCy: e.runner || p.src === 'axes' ? liveCy : null, hot: fx ? entries.some((x) => fx.isHot(x.owner, nowMs)) : false,
     dels: fx ? fx.delsOf(e.owner, p.id, nowMs) : [],
   };
 }
@@ -309,17 +310,107 @@ export function boardCard(entries, { nowMs = 0, fx = null, labelOf = null, mainI
  * 크게 보기(팝업 체계, 보드 전용 넓은 카드) 모델: 그 메인에 모인 계획 전부 — 계획마다 제목·출처·주인·완료/전체·막대·항목 전체(상태 기호·
  * 회차 번호·처리한 노드·얼마 전).
  */
-export function sheetInspectModel(entries, { nowMs = Date.now(), labelOf = null, mainId = '' } = {}) {
-  return (entries || []).map((e) => {
+export function sheetInspectModel(entries, { nowMs = Date.now(), labelOf = null, mainId = '', nodes = null } = {}) {
+  // 축 큐가 있으면 같은 설계서의 러너 단계 계획은 그 축 항목에 합친다(따로 덩어리로 두 번 보이지 않게)
+  const mg = loopMerge(entries, nodes || new Map());
+  const lab = (id) => (labelOf ? labelOf(id) : '') || '';
+  return mg.entries.map((e) => {
     const [m] = planInspectModel({ meta: { plans: [e.plan] } }, { nowMs, labelOf });
     const pr = planProgress(e.plan);
+    const axes = e.plan.src === 'axes';
     return {
-      ...m, owner: e.owner, ownerLabel: e.owner === mainId ? t('boards.plan.main') : (labelOf ? labelOf(e.owner) : '') || e.owner, runner: e.runner,
+      ...m, owner: e.owner, ownerLabel: e.owner === mainId ? t('boards.plan.main') : lab(e.owner) || e.owner, runner: e.runner,
       done: pr.done, prog: pr.prog, total: pr.total, fracDone: pr.total ? pr.done / pr.total : 0, fracProg: pr.total ? pr.prog / pr.total : 0,
       hold: e.plan.items.filter((x) => x.s === 'pending' && x.hold).length,
-      items: m.items.map((it) => { const st = it.v2 === 'skipped' ? 'skipped' : it.s === 'pending' && it.hold ? 'hold' : it.s; return { ...it, st, glyph: st === 'skipped' ? '⤼' : PLAN_ST_GLYPH[st] || '○' }; }),
+      ...(mg.apart.has(e.plan.id) ? { apart: true } : {}),
+      ...(axes && mg.merged.size ? { mergedN: [...mg.merged.values()].reduce((s, r) => s + r.length, 0) } : {}),
+      ...(axes && mg.liveCy != null ? { liveCy: mg.liveCy } : !axes && e.runner ? { liveCy: liveCycleOf(e.plan, nodes || new Map()) } : {}),
+      items: m.items.map((it, i) => {
+        const st = it.v2 === 'skipped' ? 'skipped' : it.s === 'pending' && it.hold ? 'hold' : it.s;
+        const out = { ...it, st, glyph: st === 'skipped' ? '⤼' : PLAN_ST_GLYPH[st] || '○' };
+        const runs = axes ? mg.merged.get(i) : null;
+        if (axes && it.steps && Array.isArray(it.steps.items)) out.steps = { ...it.steps, items: mergeSteps(it.steps.items, runs || [], { nowMs, labelOf: lab }) };
+        const live = !!(runs && runs.some((r) => r.live));
+        out.open = !!(out.cur || live); // 단계 목록 펼침: 지금 축 · 살아 있는 러너가 보는 축
+        if (runs && runs.length) Object.assign(out, runSummary(runs, out.steps, { nowMs, labelOf: lab, nodes: nodes || new Map(), open: out.open }));
+        return out;
+      }),
     };
   });
+}
+
+/**
+ * 자율 루프 판 합치기 — 축 큐(src axes)의 항목 설계서(`doc`, 프로젝트 기준 상대 경로)와 러너 단계 계획(src phases, 제목 = 설계서 파일 이름
+ * `planTitleOf`)이 같은 문서면(경로 정규화 뒤 같거나 한쪽이 다른 쪽의 '/…' 끝) 그 러너 계획을 그 축 항목에 붙인다.
+ * 반환 {entries: [축 큐, …합치지 못한 계획], merged: Map(축 항목 index → [{owner, plan, live}]), apart: Set(축 큐에 없는 설계서의 러너 계획 id), liveCy}.
+ * 축 큐가 없으면 그대로(합칠 곳 없음 — 머리말도 없음). liveCy = 지금 축(planProgress cur)에 붙은 러너 계획을 붙든 진행 중 회차.
+ */
+export const docKey = (s) => String(s || '').replace(/\\/g, '/').replace(/\/{2,}/g, '/').replace(/^(?:\.\/)+/, '').trim().toLowerCase();
+export function sameDoc(axisDoc, runnerPlan) {
+  const a = docKey(axisDoc), b = docKey(runnerPlan && (runnerPlan.file || runnerPlan.title));
+  if (!a || !b || !/\.(?:md|markdown|mdx)$/.test(b)) return false;
+  return a === b || a.endsWith('/' + b) || b.endsWith('/' + a);
+}
+/** 단계 맞춤 열쇠: 제목의 단계 번호(`단계 5`·`phase 2` — 축 어댑터 axisSteps 와 같은 낱말), 없으면 정리한 글 */
+export function stepKey(title) {
+  const s = String(title || '');
+  const m = /(?:단계|phase|step|stage|조건|관문)\s*([0-9A-Za-z]{1,4})/i.exec(s);
+  return m ? '#' + m[1].toLowerCase() : s.replace(/[`*_~]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+export function loopMerge(entries, nodes = new Map()) {
+  const L = entries || [];
+  const merged = new Map(), apart = new Set();
+  const ax = L.find((e) => e && e.plan && e.plan.src === 'axes');
+  if (!ax) return { entries: L, merged, apart, liveCy: null };
+  const rest = [];
+  for (const e of L) {
+    if (e === ax) continue;
+    if (!e || !e.plan || e.plan.src !== 'phases') { rest.push(e); continue; }
+    const i = ax.plan.items.findIndex((it) => it && it.doc && sameDoc(it.doc, e.plan));
+    if (i < 0) { apart.add(e.plan.id); rest.push(e); continue; }
+    const n = nodes.get(e.owner);
+    const live = !!(n && !TERMINAL.has(n.status));
+    if (!merged.has(i)) merged.set(i, []);
+    merged.get(i).push({ owner: e.owner, plan: e.plan, live });
+  }
+  for (const runs of merged.values()) runs.sort((a, b) => (b.live - a.live) || (b.plan.at || 0) - (a.plan.at || 0));
+  const cur = planProgress(ax.plan).cur;
+  let liveCy = null;
+  for (const r of merged.get(cur) || []) { const c = liveCycleOf(r.plan, nodes); if (c != null) { liveCy = c; break; } }
+  return { entries: [ax, ...rest], merged, apart, liveCy };
+}
+/**
+ * 축 단계 목록 + 러너 관찰. **상태는 축 어댑터(설계서 표식 줄, 10초마다 다시 읽은 지금 파일)를 믿는다** — 러너 관찰은 회차가 그 문서를 마지막으로
+ * 읽거나 고친 때의 값이라 늦을 수 있다. 러너 쪽은 단계를 닫은 회차·처리 노드·시각만 보탠다: 축 단계가 done·current 이고 러너가 같은 단계(번호)를
+ * 대기 아님으로 본 것 중 가장 최근 것. 둘이 어긋나면(축은 대기인데 러너는 끝남 등) 회차 정보를 붙이지 않는다. 다음 단계(진행 첫째, 없으면 대기 첫째)에 nx.
+ */
+export function mergeSteps(steps, runs, { nowMs = Date.now(), labelOf = () => '' } = {}) {
+  const obs = new Map();
+  for (const r of runs || []) for (const x of r.plan.items || []) {
+    if (!x || x.s === 'pending') continue;
+    const k = stepKey(x.t), o = obs.get(k);
+    if (!o || (x.at || 0) > (o.at || 0)) obs.set(k, x);
+  }
+  const nx = steps.findIndex((x) => x.st === 'current') >= 0 ? steps.findIndex((x) => x.st === 'current') : steps.findIndex((x) => x.st === 'pending');
+  return steps.map((x, j) => {
+    const o = x.st === 'done' || x.st === 'current' ? obs.get(stepKey(x.t)) : null;
+    return { ...x, ...(j === nx ? { nx: true } : {}), ...(o ? { cy: o.cy ?? null, by: o.by || null, byLabel: o.by ? labelOf(o.by) : '', at: o.at || 0, ago: o.at ? fmtAgo(nowMs - o.at) : '' } : {}) };
+  });
+}
+/** 합친 축 항목 줄: 러너(주인·살아 있음·진행 중 회차) + 줄 끝 회차(닫은 단계 중 시각이 가장 최근인 것, 접힌 줄은 없으면 그 계획의 마지막 회차) */
+function runSummary(runs, steps, { nowMs, labelOf, nodes, open = false }) {
+  const r = runs[0];
+  let last = null;
+  for (const x of (steps && steps.items) || []) if (x.cy != null && (!last || (x.at || 0) > (last.at || 0))) last = x; // 시각순 — 회차 번호는 러너가 바뀌면 다시 1부터
+  const liveCy = runs.map((q) => liveCycleOf(q.plan, nodes)).find((c) => c != null);
+  // 펼친 줄은 닫은 단계에서만(러너 줄이 관찰 시각을 이미 보임), 접힌 줄은 없으면 그 계획의 마지막 회차. 진행 중 회차와 같으면 줄 끝에 다시 쓰지 않음
+  let cy = last ? last.cy : open ? null : r.plan.cy ?? null, by = last ? last.by : open ? null : r.plan.by || null;
+  if (cy != null && liveCy != null && cy === liveCy) { cy = null; by = null; }
+  const at = last && cy != null ? last.at || 0 : r.plan.at || 0;
+  return {
+    cy, by, byLabel: by ? labelOf(by) : '', ago: cy != null && at ? fmtAgo(nowMs - at) : '',
+    run: { owner: r.owner, label: labelOf(r.owner) || r.owner, live: runs.some((q) => q.live), liveCy: liveCy ?? null, n: runs.length, seen: r.plan.at ? fmtAgo(nowMs - r.plan.at) : '' },
+  };
 }
 
 /**

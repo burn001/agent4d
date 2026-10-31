@@ -2271,7 +2271,7 @@ export class RootRuntime {
         if (a.adopter === this.sessionId) { carry.add(a.toolUseId); continue; } // 새 회차가 이미 이 메인으로 인계됨 — 앞 회차도 같은 기동기로
         await this.index.ensureTitle(e).catch(() => {});
         const last = Math.max(Date.parse(e.lastTs) || 0, this.offline ? 0 : e.mtimeMs || 0);
-        if (Date.parse(e.head.firstTs) > clearMs || last >= clearMs) carry.add(a.toolUseId);
+        if (Date.parse(e.head.firstTs) > clearMs || last >= clearMs || this._cycleAliveAcross(li, e, clearMs)) carry.add(a.toolUseId);
       }
     }
     for (const { e, a } of assigned) {
@@ -2353,6 +2353,18 @@ export class RootRuntime {
     }
     R.cycles.add(e.sessionId);
     return R;
+  }
+
+  /**
+   * /clear 앞에 시작한 회차 e 가 /clear 를 넘어 살아 있었는지 — 회차 메인 기록(lastTs·mtime)만으로는 모자란다: 회차가 서브에이전트·
+   * 백그라운드 작업을 기다리는 동안 메인 transcript 는 몇십 분 조용하다(실측 21분). ① 회차 프로세스가 지금 살아 있음(`sessions/<pid>.json`,
+   * /clear 앞에 시작했으니 /clear 때도 살아 있었다 — 재생도 지금 프로세스 상태로 본다, 와 같은 규칙) ② 라이브: 회차 하위 기록
+   * (서브에이전트·워크플로 transcript) 이 /clear 뒤에 쓰였음
+   */
+  _cycleAliveAcross(li, e, clearMs) {
+    if (this.index.procs?.get?.(String(e.sessionId).toLowerCase())?.alive) return true;
+    if (this.offline) return false;
+    try { return li._subFiles(e).some((s) => s.mtimeMs >= clearMs); } catch { return false; }
   }
 
   /** 인계: 끝난 세션이 띄운 기동기를 이 루트(메인) 아래 '이어받은 기동기' 노드로 */

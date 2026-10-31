@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-10-31
+
+### Fixed
+- After `/clear`, the new main now takes over a running autopilot loop (launcher, runner, current `claude -p` cycle) even when the cycle's own transcript went quiet before the clear while it waited on a subagent; a cycle whose process is still alive, or whose subagent logs were written after the clear, now counts as alive across it.
+
+### Changed
+- Loop board enlarged view no longer shows the same phases twice: a runner's phase plan for a design doc that is in the axis queue is merged into that axis row (per-phase closing cycle, runner and running cycle kept; phase state follows the design doc markers), the header pill shows the current state instead of a summed done/total, and only runner plans for docs outside the queue stay as their own block with a note.
+
 ## [0.7.2] - 2026-10-30
 
 ### Removed
