@@ -5,6 +5,7 @@ import { isLauncher, isRunner, isCycle, isOrphanRoot, deviceInfo, deviceSummary,
 import { t as tr, fmtTime, fmtDateTime } from './i18n.mjs';
 import { isJob, jobOf, jobInspect, jobStale, jobTags, jobFold, jobDisplayState, jobProgress, jobProgressText, isJobEndedState,
   procOf, procState, procJobId, jobLaneValues, jobHeat, heatLevel, jobEtaMs, fmtRate } from './job-core.mjs';
+import { RIG_KINDS, RIG_GLYPH, rigState, rigGauge, rigRc, rigStaleMs } from './lab/lab-rig-core.mjs'; // 연구소 기자재 줄
 
 export const INSPECT = {
   TOOLS: 8,          // 노드당 최근 도구 호출
@@ -464,4 +465,31 @@ export function procCardModel(n, nodes, nowMs) {
   const jn = nodes && nodes.get ? nodes.get(procJobId(n)) : null;
   const job = jn ? jobOf(jn) : null;
   return { state: st, rows, lanes: job ? laneTableModel(job, nowMs) : null, line: job && job.line ? job.line : '', jobId: jn ? jn.id : null };
+}
+
+/**
+ * 상세 팝업 기자재 줄(복셀 연구소에서 기자재로 그려지는 노드) — 순수.
+ * node = 앱 노드, kind = layout 이 정한 rigKind(RIG_KINDS, 모르면 'meter'), nowMs = 렌더러 시계, ix = rigIxOf 세부(선택),
+ * extra = 시퀀서 기계 상태 {progress}(선택). 반환 {kind, kindLabel, glyph, state, stateLabel, gauge(0..1|null), rc, staleMin, rows:[{key,label,value}]}.
+ * rows 값은 그대로 이어 '⚗ 시험대 · 진행 · 42% · rc 2 · 정체 3분' 한 줄이 된다(rc 는 실패이거나 0 이 아닐 때, 정체 분은 정체일 때만).
+ */
+export function rigCardModel(node, kind, nowMs, ix = null, extra = null) {
+  if (!node) return null;
+  const k = RIG_KINDS.includes(kind) ? kind : 'meter';
+  const state = rigState(node, nowMs, k);
+  // 시퀀서 = 기동기 회차 진행(extra.progress = cycleProgress, rigModel 과 같은 출처) · 그 밖 rigGauge
+  let gauge = k === 'sequencer' ? (extra && extra.progress != null ? Number(extra.progress) : null) : rigGauge(node, k, nowMs, ix);
+  gauge = Number.isFinite(gauge) ? Math.max(0, Math.min(1, gauge)) : null;
+  const rc = rigRc(node);
+  const sm = state === 'stale' ? rigStaleMs(node, nowMs) : null;
+  const staleMin = Number.isFinite(sm) ? Math.max(1, Math.round(sm / 60000)) : (state === 'stale' ? 0 : null);
+  const kindLabel = tr('lab.rig.' + k), stateLabel = tr('lab.state.' + state), glyph = RIG_GLYPH[k] || '';
+  const rows = [
+    { key: 'kind', label: tr('lab.rig.r.kind'), value: `${glyph} ${kindLabel}`.trim() },
+    { key: 'state', label: tr('lab.rig.r.state'), value: stateLabel },
+  ];
+  if (gauge != null) rows.push({ key: 'gauge', label: tr('lab.rig.r.gauge'), value: `${Math.round(gauge * 100)}%` });
+  if (rc != null && (rc !== 0 || state === 'fail')) rows.push({ key: 'rc', label: tr('lab.rig.r.rc'), value: tr('lab.rig.rc', { n: rc }) });
+  if (staleMin != null) rows.push({ key: 'stale', label: tr('lab.rig.r.stale'), value: tr('lab.rig.stale', { n: staleMin }) });
+  return { kind: k, kindLabel, glyph, state, stateLabel, gauge, rc, staleMin, rows };
 }

@@ -45,4 +45,6 @@ import './clear-launcher.test.mjs';
 // fg-output.test.mjs 는 따로 돌리면 통과하나 묶어 돌리면 시각 의존으로 1건 실패 — 여기 넣지 않음
 import './jobs-files.test.mjs';
 import './session-end.test.mjs';
+import './bg-end.test.mjs';
+import './wf-agent-end.test.mjs'; // 워크플로 에이전트 끝 경합
 import './sse-burst.test.mjs';

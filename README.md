@@ -31,7 +31,7 @@ Open the printed link in your browser. To let Claude Code open it for you ("open
 - **Replay** past or running sessions at 0.5×–32×, with idle gaps compressed.
 - **Local and read-only.** It only reads the transcripts Claude Code already writes; nothing is uploaded unless you turn on the optional remote link.
 - **Almost no dependencies.** The server and CLI use only Node built-in modules.
-- **Three views** — Flow, Planet and Voxel Office — each in 3D or a lighter 2D mode for slow machines.
+- **Four views** — Flow, Planet, Voxel Office and Voxel Lab — each in 3D or a lighter 2D mode for slow machines.
 
 > **Unofficial project.** Agent4D is an independent tool. Anthropic did not make it, does not endorse it and does not support it. "Claude" and "Claude Code" are trademarks of Anthropic, PBC, used here only to say what this tool works with.
 
@@ -93,13 +93,13 @@ _All screenshots and loops use the built-in mock data (`?mock=1&lang=en`). Proje
 
 The server tails the transcripts that Claude Code already writes under `~/.claude/projects/` (and background task output files) and streams a summarized event feed to the browser over Server-Sent Events. It never writes to those files.
 
-- **Three views.** **Flow** (default: hexagon nodes, curved beams, packets moving along them), **Planet** (the main agent as a mechanical planet, subagents as eight kinds of worlds such as gas giants, lava, ice, ringed, binary and comet planets, every node circled by its own orbits and moons that speed up while it works, tool holograms projected from the orbit ring, and each project drawn as a round orbital system), and **Voxel Office** (agents as office workers at desks, shelves and terminals). Each view has a **3D** mode and a lighter **2D** mode for slow machines. 2D is picked automatically when WebGL is missing.
+- **Four views.** **Flow** (default: hexagon nodes, curved beams, packets moving along them), **Planet** (the main agent as a mechanical planet, subagents as eight kinds of worlds such as gas giants, lava, ice, ringed, binary and comet planets, every node circled by its own orbits and moons that speed up while it works, tool holograms projected from the orbit ring, and each project drawn as a round orbital system), **Voxel Office** (agents as office workers at desks, shelves and terminals; you can also look through the main agent's eyes) and **Voxel Lab** (a round lab building: the work targets on a central platform, background jobs as lab rigs on the ring around it, subagents at horseshoe desks facing the platform and the main agent on a raised bridge). Each view has a **3D** mode and a lighter **2D** mode for slow machines. 2D is picked automatically when WebGL is missing.
 - **All projects, or just one.** The start screen shows every active Claude Code session on this machine, one island (or building) per project, with an automatic camera tour. Narrow it to one project or one session from the side panel.
 - **You, in the scene.** Each main agent has a small **user console** (Flow: a terminal above the island; Planet: a ground station; Voxel Office: the client screen on the office wall). It always shows the first words of your last message and where things stand ("Main working · 2m", "Answered 5m ago", "Question for you · 3 options"). A gold beam carries each message to the main agent and the answer flies back. Hover it for a summary, click it for a card with your recent messages, a pending question and the last final answer. When you send a prompt, the camera moves to the main agent that receives it (⚙ **Follow my prompts**, on by default; skipped while you steer the camera).
 - **Live tool activity.** Panels next to each node show the current tool (shell, read, edit, search, web, agent, skill…) and a one-line summary. A collapsible side panel shows a live text feed.
 - **Replay.** Play past or running sessions from the start at 0.5×–32×, with idle gaps compressed, a scrubbable timeline, highlight markers and continuous playback. An optional read-only **archive** folder keeps transcripts around for replay after the originals are gone (`agent4d archive add`).
 - **Gauges.** A per-session **context usage** gauge — and every agent (main, subagent, `claude -p`) visibly heats up as its own context window fills (warming at 30%, overheating at 70%, critical at 90%; cools down after a compact) — and an opt-in **usage-limit** gauge for the 5-hour and 7-day windows.
-- **Sound** (off until you turn it on). 12 background tracks synthesized from code, plus sound effects synthesized live in the browser.
+- **Sound** (off until you turn it on). 54 background tracks synthesized from code, plus sound effects synthesized live in the browser.
 - **Languages.** The web UI and the CLI are in English by default and switch to Korean on a Korean locale. Both can be forced (see [FAQ](#faq-and-troubleshooting)).
 - **Remote access** (optional). A Cloudflare quick tunnel plus a small Cloudflare Worker give you a stable, token-protected link that survives restarts.
 
@@ -156,7 +156,7 @@ The first run creates a config file with random tokens (see [Configuration](#con
 npm run demo        # synthetic session tree: reads no transcripts, makes no network calls
 ```
 
-Then open `http://127.0.0.1:7788/?t=<viewToken>` (the token is `viewToken` in the config file). On a running server you can also add `&mock=1` (one session) or `&mock=1&scope=all` (all projects) to the link to drive the UI from built-in mock data, and `&view=planet` or `&view=voxel` to pick a view.
+Then open `http://127.0.0.1:7788/?t=<viewToken>` (the token is `viewToken` in the config file). On a running server you can also add `&mock=1` (one session) or `&mock=1&scope=all` (all projects) to the link to drive the UI from built-in mock data, and `&view=planet`, `&view=voxel` or `&view=lab` to pick a view.
 
 ## Use with Claude Code (skill)
 
@@ -195,7 +195,7 @@ To turn the check off, set `"updateCheck": false` in `config.json` or the enviro
 
 ## Background music
 
-The 46 tracks (`bgm-aurora.mp3`, `bgm-bossa.mp3`, `bgm-caper.mp3`, `bgm-chillhop.mp3`, `bgm-circuit.mp3`, `bgm-city.mp3`, `bgm-comet.mp3`, `bgm-copier.mp3`, `bgm-cursor.mp3`, `bgm-dawn.mp3`, `bgm-deadline.mp3`, `bgm-deepfield.mp3`, `bgm-deephouse.mp3`, `bgm-drive.mp3`, `bgm-espresso.mp3`, `bgm-funk.mp3`, `bgm-glacier.mp3`, `bgm-gravity.mp3`, `bgm-hotfix.mp3`, `bgm-hyperspace.mp3`, `bgm-ionstorm.mp3`, `bgm-jazz.mp3`, `bgm-liquid.mp3`, `bgm-lofi.mp3`, `bgm-mambo.mp3`, `bgm-meeting.mp3`, `bgm-nebula.mp3`, `bgm-orbit.mp3`, `bgm-overclock.mp3`, `bgm-pantry.mp3`, `bgm-pulsar.mp3`, `bgm-pulse.mp3`, `bgm-queue.mp3`, `bgm-rainwindow.mp3`, `bgm-refactor.mp3`, `bgm-satellite.mp3`, `bgm-sprint.mp3`, `bgm-stack.mp3`, `bgm-stardust.mp3`, `bgm-supernova.mp3`, `bgm-swing.mp3`, `bgm-teatime.mp3`, `bgm-typewriter.mp3`, `bgm-uplift.mp3`, `bgm-warp.mp3`, `bgm.mp3`; about 4.6 MB each) are attached to the [latest release](https://github.com/burn001/agent4d/releases/latest) rather than stored in the repository. Put them in `web/assets/`. Without them the viewer works fine, just without music (sound effects still play).
+The 54 tracks (`bgm-aurora.mp3`, `bgm-bossa.mp3`, `bgm-caper.mp3`, `bgm-centrifuge.mp3`, `bgm-chillhop.mp3`, `bgm-circuit.mp3`, `bgm-city.mp3`, `bgm-cleanroom.mp3`, `bgm-collider.mp3`, `bgm-comet.mp3`, `bgm-copier.mp3`, `bgm-cursor.mp3`, `bgm-dawn.mp3`, `bgm-deadline.mp3`, `bgm-deepfield.mp3`, `bgm-deephouse.mp3`, `bgm-drive.mp3`, `bgm-espresso.mp3`, `bgm-funk.mp3`, `bgm-glacier.mp3`, `bgm-gravity.mp3`, `bgm-hotfix.mp3`, `bgm-hyperspace.mp3`, `bgm-ionstorm.mp3`, `bgm-jazz.mp3`, `bgm-liquid.mp3`, `bgm-lofi.mp3`, `bgm-mambo.mp3`, `bgm-meeting.mp3`, `bgm-nebula.mp3`, `bgm-orbit.mp3`, `bgm-oscillo.mp3`, `bgm-overclock.mp3`, `bgm-pantry.mp3`, `bgm-petri.mp3`, `bgm-pulsar.mp3`, `bgm-pulse.mp3`, `bgm-queue.mp3`, `bgm-rainwindow.mp3`, `bgm-reactor.mp3`, `bgm-refactor.mp3`, `bgm-satellite.mp3`, `bgm-spectro.mp3`, `bgm-sprint.mp3`, `bgm-stack.mp3`, `bgm-stardust.mp3`, `bgm-supernova.mp3`, `bgm-swing.mp3`, `bgm-teatime.mp3`, `bgm-titration.mp3`, `bgm-typewriter.mp3`, `bgm-uplift.mp3`, `bgm-warp.mp3`, `bgm.mp3`; about 4.6 MB each) are attached to the [latest release](https://github.com/burn001/agent4d/releases/latest) rather than stored in the repository. Put them in `web/assets/`. Without them the viewer works fine, just without music (sound effects still play).
 
 ```bash
 # with the GitHub CLI, inside the clone (latest release)

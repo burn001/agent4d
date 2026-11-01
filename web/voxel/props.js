@@ -72,7 +72,7 @@ export class BoxBatch {
     this.mesh = mesh;
     this.cap = cap;
   }
-  begin() { this.n = 0; this.gn = 0; this.xf = null; }
+  begin() { this.n = 0; this.gn = 0; this.xf = null; this.lift = 0; }
   /**
    * 프로젝트 페이드: fade(x, z) → 0..1(그 자리 동의 투명도). 0 이면 넣지 않고(숨김), 0 < a < 1 이면 진짜 투명
    * 같은 재질을 복제한 반투명 유령 묶음(인스턴스 알파, 깊이 안 씀)에 넣는다. 유령은 페이드가 움직이는 0.5초 동안만 차고
@@ -126,6 +126,7 @@ export class BoxBatch {
   /** 월드 행렬 m, 색 c(THREE.Color), owner(nodeId 또는 null) */
   pushMatrix(m, c, owner = null) {
     if (this.xf) m = _mx.copy(m).premultiply(this._xm);
+    if (this.lift) { if (m !== _mx) m = _mx.copy(m); m.elements[13] += this.lift; } // 바닥 높이 올림(연구소 브리지 위 캐릭터, 0 이면 그대로)
     if (this.fade) {
       const a = this.fade(m.elements[12], m.elements[14]);
       if (a <= 0) return;
@@ -193,8 +194,6 @@ export function roomFrame(room, b) {
 export function endXf(b) { if (b.lit) b.lit.setXf(null); if (b.glow) b.glow.setXf(null); if (b.glass) b.glass.setXf(null); }
 
 // 결정적 의사 난수(정적 그림의 스카이라인·책 등)
-/** 방 id → 창 벽 하늘 범위(drawCtxWear 용, buildRoomStatic 이 채움) */
-const SKY_BY_ID = new Map();
 function rnd(seed) { let s = seed >>> 0 || 1; return () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }; }
 
 /**
@@ -202,8 +201,9 @@ function rnd(seed) { let s = seed >>> 0 || 1; return () => { s = (s * 1103515245
  * 벽 높이는 세계 방향으로 정한다: 기본 카메라에서 먼 쪽(−x·−z 를 보는 벽)은 높게, 가까운 쪽은 낮게 — 돌린 방도 안이 보인다.
  * 칸막이는 유리(반투명) + 얇은 프레임·기둥, 창 벽(windowWall)은 바깥 커튼월 = 창밖 하늘.
  * band = 세션 색(높은 벽 윗면 띠·문 위 띠·문 밖 깔개)
+ * art = 작업 대상 층이 켜짐 — 창밖 풍경 판을 그리지 않고 창 벽도 다른 칸막이와 같은 투명 유리(벽 바깥 띠의 가구가 늘 같은 모습으로 보이게)
  */
-export function buildRoomStatic(room0, pal, b, { dim = false, band = null } = {}) {
+export function buildRoomStatic(room0, pal, b, { dim = false, band = null, cam = undefined, art = false } = {}) {
   const xf = room0.xf;
   const room = roomFrame(room0, b);
   const L = b.lit, G = b.glow, Q = b.glass || b.lit;
@@ -219,9 +219,11 @@ export function buildRoomStatic(room0, pal, b, { dim = false, band = null } = {}
     if (room.leadDesk) L.box(room.leadDesk.x, 0.006, room.leadDesk.z - 0.3, 6.2, 0.02, 3.8, C(pal.carpetLead));
   } else L.box(o.x, 0.005, o.z + (room.ext || 0) / 2, W - 3, 0.02, D0 - 4 + (room.ext || 0), C(pal.carpet));
   const H = 2.2, LOW = 1.0, T = 0.12;
-  const hi = { back: wallHigh(xf, 'back'), left: wallHigh(xf, 'left'), front: wallHigh(xf, 'front'), right: wallHigh(xf, 'right') };
+  // 칸막이 높이는 지금 카메라 사분면 기준(cam) — 창 벽(ww, 의뢰인 스크린 자리)은 늘 같은 벽, 카메라 쪽이 되면 하늘 대신 높은 유리로(뒤에서 봐도 안이 보이게)
+  const hi = { back: wallHigh(xf, 'back', cam), left: wallHigh(xf, 'left', cam), front: wallHigh(xf, 'front', cam), right: wallHigh(xf, 'right', cam) };
   const ww = room.type === 'office' ? windowWall(room0) : null;
-  room._skyBuild = (room._skyBuild || 0) + 1;
+  if (ww) hi[ww] = true;
+  const skyOn = ww && !art && wallHigh(xf, ww, cam); // 층이 켜지면 풍경 없음(창 벽 = 높은 유리)
   const topC = band ? C(band) : C(pal.glassFrame);
   // 유리 칸막이 한 토막(가로 = x 방향 또는 세로 = z 방향)
   const pane = (ax, az, bx, bz, side) => {
@@ -237,7 +239,7 @@ export function buildRoomStatic(room0, pal, b, { dim = false, band = null } = {}
     for (let i = 1; i < n; i++) { const u = i / n; L.box(ax + (bx - ax) * u, h / 2, az + (bz - az) * u, 0.06, h, 0.06, C(pal.glassFrame)); }
     for (const [px, pz] of [[ax, az], [bx, bz]]) L.box(px, h / 2, pz, 0.08, h, 0.08, C(pal.glassFrame));
   };
-  const wallX = (xa, xb, z, side) => (ww === side ? skyWall(L, G, xa, xb, z, side === 'front' ? -1 : 1, pal, C, room) : pane(xa, z, xb, z, side));
+  const wallX = (xa, xb, z, side) => (ww === side && skyOn ? skyWall(L, G, xa, xb, z, side === 'front' ? -1 : 1, pal, C) : pane(xa, z, xb, z, side));
   // 뒤 벽(뒷문 있으면 가운데 틈)
   const backZ = zb - T / 2;
   if (room.backDoor) { wallX(x0, o.x - 0.9, backZ, 'back'); wallX(o.x + 0.9, x1, backZ, 'back'); L.box(o.x, -0.04, zb - 0.6, 1.8, 0.08, 1.2, C(pal.corridor)); }
@@ -249,8 +251,6 @@ export function buildRoomStatic(room0, pal, b, { dim = false, band = null } = {}
   // 앞 벽(출입문 틈)·오른쪽 벽
   const dx = room.door.x, frontZ = zf + T / 2;
   wallX(x0, dx - 0.8, frontZ, 'front'); wallX(dx + 0.8, x1, frontZ, 'front');
-  // 레이아웃이 다시 계산되면 방 객체가 새로 생겨 room._sky 가 비므로(정적은 서명이 같으면 다시 안 그림) id 로도 기억 — 컨텍스트 젖빛 유리가 깜빡이지 않게
-  if (room0.id != null) { if (room._sky && room._skyB === room._skyBuild) SKY_BY_ID.set(room0.id, room._sky); else SKY_BY_ID.delete(room0.id); }
   pane(x1 + T / 2, zb, x1 + T / 2, zf, 'right');
   // 문틀(유리문 기둥·위 틀)
   const dh = hi.front ? H : 2.1;
@@ -270,7 +270,7 @@ export function buildRoomStatic(room0, pal, b, { dim = false, band = null } = {}
  * 창 벽 = 바깥 커튼월: 아래 벽(0.35) + 하늘(띠 셋으로 그러데이션) + 스카이라인(다크 = 불 켜진 창·별, 라이트 = 옅은 실루엣) + 창살.
  * 하늘·불빛은 빛 묶음(조명 영향 없음). inward = 방 안쪽 z 방향(+1 = 뒤 벽, −1 = 앞 벽)
  */
-function skyWall(L, G, xa, xb, z, inward, pal, C, room) {
+function skyWall(L, G, xa, xb, z, inward, pal, C) {
   const len = xb - xa;
   if (len < 1e-3) return;
   const cx = (xa + xb) / 2, H = 2.2;
@@ -298,7 +298,6 @@ function skyWall(L, G, xa, xb, z, inward, pal, C, room) {
   for (let i = 0; i <= n; i++) L.box(xa + (len * i) / n, 0.36 + (H - 0.36) / 2, z + inward * 0.07, 0.06, H - 0.36, 0.06, C(pal.glassFrame));
   L.box(cx, 0.38, z + inward * 0.08, len, 0.05, 0.1, C(pal.glassFrame));
   L.box(cx, H + 0.03, z, len + 0.1, 0.08, 0.16, C(pal.glassFrame));
-  if (room) { const o = room._skyB === room._skyBuild && room._sky ? room._sky : null; room._sky = { x0: o ? Math.min(o.x0, xa) : xa, x1: o ? Math.max(o.x1, xb) : xb, z: zs, inward }; room._skyB = room._skyBuild; }
 }
 
 /** 스탠딩 데스크: 상판·앞 모서리·T 다리 둘·발판 + 홀로그램 발광대(상판 뒤쪽, 옅게 — 켜지면 동적 빛이 덮음) */
@@ -598,7 +597,7 @@ export function drawDeskEmitter(G, d, lead, state, col, pal, k = 0) {
   const c = state === 'flash' ? _c.copy(col).lerp(_c2.set(0xffffff), 0.5) : state === 'dim' ? _c.copy(pal.emitter).multiplyScalar(pal.isLight ? 0.7 : 0.45) : _c.copy(col);
   G.box(d.x, DESK_TOP + 0.012, d.z + dd / 2 - 0.12, wide * 0.55, 0.016, 0.05, c);
   if (k > 0.02) { // 빛기둥(얇은 판 두 장): 발광대 → 모니터 아래 끝
-    const h = 0.16 * k;
+    const h = 0.1 * k; // DESK_MON.LIFT
     G.box(d.x, DESK_TOP + 0.02 + h / 2, d.z + dd / 2 - 0.12, wide * 0.5 * k, h, 0.012, _c.multiplyScalar(0.55));
   }
 }
@@ -729,22 +728,14 @@ export function drawCabinetWarn(lg, pal, warn, t, strong, b) {
   if (on) ring(G, cab.x, 0.05, cab.z + 1.2, 1.6 + 0.4 * Math.sin(t * 6), 14, warn, 0.1);
 }
 
-/** 사무실 컨텍스트 사용률: 창(커튼월 하늘)이 뿌옇게, 팀장 책상 위 서류 더미 — 동적 */
+/** 사무실 컨텍스트 사용률: 팀장 책상 위 서류 더미 — 동적. 창 흐림(젖빛 유리)은 2026-10-31 없앰(컨텍스트 표현은 에이전트 과열) */
 export function drawCtxWear(room0, pct, pal, b) {
   if (!room0 || room0.type !== 'office' || !(pct >= 0)) return;
   const room = roomFrame(room0, b);
-  try { ctxWear_(room, room0, pct, pal, b); } finally { endXf(b); }
+  try { ctxWear_(room, pct, pal, b); } finally { endXf(b); }
 }
-function ctxWear_(room, room0, pct, pal, b) {
-  const G = b.glow, L = b.lit;
-  const fog = Math.max(0, Math.min(1, (pct - 35) / 55));
-  const sky = room._sky || room0._sky || (room0.id != null ? SKY_BY_ID.get(room0.id) : null);
-  if (fog > 0 && sky) {
-    const glass = _c.copy(pal.skyMid).lerp(pal.fogGlass, 0.15 + fog * 0.4); // 젖빛 유리(완전 흰색까지는 아님)
-    // 불 켜진 창(앞면 0.06) 바로 앞, 창살(0.04～0.10)·위 틀(앞면 0.08)과 면이 겹치지 않게 얇게, 위 틀 아래(2.17)까지만 — 겹치면 지직거림
-    const len = sky.x1 - sky.x0, top = 2.17, h = Math.min(0.4 + 1.4 * fog, top - 0.38);
-    G.box((sky.x0 + sky.x1) / 2, top - h / 2, sky.z + sky.inward * 0.063, len, h, 0.006, glass);
-  }
+function ctxWear_(room, pct, pal, b) {
+  const L = b.lit;
   const d = room.leadDesk;
   if (!d) return;
   const piles = Math.max(0, Math.min(5, Math.floor((pct - 35) / 12)));

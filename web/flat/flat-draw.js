@@ -15,7 +15,7 @@ import { catColor } from '../flow-core.mjs';
 import { cycleProgress } from '../batch-core.mjs';
 import { BubbleBook, BUBBLE } from '../flowview/flow-style.mjs';
 import { islandStyle, PULSE_AMP, islandOutline, zoneRayLen } from '../overview/pick-core.mjs';
-import { toScreen, cardOffset, cardPx } from './flat-core.mjs';
+import { toScreen, cardOffset, cardPx, placeCards } from './flat-core.mjs';
 import { dodgeBox } from '../label-place.mjs';
 import { t } from '../i18n.mjs';
 
@@ -86,18 +86,37 @@ export function drawCards(view, ctx, now, s, anchorOf = null, onlyTop = false) {
   // 본문 글은 점수 높은 PANEL.TEXT_MAX 장만(그 밖은 머리줄만)
   cards.sort((a, b) => b.score - a.score);
   for (let i = 0; i < cards.length; i++) cards[i].e._txt = i < PANEL.TEXT_MAX;
+  // 겹침 풀기(연구소 2D 만 view.cardDeclutter): 그리기 전에 최종 자리(방향 바꿈·작게·숨김)를 정한다
+  if (view.cardDeclutter) declutterCards(view, cards, anchorOf);
   // 먼 것부터(점수 낮은 것) 그려 가까운·중요한 카드가 위에
   ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
   for (let i = cards.length - 1; i >= 0; i--) drawCard(view, ctx, cards[i], now, L, anchorOf);
   ctx.globalAlpha = 1;
 }
 
-function drawCard(view, ctx, { e, v, ph, hPx }, now, L, anchorOf) {
+/** 카드 겹침 풀기: 각 카드에 c.place({dx,dy,w,h,hidden}) — 포커스·호버(foc)는 겹쳐도 보임, 장애물 = 캔버스 글 상자(view._canvasTextRects) */
+const CARD_GROW = 0.1; // drawCard 가 펼침·섬광 동안 카드를 최대 1.1배(Math.min(1.1, ph.sx))로 그림 — 겹침 풀기는 그만큼 넓혀 봄
+function declutterCards(view, cards, anchorOf) {
+  const inp = new Array(cards.length);
+  for (let i = 0; i < cards.length; i++) {
+    const { e, v, hPx, score } = cards[i];
+    const A = anchorOf ? anchorOf(v) : null;
+    const R = A && A.R != null ? A.R : v._R;
+    const x = A ? A.x : v._sp.x, y = A ? A.y : v._sp.y;
+    inp[i] = { anchor: { x, y, R }, w: Math.min(420, hPx * (e.asp || 1.4)), h: hPx, dir: e.dir, slot: e.slot, labelPush: labelPushPx(view, e, v, R), score, force: v.id === view.focusId || v.id === view.hoverId };
+  }
+  const res = placeCards(inp, view._canvasTextRects || [], { miniK: HOLO.MINI_K, forceAvoid: !!view.cardForceAvoid, grow: CARD_GROW }); // cardForceAvoid = 연구소 2D 전체 보기 원경만
+  for (let i = 0; i < cards.length; i++) cards[i].place = res[i];
+}
+
+function drawCard(view, ctx, { e, v, ph, hPx, place }, now, L, anchorOf) {
+  if (place && place.hidden) return; // 겹쳐서 숨김
   const P = view.P;
-  const wPx = Math.min(420, hPx * (e.asp || 1.4));
+  if (place) hPx = place.h;
+  const wPx = place ? place.w : Math.min(420, hPx * (e.asp || 1.4));
   const A = anchorOf ? anchorOf(v) : null;
   const chipPx = A && A.R != null ? A.R : v._R;
-  const off = cardOffset(e.dir, chipPx, wPx, hPx, e.slot, labelPushPx(view, e, v, chipPx));
+  const off = place || cardOffset(e.dir, chipPx, wPx, hPx, e.slot, labelPushPx(view, e, v, chipPx));
   let slide = 1;
   if (ph.phase === 'open') slide = easeOut(Math.min(1, (now - e.t0) / (HOLO.OPEN * 1.3)));
   else if (ph.phase === 'fold') slide = foldSlide(ph.fk || 0);

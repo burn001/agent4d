@@ -1,7 +1,7 @@
 // 복셀 3D 바닥 스텐실: 동(프로젝트)마다 첫 사무실 앞쪽 빈 바닥에 프로젝트 이름 페인트 글씨.
 // 텍스처 = stencil-tex.js 흰 마스크(이름이 바뀔 때만 다시), 재질 색·불투명도 = 테마· 페이드. 바닥 위 데칼(깊이 쓰기 없음 + polygonOffset).
 import * as THREE from 'three';
-import { stencilTargets, stencilLines, stencilPlace, stencilStyle } from './stencil-core.mjs';
+import { stencilTargets, stencilLines, stencilPlace, stencilStyle, stencilFlip } from './stencil-core.mjs';
 import { stencilMask } from './stencil-tex.js';
 import { stencilOn, onStencil } from './stencil-pref.mjs';
 
@@ -67,7 +67,7 @@ export class VxStencil {
       if (it.mat.map !== tex) { it.mat.map = tex; it.mat.needsUpdate = true; }
       it.pid = tg.projectId; it.place = pl;
       it.mesh.position.set(pl.x, Y, pl.z);
-      it.mesh.rotation.set(-Math.PI / 2, -pl.angle, 0);
+      it.mesh.rotation.set(-Math.PI / 2, -pl.angle + (it.flip ? Math.PI : 0), 0);
       it.mesh.scale.set(pl.w, pl.h, 1);
     }
     for (const [k, it] of this.items) if (!keep.has(k)) { this.group.remove(it.mesh); it.mat.dispose(); this.items.delete(k); }
@@ -77,7 +77,12 @@ export class VxStencil {
   /** 테마·페이드 — 매 프레임(값만 바꿈) */
   _style() {
     const v = this.view, all = v.scope && v.scope.mode === 'all', L = !!(v.tokens && v.tokens.isLight);
+    const e = v.camera && v.camera.matrixWorld ? v.camera.matrixWorld.elements : null; // 카메라가 글 뒤로 돌면 뒤집어 읽히게
     for (const it of this.items.values()) {
+      if (e && it.place) {
+        const f = stencilFlip(it.place, e[8], e[10], !!it.flip);
+        if (f !== !!it.flip) { it.flip = f; it.mesh.rotation.y = -it.place.angle + (f ? Math.PI : 0); }
+      }
       const fade = all && it.pid ? v.pf.alpha(it.pid) : 1;
       const focus = all && it.pid && v.pf.focus === it.pid;
       const st = stencilStyle(L, fade, focus);

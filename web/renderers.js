@@ -1,14 +1,19 @@
 // 표현 모드 등록부. 각 항목은 RendererView 클래스를 돌려주는 지연 로더.
 import { t } from './i18n.mjs';
+import { LAB2D_READY } from './flat/lab2d-ready.mjs'; // 복셀 연구소 2D 판 준비 여부(three 없는 작은 파일)
 export const RENDERERS = {
   flow: () => import('./flowview/flow-view.js').then((m) => m.FlowView),   // Flow(새 기본)
   planet: () => import('./planet-view.js').then((m) => m.PlanetView),      // Planet = 예전 '단순 도형' 그대로(SceneView) + 작업 대상 층(켤 때만)
   voxel: () => import('./voxel/office.js').then((m) => m.VoxelView),
+  lab: () => import('./lab/lab-view.js').then((m) => m.LabView),          // 복셀 연구소(Voxel Lab) — VoxelView 를 이어받음
 };
-export const RENDERER_LABEL = { flow: t('app.renderer.flow'), planet: t('app.renderer.planet'), voxel: t('app.renderer.voxel') };
-export const RENDERER_ORDER = ['flow', 'planet', 'voxel']; // 표현 버튼 순환 순서
-// 옛 값 호환: URL ?view=shapes|shape|도형 → planet
-const ALIAS = { shapes: 'planet', shape: 'planet', '도형': 'planet', agentflow: 'flow', 'agent-flow': 'flow', '흐름': 'flow' };
+export const RENDERER_LABEL = { flow: t('app.renderer.flow'), planet: t('app.renderer.planet'), voxel: t('app.renderer.voxel'), lab: t('app.renderer.lab') };
+export const RENDERER_ORDER = ['flow', 'planet', 'voxel', 'lab']; // 표현 버튼 순환 순서
+// 옛 값 호환: URL ?view=shapes|shape|도형 → planet · 연구소 별칭
+const ALIAS = { shapes: 'planet', shape: 'planet', '도형': 'planet', agentflow: 'flow', 'agent-flow': 'flow', '흐름': 'flow', laboratory: 'lab', 'voxel-lab': 'lab', voxellab: 'lab', '연구소': 'lab', '복셀연구소': 'lab' };
+/** 표현 계열: 복셀 오피스·복셀 연구소 = 'voxel'(POV·말풍선 ⚙ 등 '복셀' 판정) */
+export const RENDERER_FAMILY = { flow: 'flow', planet: 'planet', voxel: 'voxel', lab: 'voxel' };
+export const familyOf = (id) => RENDERER_FAMILY[id] || id;
 export const normRenderer = (id) => (id == null ? id : ALIAS[String(id).toLowerCase()] || id);
 export const DEFAULT_RENDERER = 'flow';
 /** 저장된 선택 해석: 새 키(ccviz.view2) 우선, 옛 키는 복셀만 이어받음(옛 기본 '단순 도형'이 새 기본 '흐름'을 가리지 않게) */
@@ -31,13 +36,17 @@ export function normDim(x) {
 }
 /** 처음 차원: URL ?dim= 이 있으면 그 접속에서만 우선(저장값은 덮지 않음), 없으면 저장값, 없으면 3D */
 export function initialDim(urlVal, stored) { return normDim(urlVal) || normDim(stored) || DEFAULT_DIM; }
-/** 2D 표현 로더: 세 표현 모두 2D 판이 있다. 없는 id 는 Flow 2D 로 그리고 '준비 중'(pending) 표시 */
+/** 2D 표현 로더: 세 표현 모두 2D 판이 있다. 없는 id 는 대체 표현(PENDING_2D_BASE, 없으면 Flow 2D)으로 그리고 '준비 중'(pending) 표시 */
 export const RENDERERS_2D = {
   flow: () => import('./flat/flow2d.js').then((m) => m.Flow2DView),
   planet: () => import('./flat/planet2d.js').then((m) => m.Planet2DView),
   voxel: () => import('./flat/voxel2d.js').then((m) => m.Voxel2DView),
 };
+if (LAB2D_READY) RENDERERS_2D.lab = () => import('./flat/lab2d.js').then((m) => m.Lab2DView);
+/** 2D 판이 아직 없는 표현의 대체 2D(복셀 연구소 → 복셀 오피스 2D) */
+const PENDING_2D_BASE = { lab: 'voxel' };
 export function renderer2dFor(mode) {
   const own = Object.prototype.hasOwnProperty.call(RENDERERS_2D, mode);
-  return { load: own ? RENDERERS_2D[mode] : RENDERERS_2D.flow, pending: own ? null : mode };
+  const base = own ? mode : PENDING_2D_BASE[mode] || 'flow';
+  return { load: RENDERERS_2D[base], pending: own ? null : mode, base };
 }

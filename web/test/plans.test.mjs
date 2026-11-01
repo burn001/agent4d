@@ -261,10 +261,11 @@ test('§115 판 DOM 은 3D 구멍 모드에서 캔버스 아래(.under, z -1)', 
   const ui = readFileSync(new URL('../plan-ui.js', import.meta.url), 'utf8');
   assert.match(ui, /typeof view\.setPlanPunch === 'function'/);
   assert.match(ui, /hitBoard:/);
-  const sc = readFileSync(new URL('../scene.js', import.meta.url), 'utf8');
+  const sc = readFileSync(new URL('../scene.js', import.meta.url), 'utf8'), pp = readFileSync(new URL('../plan-punch3d.js', import.meta.url), 'utf8'); // 구멍 코드는 plan-punch3d.js 공용
   assert.match(sc, /alpha: true/);
-  assert.match(sc, /blendSrc: THREE\.ZeroFactor, blendDst: THREE\.OneMinusSrcAlphaFactor/);
-  assert.match(sc, /_cutLabels\(\); \/\/ §115\.3/, '렌더 뒤 판 뒤 라벨 잘라내기');
+  assert.match(pp, /blendSrc: THREE\.ZeroFactor, blendDst: THREE\.OneMinusSrcAlphaFactor/);
+  assert.match(sc, /this\.planPunchAfterRender\(\); \/\/ §115\.3/, '렌더 뒤 판 뒤 라벨 잘라내기');
+  assert.match(pp, /planPunchAfterRender\(\) \{ if \(this\._punchBoards \|\| \(this\._cutEls && this\._cutEls\.size\)\) this\._cutLabels\(\); \}/);
 });
 
 test('§115.2 판 평면 네 모서리: 카메라와 나란한 한 깊이 · 상자 모서리와 정확히 겹침 · 그림자 여백', async () => {
@@ -437,4 +438,30 @@ test('§128 크게 보기 합치기: 러너 단계 계획의 설계서 = 축 항
   const old = R('pold', 'old-design.md', [{ k: 'z', t: '단계 1', s: 'done', at: 3000, cy: 5, by: 's:c5' }]);
   const [ao] = sm([X, old], { nowMs: 65_000, mainId: 's:m', nodes: gone });
   assert.equal(ao.items[0].cy, 5); assert.ok(!ao.items[0].open); assert.ok(!ao.items[0].run.live);
+});
+
+test('§72.13 복셀 3D 계획판도 구멍 모드 — 직원 뒤 원형 마스크 구멍(§105.3)을 쓰지 않음 · 흐름·Planet 과 같은 공용 구멍 코드', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { PLAN_UI: U } = await import('../plan-core.mjs');
+  const rd = (p) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const office = rd('../voxel/office.js'), scene = rd('../scene.js'), punch = rd('../plan-punch3d.js'), ui = rd('../plan-ui.js'), css = rd('../plan.css');
+  // 복셀·흐름(Planet 은 SceneView 상속)이 같은 구멍 메서드를 붙인다
+  assert.match(office, /installPlanPunch\(VoxelView\)/);
+  assert.match(scene, /installPlanPunch\(SceneView\)/);
+  for (const m of ['setPlanPunch(', '_punchMesh(', '_depthlessGate(', '_cutLabels(', 'planPunchAfterRender(', 'disposePlanPunch(']) assert.ok(punch.includes(m), m);
+  assert.ok(!/setPlanPunch\(list\)/.test(scene), '구멍 코드는 plan-punch3d.js 한 벌');
+  // 구멍은 캔버스 알파로 비치므로 복셀 렌더러도 alpha, 렌더 뒤 라벨 잘라내기, 해제
+  assert.match(office, /new THREE\.WebGLRenderer\(\{[^}]*alpha: true/);
+  assert.match(office, /labelRenderer\.render\(this\.scene, this\.camera\);\n\s*this\.planPunchAfterRender\(\)/);
+  assert.match(office, /this\.disposePlanPunch\(\)/);
+  // plan-ui: 구멍 모드 판정에 복셀 예외가 없고(3D 이면 모두), 원형 마스크는 구멍 모드가 아닐 때만
+  assert.match(ui, /const punch = !!\(view && !view\.flat && typeof view\.setPlanPunch === 'function'\)/);
+  assert.match(ui, /\} else if \(occ3d && pj\.wp\) \{/);
+  // 복셀 게시판 모서리 = 구멍 모서리, 캔버스 아래에서는 CSS 그림자 없음(그림자는 WebGL 판)
+  const vxR = Number((css.match(/#plan-boards\.vx \.pb \{[^}]*border-radius: (\d+)px/) || [])[1]);
+  const R = Number((css.match(/\n\.pb \{[^}]*?border-radius: (\d+)px/s) || [])[1]);
+  assert.equal(vxR, U.VX_CORNER);
+  if (R) assert.equal(R, U.CORNER);
+  assert.match(ui, /vxBoard \? PLAN_UI\.VX_CORNER : PLAN_UI\.CORNER/);
+  assert.match(css, /#plan-boards\.under\.vx \.pb \{ box-shadow: inset[^;]*; \}/);
 });

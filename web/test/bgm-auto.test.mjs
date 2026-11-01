@@ -214,7 +214,7 @@ test('§67 곡 목록: 지금 표현 곡이 위에 단계별, 다른 테마 곡�
 test('§67 2026-10-30 24곡: 표현×단계마다 4곡 이상 — 직전 2곡을 피해도 고를 곡이 2곡 이상 남고, 3/4 곡은 beats 3', async () => {
   const { viewCandidates } = await import('../bgm-auto.mjs');
   const m = parseManifest(JSON.parse(readFileSync(new URL('../assets/bgm-tracks.json', import.meta.url), 'utf8')));
-  assert.equal(m.tracks.length, 46);
+  assert.equal(m.tracks.length, 54); // + 복셀 연구소 8곡(2026-11-01, views.lab)
   for (const v of ['flow', 'planet', 'voxel']) for (let i = 0; i < 4; i++) {
     const c = viewCandidates(i, m.tracks, v);
     assert.ok(c.length >= 4, `${v} ${i}: ${c}`);

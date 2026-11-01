@@ -18,6 +18,7 @@ import { OverviewHub, createRealSource } from './overview.mjs';
 import { buildProjects } from './projects.mjs';
 import { LimitsCollector } from './limits.mjs';
 import zlib from 'node:zlib';
+import crypto from 'node:crypto';
 import { timelineOf, pageOf, snapshotAt, PAGE_DEFAULT, PAGE_MAX } from './replay.mjs';
 import { ArtifactStore, setServiceScripts, isExternalReq, externalEv, externalSnap, externalPayload } from './artifacts.mjs'; // 작업 대상 층
 import { ArchiveSource, isArchiveId, archiveKey, resolveArchiveDir } from './archive.mjs';
@@ -188,6 +189,25 @@ async function handleArtifacts(req, res, url, manager, project, headers) {
   return sendJsonZ(req, res, 200, isExternalReq(req) ? externalPayload(out) : out, headers);
 }
 
+// 버전 붙은 정적 주소(?v=<내용 sha256 앞 8～64자>)는 내용이 바뀌면 주소도 바뀌므로 1년·immutable 로 둔다.
+//   해시는 파일(크기·mtime)별로 한 번만 계산(곡 4.6MB ≈ 10ms). 맞지 않거나 없는 v 는 예전처럼 짧은 캐시
+const IMMUTABLE_CC = 'public, max-age=31536000, immutable';
+const hashMemo = new Map(); // file → {size, mtimeMs, hex}
+export function contentHash(file, st) {
+  const m = hashMemo.get(file);
+  if (m && m.size === st.size && m.mtimeMs === st.mtimeMs) return m.hex;
+  let hex = null;
+  try { hex = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); } catch { hex = null; }
+  if (hex) hashMemo.set(file, { size: st.size, mtimeMs: st.mtimeMs, hex });
+  return hex;
+}
+/** 요청 ?v= 가 그 파일 내용 해시(앞부분, 8자 이상)와 맞나 */
+export function versionMatches(v, file, st) {
+  if (typeof v !== 'string' || !/^[0-9a-f]{8,64}$/i.test(v)) return false;
+  const hex = contentHash(file, st);
+  return !!hex && hex.startsWith(v.toLowerCase());
+}
+
 function serveStatic(req, res, url, webRoot, headers) {
   let rel;
   try { rel = decodeURIComponent(url.pathname); } catch { res.writeHead(400, headers); res.end('bad path'); return; }
@@ -205,11 +225,14 @@ function serveStatic(req, res, url, webRoot, headers) {
   const type = MIME[path.extname(file).toLowerCase()] || 'application/octet-stream';
   const etag = `W/"${st.size.toString(36)}-${Math.round(st.mtimeMs).toString(36)}"`;
   const base = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Last-Modified': st.mtime.toUTCString(), ETag: etag,
-    'Cache-Control': /\.(mp3|png|jpg|woff2)$/i.test(file) ? 'public, max-age=3600' : 'no-cache', ...headers };
-  // 조건부 요청: 바뀌지 않았으면 304(본문 없음). 고정 링크(Worker→터널) 경유 재방문 때 모듈·CSS 를 다시 내려받지 않는다
+    'Cache-Control': url.searchParams.has('v') && versionMatches(url.searchParams.get('v'), file, st) ? IMMUTABLE_CC
+      : /\.(mp3|png|jpg|woff2)$/i.test(file) ? 'public, max-age=3600' : 'no-cache', ...headers };
+  // 조건부 요청: 바뀌지 않았으면 304(본문 없음). 고정 링크(Worker→터널) 경유 재방문 때 모듈·CSS 를 다시 내려받지 않는다.
+  // 범위 요청(Range)에도 적용(RFC 9110 — 조건이 Range 보다 먼저): 캐시가 만료된 <audio> 는 Range + If-None-Match 로
+  // 재검증하는데, 예전엔 Range 면 조건을 무시하고 206 본문(곡 전체 4.6MB)을 다시 보냈다(반복 전송의 원인)
   const inm = req.headers['if-none-match'];
   const ims = Date.parse(req.headers['if-modified-since'] || '');
-  if (!req.headers.range && ((inm && inm.split(',').some((x) => x.trim() === etag)) || (!inm && Number.isFinite(ims) && Math.floor(st.mtimeMs / 1000) * 1000 <= ims))) {
+  if ((inm && inm.split(',').some((x) => x.trim() === etag || x.trim() === '*')) || (!inm && Number.isFinite(ims) && Math.floor(st.mtimeMs / 1000) * 1000 <= ims)) {
     const { 'Content-Type': _ct, 'Accept-Ranges': _ar, ...h304 } = base;
     res.writeHead(304, h304);
     res.end();

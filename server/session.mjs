@@ -51,6 +51,10 @@ export const RUN_EMIT_MS = 5000;
  * · ENTRYPOINTS = 프로세스 기록(~/.claude/sessions/<pid>.json)을 쓰는 것이 확인된 진입점(그 밖은 기록 부재를 증거로 쓰지 않음)
  */
 export const SESSION_END = { GRACE_MS: 30_000, PROC_GONE_MS: 10_000, ENTRYPOINTS: new Set(['cli', 'sdk-cli']) };
+/** 추정 끝(세션 종료·주인 에이전트 끝으로 끊김) — 뒤에 온 진짜 끝 표지·알림·출력이 이긴다 */
+const CUT_REASONS = new Set(['session-end', 'agent-end']);
+/** 새 Claude Code 가 서브에이전트의 bg 작업에 붙이는 안내(최종 응답 때 작업을 끄고 알림도 없음) */
+const AGENT_BOUND_RE = /terminated when you give your final response/i;
 /** 포그라운드 셸이 열려 있는 동안 대기 금지의 상한 = 호출 timeout(없으면 Bash 최대 10분) + 여유 1분(결과 없이 버려진 호출 대비) */
 const FG_DEFAULT_TIMEOUT_MS = 600_000, FG_HOLD_SLACK_MS = 60_000;
 export function fgHoldMs(tu) {
@@ -618,7 +622,12 @@ export class RootRuntime {
     n.lastActivityAt = maxIso(n.lastActivityAt, ts);
     if (n.status !== 'active') {
       if (isEnded(n.status)) {
-        if (!backlog && (!n.endedAt || ts > n.endedAt)) {
+        // 워크플로 에이전트가 저널 result 로 끝났으면 뒤늦게 읽힌 자기 기록(저널이 같은 poll 에서 먼저 읽힌 경합)은 되살리지 않고
+        // 끝 시각만 그 기록까지 늘린다 — result 는 에이전트의 마지막 응답 뒤에 쓰인다. 예전엔 되살아난 뒤 60초 뒤 idle 로 영구 잔류
+        if (this._wfResult?.has(id)) {
+          if (n.endedAt && ts > n.endedAt) { if (g.loading) n.endedAt = ts; else g.updateNode(id, { endedAt: ts }, ts); }
+        } else if (!backlog && (!n.endedAt || ts > n.endedAt) && !this._bgFinal(n)) {
+        // 일반 bash-bg 가 진짜 끝(알림·끝 표지·TaskStop)으로 끝났으면 뒤늦은 출력(끝 표지·종료 직전 출력)에 되살아나지 않는다
           const rs = this._runs?.get(id);
           if (rs && rs.kind === 'bg' && rs.ended != null) { rs.ended = null; g.updateNode(id, { status: 'active', endedAt: null, meta: { run: this._runPub(rs) } }, ts); } // 되살아남
           else g.updateNode(id, { status: 'active', endedAt: null }, ts);
@@ -640,6 +649,7 @@ export class RootRuntime {
     const n = this.graph.get(id);
     if (!n) return;
     const status = ok ? 'done' : 'error';
+    this._noteAgentEnd(n, ts);
     const patch = { status, endedAt: n.endedAt && n.status === status ? n.endedAt : ts, ...extra };
     if (extra.meta) patch.meta = extra.meta;
     // 끝난 노드는 스킬 위성을 남기지 않는다
@@ -656,12 +666,13 @@ export class RootRuntime {
   /**
    * 일부러 끈 작업 → '중지됨'. reason: taskstop(TaskStop/KillShell) · kill-cmd(끄는 셸 명령 직후 failed 알림)
    * · signal(종료 코드 130/137/143) · time-limit(백그라운드 시간 한도) · killed(알림 killed·출력 끝 [killed]) · orphan(세션 종료로 정리)
-   * · session-end(띄운 세션이 끝났는데 끝 표지·알림이 없음 — 종료 코드 미상)
+   * · session-end(띄운 세션이 끝났는데 끝 표지·알림이 없음 — 종료 코드 미상) · agent-end(주인 에이전트가 끝남)
    */
   stop(id, ts, reason) {
     const n = this.graph.get(id);
     if (!n) return;
-    const keep = n.endedAt && n.status === 'stopped' && n.meta?.stopReason !== 'session-end'; // 끊김 추정 뒤의 진짜 끝은 제 시각
+    this._noteAgentEnd(n, ts);
+    const keep = n.endedAt && n.status === 'stopped' && !CUT_REASONS.has(n.meta?.stopReason); // 끊김 추정 뒤의 진짜 끝은 제 시각
     const patch = { status: 'stopped', endedAt: keep ? n.endedAt : ts, meta: { killed: true, stopReason: reason } };
     if (n.meta?.skill) patch.meta.skill = null;
     const rm = this._runEndMeta(id, patch.endedAt);
@@ -899,6 +910,7 @@ export class RootRuntime {
       } else {
         g.updateNode(id, { label: rec.label, meta: { phase: rec.phase ?? null } }, ts);
       }
+      this._wfResult?.delete(id); // 같은 에이전트를 다시 띄운 저널(재개)이면 다시 살아날 수 있다
       this.touch(wid, ts, backlog);
     } else if (rec.type === 'result' && rec.agentId) {
       const id = `a:${rec.agentId}`;
@@ -911,11 +923,13 @@ export class RootRuntime {
       const fin = () => {
         const n = g.get(id);
         const endTs = n ? (jts ? maxIso(n.lastActivityAt, ts) : n.lastActivityAt) : ts;
+        (this._wfResult || (this._wfResult = new Set())).add(id); // 저널 result = 이 에이전트의 마지막(뒤늦게 읽힌 자기 기록이 되살리지 않음)
         if (n) { this.finish(id, ok, endTs); this.resultEvent(id, ok, text, endTs); }
         else this.pendingFinish.set(id, { ok, text, ts: endTs });
       };
-      // offline: journal 은 에이전트 기록보다 먼저 읽히고 시각도 없으므로 마지막 활동 시각을 안 뒤에 판정
-      if (this.offline && !jts) this.deferred.push(fin); else fin();
+      // 첫 적재(offline·라이브 모두): journal 은 에이전트 기록보다 먼저 읽히고 시각도 없으므로 마지막 활동 시각을 안 뒤에 판정.
+      // 예전 라이브 첫 적재는 바로 판정해 endedAt 이 아직 안 읽힌 에이전트의 EPOCH(1970)가 됐다
+      if ((this.offline || g.loading) && !jts) this.deferred.push(fin); else fin();
     }
   }
 
@@ -1308,6 +1322,7 @@ export class RootRuntime {
     }
     this.taskMap.set(taskId, id);
     if (w) (this._bgW || (this._bgW = new Map())).set(id, w); // 띄운 세션(프로세스 끝 판정 단위)
+    if (AGENT_BOUND_RE.test(String(bodyText || ''))) (this._bgAgentBound || (this._bgAgentBound = new Set())).add(id);
     const out = extractOutputPath(bodyText);
     if (out) w.tasksDirs.add(path.dirname(out));
     this.startOutput(id, taskId, w, out);
@@ -1424,7 +1439,7 @@ export class RootRuntime {
       const want = st === 'completed' ? 'done' : st === 'failed' ? 'error' : stopReason ? 'stopped' : null;
       const dup = this._exitBy?.has(target) && isEnded(t.status) && (want === t.status || (want === 'error' && t.status === 'stopped'));
       if (dup) { /* 그대로 */ } else if (st === 'completed') this.finish(target, true, ts);
-      else if (st === 'failed') { if (t.status !== 'stopped' || t.meta?.stopReason === 'session-end') this._finishFailed(target, n, ts); }
+      else if (st === 'failed') { if (t.status !== 'stopped' || CUT_REASONS.has(t.meta?.stopReason)) this._finishFailed(target, n, ts); }
       else if (stopReason) this.stop(target, ts, stopReason);
       if (st) {
         // claude -p 가 백그라운드로 돌았던 경우 종료 시각 반영
@@ -1804,6 +1819,7 @@ export class RootRuntime {
     const panel = this._outputPanel(o.nodeId, raw, o.log ? o.key : o.nodeId);
     const ix = this.outputIx(o.nodeId, text);
     this.graph.emit({ ts, type: 'output', nodeId: o.nodeId, text, ...(panel ? { panel } : {}), ...(ix ? { ix } : {}) });
+    if (!(backlog || this.graph.loading) && this._bgFinal(this.graph.get(o.nodeId))) return; // 끝난 뒤 늦게 읽힌 출력이 자동 진행 작업을 되살리지 않게
     this.jobFeed(o.log ? o.key : o.nodeId, raw, ts, { ownerId: o.nodeId, backlog: !!(backlog || this.graph.loading) });
   }
 
@@ -1829,7 +1845,12 @@ export class RootRuntime {
 
   /** 끝 표지·알림이 아직 바꿀 수 있는 상태: 안 끝남, 또는 세션 종료로 끊김(추정이라 뒤에 온 진짜 끝이 이긴다) */
   _bgOpenOrCut(n) {
-    return !!n && (!isEnded(n.status) || (n.status === 'stopped' && n.meta?.stopReason === 'session-end'));
+    return !!n && (!isEnded(n.status) || (n.status === 'stopped' && CUT_REASONS.has(n.meta?.stopReason)));
+  }
+
+  /** 진짜 끝(알림·끝 표지·TaskStop 등)으로 끝난 일반 bash-bg — task id 는 다시 쓰이지 않으니 뒤늦은 출력에 되살리지 않는다 */
+  _bgFinal(n) {
+    return this._bgCuttable(n) && isEnded(n.status) && !(n.status === 'stopped' && CUT_REASONS.has(n.meta?.stopReason));
   }
 
   /** 세션 프로세스와 같이 끝나는 bg 노드: 일반 bash-bg(기동기·러너·분리 프로세스·작업 노드는 제 규칙이 있음) */
@@ -1889,13 +1910,53 @@ export class RootRuntime {
     for (const [id, exitIso] of [...this._cutPending]) {
       const n = this.graph.get(id);
       if (!n) { this._cutPending.delete(id); continue; }
-      if (isEnded(n.status)) { if (n.meta?.stopReason !== 'session-end') this._cutPending.delete(id); continue; } // 진짜 끝이 왔으면 내려놓음
+      if (isEnded(n.status)) { if (!CUT_REASONS.has(n.meta?.stopReason)) this._cutPending.delete(id); continue; } // 진짜 끝(또는 끊김)이 왔으면 내려놓음
       const o = this.outputs.get(id);
       const lastMs = Math.max(Date.parse(exitIso) || 0, o?.tail?.mtimeMs || 0, Date.parse(n.lastActivityAt) || 0);
       if (!off && now - lastMs < SESSION_END.GRACE_MS) continue; // 끝 표지가 늦게 붙거나 아직 쓰는 중
       if (o && o.buf) this._flushOutput(o, true);
       const end = maxIso(exitIso, o ? this._fileEndIso(o, n) : maxIso(n.startedAt, n.lastActivityAt));
       this.stop(id, end, 'session-end');
+    }
+  }
+
+  /**
+   * 주인 에이전트(서브에이전트·워크플로 에이전트)가 끝난 bg 작업 — '에이전트 종료로 끊김'(stopped · agent-end, 종료 코드 미상).
+   * 서브에이전트가 띄운 bg 의 끝 알림은 그 서브에이전트에게만 가므로 에이전트가 끝나면 알림이 올 곳이 없다. 새 Claude Code 는 최종 응답 때
+   * 작업을 끈다고 밝힌다(AGENT_BOUND_RE) → 조용함 GRACE_MS, 그 밖(옛 판 — 셸이 멎은 채 남기도 함)은 적응 정체 문턱(staleAfter) 동안
+   * 출력 파일이 안 바뀌어야 닫는다. 끝 = max(에이전트 끝, 출력 파일 수정 시각). 재생도 벽시계 기준(라이브와 같은 최종 상태)
+   */
+  /** 에이전트 끝 시각 모두(SendMessage 로 되살아나 여러 번 끝날 수 있음 — 첫 적재는 기록 읽는 순서상 노드 endedAt 이 첫 끝에 머문다) */
+  _noteAgentEnd(n, ts) {
+    if (!n || (n.kind !== 'subagent' && n.kind !== 'workflow-agent') || !ts) return;
+    const M = this._agentEnds || (this._agentEnds = new Map());
+    const a = M.get(n.id) || [];
+    if (!a.includes(ts)) { a.push(ts); a.sort(); if (a.length > 64) a.shift(); }
+    M.set(n.id, a);
+  }
+
+  _sweepAgentEnd(now, off) {
+    if (!this._bgW) return;
+    const g = this.graph;
+    const wall = off ? Date.now() : now;
+    for (const id of this._bgW.keys()) {
+      const n = g.get(id);
+      if (!this._bgCuttable(n) || isEnded(n.status)) continue;
+      const owner = n.parentId ? g.get(n.parentId) : null;
+      if (!owner || (owner.kind !== 'subagent' && owner.kind !== 'workflow-agent') || !isEnded(owner.status)) continue;
+      const ends = this._agentEnds?.get(owner.id) || (owner.endedAt ? [owner.endedAt] : []);
+      if (!ends.length) continue;
+      // 마지막 끝 뒤에도 기록이 있으면(SendMessage 로 되살아나 아직 일하는 중) 판정하지 않는다 — 알림이 그 에이전트에게 갈 수 있다
+      if (Date.parse(owner.lastActivityAt) > Date.parse(ends[ends.length - 1]) + 1000) continue;
+      const agentEnd = ends.find((e) => !n.startedAt || e >= n.startedAt) || ends[ends.length - 1]; // 띄운 뒤 처음 끝난 때(그 최종 응답)
+      const o = this.outputs.get(id);
+      const lastMs = Math.max(Date.parse(agentEnd) || 0, o?.tail?.mtimeMs || 0, Date.parse(n.lastActivityAt) || 0);
+      const rs = this._runs?.get(id);
+      const q = this._bgAgentBound?.has(id) ? SESSION_END.GRACE_MS : Math.max(SESSION_END.GRACE_MS, rs ? this._runStaleMs(rs) : PROC.STALE_DEFAULT_SEC * 1000);
+      if (wall - lastMs < q) continue;
+      if (o && o.buf) this._flushOutput(o, true);
+      const end = maxIso(agentEnd, o ? this._fileEndIso(o, n) : maxIso(n.startedAt, n.lastActivityAt));
+      this.stop(id, end, 'agent-end');
     }
   }
 
@@ -2674,6 +2735,7 @@ export class RootRuntime {
     pass([...g.nodes.values()], false);
     pass(launchers, true);
     pass(runners, true);
+    this._sweepAgentEnd(now, off); // 주인 에이전트가 끝난 bg 작업
     this._sweepSessionEnd(now, off); // 띄운 세션이 끝난 bg 작업
     this._sweepWatches(); // 끝난 백그라운드 셸·Monitor 의 들여다보기 닫기
     if (!off) { this._jobFiles(); this._extJobsSweep(now); this._flushAutoJobs(nowIso); this._runSweep(now); this._loopAxesSweep(now); }

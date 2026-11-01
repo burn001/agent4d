@@ -2,7 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { parseManifest, normalizeSel, firstTrack, nextTrack, loopFor, optionList, isMode, TRACK_KEY } from '../bgm-core.mjs';
+import { createHash } from 'node:crypto';
+import { parseManifest, normalizeSel, firstTrack, nextTrack, loopFor, optionList, isMode, TRACK_KEY, trackUrl } from '../bgm-core.mjs';
 
 const ASSETS = new URL('../assets/', import.meta.url);
 const manifest = JSON.parse(readFileSync(new URL('bgm-tracks.json', ASSETS), 'utf8'));
@@ -130,4 +131,19 @@ test('영어 화면(§86): 매니페스트 *_en 필드로 곡 이름·제목·�
   } finally { _setLangForTest('ko'); }
   assert.equal(parseManifest({ tracks: [{ id: 'jazz', label: '재즈', label_en: 'Jazz', file: 'a.mp3' }] }).tracks[0].label, '재즈');
   assert.equal(sectionName('기', { 기: 'Opening' }), '기');
+});
+
+test('§130 버전 주소: 매니페스트 hash = 곡 내용 sha256 앞 16자, trackUrl 은 ?v=<hash>, 해시 없거나 이상하면 예전 주소', () => {
+  const m = parseManifest(manifest);
+  for (const t of m.tracks) {
+    assert.match(t.hash || '', /^[0-9a-f]{16}$/, `${t.id} hash`);
+    assert.equal(trackUrl(t), `assets/${t.file}?v=${t.hash}`);
+    if (existsSync(new URL(t.file, ASSETS))) {
+      const hex = createHash('sha256').update(readFileSync(new URL(t.file, ASSETS))).digest('hex');
+      assert.equal(t.hash, hex.slice(0, 16), `${t.file} 해시가 낡음 — python music/tracks.py manifest`);
+    }
+  }
+  const p = parseManifest({ tracks: [{ id: 'a', file: 'a.mp3', hash: 'XYZ' }, { id: 'b', file: 'b.mp3' }, { id: 'c', file: 'c.mp3', hash: 'ABCDEF0123456789' }] });
+  assert.deepEqual(p.tracks.map(trackUrl), ['assets/a.mp3', 'assets/b.mp3', 'assets/c.mp3?v=abcdef0123456789']);
+  assert.equal(trackUrl(null), null);
 });

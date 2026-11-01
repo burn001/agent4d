@@ -7,7 +7,7 @@ import { QUIP, rankQuips } from './quip-core.mjs'; // 생각·말풍선
 const VX_SHIFTS = [0, 14, 28], VX_FAR = [42, [0.6, 14], [-0.6, 14], 56, [0.6, 42], [-0.6, 42], 70];
 
 const BUBBLE_MAX = 8, BUBBLE_MAX_NARROW = 4;
-const LABEL_MAX = 24;
+const LABEL_MAX = 32; // 이름표 갈고리(_extraLabels) 몫까지 — office.js _labels 와 같은 길이
 const ROOM_MAX = 16;
 const trunc = (s, n) => { s = String(s ?? '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
 
@@ -110,10 +110,30 @@ export class Bubbles {
     // 이름표
     fill(this.lpool, ctx.labels || [], (it, L) => { it.o.position.set(L.x, L.y, L.z); it.key = L.id; }, 'vx-label');
     fadePool(this.bpool, ctx); fadePool(this.lpool, ctx); // 프로젝트 페이드(사라진 동의 것은 숨겨 겹침 계산에서도 뺌)
-    if (ctx.camera && ctx.labels) this._placeLabels(ctx, ctx.labels.length);
-    // 방 문패
+    // 방 문패(이름표 배치 전에 — 문패 상자를 이름표가 비킨다)
     fill(this.rpool, ctx.rooms || [], (it, R) => { it.o.position.set(R.x, R.y != null ? R.y : 0.05, R.z); }, 'vx-room');
     fadePool(this.rpool, ctx);
+    if (ctx.camera && ctx.labels) this._placeLabels(ctx, ctx.labels.length);
+  }
+
+  /** 이번 프레임 보이는 방 문패의 화면 상자 [[x0,y0,x1,y1]…] (rpool 기준점 = 왼쪽 가운데, 크기는 글이 바뀔 때만 잰다) */
+  _roomRects(ctx) {
+    const out = this._rr || (this._rr = []);
+    out.length = 0;
+    const W = ctx.width, H = ctx.height, cam = ctx.camera, v = this._v;
+    for (const it of this.rpool.items) {
+      if (!it.o.visible) continue;
+      if (it._mw == null || it._mwHtml !== it.html || !it._mwOk) {
+        const w = it.el.offsetWidth, h = it.el.offsetHeight;
+        it._mwOk = w > 0 && h > 0; it._mwHtml = it.html;
+        it._mw = w || Math.max(60, textPx(it.el.textContent, 11) * 0.8); it._mh = h || 18;
+      }
+      v.copy(it.o.position).project(cam);
+      if (v.z < -1 || v.z > 1) continue;
+      const x = (v.x * 0.5 + 0.5) * W, y = (-v.y * 0.5 + 0.5) * H;
+      out.push([x, y - it._mh / 2, x + it._mw, y + it._mh / 2]);
+    }
+    return out;
   }
 
   /** 이름표끼리·이름표와 다른 캐릭터가 겹치지 않게: 아래로 조금씩 밀고, 그래도 걸치면 흐리게(이름표는 모두 고정 라벨) */
@@ -145,11 +165,12 @@ export class Bubbles {
       cands.push({ id: it.key, i, x: (v.x * 0.5 + 0.5) * W, y: (-v.y * 0.5 + 0.5) * H, up: false, gap: 0, force: / focus/.test(it.cls), pin: true, modes: [{ w: it._mw + 4, h: it._mh }] });
     }
     // 피할 사각형: 이번 프레임 말풍선 자리(_declutter 가 쌓은 상자)
-    const rects = [];
-    const pl = this._placed || [];
-    for (let j = 0; j + 3 < pl.length; j += 4) rects.push([pl[j], pl[j + 1], pl[j + 2], pl[j + 3]]);
-    // + 계획 보드(라벨이 비킴). 맞춤(fitLabels)은 보드를 뺀 배치로 — 보드 때문에 숨은 이름표가 맞춤에서 드나들지 않게
-    const { placed, fit } = placeLabelsBoard(cands, discs, { shifts: VX_SHIFTS, farShifts: VX_FAR, bounds: [0, W], rects }, planLabelRects([]));
+    const rects = labelObstacleRects(this._placed || [], null, null);
+    // + 계획 보드 · 전체 보기 간판(ctx.signRects)·방 문패 상자(라벨이 비킴 — 간판·문패는 고정, 이름표가 밀림/흐림/숨김).
+    // 맞춤(fitLabels)은 이 고정 판들을 뺀 배치로 — 거리마다 화면 상자가 바뀌는 판 때문에 숨은 이름표가 맞춤에서 드나들지 않게
+    const sr = ctx.signRects; // 전체 보기에서만(단일 프로젝트 오피스 배치는 그대로)
+    const board = labelObstacleRects(null, sr, sr ? this._roomRects(ctx) : null, planLabelRects([]));
+    const { placed, fit } = placeLabelsBoard(cands, discs, { shifts: VX_SHIFTS, farShifts: VX_FAR, bounds: [0, W], rects }, board);
     for (const c of cands) {
       const it = items[c.i], r = placed.get(c.id);
       it._fitOn = fit.has(c.id);
@@ -206,6 +227,17 @@ export class Bubbles {
   }
 
   dispose() { this.bpool.dispose(); this.lpool.dispose(); this.rpool.dispose(); this.bubbles.clear(); }
+}
+
+/**
+ * 이름표가 비킬 사각형 모음(순수): placed = 말풍선 상자 평면 배열 [x0,y0,x1,y1, …](_declutter), signRects = 전체 보기 간판 화면 상자,
+ * roomRects = 방 문패 화면 상자, extra = 그 밖 사각형(계획 보드 등). 반환 [[x0,y0,x1,y1]…] — placeLabels(Board) 의 rects·board 그대로.
+ */
+export function labelObstacleRects(placed, signRects, roomRects, extra) {
+  const out = [];
+  if (placed) for (let j = 0; j + 3 < placed.length; j += 4) out.push([placed[j], placed[j + 1], placed[j + 2], placed[j + 3]]);
+  for (const a of [signRects, roomRects, extra]) if (a) for (const r of a) if (r && r.length >= 4 && r[2] > r[0] && r[3] > r[1]) out.push(r);
+  return out;
 }
 
 function push(m, id, x) { const a = m.get(id); if (a) a.push(x); else m.set(id, [x]); }

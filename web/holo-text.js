@@ -46,8 +46,15 @@ void main() {
   c.xy += position.xy * vec2(length(modelMatrix[0].xyz), length(modelMatrix[1].xyz));
   gl_Position = projectionMatrix * c;
 }`;
+// 세계 모드(복셀 책상 모니터): 메시 자세(quaternion)를 그대로 — 원근대로 비스듬히. 양면: 뒤에서는 글이 좌우 거울상으로 uBack 만큼 옅게(투명 홀로그램)
+const VS_WORLD = `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
 const FS = `
-uniform sampler2D uMap; uniform float uAlpha; uniform float uSwap; uniform vec4 uBody; uniform float uScroll; uniform float uLight;
+uniform sampler2D uMap; uniform float uAlpha; uniform float uSwap; uniform vec4 uBody; uniform float uScroll; uniform float uLight; uniform float uBack;
 varying vec2 vUv;
 void main() {
   vec2 uv = vUv;
@@ -56,7 +63,7 @@ void main() {
   if (inBody && uScroll > 0.0) { uv.y += uScroll; if (uv.y > uBody.w) discard; } // 꼬리: 새 줄이 아래에서 밀고 올라옴
   vec4 t = texture2D(uMap, uv);
   float sl = uLight > 0.5 ? 0.975 + 0.025 * sin(vUv.y * 230.0) : 0.9 + 0.1 * sin(vUv.y * 230.0);
-  gl_FragColor = vec4(t.rgb * (uLight > 0.5 ? 1.0 : sl), t.a * uAlpha);
+  gl_FragColor = vec4(t.rgb * (uLight > 0.5 ? 1.0 : sl), t.a * uAlpha * (gl_FrontFacing ? 1.0 : uBack));
 }`;
 
 /** 글자 폭에 맞춰 자르기(넘치면 …) */
@@ -186,8 +193,11 @@ export function drawPanel(ctx, W, H, e, rows, light, ink, jobs = null) {
 }
 
 export class HoloText {
-  constructor(scene) {
+  /** opts.world = true: 빌보드 대신 후보의 자세(c.q)로 놓음. opts.backAlpha: 세계 모드 뒷면 불투명도 배율(기본 1) */
+  constructor(scene, opts = {}) {
     this.scene = scene;
+    this.world = !!opts.world;
+    this.backAlpha = opts.backAlpha ?? 1;
     this.geo = new THREE.PlaneGeometry(1, 1);
     this.slots = [];
     this.frame = 0;
@@ -198,8 +208,8 @@ export class HoloText {
       cv.width = Math.round(PANEL.CH * 1.5); cv.height = PANEL.CH;
       const tex = this._tex(cv);
       const mat = new THREE.ShaderMaterial({
-        uniforms: { uMap: { value: tex }, uAlpha: { value: 1 }, uSwap: { value: 0 }, uBody: { value: new THREE.Vector4(0, 0, 1, 1) }, uScroll: { value: 0 }, uLight: { value: 0 } },
-        vertexShader: VS, fragmentShader: FS, transparent: true, depthWrite: false, side: THREE.DoubleSide,
+        uniforms: { uMap: { value: tex }, uAlpha: { value: 1 }, uSwap: { value: 0 }, uBody: { value: new THREE.Vector4(0, 0, 1, 1) }, uScroll: { value: 0 }, uLight: { value: 0 }, uBack: { value: this.backAlpha } },
+        vertexShader: this.world ? VS_WORLD : VS, fragmentShader: FS, transparent: true, depthWrite: false, side: THREE.DoubleSide,
       });
       const mesh = new THREE.Mesh(this.geo, mat);
       mesh.frustumCulled = false; mesh.renderOrder = 5; mesh.visible = false;
@@ -281,6 +291,7 @@ export class HoloText {
       u.uScroll.value = sc;
       s.mesh.position.set(c.x, c.y, c.z);
       s.mesh.scale.set(c.W, c.H, 1);
+      if (this.world && c.q) s.mesh.quaternion.copy(c.q);
       if (!s.mesh.visible) s.mesh.visible = true;
       e._txf = f;
       drawn++;

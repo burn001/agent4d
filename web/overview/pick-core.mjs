@@ -80,7 +80,7 @@ export function pickRectAt(buildings, x, z, pad = 1.5) {
 export function pickLabelAt(clientX, clientY, root = typeof document !== 'undefined' ? document : null) {
   if (!root) return null;
   for (const el of root.querySelectorAll('.ov-island[data-pid], .ov-bldg[data-pid]')) {
-    if (el.style.display === 'none') continue;
+    if (el.style.display === 'none' || el.style.visibility === 'hidden') continue; // visibility = 연구소 2D 섬 이름표 거르기로 숨김
     const r = el.getBoundingClientRect();
     if (r.width && clientX >= r.left - 2 && clientX <= r.right + 2 && clientY >= r.top - 2 && clientY <= r.bottom + 2) return el.dataset.pid;
   }

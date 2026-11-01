@@ -102,6 +102,7 @@
 .pl-lead.pl-own { stroke-dasharray: 4 4; stroke: color-mix(in srgb, var(--accent) 50%, transparent); } /* 판 → 계획 주인(러너 등) */
 /* 복셀: 기동기·팀장 옆에 세운 게시판(나무 테·코르크 빛 머리) */
 #plan-boards.vx .pb { border: 3px solid #8b5a2b; border-radius: 4px; box-shadow: 0 6px 16px rgba(0, 0, 0, .4), inset 0 0 0 1px rgba(255, 220, 170, .18); }
+#plan-boards.under.vx .pb { box-shadow: inset 0 0 0 1px rgba(255, 220, 170, .18); } /* 복셀 3D 도 캔버스 아래(구멍 모드) — 그림자는 WebGL 그림자 판 */
 #plan-boards.vx .pb-h { margin: calc(-7px * var(--pbk)) calc(-9px * var(--pbk)) 0; padding: calc(6px * var(--pbk)) calc(9px * var(--pbk)) calc(4px * var(--pbk)); background: color-mix(in srgb, #c8995c 22%, transparent); }
 /* 범례 */
 .plan-legend .pl-m { display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; font-style: normal; font-size: 9px; font-weight: 800; vertical-align: -3px; margin: 0 3px 0 6px; box-sizing: border-box; }

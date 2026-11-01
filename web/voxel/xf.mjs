@@ -99,12 +99,25 @@ export function wallWorldDir(xf, side) {
   return { x: Math.round(a.x), z: Math.round(a.z) };
 }
 /**
- * 높은 벽인가: 기본 카메라(+x·+z 쪽 위에서 비스듬히)에서 먼 쪽(바깥 방향이 −x 또는 −z)이면 높게, 가까운 쪽은 낮게(안이 보이게).
- * 회전하지 않은 방은 예전과 같다(뒤·왼쪽 높음, 앞·오른쪽 낮음).
+ * 높은 벽인가: 카메라에서 먼 쪽이면 높게, 가까운 쪽은 낮게(안이 보이게).
+ * cam = 카메라가 있는 사분면 {x: ±1, z: ±1}(— 방위각을 풀어 뒤에서도 봄). 기본 (1, +1) = 예전 기본 카메라(x·+z 쪽 위에서 비스듬히)
+ * → 회전하지 않은 방은 예전과 같다(뒤·왼쪽 높음, 앞·오른쪽 낮음).
  */
-export function wallHigh(xf, side) {
+export function wallHigh(xf, side, cam = CAM_Q0) {
   const d = wallWorldDir(xf, side);
-  return d.x < 0 || d.z < 0;
+  return d.x === -cam.x || d.z === -cam.z;
+}
+export const CAM_Q0 = Object.freeze({ x: 1, z: 1 });
+/**
+ * 카메라 사분면: 시선점 → 카메라 수평 방향 (hx, hz) 의 부호. 경계(축과 거의 나란함)에서 깜빡이지 않게 prev 를 hyst(사인값) 안에서는 유지.
+ * 경계 = 그 축의 벽이 카메라와 나란한 순간이라 벽 높이가 바뀌어도 거의 안 보인다.
+ */
+export function camQuadrant(hx, hz, prev = CAM_Q0, hyst = 0.07) {
+  const l = Math.hypot(hx, hz);
+  if (!(l > 1e-6)) return prev;
+  const nx = hx / l, nz = hz / l;
+  const x = nx > hyst ? 1 : nx < -hyst ? -1 : prev.x, z = nz > hyst ? 1 : nz < -hyst ? -1 : prev.z;
+  return x === prev.x && z === prev.z ? prev : { x, z };
 }
 
 /** 창 벽: 뒤 벽이 높으면 뒤, 아니면 앞 벽(마주 보는 두 벽 중 하나는 늘 높다) */

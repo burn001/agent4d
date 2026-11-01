@@ -17,7 +17,7 @@ export class FlatIx {
     this.geo = new IxGeo();
     this.mode = view.constructor && view.constructor.modeId;
     this.theme = this.mode === 'planet' ? 'planet' : 'flow';
-    this.off = this.mode === 'voxel'; // 복셀 2D 는 개편 때
+    this.off = this.mode === 'voxel' || !!(view.constructor && view.constructor.family === 'voxel'); // 복셀 2D(연구소 포함)는 개편 때
     this._p = {}; this._q = {};
     this._env = {
       theme: this.theme, reduced: !!view.reduced,

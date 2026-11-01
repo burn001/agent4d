@@ -139,5 +139,5 @@ test('충돌 방문 길: 방 안 → 문 → 문 밖 → 라운지 자리(돌린
   const di = P.findIndex((q) => Math.abs(q.x - room.door.out.x) < 1e-6 && Math.abs(q.z - room.door.out.z) < 1e-6);
   assert.ok(di > 0, '문 밖을 지남');
   for (const q of P.slice(0, di)) assert.ok(inside(q, room.bounds, 1.21), '문 앞까지는 방 안');
-  assert.deepEqual(P[P.length - 1], spot);
+  assert.deepEqual([P[P.length - 1].x, P[P.length - 1].z], [spot.x, spot.z]);
 });

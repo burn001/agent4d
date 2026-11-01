@@ -55,13 +55,16 @@ test('숨쉬기·말풍선 장부', () => {
   assert.equal(bb.live(100).length, 0);
 });
 
-test('표현 등록: 흐름(기본)·Planet(예전 단순 도형)·복셀, 옛 값 호환', () => {
+test('표현 등록: 흐름(기본)·Planet(예전 단순 도형)·복셀 오피스·복셀 연구소, 옛 값 호환', () => {
   assert.equal(DEFAULT_RENDERER, 'flow');
   assert.ok(isRenderer('flow') && isRenderer('planet') && isRenderer('voxel'));
   assert.ok(!isRenderer('shapes'));
-  assert.deepEqual(RENDERER_ORDER, ['flow', 'planet', 'voxel']);
+  assert.deepEqual(RENDERER_ORDER, ['flow', 'planet', 'voxel', 'lab']);
+  assert.ok(isRenderer('lab')); assert.equal(RENDERER_LABEL.lab, '복셀 연구소');
+  for (const a of ['lab', 'laboratory', 'voxel-lab', '연구소']) assert.equal(normRenderer(a), 'lab', a);
+  assert.equal(storedRenderer('lab', null), 'lab', 'ccviz.view2 = lab');
   assert.equal(RENDERER_LABEL.flow, '흐름'); assert.equal(RENDERER_LABEL.planet, 'Planet');
-  assert.equal(nextRenderer('flow'), 'planet'); assert.equal(nextRenderer('voxel'), 'flow');
+  assert.equal(nextRenderer('flow'), 'planet'); assert.equal(nextRenderer('voxel'), 'lab'); assert.equal(nextRenderer('lab'), 'flow');
   assert.equal(normRenderer('shapes'), 'planet'); assert.equal(normRenderer('shape'), 'planet'); assert.equal(normRenderer('voxel'), 'voxel');
   assert.equal(normRenderer('흐름'), 'flow'); assert.equal(normRenderer('agent-flow'), 'flow'); assert.equal(storedRenderer('flow', null), 'flow', '기존 저장값 flow 그대로');
   assert.equal(storedRenderer(null, 'shapes'), 'flow', '옛 저장값 "도형"은 새 기본(흐름)으로 시작');

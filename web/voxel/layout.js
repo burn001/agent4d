@@ -10,6 +10,7 @@ import { mapSeatLike, quarter } from './xf.mjs';
 import { isJob, isProc } from '../job-core.mjs';
 import { placeJobs } from './vx-job-core.mjs';
 import { assignBays, bayLocal } from './vx-proc-core.mjs';
+import { navPath } from './nav-core.mjs';
 
 const PI = Math.PI;
 export const OFFICE = { w: 24, d: 18 };
@@ -394,7 +395,7 @@ export function computeOffice(nodesIn, rootId, prev) {
       door: { x: o.x + DOOR_X, z: o.z + frontZ - 0.7, out: { x: o.x + DOOR_X, z: o.z + frontZ + 0.8 } },
       portal: { x: o.x - 7, z: o.z + 8.2 + off.ext, spawn: { x: o.x - 7, z: o.z + 7.3 + off.ext } },
       bell: { x: o.x + 4, z: o.z + 8.2 + off.ext },
-      racks: [], screens: [], board: null,
+      racks: [], screens: [], bays: [], board: null,
       aisles: [o.z + LEAD_DESK.z + 2.0, ...Array.from({ length: off.rows }, (_, r) => o.z + DESK_Z0 + r * ROW_STEP + 1.7)],
       bounds: { minX: o.x - OFFICE.w / 2, maxX: o.x + OFFICE.w / 2, minZ: o.z - OFFICE.d / 2, maxZ: o.z + frontZ },
       backDoor: false, leftDoor: null,
@@ -435,6 +436,7 @@ export function computeOffice(nodesIn, rootId, prev) {
     if (s.kind === 'proc') { // 생산 라인: 기계 중심(전광판·컨베이어·팔레트는 그리는 쪽이 BAY 치수로)
       const b = bayLocal(s.slot);
       out.machine.set(id, { roomId: room.id, x: o.x + b.x, y: 0, z: o.z + b.z, type: 'proc', slot: s.slot, face: 0 });
+      if (room.bays && !room.bays.includes(s.slot)) { room.bays.push(s.slot); room.bays.sort((p, q) => p - q); } // 길찾기 장애물(슬롯 = 지역 자리)
       continue;
     }
     if (s.kind === 'rack' || s.kind === 'screen') {
@@ -546,15 +548,24 @@ function exitOf(p, other) {
 }
 
 /**
- * a → b 꺾은선(가로·세로만). a·b 는 {x,z} 이고, 자리(seat)면 kind(lead|grid|aux|meet)·deskZ·face 를 가진다.
- * 책상 자리는 옆으로 나와 책상 앞 통로(책상 z + 1.7)를 지나고, 시설끼리는 가장 가까운 통로 줄을 쓴다.
+ * a → b 걷는 길(가로·세로 꺾은선). 가구·벽을 장애물로 둔 방 격자에서 A*(nav-core.mjs navPath) — 첫 점 = a,
+ * 끝 점 = b(b 가 가구 안이면 그 가구 앞 접근점). 격자 밖·길 없음이면 예전 통로 규칙(orthoPath)으로.
  */
 export function pathBetween(a, b, room) {
+  if (room && room.bounds) { const p = navPath(a, b, room); if (p) return p; }
+  return orthoPath(a, b, room);
+}
+
+/**
+ * (예전 규칙, 길찾기 실패 때만) a → b 꺾은선(가로·세로만). a·b 는 {x,z} 이고, 자리(seat)면 kind(lead|grid|aux|meet)·deskZ·face 를 가진다.
+ * 책상 자리는 옆으로 나와 책상 앞 통로(책상 z + 1.7)를 지나고, 시설끼리는 가장 가까운 통로 줄을 쓴다. 가구는 피하지 않는다.
+ */
+export function orthoPath(a, b, room) {
   // 돌린 방: 지역(회전 전) 좌표에서 길을 찾고 세계로 되돌린다 — 책상 앞 통로·문 쪽 규칙이 그대로 맞는다
   const xf = room && room.xf;
   if (xf && quarter(xf.k) && room.local) {
     const k = quarter(xf.k);
-    const pts = pathBetween(mapSeatLike(a, -k, xf.px, xf.pz), mapSeatLike(b, -k, xf.px, xf.pz), room.local);
+    const pts = orthoPath(mapSeatLike(a, -k, xf.px, xf.pz), mapSeatLike(b, -k, xf.px, xf.pz), room.local);
     return pts.map((p) => { const q = mapSeatLike(p, k, xf.px, xf.pz); return { x: q.x, z: q.z }; });
   }
   const ea = exitOf(a, b), eb = exitOf(b, a);

@@ -2,7 +2,7 @@
 //  · 공용 라운지(정적: 깔개·소파·서류 캐비닛) + 사무실 카펫(세션 색)
 //  · 같은 파일 충돌: 캐비닛 위 주황 경고등 + 말풍선(파일명), 양쪽 팀 직원이 캐비닛 앞에 선다
 //  · 세션 간 메시지: 종이비행기가 사무실 사이를 난다
-//  · 컨텍스트 사용률: 그 사무실 창이 뿌옇게·팀장 책상 서류 더미
+//  · 컨텍스트 사용률: 팀장 책상 서류 더미(창 흐림은 2026-10-31 없앰)
 import { t as _t } from '../i18n.mjs';
 import * as THREE from 'three';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
@@ -23,6 +23,9 @@ export class VxSessions extends VxSessCore {
   }
   /** 라운지 둘레 live 사무실의 세션 색(높은 벽 윗면·문 위 띠·문 밖 깔개), 없으면 null */
   bandColor(r) {
+    if (r && r.type === 'lab' && r.lab && r.lab.zones && r.lab.zones.length > 1) { // 연구소 다중 메인 구역: 브리지 앞 세션 색 띠(세션 색이 없으면 구역 번호 색)
+      return this.sessColor(this.view.nodes.get(r.ownerId)) || this.view.tokens['sess-' + (r.lab.zone % 6)] || null;
+    }
     if (!r || !r.lounge || r.type !== 'office' || r.past) return null;
     return this.sessColor(this.view.nodes.get(r.ownerId));
   }

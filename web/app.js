@@ -10,7 +10,7 @@ import { createMockSource } from './mock.js';
 import { KINDS, KIND_LABEL, KIND_SHAPE } from './layout.js';
 import { CATS, CAT_LABEL } from './icons.js';
 import { HOLO_KIND } from './holo-core.mjs';
-import { RENDERERS, RENDERER_LABEL, DEFAULT_RENDERER, isRenderer, storedRenderer, nextRenderer, normRenderer, normDim, initialDim, renderer2dFor, DIM_LABEL } from './renderers.js';
+import { RENDERERS, RENDERER_LABEL, DEFAULT_RENDERER, isRenderer, storedRenderer, nextRenderer, normRenderer, normDim, initialDim, renderer2dFor, DIM_LABEL, familyOf } from './renderers.js';
 import { ReplayEngine, createLocalReplayApi } from './replay/engine.mjs';
 import { mountReplayUI, fmtClock } from './replay/ui.mjs';
 import { serializeSelection, parseSelection, selectionLabel, sessionsOf, sessionHint } from './projects.js';
@@ -46,8 +46,11 @@ import { mountControl } from './control.js'; // 화면 원격 조작(받는 쪽)
 import { MODES as BGM_MODES } from './bgm-core.mjs'; // bgm 명령
 import { localizeEvent, localizeSnapshot, localizeProjects } from './i18n-server.mjs'; // 서버가 조합한 문구 → 지금 언어(ko 면 그대로)
 import { quipsOn, setQuipsOn } from './voxel/quip-pref.mjs'; // 복셀 생각·말풍선(ctl quips)
+import { labWalkOn, setLabWalkOn } from './lab/lab-pref.mjs'; // 복셀 연구소 현장 걷기(ctl labwalk)
 import { plinksPref, setPlinksPref } from './plinks-core.mjs'; // Planet 관계선(ctl plinks)
 import { mountPlanetLinks } from './plinks-ui.js'; // ⚙ 관계선 줄·범례
+import { mountPov } from './pov-ui.js'; // 메인 1인칭 시점(복셀 3D)
+import { PovCam } from './pov.js';
 
 // index.html 정적 문구(data-i18n*)·문서 제목을 지금 언어로 — 가능한 한 일찍
 applyDom();
@@ -144,7 +147,7 @@ async function loadView(mode, d) {
   if (d === '2d') {
     const r = renderer2dFor(mode); // 2D 판이 없는 표현은 Flow 2D 로 그리고 '준비 중'
     const [C, D] = await Promise.all([r.load(), import('./flat/camera2d.js').then((m) => m.Director2D)]);
-    return { C, D, opts: r.pending ? { pending: r.pending, pendingLabel: RENDERER_LABEL[r.pending] } : {} };
+    return { C, D, opts: r.pending ? { pending: r.pending, pendingLabel: RENDERER_LABEL[r.pending], pendingBaseLabel: r.base && r.base !== 'flow' ? RENDERER_LABEL[r.base] : null } : {} };
   }
   const [C, D] = await Promise.all([RENDERERS[mode](), import('./camera.js').then((m) => m.CameraDirector)]);
   return { C, D, opts: {} };
@@ -212,7 +215,9 @@ const sound = new Sound({ music, sfx, button: $('btn-sound'), sfxSlider: $('sfx-
 const activity = new ActivityMeter();
 music.setActivitySource(() => activity.sample(clockFn(), store.nodes.values()), () => pauseBuf.paused); // 일시정지 중엔 단계 시계도 멈춤
 music.setView(viewMode); // 테마별 풀: 지금 표현(흐름·Planet·복셀)의 곡으로 자동 선곡
+sfx.view = viewMode; // 복셀 연구소 소리(lab-audio)
 
+let povUi = null; // 메인 1인칭 시점(아래 inspector 뒤에 붙임)
 let autoCam = lsGet('ccviz.autocam') !== 'off';
 const camBtn = $('btn-camera');
 function setAutoCam(on) {
@@ -223,7 +228,7 @@ function setAutoCam(on) {
   lsSet('ccviz.autocam', on ? 'on' : 'off');
 }
 setAutoCam(autoCam);
-camBtn.addEventListener('click', () => setAutoCam(!autoCam));
+camBtn.addEventListener('click', () => { if (povUi) povUi.exit(); setAutoCam(!autoCam); });
 // Esc: 실황 노드 필터·포커스 해제(입력창 포커스 중 제외)
 window.addEventListener('keydown', (e) => { if (escClears(e, !!panel.filter)) { e.preventDefault(); panel.setFilter(null); } });
 // 자동 카메라 방식: 전체 맞춤(기본) ⇄ 활동 따라가기. ?cam=fit|follow, localStorage ccviz.camMode
@@ -238,8 +243,9 @@ function setCamMode(m) {
   camModeBtn.setAttribute('aria-pressed', String(m === 'follow'));
   lsSet('ccviz.camMode', m);
 }
-setCamMode(params.get('cam') || lsGet('ccviz.camMode') || 'fit');
-camModeBtn.addEventListener('click', () => { camModeBtn.blur(); setCamMode(director.camMode === 'fit' ? 'follow' : 'fit'); });
+const camQ = params.get('cam'); // ?cam=pov = 처음 메인이 보이면 1인칭(구도 저장값은 그대로)
+setCamMode((camQ !== 'pov' && camQ) || lsGet('ccviz.camMode') || 'fit');
+camModeBtn.addEventListener('click', () => { camModeBtn.blur(); if (povUi) povUi.exit(); setCamMode(director.camMode === 'fit' ? 'follow' : 'fit'); });
 // 'Follow my prompts'(입력 시 받는 메인으로 카메라 이동, 기본 켬 — 예전, 빛줄기는 0.3.0 에서 없앰): localStorage ccviz.followPrompt, ?followPrompt=0|1 은 이번 접속만
 const fpQ = params.get('followPrompt');
 let followPrompt = fpQ != null ? fpQ !== '0' : lsGet('ccviz.followPrompt') !== 'off';
@@ -315,6 +321,8 @@ const inspector = mountInspector({
   onFollow: (on) => { if (director.setFollow) director.setFollow(on); },
   onScopeSession: (n) => scopeToNode(n),
   onScopeProject: (pid) => { director.resumeAuto(); selectScope({ scope: 'project', projectId: pid }); },
+  canPov: (n) => n.kind === 'main' && !n.parentId, // 메인 노드 카드 '이 에이전트 시점으로'(복셀 3D 가 아니면 바꾼 뒤)
+  onPov: (n) => { povEnterSwitch(n.id); },
   onReplay: (n) => {
     const t0 = Date.parse(n.startedAt || '') || null;
     if (replaying && eng) { if (t0) { eng.seek(Math.max(eng.startT, Math.min(eng.endT, t0))); if (eng.status !== 'playing') eng.play(); } return; }
@@ -324,6 +332,26 @@ const inspector = mountInspector({
     startReplay(sid, { at: last ? Math.max(t0 || 0, last - 60000) : null });
   },
 });
+
+// 메인 1인칭 시점: 무대 왼쪽 위 눈 버튼·POV 칩·⚙ 카메라 줄(#btn-pov — mountSettings 가 옮김)·?cam=pov·ctl camera pov
+povUi = mountPov({
+  getView: () => view, getDirector: () => director, nodes: store.nodes,
+  projectName: (pid) => { const p = store.projects.find((x) => x.projectId === pid); return p ? p.name : null; },
+  getFocusId: () => focusId, flash, popupOpen: () => inspector.isOpen,
+});
+/** 복셀 3D 가 아니면 바꾼 뒤(캐릭터가 자리 잡을 때까지 ≤4초) POV. 반환 = povUi.enter 결과 */
+async function povEnterSwitch(id = null, { quiet = false } = {}) {
+  if (!PovCam.canUse(view)) {
+    await switchView('voxel', '3d');
+    if (!PovCam.canUse(view)) return { ok: false, error: 'not_voxel' };
+  }
+  for (let i = 0; i < 20 && !povUi.mains().length; i++) await new Promise((r) => setTimeout(r, 200));
+  return povUi.enter(id, { quiet });
+}
+if (camQ === 'pov') { // 첫 메인 캐릭터가 자리 잡으면 한 번(≤30초)
+  let tries = 0;
+  const iv = setInterval(() => { tries++; if (povUi.active || tries > 60) { clearInterval(iv); return; } if (PovCam.canUse(view) && povUi.mains().length) { clearInterval(iv); setTimeout(() => povUi.enter(null, { quiet: true }), 600); } }, 500);
+}
 
 // 범례
 const legend = $('legend');
@@ -342,6 +370,7 @@ legend.innerHTML =
   `<h3>${tr('app.leg.h.cats')}</h3><ul class="cats">` + CAT_ORDER.map((c) => `<li><i style="background:${c === 'skill' ? 'var(--skill)' : catColor(c, resolveTheme() === 'light')}"></i>${CAT_LABEL[c] || c}</li>`).join('') + '</ul>' +
   `<h3>${tr('app.leg.h.holo')}</h3><ul>` + legNote('app.leg.holo') + CATS.map((c) => `<li><i style="background:${c === 'skill' ? 'var(--skill)' : 'var(--muted)'}"></i>${CAT_LABEL[c]} <span>${HOLO_KIND[c].desc}</span></li>`).join('') + '</ul>' +
   `<h3>${tr('app.renderer.voxel')}</h3><ul>` + ['app.leg.vox1', 'app.leg.vox2', 'app.leg.vox3', 'app.leg.vox4'].map(legPlain).join('') + '</ul>' +
+  `<h3>${tr('app.renderer.lab')}</h3><ul id="leg-lab">` + ['app.leg.lab1', 'app.leg.lab2', 'app.leg.lab3', 'app.leg.lab4', 'app.leg.lab5', 'app.leg.lab6'].map(legPlain).join('') + '</ul>' + // 복셀 연구소 절(플랫폼·기자재 상태 6색·말굽 책상·앞쪽·다중 세션/캠퍼스·현장 걷기)
   `<h3>${tr('app.leg.h.controls')}</h3><ul>` + ['app.leg.ctl1', 'app.leg.ctl2', 'app.leg.ctl3', 'app.leg.ctl4', 'app.leg.ctl5', 'app.leg.ctl6', 'app.leg.ctl7'].map(legPlain).join('') + '</ul>';
 $('btn-legend').addEventListener('click', () => {
   legend.hidden = !legend.hidden;
@@ -436,6 +465,8 @@ function bindCanvas(v) {
     // 사용자 콘솔(흐름 단말·Planet 관제소·복셀 의뢰인 스크린) = 나 · 사용자 카드
     const uc = v.pickConsole ? v.pickConsole(e.clientX, e.clientY) : null;
     if (uc) { holoTip(null); inspector.open({ type: 'console', id: uc }); return; }
+    // 1인칭 중 빈 곳: 팝업이 열려 있으면 닫기만, 아니면 POV 나가기(계획판·섬·바닥 대상 고르기는 하지 않음)
+    if (povUi && povUi.active) { if (inspector.isOpen) inspector.close('blank'); else povUi.exit(); return; }
     // 흐름·Planet 3D 계획 보드는 캔버스 아래(깊이로 가려짐)라 클릭을 캔버스에서 판정 — 노드·패널·콘솔이 먼저
     const pb = plans && plans.on && plans.hitBoard ? plans.hitBoard(e.clientX, e.clientY) : null;
     if (pb && store.nodes.has(pb)) { inspector.open({ type: 'plan', id: pb }); return; }
@@ -499,7 +530,7 @@ function hookEnv(v) { const f = v.onFrame; v.onFrame = (dt, now) => { if (f) f(d
 
 // ---------------- 통계·FPS ----------------
 let statsDirty = true, frames = 0, fpsT = performance.now(), fps = 0;
-const hookFrame = (v) => { v.onFrame = (dt, now) => { director.update(dt, now); frames++; if (plans && plans.on) plans.sync(); }; }; // 보드 자리는 카메라를 옮긴 바로 그 프레임에(한 프레임 늦게 따라오지 않게)
+const hookFrame = (v) => { v.labSound = (name) => { let rp = false; try { rp = replaying; } catch (e) {} return sfx.playLab(name, { speed: timeScale, replay: rp }); }; v.onFrame = (dt, now) => { director.update(dt, now); frames++; if (plans && plans.on) plans.sync(); }; }; // 보드 자리는 카메라를 옮긴 바로 그 프레임에(한 프레임 늦게 따라오지 않게)
 hookFrame(view);
 hookEnv(view);
 setShowDone(showDone);
@@ -564,6 +595,7 @@ async function switchView(next, nextDim = dim) {
   viewMode = next;
   dim = nextDim;
   music.setView(next); // 자동이면 새 테마 곡으로 크로스페이드
+  sfx.view = next; // 복셀 연구소 소리(lab-audio)
   if (art) art.viewChanged(next); // 표현마다 저장된 켬/끔
   if (plinksUi) plinksUi.viewChanged();
   lsSet('ccviz.view2', next);
@@ -572,6 +604,7 @@ async function switchView(next, nextDim = dim) {
   viewLabel(); dimLabel();
   switching = false; viewSel.setDisabled(false);
   statsDirty = true;
+  if (povUi) povUi.viewChanged(); // 복셀 3D 가 아니면 POV 나가기·눈 버튼 숨김
   return true;
 }
 
@@ -931,6 +964,18 @@ function disconnect() {
   if (es) { if (ctl) ctl.unbind(es); es.close(); es = null; }
   if (mockSrc) { mockSrc.close(); mockSrc = null; }
   if (ovMock) { ovMock.stop(); ovMock = null; }
+  if (labMock) { labMock.stop(); labMock = null; }
+}
+// ?mock=1&labmock=<1..10>: 복셀 연구소 확인 장면(web/lab/lab-mock.mjs — 설계 M1～M10)
+let labMock = null;
+function startLabMock() {
+  const n = Number(params.get('labmock')) || 0;
+  if (!n || MODE !== 'mock' || labMock) return;
+  import('./lab/lab-mock.mjs').then(({ LabMockDriver }) => {
+    if (labMock || replaying) return;
+    labMock = new LabMockDriver({ nodes: () => store.nodes.values(), emit: (ev) => onEvent(mockEn(ev)), scenario: n });
+    labMock.start();
+  }).catch((e) => console.warn('연구소 mock', e));
 }
 
 /** scope=all 스냅샷: store 를 비우고 모든 노드 → setScope → layoutNow → director.setScope */
@@ -1002,16 +1047,18 @@ function connect() {
         // ?multi=1: 같은 프로젝트 live 메인 3·2·5(마주 보기·파이·충돌·세션 간 메시지 확인용)
         const multi = params.get('multi');
         const isl = Number(params.get('islands')) || 0; // ?islands=N: 살아 있는 섬 N 개(화면 비율 배치 확인용)
-        const m = (ovMock = createOverviewMock(isl ? { projects: isl, mainsPerProject: [2, 1, 1, 2, 1, 1].slice(0, isl), seed: 2026 } : { projects: 4, mainsPerProject: multi ? [3, 2, 0, 5] : [2, 1, 0, 1], seed: 2026 }));
+        const m = (ovMock = createOverviewMock({ ...(isl ? { projects: isl, mainsPerProject: [2, 1, 1, 2, 1, 1].slice(0, isl), seed: 2026 } : { projects: 4, mainsPerProject: multi ? [3, 2, 0, 5] : [2, 1, 0, 1], seed: 2026 }), promptEveryMs: Number(params.get('prompts')) || 0 })); // ?prompts=<ms> 재현(프로젝트를 돌아가며 사람 입력)
         const mc = new MockCtx({ ...mockCtxOpts(), roots: true }), mp = new MockPanels();
         onSnapshotAll(mockEn(mp.seed(mc.seed(m.snapshot()))));
         setConn('ok', tr('app.mock.fakeAll'));
         m.start((ev) => { if (ovMock !== m) return; onEvent(mockEn(mp.apply(ev))); for (const x of mc.after(ev, getNode)) onEvent(x); }, (d) => { if (ovMock === m) onProjects(mockEn(d)); });
+        startLabMock();
       });
       return;
     }
     const mc = new MockCtx(mockCtxOpts()), mp = new MockPanels();
     mockSrc = createMockSource({ onSnapshot: (snap) => onSnapshot(mockEn(mp.seed(mc.seed(snap)))), onEvent: (ev) => { onEvent(mockEn(mp.apply(ev))); for (const x of mc.after(ev, getNode)) onEvent(x); }, onStatus: (s, t) => setConn(s, t) }, { mode: MODE, stress: STRESS });
+    startLabMock();
     return;
   }
   setConn('wait', tr('app.conn.connecting'));
@@ -1461,6 +1508,7 @@ window.__ccviz = {
   setPaused, get paused() { return pauseBuf.paused; }, pauseBuf,
   conflicts, get sessColors() { return sessColors; },
   inspector,
+  pov: povUi,
 };
 
 ctxUi = mountCtx({ store, getState: () => ({ focusId, streamAll, sel }) });
@@ -1562,7 +1610,19 @@ const ctlHooks = {
     if (temp) { const u = new URL(location.href); u.searchParams.set('lang', value); return { after: () => location.replace(u.href) }; }
     return { detail: value, after: () => setLangPref(value) }; // 저장 후 새로고침(같은 언어면 저장만)
   },
-  camera: ({ value }) => {
+  camera: async ({ value, who, switch: sw }) => {
+    if (value === 'pov') { // 메인 1인칭: 복셀 3D 가 아니면 not_voxel(--switch 면 바꾼 뒤), 이름이 모호하면 후보
+      if (!PovCam.canUse(view) && !sw) return { ok: false, error: 'not_voxel', detail: `${viewMode} ${dim}` };
+      if (!PovCam.canUse(view)) { await switchView('voxel', '3d'); if (!PovCam.canUse(view)) return { ok: false, error: 'not_voxel' }; }
+      for (let i = 0; i < 20 && !povUi.mains().length; i++) await new Promise((r) => setTimeout(r, 200));
+      let id = null;
+      if (who) { const r = povUi.resolve(who); if (!r.ok) return { ok: false, error: r.error, detail: r.candidates.join(' | ') || null }; id = r.id; }
+      const r = povUi.enter(id, { quiet: true });
+      if (!r.ok) return { ok: false, error: r.error };
+      const n = store.nodes.get(r.id);
+      return { detail: 'POV · ' + ((n && n.label) || r.id) };
+    }
+    if (povUi && povUi.active) povUi.exit();
     if (value === 'auto' || value === 'manual') setAutoCam(value === 'auto');
     else { setCamMode(value); if (!autoCam) setAutoCam(true); }
     return {};
@@ -1588,7 +1648,8 @@ const ctlHooks = {
   plans: ({ value }) => { if (!plans) return { ok: false, error: 'not_ready' }; if (plans.on !== (value === 'on')) { const b = $('btn-plans'); if (b) b.click(); else plans.setOn(value === 'on'); } return {}; },
   weather: ({ value }) => { if (weather) { weather.setMode(value); return {}; } lsSet('ccviz.weather', value); return { detail: 'saved (3D only)' }; },
   grid: ({ value }) => { env.setGrid(value === 'on'); return {}; },
-  quips: ({ value }) => { setQuipsOn(value === 'on'); return viewMode === 'voxel' ? {} : { detail: 'saved (voxel only)' }; },
+  quips: ({ value }) => { setQuipsOn(value === 'on'); return familyOf(viewMode) === 'voxel' ? {} : { detail: 'saved (voxel only)' }; }, // 복셀 오피스·연구소
+  labwalk: ({ value }) => { setLabWalkOn(value === 'on'); return viewMode === 'lab' ? {} : { detail: 'saved (lab only)' }; }, // 복셀 연구소 현장 걷기
   plinks: ({ value }) => { setPlinksPref(value); return viewMode === 'planet' ? {} : { detail: 'saved (planet only)' }; },
   panel: ({ value }) => { panel.setCollapsed(value === 'close'); return {}; },
   timeline: ({ value }) => { document.body.classList.toggle('tl-show', value === 'show'); return {}; },
@@ -1610,8 +1671,8 @@ ctl = mountControl({
     scopeLabel: CAN_ALL ? selectionLabel(sel, store.projects, archive) : null,
     sound: sound.on ? 'on' : 'off', soundStatus: sound.status(), music: sound.musicOn ? 'on' : 'off', sfx: sound.sfxOn ? 'on' : 'off', paused: pauseBuf.paused, replaying,
     replaySession: replaying && eng ? eng.sessionId : null, lang: curLang(), panel: panel.collapsed ? 'closed' : 'open',
-    artifacts: !!(art && art.on), plans: !!(plans && plans.on), grid: env.gridOn, quips: quipsOn() ? 'on' : 'off', plinks: plinksPref(), weather: weather ? weather.mode : null,
-    camera: autoCam ? 'auto' : 'manual', camMode: director.camMode, mode: MODE, size: `${innerWidth}×${innerHeight}`,
+    artifacts: !!(art && art.on), plans: !!(plans && plans.on), grid: env.gridOn, quips: quipsOn() ? 'on' : 'off', labwalk: labWalkOn() ? 'on' : 'off', plinks: plinksPref(), weather: weather ? weather.mode : null,
+    camera: povUi && povUi.active ? 'pov' : autoCam ? 'auto' : 'manual', camMode: director.camMode, mode: MODE, size: `${innerWidth}×${innerHeight}`,
   }),
 });
 window.__ccviz.ctl = ctl; window.__ccviz.ctlHooks = ctlHooks;

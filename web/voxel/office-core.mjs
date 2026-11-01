@@ -46,6 +46,7 @@ export function roomPoint(room, lx, lz, front = false, out = {}) {
 
 /** 특별 상호작용 시설 자리(세계). 사무실이 아니면 null */
 export function ixSpot(room, cat) {
+  if (room && room.type === 'lab') return (room.ixSpots && room.ixSpots[cat]) || null; // 복셀 연구소: computeLab 이 미리 계산
   if (!room || room.type !== 'office') return null;
   const f = OFFICE_FX[IX_FACILITY[cat]];
   if (!f) return null;
@@ -80,6 +81,7 @@ export function vxIxAlpha(te, lin) {
 
 /** 탕비실 쉬는 자리 i(세계, face 포함). 사무실이 아니면 null */
 export function breakSpot(room, i = 0) {
+  if (room && room.type === 'lab') { const a = room.breakSlots; return a && a.length ? a[((i % a.length) + a.length) % a.length] : null; } // 연구소 앞쪽 라운지
   if (!room || room.type !== 'office') return null;
   const b = BREAK_LOCAL[((i % BREAK_LOCAL.length) + BREAK_LOCAL.length) % BREAK_LOCAL.length];
   const p = roomPoint(room, b.x, b.z);
@@ -92,6 +94,7 @@ export function breakSpot(room, i = 0) {
 export const BREAK_N = BREAK_LOCAL.length;
 /** 탕비실 자리 전부(세계, 방 객체에 기억) — SpotBook 후보. 사무실이 아니면 null */
 export function breakSlots(room) {
+  if (room && room.type === 'lab') return room.breakSlots || null;
   if (!room || room.type !== 'office') return null;
   return room._brk || (room._brk = BREAK_LOCAL.map((_, i) => breakSpot(room, i)));
 }
@@ -105,6 +108,7 @@ export function clientLocal(room) {
 }
 /** 의뢰인 스크린 가운데(세계, y 포함) · 그 앞 팀장 자리(face 포함). 사무실이 아니면 null */
 export function clientScreen(room) {
+  if (room && room.type === 'lab') return room.client ? { ...room.client.screen } : null; // 연구소 브리지 통신 스크린
   if (!room || room.type !== 'office') return null;
   const c = clientLocal(room), p = roomPoint(room, c.x, c.z);
   p.y = OFFICE_FX.client.y;
@@ -113,6 +117,7 @@ export function clientScreen(room) {
 /** 스크린에서 한 걸음 반 앞(1.3 이면 안테나 접근점과 0.55 — 겹쳐 보였다) */
 export const CLIENT_STEP = 1.65;
 export function clientSpot(room) {
+  if (room && room.type === 'lab') return room.client ? { ...room.client.spot } : null;
   if (!room || room.type !== 'office') return null;
   const c = clientLocal(room), p = roomPoint(room, c.x, c.z + c.inward * CLIENT_STEP);
   p.face = (c.inward > 0 ? PI : 0) + xfAngle(room.xf && room.local ? room.xf : null);
@@ -164,6 +169,7 @@ export function breakDecision(s) {
 export const OVERSEE_FRONT = 1.25;
 export const OVERSEE_SIDE = -0.8; // 책상 정면에서 왼쪽으로 조금 — 기본 카메라(앞 오른쪽 위)에서 팀장이 팀원을 가리지 않게
 export function overseeSpot(room, desk = null) {
+  if (room && room.type === 'lab') return room.oversee ? room.oversee(desk) : null; // 연구소: 볼 팀원 책상 앞(플랫폼 쪽)
   if (!room || room.type !== 'office' || !room.leadDesk) return null;
   const rot = xfAngle(room.xf && room.local ? room.xf : null);
   if (desk && Number.isFinite(desk.lx) && Number.isFinite(desk.lz)) {
@@ -215,6 +221,12 @@ export function floorRoute(a, b, room) {
   const pts = pathBetween(a, b, room);
   return pts.length >= 2 ? pts : [{ x: a.x, z: a.z }, { x: b.x, z: b.z }];
 }
+/** 길 열쇠: 방 id·방 길 격자 서명·두 끝점(0.01 반올림). 같으면 같은 길(nav-core 결정적) */
+const r2_ = (v) => Math.round(v * 100);
+export function routeSig(a, b, room) {
+  if (!room || !room.navSig) return null; // 길 격자 서명이 있는 방(연구소)만 이어 씀 — 사무실은 늘 다시(작은 격자, nav-core 캐시)
+  return (room ? room.id + '#' + (room.navSig || '') + '#' + (room.origin ? r2_(room.origin.x) + ',' + r2_(room.origin.z) : '') : '') + '#' + r2_(a.x) + ',' + r2_(a.z) + '>' + r2_(b.x) + ',' + r2_(b.z);
+}
 /** 누적 길이 [0, l1, l1+l2, …] */
 export function routeCum(pts) {
   const c = [0];
@@ -257,6 +269,37 @@ export function lineStyle(status) {
 
 // ---------------- 홀로그램 모니터 ----------------
 export const MON = { OPEN: 0.32, CLOSE: 0.42, H: 1.0, MIN_PX: 64, BOOST: 1.9, TOP: 6, ASP: 1.62, LEAD_K: 1.3, POP: 0.95, POP_MAX: 3, MINI_MAX: 3 };
+// 책상 고정 모니터(빌보드 아님): 화면 높이·팀장 배율·키움 상한(머리보다 낮게)·상판 위 띄움·뒤로 젖힘(rad)·책상 앞 끝에서 안쪽 거리.
+// MON.H·BOOST 는 계획판(plan-core VX_MON_H·BOOST.voxel)이 크기 기준으로 함께 쓰므로 그대로 둔다.
+/**
+ * 기동기(복합기) 위 회차 대시보드 자리 — 빌보드 판 가운데·위 끝과 기동기 이름표 자리. pos = 장치 자리, k = BATCH.DEVICE_K.
+ * 이름표는 판 위 끝 위(LABEL_GAP)에 두어 판과 겹치지 않는다. 회차 요약 숫자는 판 글이 읽히는 동안 판에만(이름표는 이름·꼬리표만).
+ */
+export const VX_DASH = { W: 1.6, H: 0.95, LIFT: 0.12, DX: 0.1, LABEL_GAP: 0.2 };
+export function launcherDash(pos, k) {
+  const x = pos.x + VX_DASH.DX * k, z = pos.z, y = 1.6 * k + VX_DASH.H / 2 + VX_DASH.LIFT;
+  const top = y + VX_DASH.H / 2;
+  return { x, y, z, top, label: { x, y: top + VX_DASH.LABEL_GAP, z } };
+}
+export const DESK_MON = { H: 1.0, LEAD_K: 1.2, FOCUS_K: 1.12, MAX_H: 1.16, LIFT: 0.1, TILT: 0.24, INSET: 0.12, MINI_W: 0.8, MINI_H: 0.52, POP_W: 0.64, POP_H: 0.4, SIDE_GAP: 0.08, BACK_A: 0.65 };
+// 화면·옆 창·팝업 2배(2026-10-31 박사님 1.5배 → 2배, "아바타가 조금 가려도 괜찮아") — 위 끝이 머리 위로 조금 올라옴, 직원은 투명한 화면 뒤로 비쳐 보임
+// BACK_A = 뒷면(투명 홀로그램 판을 뒤에서 봄) 불투명도 배율: 앞면 글·무늬가 좌우 거울상으로 이만큼 옅게
+/**
+ * 책상 고정 모니터 자세(순수). seat = {deskX, deskZ, face}, deskTop = 상판 높이, depth = 책상 깊이, H = 지금 화면 높이(열림 반영).
+ * 화면(앞면, 평면 +z)은 직원 쪽(-얼굴 방향)을 보고 윗변이 직원 반대쪽으로 TILT 만큼 젖혀진다. 아래 끝 = 상판 + LIFT, 책상 앞 끝(얼굴 방향 끝) − INSET.
+ * 반환: base(아래 끝 가운데)·c(가운데)·top(위 끝 높이)·n(앞면 법선, 직원 쪽·조금 위)·u(화면 위 방향)·r(화면 가로 방향)·yaw·pitch(Euler 'YXZ' = (pitch, yaw, 0))
+ */
+export function deskMonitorPose(seat, deskTop, depth, H, tilt = DESK_MON.TILT) {
+  const face = seat.face || 0, fx = Math.sin(face), fz = Math.cos(face);
+  const off = depth / 2 - DESK_MON.INSET;
+  const st = Math.sin(tilt), ct = Math.cos(tilt);
+  const base = { x: seat.deskX + fx * off, y: deskTop + DESK_MON.LIFT, z: seat.deskZ + fz * off };
+  const u = { x: fx * st, y: ct, z: fz * st };
+  const n = { x: -fx * ct, y: st, z: -fz * ct };
+  const r = { x: -fz, y: 0, z: fx };
+  const c = { x: base.x + u.x * H / 2, y: base.y + u.y * H / 2, z: base.z + u.z * H / 2 };
+  return { base, c, top: base.y + H * ct, n, u, r, yaw: face + Math.PI, pitch: -tilt };
+}
 /** 모니터를 펼칠지: 그 노드의 홀로그램 항목이 보이고(장부) 캐릭터가 자기 책상에 서 있을 때 */
 export function monitorWanted(hasEntry, atDesk, gone = false) { return !gone && !!hasEntry && !!atDesk; }
 /** 열림 정도 한 걸음(펼침 OPEN 초 · 접힘 CLOSE 초) */

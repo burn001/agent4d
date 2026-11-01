@@ -161,7 +161,7 @@ test('stationFor: 접근점 → 대기 자리 → null', () => {
   assert.equal(stationFor('web', meet, 0), null);    // 회의실엔 없음 → 제자리
 });
 
-test('pathBetween: 가로·세로 꺾은선, 끝점 일치, 책상은 옆으로 나와 앞 통로', () => {
+test('pathBetween: 가로·세로 꺾은선, 끝점 일치, 자기 책상을 뚫지 않음(§18.10)', () => {
   const lay = computeOffice(tree(), 's:main', null);
   const room = lay.rooms.find((r) => r.id === 'o:s:main');
   const seat = lay.seat.get('a:1');
@@ -170,10 +170,13 @@ test('pathBetween: 가로·세로 꺾은선, 끝점 일치, 책상은 옆으로 
   assert.deepEqual([p[0].x, p[0].z], [seat.x, seat.z]);
   assert.deepEqual([p.at(-1).x, p.at(-1).z], [st.x, st.z]);
   for (let i = 1; i < p.length; i++) assert.ok(Math.abs(p[i].x - p[i - 1].x) < 1e-9 || Math.abs(p[i].z - p[i - 1].z) < 1e-9, 'axis aligned');
-  assert.ok(Math.abs(p[1].x - seat.x) > 1); // 옆으로 먼저
-  assert.ok(p.some((q) => Math.abs(q.z - (seat.deskZ + 1.7)) < 1e-9)); // 책상 앞 통로
+  // 자리(책상 뒤) → 앞쪽 시설: 책상 상판(폭 1.3·깊이 0.7)을 가로지르지 않는다
+  for (let i = 1; i < p.length; i++) for (let u = 0; u <= 1; u += 0.02) {
+    const x = p[i - 1].x + (p[i].x - p[i - 1].x) * u, z = p[i - 1].z + (p[i].z - p[i - 1].z) * u;
+    assert.ok(!(Math.abs(x - seat.deskX) < 0.65 && Math.abs(z - seat.deskZ) < 0.35), '책상 관통');
+  }
   const back = pathBetween(st, { ...seat }, room);
-  assert.equal(pathLength(back).toFixed(6), pathLength(p).toFixed(6));
+  assert.ok(Math.abs(pathLength(back) - pathLength(p)) < 1.0, '왕복 길이 비슷');
   const door = pathBetween(room.door, { ...seat }, room);
   assert.deepEqual([door.at(-1).x, door.at(-1).z], [seat.x, seat.z]);
 });

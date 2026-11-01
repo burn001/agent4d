@@ -1,11 +1,11 @@
 // 상단 바 표현 선택 드롭다운. 예전 #btn-view 순환 버튼 + #btn-dim 토글을 버튼 하나 + 펼침 메뉴로.
-//   메뉴 = 표현 묶음(Flow · Planet · 복셀 오피스) + 화면 묶음(3D · 2D 저사양). 단일 선택 두 묶음(menuitemradio)
+//   메뉴 = 표현 묶음(Flow · Planet · 복셀 오피스 · 복셀 연구소) + 화면 묶음(3D · 2D 저사양). 단일 선택 두 묶음(menuitemradio)
 //   키보드: 버튼에서 Enter·Space·↓ = 열고 지금 값에 초점, 메뉴에서 ↑↓(끝에서 돌아감)·Home·End·Enter·Space = 고름, Esc·Tab = 닫음(초점 버튼으로)
 //   순수 부분(menuItems·triggerText·menuKey)은 DOM 없이 web/test/viewsel.test.mjs 가 검사한다. mount 만 document 를 쓴다
 import { RENDERER_LABEL, RENDERER_ORDER, DIM_LABEL, DIMS } from './renderers.js';
 import { t } from './i18n.mjs';
 
-const VIEW_HINT = { flow: t('app.vsel.hint.flow'), planet: t('app.vsel.hint.planet'), voxel: t('app.vsel.hint.voxel') };
+const VIEW_HINT = { flow: t('app.vsel.hint.flow'), planet: t('app.vsel.hint.planet'), voxel: t('app.vsel.hint.voxel'), lab: t('app.vsel.hint.lab') };
 const DIM_TEXT = { '3d': '3D', '2d': t('app.vsel.dim2d') };
 const DIM_HINT = { '3d': t('app.vsel.hint.3d'), '2d': t('app.vsel.hint.2d') };
 

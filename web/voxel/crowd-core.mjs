@@ -92,7 +92,7 @@ export function stationCands(room, cat) {
 export function takeStation(book, ch, cat) {
   const room = ch.room, cands = stationCands(room, cat);
   if (!cands) return null;
-  const r = book.take(room.id, cat === 'workflow' ? 'agent' : cat, ch.id, cands);
+  const r = book.take(room.spotRoomId || room.id, cat === 'workflow' ? 'agent' : cat, ch.id, cands); // 연구소 구역 방끼리 시설 공유(spotRoomId)
   ch.station = r;
   return r ? r.spot : null;
 }
@@ -100,7 +100,7 @@ export function takeStation(book, ch, cat) {
 export function takeBreak(book, ch) {
   const room = ch.room, cands = breakSlots(room);
   if (!cands) return null;
-  const r = book.take(room.id, 'break', ch.id, cands);
+  const r = book.take(room.spotRoomId || room.id, 'break', ch.id, cands);
   ch.station = r;
   return r ? r.spot : null;
 }
@@ -140,7 +140,8 @@ const together = (a, b) => (a.room && b.room && a.room === b.room) || (a.target 
  * 짝마다 겹친 만큼을 무게(밀리는 쪽 1, 책상 0)로 나눠 미루고 한꺼번에 적용(순서 무관). 같은 점이면 id 순서로 방향을 정한다(결정적).
  * 걷는 사람은 밀림의 앞뒤 성분을 진행 방향 오른쪽 비켜 서기로 바꾼다(앞뒤로 밀면 길을 되돌아가거나 관통). 같은 쪽으로 걷는 둘은 앞뒤로 벌어짐
  */
-export function separate(chars, dt, opt = CROWD, speed = 1) {
+/** solid(ch, x, z) → true 면 그 자리로는 밀지 않음(가구·벽 안 — 복셀 연구소처럼 큰 방은 nav-core navSolid, 없으면 예전대로) */
+export function separate(chars, dt, opt = CROWD, speed = 1, solid = null) {
   const list = [];
   for (const ch of chars) {
     if (!ch || ch.state === 'gone' || !ch.placed || ch.offstage || !ch.room) continue;
@@ -208,6 +209,7 @@ export function separate(chars, dt, opt = CROWD, speed = 1) {
     }
     const ox = x - A.x, oz = z - A.z, o = Math.hypot(ox, oz);
     if (o > opt.MAX_OFF) { x = A.x + ox * opt.MAX_OFF / o; z = A.z + oz * opt.MAX_OFF / o; }
+    if (solid && solid(ch, x, z) && !solid(ch, ch.pos.x, ch.pos.z)) continue; // 밀려서 가구·벽 안으로 들어가지 않게
     if (Math.abs(x - ch.pos.x) > 1e-5 || Math.abs(z - ch.pos.z) > 1e-5) { ch.pos.x = x; ch.pos.z = z; moved = true; if (A.walk) ch.nudged = true; }
   }
   return moved;

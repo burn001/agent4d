@@ -2,6 +2,7 @@
 //   spawn ─▶ enter ─▶ seated ⇄ walk ─▶ work ─▶ walk(return) ─▶ seated
 //                       └──(done/error)──▶ leave ─▶ gone
 import { pathBetween, pathLength, hashStr } from './layout.js';
+import { loungePath, navSpot } from './nav-core.mjs'; // 라운지 둘레 길
 import { STAND_CATS, breakDecision, BREAK, superviseAct } from './office-core.mjs';
 import { runOf, runWorking, runVisStatus } from '../run-core.mjs'; // 실행 중 셸
 
@@ -158,6 +159,9 @@ export class Character {
 
   _decide(ctx) {
     this.sup = null;
+    // 복셀 연구소(11.01.): 경사로(계단) 위를 걷는 동안은 목표를 바꾸지 않는다 — 오르다 새 도구·책상 복귀로 되돌아 내려가는(높이가 오르내리는)
+    // 지그재그 없앰. 경사로를 다 지나(덱·바닥) 다음 판단에서 새 목표로. ctx.onRamp 는 LabView 만 준다(복셀 오피스 등은 그대로).
+    if (ctx.onRamp && this.state === 'walk' && this.path && this.pi < this.path.length && ctx.onRamp(this)) return;
     if (this.endAt != null) { // 끝남: 하던 자리에서 마무리 후 퇴장
       // 끝난 채 붙잡혀 있는데(오류 잠깐· 완료 표시 끔) 재배치로 자리를 옮겼으면(target 비움) 새 자리로 걸어간다
       // 예전엔 옛 책상에 그대로 서 있어 그 책상을 새로 받은 직원과 한 점에 겹쳤다
@@ -175,7 +179,7 @@ export class Character {
     }
     if (this.errand) this.errand = null;
     // 라운지 방문(같은 파일 충돌): 정한 시각까지 캐비닛 앞 자리에 선다(도구보다 먼저)
-    if (this.visit && this.visit.until > now && ctx.room && ctx.room.door) {
+    if (this.visit && this.visit.until > now && ctx.room && (ctx.room.door || ctx.room.type === 'lab')) {
       const sp = this.visit.spot;
       const want = { key: 'visit:' + sp.x.toFixed(2) + ',' + sp.z.toFixed(2), type: 'visit', spot: sp, cat: null, toolId: null };
       ctx.releaseStation(this);
@@ -257,18 +261,32 @@ export class Character {
     const now = ctx.now;
     const fromSeat = this.target && this.target.type === 'desk' && (this.state === 'seated' || this.state === 'work');
     const a = fromSeat ? this.seat : { x: this.pos.x, z: this.pos.z };
-    const b = want.type === 'desk' ? this.seat : want.spot;
-    const fromVisit = this.target && this.target.type === 'visit';
+    let b = want.type === 'desk' ? this.seat : want.spot;
+    this._goal = null;
+    const fromVisit = this.target && this.target.type === 'visit' && !this._visitInRoom; // 연구소 방문(현장 걷기·충돌)은 방 안 길
+    const inRoom = !!(ctx.room && ctx.room.type === 'lab');
+    if (want.type === 'visit') this._visitInRoom = inRoom;
     this.target = want;
     this.workCat = null;
     // 이미 그 자리에 서 있으면(처음 배치 직후 등) 바로 도착 — 예전엔 자리 → 책상 옆 → 통로 → 자리로 책상을 한 바퀴 돌았다
     if (this.state !== 'enter' && Math.abs(this.pos.x - b.x) < 1e-3 && Math.abs(this.pos.z - b.z) < 1e-3) { this.snapNext = false; this._arrive(b, now); return; }
-    // 라운지 방문: 방 안 → 문 → 문 밖 → 라운지 자리, 돌아올 때는 거꾸로(라운지는 방 밖이라 방 경계로 자르지 않음)
+    // 라운지 방문: 방 안 → 문 → 문 밖 → 라운지 자리, 돌아올 때는 거꾸로. 문 밖 ↔ 라운지는 라운지 둘레 격자(소파·탁자·캐비닛·다른 방을 피함)
     const door = ctx.room && ctx.room.door;
+    if ((this.snapNext || ts >= 16) && !(this.state === 'enter' && this.appearT0 != null && now - this.appearT0 < APPEAR)) { // 걷지 않음 — 길 계산 없이 서 있을 자리만
+      this.snapNext = false;
+      this._goal = want.type === 'visit' ? b : navSpot(ctx.room, b);
+      this._arrive(this._goal, now);
+      return;
+    }
     let path;
-    if (want.type === 'visit' && door) path = [...pathBetween(a, door, ctx.room), door.out, b];
-    else if (fromVisit && door && want.type !== 'visit') path = [{ x: this.pos.x, z: this.pos.z }, door.out, ...pathBetween(door, b, ctx.room)];
+    if (want.type === 'visit' && door && !inRoom) { this._loungeNav = this.visit && this.visit.nav || null; path = [...pathBetween(a, door, ctx.room), ...loungePath(this._loungeNav, door.out, b)]; }
+    else if (fromVisit && door && want.type !== 'visit') path = [...loungePath(this._loungeNav, this.pos, door.out), ...pathBetween(door, b, ctx.room)];
     else path = pathBetween(a, b, ctx.room);
+    path = joinPath(path);
+    // 도착 자리 = 길 끝(목표가 가구 안이면 그 앞 접근점 — 길찾기가 거기서 멈춤)
+    const end = path[path.length - 1];
+    if (end && (Math.abs(end.x - b.x) > 1e-6 || Math.abs(end.z - b.z) > 1e-6)) b = { ...b, x: end.x, z: end.z };
+    this._goal = b;
     const speed = WALK_SPEED * clamp(ts, 1, 6);
     const est = pathLength(path) / speed;
     if (this.state === 'enter' && this.appearT0 != null && now - this.appearT0 < APPEAR) {
@@ -276,7 +294,7 @@ export class Character {
       this.path = path; this.pi = 1;
       return;
     }
-    if (this.snapNext || ts >= 16 || est < 0.05) {
+    if (est < 0.05) {
       this.snapNext = false;
       this._arrive(b, now);
       return;
@@ -302,10 +320,28 @@ export class Character {
     const a = (this.state === 'seated' || this.state === 'work') && this.target && this.target.type === 'desk' ? this.seat : { x: this.pos.x, z: this.pos.z };
     this.state = 'leave';
     this.workCat = null;
+    const inLounge = this.target && this.target.type === 'visit' && !this._visitInRoom; // 라운지에서 끝나면 방 문 밖까지 돌아와 사라짐(연구소 방문은 방 안)
     this.target = { key: 'leave', type: 'door', spot: door, cat: null, toolId: null };
+    this._goal = null;
     if (ts >= 16) { this.path = null; this.vanishT0 = ctx.now; return; }
-    this.path = [...pathBetween(a, door, ctx.room), door.out];
+    this.path = joinPath(inLounge ? loungePath(this._loungeNav, this.pos, door.out) : [...pathBetween(a, door, ctx.room), door.out]);
     this.pi = 1;
+  }
+
+  /**
+   * 걷는 길 다시(장애물이 바뀌어 남은 길이 가구·벽을 지날 때 — 복셀 연구소 기자재·책상 열 변화). 목적지는 그대로, 지금 자리에서 출발.
+   * 걷기('walk') = 목표를 비워 다음 프레임 _goTo, 퇴장('leave', 방 안) = 문까지 길만 새로. 반환 = 바꿨는지
+   */
+  replan(room) {
+    if (!this.path || !room) return false;
+    if (this.state === 'walk') { this.target = null; this.path = null; return true; }
+    if (this.state === 'leave' && room.door && !(this.target && this.target.type === 'visit')) {
+      const door = room.door;
+      this.path = joinPath([...pathBetween({ x: this.pos.x, z: this.pos.z }, door, room), door.out]);
+      this.pi = 1;
+      return true;
+    }
+    return false;
   }
 
   _move(ctx) {
@@ -334,9 +370,17 @@ export class Character {
     }
     if (this.pi >= this.path.length) {
       if (this.state === 'leave') { if (this.vanishT0 == null) this.vanishT0 = now; this.path = null; return; }
-      const b = this.target && (this.target.type === 'desk' ? this.seat : this.target.spot);
+      const b = this.target && (this._goal || (this.target.type === 'desk' ? this.seat : this.target.spot));
       if (b) this._arrive(b, now); else { this.state = 'seated'; this.path = null; }
     }
+  }
+
+  /** 이사 보간: 방이 (dx, dz) 옮겨 갈 때 같이(지금 자리·걷는 길·도착 자리). 자리·시설 점은 방과 함께 옮겨짐 */
+  shiftBy(dx, dz) {
+    this.pos.x += dx; this.pos.z += dz;
+    if (this.path) for (const p of this.path) { p.x += dx; p.z += dz; }
+    if (this._goal && this._goal !== this.seat && !(this.target && this._goal === this.target.spot)) { this._goal.x += dx; this._goal.z += dz; }
+    if (this.blinkTo && this.blinkTo !== this.seat && !(this.target && this.blinkTo === this.target.spot)) { this.blinkTo.x += dx; this.blinkTo.z += dz; }
   }
 
   /** 크기(등장 0→1, 소멸 1→0) */
@@ -354,6 +398,13 @@ export class Character {
   /** 가는 자리(걷는 중이면 도착할 자리, 아니면 지금 자리): 목표가 책상이면 자기 좌석, 그 밖(작업대·라운지·감독)은 그 자리, 목표 없음·등장 중·퇴장 중이면 좌석 → 없으면 지금 위치 */
   goalSpot() { if (this.state === 'leave' || this.state === 'gone') return this.seat || this.pos; /* 퇴장: 문으로 가는 걸음은 구도를 넓히지 않음(자리에서 사라지는 것으로) */ const t = this.target; const b = t ? (t.type === 'desk' ? this.seat : t.spot) : this.seat; return b || this.pos; }
   atDesk() { return (this.state === 'seated' || this.state === 'work') && !!this.target && this.target.type === 'desk'; }
+}
+
+/** 이어 붙인 길: 점 복사(방 객체의 점을 공유하지 않게 — 이사 보간 shiftBy) · 겹친 점 빼기 */
+function joinPath(pts) {
+  const r = [];
+  for (const p of pts) { const l = r[r.length - 1]; if (!l || Math.abs(l.x - p.x) > 1e-9 || Math.abs(l.z - p.z) > 1e-9) r.push({ x: p.x, z: p.z }); }
+  return r;
 }
 
 const easeOutBack = (x) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };

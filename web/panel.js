@@ -15,7 +15,7 @@ const MAX_LINES = 1000;
 const NATIVE_ANCHOR = typeof CSS !== 'undefined' && !!CSS.supports && CSS.supports('overflow-anchor', 'auto');
 const STATUS_TXT = Object.fromEntries(['active', 'idle', 'done', 'error', 'stopped'].map((k) => [k, t('app.panel.st.' + k)]));
 // '중지됨' 사유(서버 meta.stopReason)
-export const STOP_REASON_TXT = Object.fromEntries(['taskstop', 'kill-cmd', 'signal', 'time-limit', 'killed', 'orphan', 'session-end', 'parent-stopped']
+export const STOP_REASON_TXT = Object.fromEntries(['taskstop', 'kill-cmd', 'signal', 'time-limit', 'killed', 'orphan', 'session-end', 'agent-end', 'parent-stopped']
   .map((k) => [k, t('app.panel.stop.' + k)]));
 const trunc = (s, n) => { s = String(s ?? ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
 

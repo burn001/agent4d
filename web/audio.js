@@ -12,7 +12,7 @@
 //   - 다 꺼진 덱은 pause() 만 하고 src·노드는 그대로 두어 다음 전환에 다시 쓴다(요소·노드는 덱 두 개분만 만든다)
 //   - 매니페스트가 없으면 예전 한 곡(bgm.mp3·bgm.json)으로 동작
 
-import { TRACK_KEY, LAST_KEY, MIG_KEY, FALLBACK_TRACKS, parseManifest, normalizeSel, initialSel, isMode, firstTrack, nextTrack, loopFor, optionList, modeLabel, stageLabel, sectionName } from './bgm-core.mjs';
+import { TRACK_KEY, LAST_KEY, MIG_KEY, FALLBACK_TRACKS, parseManifest, normalizeSel, initialSel, isMode, firstTrack, nextTrack, loopFor, optionList, modeLabel, stageLabel, sectionName, trackUrl } from './bgm-core.mjs';
 import { AutoPicker, activityLevel, pickForLevel, autoLabel, LEVEL_LABEL } from './bgm-auto.mjs';
 import { t as tr } from './i18n.mjs';
 import { Lane, planXfade, shouldLeadEnd, takeover, XFADE, TAKEOVER_OUT, READY_TIMEOUT, SILENT } from './bgm-xfade.mjs';
@@ -303,7 +303,7 @@ export class Music {
     d.leadDone = false;
     d.el.loop = loopFor(this.sel);
     if (preload) d.el.preload = preload;
-    const src = 'assets/' + t.file;
+    const src = trackUrl(t); // ?v=<내용 해시> — 1년 immutable 캐시
     if (d.el.getAttribute('src') !== src) d.el.src = src;
     else { try { d.el.currentTime = 0; } catch (e) {} }
   }
@@ -313,7 +313,7 @@ export class Music {
     const t = this._setCur(id);
     if (!t) return;
     const d = this.decks[this.active];
-    if (d.id !== t.id || d.el.getAttribute('src') !== 'assets/' + t.file) this._deckLoad(this.active, t.id, preload);
+    if (d.id !== t.id || d.el.getAttribute('src') !== trackUrl(t)) this._deckLoad(this.active, t.id, preload);
     else if (preload) d.el.preload = preload;
     d.el.loop = loopFor(this.sel);
   }

@@ -40,7 +40,7 @@ export class Vx2DExtra {
   holdPts(id) {
     const v = this.view, ch = v.chars.get(id), m = !ch && v.machines.get(id);
     const room = ch ? ch.room : m && m.pos ? v.roomsById.get(m.pos.roomId) : null;
-    const off = room && room.type === 'office' ? room : room && room.officeId ? v.roomsById.get(room.officeId) : null;
+    const off = room && (room.type === 'office' || room.type === 'lab') ? room : room && room.officeId ? v.roomsById.get(room.officeId) : null; // 연구소 구역 방 = 자기 ixSpots(computeLab)
     const sp = off && ixSpot(off, 'github');
     return sp ? [{ x: sp.x, y: 0, z: sp.z, r: 1.4 }] : null;
   }
@@ -238,7 +238,7 @@ export class Vx2DExtra {
       const m = !ch && (v.machines.get(f.nodeId) || (f.bgNode && v.machines.get(f.bgNode)));
       const room = ch ? ch.room : m && m.pos ? v.roomsById.get(m.pos.roomId) : null;
       if (f.cat === 'user') { const kind = mod.ixAutoKind(f.ix); if (kind && kind !== 'dot') this._auto2d(ctx, now, s, f, kind, ch, m); continue; }
-      const off = room && room.type === 'office' ? room : room && room.officeId ? v.roomsById.get(room.officeId) : null;
+      const off = room && (room.type === 'office' || room.type === 'lab') ? room : room && room.officeId ? v.roomsById.get(room.officeId) : null; // 연구소: 구역 방마다 ixSpots(공유 시설 자리)
       const sp = off && ixSpot(off, f.cat);
       if (!sp) continue;
       const vv = v.vis.get(f.nodeId);
@@ -326,7 +326,7 @@ export class Vx2DExtra {
     const scr = this.conScr || (this.conScr = []); scr.length = 0;
     const tags = [];
     for (const r of v.rooms) {
-      if (r.type !== 'office' || !r.leadDesk || r.external) continue;
+      if ((r.type !== 'office' && r.type !== 'lab') || !r.leadDesk || r.external) continue; // 연구소: 구역 방(팀장)마다 브리지 통신 스크린
       const ov = v.vis.get(r.ownerId);
       if (!ov || ov.node.kind !== 'main' || ov.hidden || !(ov.scopeK ?? 1)) continue;
       const fa = ov.projA ?? 1; // 프로젝트 페이드
@@ -334,7 +334,7 @@ export class Vx2DExtra {
       const mode = d ? d.screen(now, ov.node.status === 'idle') : 'idle';
       const sc = clientScreen(r);
       if (!sc) continue;
-      const odd = r.xf && r.local ? (Math.round(r.xf.k) % 2 !== 0) : false;
+      const odd = r.type !== 'lab' && r.xf && r.local ? (Math.round(r.xf.k) % 2 !== 0) : false; // 연구소는 돌린 방 없음
       const w = (odd ? 0.3 : 2.4) * s, h = (odd ? 2.4 : 0.3) * s;
       ctx.globalAlpha = fa;
       ctx.fillStyle = mode === 'alert' ? (Math.floor(now * 4) % 2 ? t.error : pal.screenOff) : mode === 'saver' ? pal.screenOff : mode === 'idle' ? mixHex(pal.screenDim, user, 0.15) : mixHex(pal.screenDim, user, 0.6);
@@ -350,8 +350,9 @@ export class Vx2DExtra {
         }
         if (s > 6) tags.push({ root: r.ownerId, x: X(sc.x), y: Y(sc.z) - h / 2 - 4, a: fa, hit: hits[hits.length - 1] });
       }
-      if (d && d.ask && s > 3) {
-        const n = d.ask.n, sp = clientSpot(r);
+      const sp0 = d && d.ask && s > 3 ? clientSpot(r) : null;
+      if (sp0) {
+        const n = d.ask.n, sp = sp0;
         for (let i = 0; i < n; i++) {
           const u = n > 1 ? i / (n - 1) - 0.5 : 0, chosen = d.ask.chosen === i;
           const cx = (sc.x + sp.x) / 2 + (odd ? 0 : u * 2.2), cz = (sc.z + sp.z) / 2 + (odd ? u * 2.2 : 0);

@@ -65,7 +65,7 @@ Show the link from `url` (or from `start`) to the user and suggest opening it in
 - **Update:** `$A4D update` (see step 2). `update` restarts a running server with the same options.
 - **All commands and options:** `$A4D help`.
 - **2D mode** for slow machines or browsers without WebGL: the 3D/2D button in the top bar, or add `&dim=2d` to the link.
-- **Views:** Flow (default), Planet and Voxel Office, chosen from the view menu in the top bar (or `&view=planet`, `&view=voxel`).
+- **Views:** Flow (default), Planet, Voxel Office and Voxel Lab, chosen from the view menu in the top bar (or `&view=planet`, `&view=voxel`, `&view=lab`).
 - **Replay:** pick a past or running session in the viewer and play it from the start at 0.5×–32×, with a scrubbable timeline.
 - **Try without real data:** `npm run demo` inside the clone shows a synthetic session tree.
 
@@ -87,8 +87,9 @@ When the user asks to change what the open viewer shows, run `$A4D ctl <command>
 | "replay this session at 8x" / "go live" | `$A4D ctl replay current --speed 8` / `$A4D ctl live` |
 | "Korean UI" / "English UI" | `$A4D ctl lang ko` / `$A4D ctl lang en` |
 | "close the popups" / "reload the viewer" / "show 'meeting starts' on screen" | `$A4D ctl close` / `$A4D ctl reload` / `$A4D ctl toast "meeting starts"` |
+| "show me the main agent's view" / "first-person as the lead" / "팀장 시점으로" (Voxel Office 3D) / "stop the POV" | `$A4D ctl camera pov` / `$A4D ctl camera pov <main name, session id or project>` (add `--switch` if the viewer is not in Voxel 3D) / `$A4D ctl camera auto` |
 
-More: camera (`auto|manual|fit|follow`), `focus <node or session>`, `bgm auto|<track>`, `artifacts on|off`, `plans on|off` (loop board), `weather auto|off|fog|rain|snow`, `grid on|off`, `panel open|close`, `timeline show|hide`, `done on|off`. Full list: `$A4D ctl help`.
+More: camera (`auto|manual|fit|follow|pov`), `focus <node or session>`, `bgm auto|<track>`, `artifacts on|off`, `plans on|off` (loop board), `weather auto|off|fog|rain|snow`, `grid on|off`, `panel open|close`, `timeline show|hide`, `done on|off`. Full list: `$A4D ctl help`.
 
 - If more than one viewer is open and the user means only one ("just the meeting-room TV"), run `$A4D ctl clients` first and add `--client <id prefix or part of its name>`. Viewers can be named in their ⚙ menu.
 - If a project or session name matches several, the command prints the candidates and changes nothing. **Ask the user which one** instead of guessing, then send it again with the exact name or id.

@@ -22,7 +22,7 @@ import { runLabelOrder } from '../run-core.mjs'; // 실행 중 셸
 import { JOBCARD, jobCardModel, jobFlatPos, jobLabelAlways, jobColorHex, mixHex } from '../voxel/vx-job-core.mjs';
 import { catColor, jobCardsGone, vxHeldEnded, endedBadly, badEndDueAt } from '../flow-core.mjs';
 import { pickRectAt, projectAreaPad } from '../overview/pick-core.mjs';
-import { toScreen, toWorld, camScale } from './flat-core.mjs';
+import { toScreen, toWorld, camScale, islandLabelAt } from './flat-core.mjs';
 import { wallSegments, yawVec, facilityRect, FACILITY_LABEL, roomKindName, charRadius, isMoving } from './plan-core.mjs';
 import { drawCards, drawRings, drawDeviceFace, BubbleLayer, fitChars } from './flat-draw.js';
 import { spawnLinks } from '../spawn-link.mjs';
@@ -44,6 +44,18 @@ const MACHINE_KIND = { 'bash-bg': 'rack', monitor: 'screen', workflow: 'board' }
 const KNOWN = new Set(['main', 'subagent', 'workflow', 'workflow-agent', 'claude-p', 'bash-bg', 'monitor']);
 const VERB_CATS = new Set(['shell', 'read', 'write', 'edit', 'search', 'agent', 'workflow', 'skill', 'web', 'monitor', 'mcp', 'artifact', 'notify', 'other']);
 const catVerb = (c) => tr('flat.verb.' + (VERB_CATS.has(c) ? c : 'other'));
+/** 작업 칩 지역 축(오른쪽 r = (rx, rz) · 앞쪽 f = (fx, fz)) 사각형 경로(화면, 가운데 cx·cy, 크기 du × dw m, 배율 s) — 모듈 함수(프레임마다 할당 0) */
+function jobQuadPath(ctx, cx, cy, du, dw, rx, rz, fx, fz, s) {
+  const ax = rx * du * s / 2, ay = rz * du * s / 2, bx = fx * dw * s / 2, by = fz * dw * s / 2;
+  ctx.beginPath(); ctx.moveTo(cx - ax - bx, cy - ay - by); ctx.lineTo(cx + ax - bx, cy + ay - by); ctx.lineTo(cx + ax + bx, cy + ay + by); ctx.lineTo(cx - ax + bx, cy - ay + by); ctx.closePath();
+}
+/** 작업 칩 지역 (u = 오른쪽, w = 판 앞쪽) 사각형(크기 du × dw m, 색 col) → 화면(칩 중심 c) — ex(jobFaceExact)면 돌린 사각형, 아니면 축 맞춤 fillRect · 모듈 함수(칩마다 클로저 0) */
+function jobRect(ctx, c, rx, rz, fx, fz, s, ex, u, w, du, dw, col) {
+  const cx = c.x + (rx * u + fx * w) * s, cy = c.y + (rz * u + fz * w) * s;
+  if (ex) { jobQuadPath(ctx, cx, cy, du, dw, rx, rz, fx, fz, s); ctx.fillStyle = col; ctx.fill(); return; }
+  const W = (Math.abs(rx) * du + Math.abs(fx) * dw) * s, H = (Math.abs(rz) * du + Math.abs(fz) * dw) * s;
+  ctx.fillStyle = col; ctx.fillRect(cx - W / 2, cy - H / 2, W, H);
+}
 const HOLD_SEC = 30;        // 퇴장 뒤 자리 반납까지(벽시계, 재생 속도로 나눔) — 3D 와 같음
 const RECENT_MS = 30000;    // 스냅샷으로 들어온 done 이 이 안이면 퇴장 동작만 보여 줌
 const TOP_ACTIVE = 6;
@@ -336,15 +348,19 @@ export class Voxel2DView extends FlatView {
     }
     return out;
   }
+  /** 배치 함수 갈고리(3D VoxelView._computeLayout 과 같은 뜻 — 연구소 Lab2DView 가 덮어씀) */
+  _computeLayout(present, campus) {
+    return campus
+      ? computeCampus(present, this.scope.roots, this.scope.projects, this.layout && this.layout.campus ? this.layout : null, { showInactive: this.scope.showInactive, nowMs: Date.now(), view: packView(this.container, { flat: true }) })
+      : computeOffice(present, this.rootId, this.layout && !this.layout.campus ? this.layout : null);
+  }
   _relayout() {
     this._layoutVer++;
     const now = this._now;
     this.lastLayout = now;
     this.layoutDirty = false;
     const campus = this.scope.mode === 'all';
-    const lay = campus
-      ? computeCampus(this._present(), this.scope.roots, this.scope.projects, this.layout && this.layout.campus ? this.layout : null, { showInactive: this.scope.showInactive, nowMs: Date.now(), view: packView(this.container, { flat: true }) })
-      : computeOffice(this._present(), this.rootId, this.layout && !this.layout.campus ? this.layout : null);
+    const lay = this._computeLayout(this._present(), campus);
     const oldRooms = this.roomsById;
     const movingRooms = this.vsess.afterLayout(lay, now); // 이사 보간
     this.layout = lay;
@@ -353,7 +369,7 @@ export class Voxel2DView extends FlatView {
     this.layoutRoot = lay.rootId;
     for (const r of lay.rooms) r._act = Object.fromEntries(FACILITIES.map((f) => [f, 0]));
     const moved = new Set();
-    for (const r of lay.rooms) { const o = oldRooms.get(r.id); if (o && !movingRooms.has(r.id) && (o.origin.x !== r.origin.x || o.origin.z !== r.origin.z || o.ext !== r.ext)) moved.add(r.id); }
+    for (const r of lay.rooms) { const o = oldRooms.get(r.id); if (o && !movingRooms.has(r.id) && (o.origin.x !== r.origin.x || o.origin.z !== r.origin.z || o.ext !== r.ext || (o.lab && r.lab && (o.lab.rP !== r.lab.rP || o.lab.rows !== r.lab.rows)))) moved.add(r.id); }
     for (const id of moved) this.spots.dropRoom(id);
     for (const ch of this.chars.values()) {
       const seat = lay.seat.get(ch.id);
@@ -408,7 +424,7 @@ export class Voxel2DView extends FlatView {
       const cl = (lay.buildings || []).map((b) => ({
         projectId: b.projectId, name: b.name, center: b.center, r: Math.hypot(b.size.w, b.size.d) / 2,
         active: b.active, live: b.live, busy: b.busy, inactive: b.recent, temp: b.temp, sessions: b.sessions, liveSessions: b.liveSessions,
-        mains: b.offices.map((o) => ({ nodeId: o.mainId })), labelZ: b.bounds.maxZ + 1.6, bounds: b.bounds,
+        mains: b.offices.map((o) => ({ nodeId: o.mainId })), labelZ: islandLabelAt(b).z, labelX: islandLabelAt(b).x, bounds: b.bounds, // 원형 연구동: 배치가 준 labelX·labelZ 우선
       }));
       this._setClusters(cl);
     } else { this._clusters = []; this._clusterV.clear(); this._syncIslandEls(); }
@@ -490,6 +506,7 @@ export class Voxel2DView extends FlatView {
   setArtifacts({ on, book, fx, style } = {}) {
     if (on && !this.vArt && book && fx) this.vArt = new VoxelArt2D(this, { book, fx, style });
     else if (!on && this.vArt) { this.vArt.dispose(); this.vArt = null; }
+    if (!!this.vArt !== !!this._artStatic) { this._artStatic = !!this.vArt; this._staticVer = (this._staticVer || 0) + 1; } // 창 풍경 켬/끔은 정적 층
     this.invalidate();
     return !!this.vArt;
   }
@@ -840,7 +857,7 @@ export class Voxel2DView extends FlatView {
     ctx.globalAlpha = A;
     const ww = r.type === 'office' ? windowWall(r) : null;
     const b0 = r.bounds;
-    if (ww) {
+    if (ww && !this.vArt) { // 작업 대상 층이 켜지면 창 풍경 없음(벽 바깥 띠가 그 자리를 씀)
       const z = ww === 'front' ? b0.maxZ : b0.minZ;
       const g = ctx.createLinearGradient(0, this._Y(z) - 0.25 * s, 0, this._Y(z) + 0.25 * s);
       g.addColorStop(0, pal.skyTop); g.addColorStop(0.5, pal.skyMid); g.addColorStop(1, pal.skyLow);
@@ -927,19 +944,15 @@ export class Voxel2DView extends FlatView {
   _drawSessDyn(ctx, s, now) {
     const lay = this.layout, pal = this.pal, t = this.tokens;
     this._cabRects = [];
-    // 컨텍스트: 뒤 벽 창 흐림·서류 더미
+    // 컨텍스트: 팀장 책상 서류 더미(창 흐림은 2026-10-31 없앰 — 컨텍스트 표현은 에이전트 과열)
     for (const r of this.rooms) {
       if (!r._on || r.type !== 'office' || r.past) continue;
       const v = this.vis.get(r.ownerId), c = v && v.node.meta && v.node.meta.ctx;
       if (!c || !isFinite(c.pct)) continue;
-      const fog = Math.max(0, Math.min(1, (c.pct - 35) / 55));
-      const fw = windowWall(r) === 'front';
-      const rl = this._rotBegin(ctx, r);
-      ctx.globalAlpha = (r._alpha ?? 1) * (0.55 + 0.45 * fog);
-      ctx.fillStyle = fog > 0.5 ? pal.fogGlass : pal.window;
-      if (fw) this._rect(ctx, rl.origin.x + 0.9, rl.bounds.maxZ - 0.2, 5.6, 0.3);
-      else this._rect(ctx, rl.origin.x + 5, rl.origin.z - 8.8, 7.2, 0.3);
       const piles = Math.max(0, Math.min(5, Math.floor((c.pct - 35) / 12)));
+      if (!piles || !r.leadDesk) continue;
+      const rl = this._rotBegin(ctx, r);
+      ctx.globalAlpha = r._alpha ?? 1;
       if (rl.leadDesk && piles) { ctx.fillStyle = pal.paper; for (let i = 0; i < piles; i++) this._rect(ctx, rl.leadDesk.x + (i % 2 ? 0.5 : -0.5), rl.leadDesk.z - 0.2 + Math.floor(i / 2) * 0.18, 0.34, 0.26); }
       this._rotEnd(ctx, r);
     }
@@ -1121,42 +1134,39 @@ export class Voxel2DView extends FlatView {
     const md = jobCardModel(m.node, this.clock(), now, this.reduced);
     if (!md) return;
     const k = v.drawS || 1, f = m.pos.face || 0;
-    const fx = Math.round(Math.sin(f)), fz = Math.round(Math.cos(f)), rx = Math.round(Math.cos(f)), rz = Math.round(-Math.sin(f));
+    // jobFaceExact(연구소 2D 만): 방위 그대로(비스듬한 판은 돌린 사각형) — 끄면 축 맞춤(복셀 오피스 방위는 늘 축 방향)
+    const ex = !!this.jobFaceExact, sf = Math.sin(f), cf = Math.cos(f);
+    const fx = ex ? sf : Math.round(sf), fz = ex ? cf : Math.round(cf), rx = ex ? cf : Math.round(cf), rz = ex ? -sf : Math.round(-sf);
     const c = v._sp; // 칩 중심(화면) — _syncActors 가 v.pos 를 칩 자리로 둔다
     const p = jobFlatPos(m.pos, this._jfp2 || (this._jfp2 = {}));
     c.x = this._X(p.x); c.y = this._Y(p.z);
-    // 지역 (u = 오른쪽, w = 판 앞쪽) 사각형 → 화면 사각형
-    const rect = (u, w, du, dw, col) => {
-      const cx = c.x + (rx * u + fx * w) * s, cy = c.y + (rz * u + fz * w) * s;
-      const W = (Math.abs(rx) * du + Math.abs(fx) * dw) * s, H = (Math.abs(rz) * du + Math.abs(fz) * dw) * s;
-      ctx.fillStyle = col; ctx.fillRect(cx - W / 2, cy - H / 2, W, H);
-    };
     const D = (JOBCARD.CHIP - 0.05) * k, CW = JOBCARD.W * k;
     const sc = jobColorHex(md.key, t, pal);
     const a0 = ctx.globalAlpha;
-    rect(0, 0, JOBCARD.BOARD_W, JOBCARD.CHIP + 0.005, pal.boardFrame);
-    if (m.pos.hi) rect(0, JOBCARD.CHIP / 2, JOBCARD.BOARD_W + 0.04, 0.05, this.kindColor('bash-bg'));
+    jobRect(ctx, c, rx, rz, fx, fz, s, ex, 0, 0, JOBCARD.BOARD_W, JOBCARD.CHIP + 0.005, pal.boardFrame);
+    if (m.pos.hi) jobRect(ctx, c, rx, rz, fx, fz, s, ex, 0, JOBCARD.CHIP / 2, JOBCARD.BOARD_W + 0.04, 0.05, this.kindColor('bash-bg'));
     let card = pal.board;
     if (md.dim) card = mixHex(card, pal.boardFrame, 0.35); else if (md.ended) card = mixHex(card, pal.boardFrame, 0.18);
     if (md.key === 'stale' && md.lamp > 0.5) card = mixHex(card, sc, 0.3);
-    rect(0, 0, CW, D, card);
-    if (s < 6) { rect(-CW / 2 + 0.05, 0, 0.1, D, sc); return; } // 멀면 띠만
-    rect(-CW / 2 + 0.035, 0, 0.05, D - 0.02, sc);
+    jobRect(ctx, c, rx, rz, fx, fz, s, ex, 0, 0, CW, D, card);
+    if (s < 6) { jobRect(ctx, c, rx, rz, fx, fz, s, ex, -CW / 2 + 0.05, 0, 0.1, D, sc); return; } // 멀면 띠만
+    jobRect(ctx, c, rx, rz, fx, fz, s, ex, -CW / 2 + 0.035, 0, 0.05, D - 0.02, sc);
     if (md.progress != null) {
       const tw = 0.4, u0 = -CW / 2 + 0.08, pr = Math.max(0, Math.min(1, md.progress));
-      rect(u0 + tw / 2, 0, tw, 0.06, pal.metalDark);
-      if (pr > 0.005) rect(u0 + (tw * pr) / 2, 0, tw * pr, 0.045, sc);
+      jobRect(ctx, c, rx, rz, fx, fz, s, ex, u0 + tw / 2, 0, tw, 0.06, pal.metalDark);
+      if (pr > 0.005) jobRect(ctx, c, rx, rz, fx, fz, s, ex, u0 + (tw * pr) / 2, 0, tw * pr, 0.045, sc);
     } else {
-      rect(-CW / 2 + 0.2, -0.03, 0.22, 0.025, pal.boardFrame); // 글 줄 흉내
-      rect(-CW / 2 + 0.17, 0.03, 0.16, 0.02, pal.boardFrame);
+      jobRect(ctx, c, rx, rz, fx, fz, s, ex, -CW / 2 + 0.2, -0.03, 0.22, 0.025, pal.boardFrame); // 글 줄 흉내
+      jobRect(ctx, c, rx, rz, fx, fz, s, ex, -CW / 2 + 0.17, 0.03, 0.16, 0.02, pal.boardFrame);
     }
     const ru = CW / 2 - 0.07;
     if (md.wait != null) {
       // 모래시계(위에서 본 네모): 테두리 + 아래쪽(판 앞쪽)부터 차오름
       const cx = c.x + rx * ru * s, cy = c.y + rz * ru * s, R = 0.065 * s;
-      ctx.strokeStyle = pal.metalDark; ctx.lineWidth = Math.max(1, 0.015 * s); ctx.strokeRect(cx - R, cy - R, 2 * R, 2 * R);
+      ctx.strokeStyle = pal.metalDark; ctx.lineWidth = Math.max(1, 0.015 * s);
+      if (ex) { jobQuadPath(ctx, cx, cy, 0.13, 0.13, rx, rz, fx, fz, s); ctx.stroke(); } else ctx.strokeRect(cx - R, cy - R, 2 * R, 2 * R); // jobFaceExact: 테두리도 카드와 같이 돌림
       const fw = 0.13 * md.wait;
-      if (fw > 0.004) rect(ru, 0.065 - fw / 2, 0.12, fw, sc);
+      if (fw > 0.004) jobRect(ctx, c, rx, rz, fx, fz, s, ex, ru, 0.065 - fw / 2, 0.12, fw, sc);
     } else {
       const cx = c.x + rx * ru * s, cy = c.y + rz * ru * s;
       ctx.globalAlpha = a0 * (md.lamp > 0.05 ? 0.35 + 0.65 * md.lamp : 1);
@@ -1164,6 +1174,7 @@ export class Voxel2DView extends FlatView {
       ctx.beginPath(); ctx.arc(cx, cy, Math.max(1.2, 0.05 * s), 0, Math.PI * 2); ctx.fill();
       ctx.globalAlpha = a0;
     }
+    if (foc && ex) { ctx.globalAlpha = 0.9; ctx.strokeStyle = t.text; ctx.lineWidth = 1.2; jobQuadPath(ctx, c.x, c.y, 0.84, 0.3, rx, rz, fx, fz, s); ctx.stroke(); return; }
     if (foc) { ctx.globalAlpha = 0.9; ctx.strokeStyle = t.text; ctx.lineWidth = 1.2; const W = (Math.abs(rx) * 0.84 + Math.abs(fx) * 0.3) * s, H = (Math.abs(rz) * 0.84 + Math.abs(fz) * 0.3) * s; ctx.strokeRect(c.x - W / 2, c.y - H / 2, W, H); }
   }
 

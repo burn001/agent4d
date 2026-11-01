@@ -3,9 +3,11 @@
 //   activityLevel: 지표 → 0 한가 · 1 보통 · 2 활발 · 3 매우 활발
 //   AutoPicker:    단계 히스테리시스(올림 45초·내림 120초 유지, 전환 뒤 최소 90초) — 덜컥거림 방지
 //   stageCandidates·pickForLevel: 매니페스트 곡의 stage(0～3, 목록 가능)로 단계 → 후보 → 직전 2곡 피해 무작위
-//   viewCandidates: 지금 표현(flow·planet·voxel)의 테마 풀(views)에서 그 단계 곡, 비면 전체 풀(stageCandidates)로 폴백
+//   viewCandidates: 지금 표현(flow·planet·voxel·lab)의 테마 풀(views)에서 그 단계 곡, 비면 전체 풀(stageCandidates)로 폴백.
+//     복셀 연구소(lab)는 연구소 곡이 매니페스트에 없으면 복셀 오피스 풀(labPoolView, web/lab/lab-audio.mjs)
 import { t as tr } from './i18n.mjs';
 import { stageLabel, themed, viewStages } from './bgm-core.mjs';
+import { labPoolView } from './lab/lab-audio.mjs';
 
 export const WINDOW_MS = 90_000;     // 활동 창(최근 1분 30초)
 export const WORK_RECENT_MS = 30_000; // 작업 중 노드: 최근 30초 안 이벤트가 온 노드 + 창 안에 연 도구가 아직 열린 노드
@@ -142,6 +144,7 @@ export function stageCandidates(level, tracks) {
  * 전체 풀(stage, stageCandidates — 가까운 단계 폴백 포함)
  */
 export function viewCandidates(level, tracks, view = null) {
+  view = labPoolView(tracks, view); // 연구소 곡이 없으면 복셀 오피스 풀(lab → voxel)
   if (tracks && themed(tracks, view)) {
     const c = tracks.filter((t) => viewStages(t, view).includes(level));
     if (c.length) return c.map((t) => t.id);

@@ -1,7 +1,7 @@
 // 작업 대상 층 — Planet·복셀 2D 그리기. 흐름 2D(flat/art2d.js)와 같은 방식: 3D 와 같은 도형(ArtGeo, 세계 좌표)을
 // 위에서 본 평면으로 투영하고 높이(y)는 화면 위쪽(−z)으로 기울인다(Planet 0.55 = 흐름과 같음, 복셀 0.3 = 평면도에 가깝게).
 // 같은 실루엣의 평면 기호: 상자 = 윗면 + 앞면, 선·점·라벨 그대로. three.js 를 불러오지 않는다. 끄면 이 객체가 없다.
-import { ART, ART_KEYS, artKeyColor, artFitPoints, ArtState, artNameLines, artNamePlate, artNameReadable } from '../artifact-core.mjs';
+import { ART, ART_KEYS, artKeyColor, artFitPoints, ArtState, artNameLines, artNamePlate, artNameReadable, artLineKey, artLineKeyParts } from '../artifact-core.mjs';
 import { planetArtGeometry, pickHits, PLANET_ART } from '../art-meta.mjs';
 import { VxArtPlan, voxelArtGeometry, vxFitPoints, vxRoomsFor } from '../voxel/vx-art-core.mjs';
 import { projectNameOf, nameFont, dimIslandLabel, undimAll } from '../art-name.js';
@@ -9,6 +9,7 @@ import { arcNamePlate } from '../art-arc.mjs'; // 원형 섬 가장자리 원호
 import { toScreen, camScale } from './flat-core.mjs';
 
 const AB = 10;
+const KP = { c: 0, w: 0, ab: 0 }; // 선 열쇠 풀기 재사용 객체
 
 class ArtLayerBase2D {
   constructor(view, { book, fx, style = null }, { tilt = 0.55, solid = false } = {}) {
@@ -92,7 +93,7 @@ class ArtLayerBase2D {
       const o = i * 6;
       this._xy(g.L[o], g.L[o + 1], g.L[o + 2], a); this._xy(g.L[o + 3], g.L[o + 4], g.L[o + 5], b);
       if ((a.x < 0 && b.x < 0) || (a.y < 0 && b.y < 0) || (a.x > v.W && b.x > v.W) || (a.y > v.H && b.y > v.H)) continue;
-      const k = (g.LC[i] * 4 + g.LW[i]) * 16 + Math.max(1, Math.round(g.LA[i] * AB));
+      const k = artLineKey(g.LC[i], g.LW[i], Math.max(1, Math.round(g.LA[i] * AB))); // LW≥4 는 3 으로(색 밀림 방지)
       let p = paths.get(k);
       if (!p || p.n === 0) { p = { path: new Path2D(), n: 0 }; paths.set(k, p); }
       p.path.moveTo(a.x, a.y); p.path.lineTo(b.x, b.y); p.n++; nl++;
@@ -100,7 +101,7 @@ class ArtLayerBase2D {
     ctx.lineCap = 'round';
     for (const [k, p] of paths) {
       if (!p.n) continue;
-      const ab = k % 16, rest = (k / 16) | 0, w = rest % 4, ci = (rest / 4) | 0;
+      const { ab, w, c: ci } = artLineKeyParts(k, KP);
       ctx.globalAlpha = ab / AB; ctx.strokeStyle = cols[ci]; ctx.lineWidth = w === 3 ? 2.6 : w === 2 ? 1.8 : 1;
       ctx.stroke(p.path);
     }

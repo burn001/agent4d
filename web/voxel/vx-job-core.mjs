@@ -26,6 +26,7 @@ export const JOB_COLOR_KEY = ['queued', 'running', 'waiting', 'done', 'failed', 
 /**
  * 주인 자리 → 판 기준점. owner = 주인의 배치(layout machine 또는 seat):
  *   {type:'rack'|'screen'|'batch'|'board', x, y, z, face, slot} 또는 {type:'lead'|'desk', x(책상), z(책상)}
+ *   또는 연구소 기자재 {type:'rig', x, z, face(중심 쪽), shelf?, scale?}
  * @returns {{ x, y0, z, face, pole:number|null, d2:number }|null}
  *   y0 = 맨 아래 카드 중심 높이, pole = 기둥이 시작하는 높이(null = 벽걸이), d2 = 2D 칩 줄이 시작하는 판 앞쪽 거리
  */
@@ -41,6 +42,10 @@ export function jobAnchor(owner) {
     case 'batch': return { x: owner.x + 1.2, y0: 0.95, z: owner.z + 0.1, face: 0, pole: 0, d2: -0.3 };
     case 'board': return { x: owner.x + 2.0, y0: 1.0, z: owner.z + 0.3, face: 0, pole: 0, d2: 0.2 };
     case 'proc': return { x: owner.x + 4.75, y0: 0.95, z: owner.z, face: 0, pole: 0, d2: -0.3 }; // 생산 라인 끝(팔레트 오른쪽) — 자동 진행 작업은 전광판으로 가고 그 밖 작업만
+    case 'rig': { // 연구소 기자재(고리·보조 선반): 기자재 앞(face = 중심 쪽)으로 1.05m(보조 선반 0.7m) 바닥에 선 시료 판
+      const f = Number.isFinite(owner.face) ? owner.face : 0, d = owner.shelf || (owner.scale && owner.scale < 1) ? 0.7 : 1.05;
+      return { x: owner.x + Math.sin(f) * d, y0: 0.95, z: owner.z + Math.cos(f) * d, face: f, pole: 0, d2: 0.2 };
+    }
     case 'lead': return { x: owner.x - 1.75, y0: 0.95, z: owner.z + 0.15, face: 0, pole: 0, d2: -0.3 };
     default: return { x: owner.x - 0.95, y0: 0.95, z: owner.z, face: 0, pole: 0, d2: -0.3 }; // 그 밖 책상 주인
   }

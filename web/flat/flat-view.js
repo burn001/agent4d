@@ -181,7 +181,7 @@ export class FlatView {
     this.renderer = { domElement: c, flat: true }; // app.js(bindCanvas)·ctx-ui 가 읽는 자리
     labelContainer.classList.add('flow-mode', 'flat-mode');
     this.pendingMode = opts.pending || null;
-    if (this.pendingMode) this._pendingBadge(opts.pendingLabel || this.pendingMode);
+    if (this.pendingMode) this._pendingBadge(opts.pendingLabel || this.pendingMode, opts.pendingBaseLabel || null);
 
     this.dirty = true;
     this._raf = 0; this._timer = 0; this._lastTickMs = 0; this._level = 2;
@@ -709,6 +709,7 @@ export class FlatView {
       e.center.x = c.center.x; e.center.y = 0; e.center.z = c.center.z;
       e.r = c.r; e.name = c.name; e.active = !!c.active; e.live = !!c.live; e.busy = !!c.busy; e.inactive = !!c.inactive; e.temp = !!c.temp;
       e.labelZ = c.labelZ ?? (c.box ? c.center.z + c.box.hd + 1.2 : null); // 이름표 자리(z) — 섬 상자 아래, 없으면 원 아래(복셀 동은 바닥판 앞 가장자리)
+      e.labelX = c.labelX ?? null; // 이름표 자리(x) — 원형 연구동은 배치가 줌, 없으면 가운데
       e.box = c.box || null; e.orbit = c.orbit || null; e.zones = c.zones || null; e.round = c.round || 0; e.stars = c.stars || null;
       e.c = c;
     }
@@ -951,7 +952,7 @@ export class FlatView {
     }
     // 피할 사각형: 도구 카드·말풍선·섬 이름표
     // + 계획 보드(라벨이 비킴). 자동 맞춤(라벨 점·라벨 자리)은 보드를 뺀 배치로 — 보드 화면 상자는 카메라를 따라 바뀌므로 되먹임
-    const { placed, fit } = placeLabelsBoard(cands, discs, { shifts: LABEL_SHIFTS, farShifts: LABEL_FAR_SHIFTS, bounds: [0, W], vbounds: [0, H], rects: this._obstacleRects(W, H) }, planLabelRects([]));
+    const { placed, fit } = placeLabelsBoard(cands, discs, { shifts: LABEL_SHIFTS, farShifts: LABEL_FAR_SHIFTS, bounds: [0, W], vbounds: [0, H], rects: this._obstacleRects(W, H), forceRects: !!this.labelForceRects }, planLabelRects([]));
     this._labRes = smoothReserve(this._labRes, labelReserve(fit, cands, discs)); // 맞춤에 라벨 자리 포함
     const want = new Set(placed.keys());
     const candOf = new Map(cands.map((c) => [c.id, c]));
@@ -1051,14 +1052,16 @@ export class FlatView {
     const rects = (this._cardRects || []).slice();
     if (this.sess) this.sess.rects(rects); // 충돌 파일명 칩
     if (this._cabRects) for (const r of this._cabRects) rects.push(r); // 복셀 평면도 캐비닛 말풍선
+    const ct = this._labelTextRects || this._canvasTextRects; // 연구소 2D 캔버스 글(문패·라운지·브리지 이름·'+n') — 섬 이름표는 아래에서 한 번만
+    if (ct) rects.push(...ct);
     if (this.bubbles && this.bubbles.baseRects) this.bubbles.baseRects(rects);
     if (this.scope.mode === 'all') {
       const p = {};
       for (const [pid, el] of this.islandEls) {
-        const e = this._clusterV.get(pid); if (!e || !el.isConnected) continue;
+        const e = this._clusterV.get(pid); if (!e || !el.isConnected || el._dclHide) continue; // _dclHide = 연구소 2D 거르기로 숨김(바탕은 늘 없음)
         if (el._mk !== el._html || !el._mw) { el._mw = el.offsetWidth || 0; el._mh = el.offsetHeight || 0; el._mk = el._html; }
         if (!el._mw) continue;
-        toScreen(this.cam, W, H, e.center.x, e.labelZ != null ? e.labelZ : e.center.z + e.r + 1.2, p);
+        toScreen(this.cam, W, H, e.labelX ?? e.center.x, e.labelZ != null ? e.labelZ : e.center.z + e.r + 1.2, p);
         rects.push([p.x - el._mw / 2, p.y, p.x + el._mw / 2, p.y + el._mh]);
       }
     }
@@ -1095,7 +1098,7 @@ export class FlatView {
     }
     for (const [pid, el] of this.islandEls) {
       const e = this._clusterV.get(pid); if (!e) continue;
-      toScreen(this.cam, W, H, e.center.x, e.labelZ != null ? e.labelZ : e.center.z + e.r + 1.2, p);
+      toScreen(this.cam, W, H, e.labelX ?? e.center.x, e.labelZ != null ? e.labelZ : e.center.z + e.r + 1.2, p);
       const tf = `translate(-50%, 0) translate(${Math.round(p.x)}px, ${Math.round(p.y)}px)`;
       if (el._tf !== tf) { el.style.transform = tf; el._tf = tf; }
     }
@@ -1104,11 +1107,11 @@ export class FlatView {
   /** 맞춤 띠에 더할 라벨 자리(px) */
   labelReserve() { return this._labRes || null; }
 
-  _pendingBadge(mode) {
+  _pendingBadge(mode, base = null) {
     const el = this._badge = document.createElement('div');
     el.className = 'flat-pending';
     el.setAttribute('role', 'status');
-    el.textContent = t('flat.pending', { mode });
+    el.textContent = base ? t('flat.pendingVia', { mode, base }) : t('flat.pending', { mode }); // base = 대체 2D 표현 이름(연구소 → 복셀 오피스)
     this.container.appendChild(el);
   }
 }

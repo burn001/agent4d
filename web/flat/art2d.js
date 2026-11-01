@@ -1,13 +1,14 @@
 // 작업 대상 층 — 2D 캔버스 그리기. 3D 와 같은 ArtState·artGeometry(세계 좌표 도형)를
 // 위에서 본 평면으로 투영한다: 높이(y)는 화면 위쪽(−z)으로 0.55 배 기울여(ix2d 와 같은 TILT) 블록이 솟아 보이게.
 // 바닥층(y = ART.FLOOR_Y < 0)은 섬보다 조금 아래(화면 아래쪽)로 내려 '아래 층'으로 읽힌다. three.js 를 불러오지 않는다. 끄면 이 객체가 없다.
-import { ART, ART_KEYS, artKeyColor, artGeometry, artFitPoints, artPickXZ, ArtState } from '../artifact-core.mjs';
+import { ART, ART_KEYS, artKeyColor, artGeometry, artFitPoints, artPickXZ, ArtState, artLineKey, artLineKeyParts } from '../artifact-core.mjs';
 import { toScreen, toWorld, camScale } from './flat-core.mjs';
 import { projectNameOf, nameFont, dimIslandLabel, undimAll } from '../art-name.js';
 import { artNameLines, artNamePlate, artNameReadable } from '../artifact-core.mjs';
 
 const TILT = 0.55;
 const AB = 10; // 선 알파 단계
+const KP = { c: 0, w: 0, ab: 0 }; // 선 열쇠 풀기 재사용 객체
 
 export class FlatArt {
   constructor(view, { book, fx, style = null }) {
@@ -110,7 +111,7 @@ export class FlatArt {
       const o = i * 6;
       this._xy(g.L[o], g.L[o + 1], g.L[o + 2], a); this._xy(g.L[o + 3], g.L[o + 4], g.L[o + 5], b);
       if ((a.x < 0 && b.x < 0) || (a.y < 0 && b.y < 0) || (a.x > v.W && b.x > v.W) || (a.y > v.H && b.y > v.H)) continue;
-      const k = (g.LC[i] * 4 + g.LW[i]) * 16 + Math.max(1, Math.round(g.LA[i] * AB));
+      const k = artLineKey(g.LC[i], g.LW[i], Math.max(1, Math.round(g.LA[i] * AB))); // LW≥4 는 3 으로(색 밀림 방지)
       let p = paths.get(k);
       if (!p) { p = new Path2D(); paths.set(k, p); }
       p.moveTo(a.x, a.y); p.lineTo(b.x, b.y);
@@ -118,7 +119,7 @@ export class FlatArt {
     ctx.lineCap = 'round';
     const lw = 1; // 모서리 선 1px
     for (const [k, p] of paths) {
-      const ab = k % 16, rest = (k / 16) | 0, w = rest % 4, ci = (rest / 4) | 0;
+      const { ab, w, c: ci } = artLineKeyParts(k, KP);
       ctx.globalAlpha = ab / AB; ctx.strokeStyle = cols[ci]; ctx.lineWidth = lw * (w === 3 ? 2.6 : w === 2 ? 1.8 : 1);
       ctx.stroke(p);
     }

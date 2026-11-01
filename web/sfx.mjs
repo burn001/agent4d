@@ -5,6 +5,7 @@
 // 순수 함수(eventToSound·RateLimiter·scaleNotes·noteFor)는 node --test 로 시험한다.
 
 import { t as tr } from './i18n.mjs';
+import { labEventSound, labSpeedOk, LabSoundGate, LAB_SFX, LAB_SFX_PRI, LAB_SFX_GAIN } from './lab/lab-audio.mjs'; // 복셀 연구소 소리(순환 import — 함수 안에서만 씀)
 
 // ───────────────────────── 음계 (배경음악 music/compose.py 와 같은 화음표) ─────────────────────────
 // compose.py: 96 BPM, 4/4, 1마디 2.5초, 120마디 = 300초. CH·PROG_A·PROG_C·build_chords() 를 그대로 옮김.
@@ -293,6 +294,19 @@ export const SOUNDS = {
   'act-build': { dur: 0.3, register: 'low', desc: '새 대상 건설: 낮은 나무 블록 두 번 쌓임(삼각파 근음 → 5도) + 짧은 저역 노이즈' },
   'act-crumble': { dur: 0.34, register: 'low', desc: '삭제: 대역 노이즈가 아래로 무너지는 소리 3토막(작게)' },
   'act-flash': { dur: 0.26, register: 'high', desc: '산출물 플래시: 고역 노이즈 셔터 클릭 + 사인 반짝임' },
+  // 복셀 연구소(Voxel Lab) 기자재·플랫폼 — 이름·뜻은 web/lab/lab-audio.mjs LAB_SFX, 언제 울리는지는 labSoundFor
+  'lab-print': { dur: 0.36, register: 'mid', desc: '3D 프린트: 저역 통과 사각파 4음 상행 펄스 사다리 + 끝에 헤드 쉿' },
+  'lab-edit': { dur: 0.16, register: 'high', desc: '고치기: 부드러운 대역 노이즈 클릭 2 + 아주 작은 사인' },
+  'lab-shatter': { dur: 0.34, register: 'low', desc: '지우기: 고역 노이즈 조각 5개가 낮아지며 흩어짐 + 작은 둔탁음' },
+  'lab-wave': { dur: 0.38, register: 'mid', desc: '대량 변경 파도: 좁은 대역 노이즈가 코어 → 테두리로 쓸려 감(400 → 3000Hz) + 사인 글리산도' },
+  'lab-alarm': { dur: 0.4, register: 'low', desc: '위험 동작: 저역 통과 사각파 낮은 2음 경보(근음 ↔ 위 음 두 번)' },
+  'lab-absorb': { dur: 0.38, register: 'mid', desc: 'push: 사인이 두 옥타브 아래로 빨려 듦 + 노이즈 하강 + 끝에 코어 종(FM)' },
+  'lab-radar': { dur: 0.36, register: 'high', desc: 'Grep·Glob: 짧은 상승 처프 뒤 레이더 핑 + 0.16초 뒤 작은 메아리' },
+  'lab-rig-on': { dur: 0.2, register: 'low', desc: '기자재 켜짐: 기계 딸깍(대역 노이즈) + 사각파 블립 근음 → 5도' },
+  'lab-rig-done': { dur: 0.38, register: 'mid', desc: '기자재 끝: 5도 → 근음 짧은 종지(삼각파 받침)' },
+  'lab-rig-fail': { dur: 0.36, register: 'low', desc: '기자재 실패: 저역 노이즈 덜컥 + 낮은 삼각파 반음 하강' },
+  'lab-rig-stale': { dur: 0.22, register: 'high', desc: '기자재 정체: 노랑 두 번 깜빡에 맞춘 작은 틱 2' },
+  'lab-lift': { dur: 0.4, register: 'low', desc: '퇴장 승강판: 저역 통과 톱니가 한 옥타브 내려가는 모터음 + 낮은 바람' },
 };
 
 const A = 0.005;  // attack
@@ -568,6 +582,81 @@ export function synth(ctx, dest, name, t0, { notes = scaleNotes(null), pitchInde
       noise(ctx, t0, 0.03, dest, 0.12 * G, { type: 'highpass', f: 5000 });
       osc(ctx, 'sine', mtof(noteFor(notes, 'high', pitchIndex) + 12), t0 + 0.03, 0.2, dest, 0.05 * G, { attack: 0.005 });
       return t0 + 0.26;
+    // ---- 복셀 연구소(Voxel Lab) ----
+    case 'lab-print': {
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1800; lp.Q.value = 2; lp.connect(dest);
+      for (let i = 0; i < 4; i++) osc(ctx, 'square', mtof(up(notes, reg, pitchIndex % 3, i)), t0 + i * 0.06, 0.05, lp, (0.08 + i * 0.012) * G, { attack: 0.005 });
+      noise(ctx, t0 + 0.24, 0.1, dest, 0.04 * G, { type: 'highpass', f: 6000, attack: 0.01 });
+      return t0 + 0.36;
+    }
+    case 'lab-edit':
+      noise(ctx, t0, 0.04, dest, 0.12 * G, { type: 'bandpass', f: 2400, q: 2 });
+      noise(ctx, t0 + 0.07, 0.04, dest, 0.09 * G, { type: 'bandpass', f: 3000, q: 2 });
+      osc(ctx, 'sine', mtof(n0), t0 + 0.07, 0.06, dest, 0.04 * G);
+      return t0 + 0.16;
+    case 'lab-shatter': {
+      for (let i = 0; i < 5; i++) noise(ctx, t0 + i * 0.045 + (i % 2) * 0.012, 0.06, dest, (0.13 - i * 0.018) * G, { type: 'highpass', f: 7000 - i * 900 });
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 600; lp.connect(dest);
+      osc(ctx, 'triangle', mtof(n0), t0, 0.1, lp, 0.12 * G, { freqEnd: mtof(n0 - 5) });
+      return t0 + 0.34;
+    }
+    case 'lab-wave':
+      noise(ctx, t0, 0.36, dest, 0.16 * G, { type: 'bandpass', f: 400, fEnd: 3000, q: 4, attack: 0.08 });
+      osc(ctx, 'sine', mtof(n0), t0 + 0.04, 0.3, dest, 0.05 * G, { freqEnd: mtof(n0 + 12), attack: 0.06 });
+      return t0 + 0.38;
+    case 'lab-alarm': {
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 900; lp.Q.value = 0.8; lp.connect(dest);
+      const hi = up(notes, reg, pitchIndex, 2);
+      for (let i = 0; i < 4; i++) osc(ctx, 'square', mtof(i % 2 ? hi : n0), t0 + i * 0.095, 0.085, lp, 0.13 * G, { attack: 0.006 });
+      return t0 + 0.4;
+    }
+    case 'lab-absorb': {
+      const f0 = mtof(n0 + 24);
+      osc(ctx, 'sine', f0, t0, 0.26, dest, 0.12 * G, { freqEnd: mtof(n0), attack: 0.01 });
+      noise(ctx, t0, 0.24, dest, 0.08 * G, { type: 'bandpass', f: 6000, fEnd: 800, q: 1.5, attack: 0.02 });
+      fm(ctx, mtof(n0), t0 + 0.22, 0.16, dest, 0.1 * G, { ratio: 3.5, index: 1.6, idxDecay: 0.1 });
+      return t0 + 0.38;
+    }
+    case 'lab-radar': {
+      const m = n0;
+      osc(ctx, 'sine', mtof(m - 12), t0, 0.05, dest, 0.05 * G, { freqEnd: mtof(m) });
+      osc(ctx, 'sine', mtof(m), t0 + 0.05, 0.14, dest, 0.1 * G, { attack: 0.005 });
+      osc(ctx, 'sine', mtof(m), t0 + 0.21, 0.13, dest, 0.035 * G, { attack: 0.005 });
+      return t0 + 0.36;
+    }
+    case 'lab-rig-on': {
+      noise(ctx, t0, 0.03, dest, 0.18 * G, { type: 'bandpass', f: 1800, q: 3 });
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1600; lp.connect(dest);
+      osc(ctx, 'square', mtof(n0 + 12), t0 + 0.03, 0.06, lp, 0.1 * G);
+      osc(ctx, 'square', semis(n0 + 12, 7), t0 + 0.1, 0.07, lp, 0.1 * G);
+      return t0 + 0.2;
+    }
+    case 'lab-rig-done': {
+      const r = noteFor(notes, 'mid', 0);
+      osc(ctx, 'sine', semis(r, 7), t0, 0.14, dest, 0.13 * G);
+      osc(ctx, 'sine', mtof(r), t0 + 0.12, 0.24, dest, 0.15 * G, { attack: 0.008 });
+      osc(ctx, 'triangle', mtof(r - 12), t0 + 0.12, 0.22, dest, 0.04 * G, { attack: 0.01 });
+      return t0 + 0.38;
+    }
+    case 'lab-rig-fail': {
+      noise(ctx, t0, 0.07, dest, 0.2 * G, { type: 'lowpass', f: 320 });
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 800; lp.connect(dest);
+      osc(ctx, 'triangle', mtof(n0), t0 + 0.04, 0.14, lp, 0.3 * G);
+      osc(ctx, 'triangle', semis(n0, -1), t0 + 0.17, 0.18, lp, 0.28 * G);
+      return t0 + 0.36;
+    }
+    case 'lab-rig-stale':
+      for (let i = 0; i < 2; i++) {
+        noise(ctx, t0 + i * 0.11, 0.025, dest, 0.06 * G, { type: 'bandpass', f: 3500, q: 2 });
+        osc(ctx, 'sine', mtof(n0), t0 + i * 0.11, 0.04, dest, 0.05 * G);
+      }
+      return t0 + 0.22;
+    case 'lab-lift': {
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 600; lp.Q.value = 1.2; lp.connect(dest);
+      osc(ctx, 'sawtooth', mtof(n0), t0, 0.36, lp, 0.1 * G, { freqEnd: mtof(n0 - 12), attack: 0.03 });
+      noise(ctx, t0, 0.36, dest, 0.05 * G, { type: 'lowpass', f: 400, fEnd: 150, attack: 0.04 });
+      return t0 + 0.4;
+    }
     default:
       return t0;
   }
@@ -650,11 +739,29 @@ export class Sfx {
     if (typeof document !== 'undefined' && document.hidden) return false;
     // 컨텍스트가 멈춘 동안(자동재생 대기·interrupted)은 쌓지 않는다 — 풀리면 한꺼번에 나므로(복원은 sound.mjs)
     if (this.ctx && this.ctx.state !== 'running' && this.ctx.state !== undefined) { this.ctx.resume().catch(() => {}); return false; }
-    const s = eventToSound(ev, node);
+    const lab = this.view === 'lab';
+    const s = lab ? labEventSound(ev, node, { view: 'lab' }) : eventToSound(ev, node);
     if (!s) return false;
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const isLab = lab && Object.prototype.hasOwnProperty.call(LAB_SFX, s.name);
+    if (isLab && (!labSpeedOk(s.name, replay ? speed : 1) || !this._labGate().allow(s.name, now))) { this.stats.dropped++; return false; }
     if (!this.limiter.allow(s, now, replay ? speed : 1)) { this.stats.dropped++; return false; }
-    return this.play(s.name, s);
+    return this.play(s.name, isLab ? { ...s, gain: LAB_SFX_GAIN[s.name] ?? 0.55 } : s);
+  }
+  _labGate() { return this._lg || (this._lg = new LabSoundGate()); }
+  /**
+   * 복셀 연구소 소리 바로 내기(기자재 상태 전이·승강판·플랫폼 연출 — 앱 이벤트가 아닌 렌더러 쪽 계기).
+   * 이름이 연구소 소리가 아니거나 지금 표현이 연구소가 아니면 무시. 배속 솎기·같은 이름 0.25초·RateLimiter(초당 8) 를 지난다.
+   */
+  playLab(name, { speed = 1, replay = false } = {}) {
+    if (!this._on || this.held || this.view !== 'lab' || !name || !Object.prototype.hasOwnProperty.call(LAB_SFX, name)) return false;
+    if (typeof document !== 'undefined' && document.hidden) return false;
+    if (this.ctx && this.ctx.state !== 'running' && this.ctx.state !== undefined) return false;
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (!labSpeedOk(name, replay ? speed : 1) || !this._labGate().allow(name, now)) { this.stats.dropped++; return false; }
+    const s = { name, priority: LAB_SFX_PRI[name] ?? 2, pitchIndex: 0, pan: 0, key: name, cat: name };
+    if (!this.limiter.allow(s, now, replay ? speed : 1)) { this.stats.dropped++; return false; }
+    return this.play(name, { ...s, gain: LAB_SFX_GAIN[name] ?? 0.55 });
   }
 
   play(name, { priority = 2, pitchIndex = 0, pan = 0, gain = 1 } = {}) {

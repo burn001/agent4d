@@ -13,11 +13,12 @@ import flat from './i18n/flat.mjs';
 import scene from './i18n/scene.mjs';
 import replay from './i18n/replay.mjs';
 import server from './i18n/server.mjs';
+import lab from './i18n/lab.mjs';
 
 export const LANGS = ['en', 'ko'];
 export const LANG_PREFS = ['auto', 'en', 'ko'];
 export const LANG_KEY = 'ccviz.lang';
-export const DICT_PARTS = { core, app, sound, cards, boards, flat, scene, replay, server };
+export const DICT_PARTS = { core, app, sound, cards, boards, flat, scene, replay, server, lab };
 
 /** 사전 합치기: { en: {...}, ko: {...} } (겹친 키는 dupes 에) */
 export function mergeDicts(parts) {

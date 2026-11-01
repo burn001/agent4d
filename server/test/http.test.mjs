@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import http from 'node:http';
+import crypto from 'node:crypto';
 import { makeFixture, rmFixture, IDS } from './fixtures/build.mjs';
 import { createServer, createRealManager } from '../index.mjs';
 import { DemoManager } from '../demo.mjs';
@@ -135,6 +136,35 @@ test('정적: ETag·Last-Modified 조건부 요청이면 304(본문 없음), 바
   const d = await get(`${base}/assets/bgm.mp3`, { ...H, 'if-none-match': 'W/"other"' });
   assert.equal(d.status, 200);
   assert.equal(d.body.length, a.body.length);
+});
+
+test('정적 §130: ?v=<내용 해시> 는 1년 immutable(200·206 모두), 틀린·없는 v 는 짧은 캐시, Range 도 조건부면 304', async () => {
+  const hex = crypto.createHash('sha256').update(Buffer.alloc(1000, 7)).digest('hex');
+  const IMM = 'public, max-age=31536000, immutable';
+  const full = await get(`${base}/assets/bgm.mp3?v=${hex.slice(0, 16)}`, H);
+  assert.equal(full.status, 200);
+  assert.equal(full.headers['cache-control'], IMM);
+  assert.equal(full.body.length, 1000);
+  const part = await get(`${base}/assets/bgm.mp3?v=${hex.slice(0, 16)}`, { ...H, range: 'bytes=0-' });
+  assert.equal(part.status, 206);
+  assert.equal(part.headers['cache-control'], IMM);
+  assert.equal(part.headers['content-range'], 'bytes 0-999/1000');
+  assert.equal((await get(`${base}/assets/bgm.mp3?v=${hex}`, { ...H, range: 'bytes=5-9' })).headers['cache-control'], IMM, '전체 해시도 됨');
+  for (const v of ['0123456789abcdef', 'zz', hex.slice(0, 7), '']) {
+    const r = await get(`${base}/assets/bgm.mp3?v=${v}`, { ...H, range: 'bytes=0-9' });
+    assert.equal(r.status, 206);
+    assert.equal(r.headers['cache-control'], 'public, max-age=3600', `v=${v}`);
+  }
+  assert.equal((await get(`${base}/assets/bgm.mp3`, H)).headers['cache-control'], 'public, max-age=3600');
+  // 만료된 <audio> 재검증: Range + If-None-Match 가 맞으면 304(본문 없음) — 예전엔 206 으로 곡을 다시 보냈다
+  const re = await get(`${base}/assets/bgm.mp3`, { ...H, range: 'bytes=0-999', 'if-none-match': full.headers.etag });
+  assert.equal(re.status, 304);
+  assert.equal(re.body.length, 0);
+  const re2 = await get(`${base}/assets/bgm.mp3`, { ...H, range: 'bytes=0-999', 'if-modified-since': full.headers['last-modified'] });
+  assert.equal(re2.status, 304);
+  const miss = await get(`${base}/assets/bgm.mp3`, { ...H, range: 'bytes=0-9', 'if-none-match': 'W/"other"' });
+  assert.equal(miss.status, 206);
+  assert.equal(miss.body.length, 10);
 });
 
 test('/sessions·/state', async () => {

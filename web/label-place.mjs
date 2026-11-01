@@ -49,9 +49,20 @@ export function textWidth(s, px = 11) {
  * @param discs [{id, x, y, r}] 화면의 노드 원판(자기 노드는 id 로 뺀다)
  * @param opts  { pad = 2(원판 여유 px), bounds = [x0, x1](가로로 이 밖에 잘리는 자리는 걸침과 같이 봄),
  *               shifts = [0](밀기: 수 = dy px(노드에서 멀어지는 쪽), [kx, dy] = 가로로 라벨 폭 × kx 만큼도),
- *               vbounds = [y0, y1](세로로 이 밖이면 잘림), farShifts = [](고정 라벨만 마지막에 쓰는 먼 자리, 리더선), rects = [[x0, y0, x1, y1]…](피할 사각형: 도구 패널·말풍선·섬 이름표) }
+ *               vbounds = [y0, y1](세로로 이 밖이면 잘림), farShifts = [](고정 라벨만 마지막에 쓰는 먼 자리, 리더선), rects = [[x0, y0, x1, y1]…](피할 사각형: 도구 패널·말풍선·섬 이름표),
+ *               forceRects = false(true 면 force 라벨이 빈 자리가 없을 때 rects·화면 밖만은 피하는 자리를 먼저 — 연구소 2D) }
  * @returns Map id → {compact, mini, dx, dy, dim, lead, box}
  */
+/** 상자가 사각형들·화면 밖(bounds 가로 [x0, x1] · vb 세로 [y0, y1])에 걸친 넓이 합(px²) — forceRects 의 마지막 고르기 */
+function coverArea(box, rects, bounds, vb) {
+  const ov = (r) => Math.max(0, Math.min(box[2], r[2]) - Math.max(box[0], r[0])) * Math.max(0, Math.min(box[3], r[3]) - Math.max(box[1], r[1]));
+  let a = 0;
+  for (const r of rects) a += ov(r);
+  const w = box[2] - box[0], h = box[3] - box[1];
+  if (bounds) a += (Math.max(0, bounds[0] - box[0]) + Math.max(0, box[2] - bounds[1])) * h;
+  if (vb) a += (Math.max(0, vb[0] - box[1]) + Math.max(0, box[3] - vb[1])) * w;
+  return a;
+}
 export function placeLabels(cands, discs, opts = {}) {
   const pad = opts.pad ?? 2, shifts = opts.shifts || [0], bounds = opts.bounds || null;
   const far = opts.farShifts || [], rects = opts.rects || [];
@@ -94,6 +105,26 @@ export function placeLabels(cands, discs, opts = {}) {
         }
         if (got) break;
       }
+    }
+    // opts.forceRects(연구소 2D 만): 고정(포커스·호버) 라벨이 빈 자리가 없을 때 — 노드·라벨엔 걸쳐도 장애물 사각형(섬 이름표·도구 카드·말풍선)과
+    // 화면 밖은 피하는 자리(밀기 → 먼 자리 → 노드 반대쪽 순, 첫 모드부터). 반대쪽 = dy −(2·gap + 높이 + 4): 아래 라벨은 노드 위로, 위 라벨은 아래로
+    // (DOM 은 같은 transform 에 dy 만 더하므로 따로 뒤집기 표시가 필요 없음).
+    // 빈 자리가 끝내 없으면 장애물·화면 밖에 걸친 넓이가 가장 작은 자리(같으면 앞 후보)
+    if (!got && c.force && opts.forceRects) {
+      let best = null, bestA = Infinity;
+      for (const m of c.modes) {
+        const flip = -(2 * c.gap + m.h + 4);
+        for (const sh of [0, ...shifts, ...far, [0, flip], [0.55, flip], [-0.55, flip]]) {
+          const [dy, dx] = shiftOf(sh, m);
+          if (dy > 0 && Math.hypot(dx, dy) > LEAD_MAX) continue; // 긴 리더선은 쓰지 않음
+          const box = labelBox(c, m, dy, dx);
+          const a = coverArea(box, rects, bounds, vb);
+          if (a < bestA) { bestA = a; best = { compact: !!m.compact, mini: !!m.mini, dx, dy, dim: false, lead: dy >= LEAD_MIN ? dy : 0, box }; }
+          if (a === 0) break;
+        }
+        if (bestA === 0) break;
+      }
+      got = best;
     }
     if (!got && c.force) { const m = c.modes[0]; got = { compact: !!m.compact, mini: !!m.mini, dx: 0, dy: 0, dim: false, lead: 0, box: labelBox(c, m, 0) }; }
     if (!got && c.pin === true && soft) got = soft;

@@ -8,6 +8,7 @@
 import { t, lang, langPref, setLangPref } from './i18n.mjs';
 import { quipsOn, setQuipsOn, onQuips } from './voxel/quip-pref.mjs'; // 복셀 생각·말풍선
 import { stencilOn, setStencilOn, onStencil } from './voxel/stencil-pref.mjs'; // 복셀 바닥 스텐실
+import { labWalkOn, setLabWalkOn, onLabWalk } from './lab/lab-pref.mjs'; // 복셀 연구소 현장 걷기
 
 const $ = (id) => document.getElementById(id);
 
@@ -67,6 +68,17 @@ function quipsButton() {
   return b;
 }
 
+/** 복셀 연구소 현장 걷기 켬/끔(연구소 전용, 저장 'ccviz.labwalk') — ctl labwalk 로 바뀌어도 글이 따라감 */
+function labWalkButton() {
+  const b = document.createElement('button');
+  b.id = 'btn-labwalk'; b.type = 'button'; b.className = 'tb';
+  b.title = t('lab.walk.title');
+  const sync = () => { const on = labWalkOn(); b.textContent = t(on ? 'lab.walk.on' : 'lab.walk.off'); b.setAttribute('aria-pressed', String(on)); };
+  b.addEventListener('click', () => setLabWalkOn(!labWalkOn()));
+  onLabWalk(sync); sync();
+  return b;
+}
+
 /** 바닥 스텐실(프로젝트 이름) 켬/끔(복셀 전용, 저장 'ccviz.stencil') */
 function stencilButton() {
   const b = document.createElement('button');
@@ -106,9 +118,10 @@ export function mountSettings() {
   soundNote.textContent = t('core.settings.soundNote');
   const rows = [
     row(t('core.settings.row.view'), [viewNode]),
-    row(t('core.settings.row.camera'), [$('btn-camera'), $('btn-cam-mode'), $('btn-follow-prompt')]),
+    row(t('core.settings.row.camera'), [$('btn-camera'), $('btn-cam-mode'), $('btn-follow-prompt'), $('btn-pov')]),
     row(t('core.settings.row.display'), [$('btn-done'), $('btn-env'), $('btn-legend')]),
     row(t('core.settings.row.quips'), [quipsButton(), stencilButton()]),
+    row(t('core.settings.row.lab'), [labWalkButton()]), // 복셀 연구소: 작업 대상 층은 표시 줄(기본 켬) · 현장 걷기
     row(t('core.settings.row.theme'), [$('btn-theme')]),
     row(t('core.settings.row.sound'), [soundNote]),
     row(t('core.settings.row.live'), [$('btn-pause')]),

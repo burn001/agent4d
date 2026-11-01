@@ -15,6 +15,7 @@ export default {
     'scene.flowShape.note': 'Context fills the main body (reactor pillars / column liquid). Your console is the holographic desk — text appears on its screen.',
     'scene.holo.tipHint': 'Click for details', // 도구 패널 툴팁
     'scene.mode.voxel': 'Voxel Office',
+    'scene.mode.lab': 'Voxel Lab',
     // 노드 상태(라벨 아랫줄)
     'scene.status.active': 'Working',
     'scene.status.idle': 'Idle',
@@ -61,6 +62,7 @@ export default {
     'scene.room.external': 'External job',
     'scene.room.past': 'Past office',
     'scene.room.office': 'Office',
+    'scene.room.lab': 'Lab',
     'scene.room.annex': 'Annex',
     'scene.room.standalone': 'standalone claude -p',
     // 복셀 기동기 대시보드 패널
@@ -121,6 +123,7 @@ export default {
     'scene.flowShape.monitor': '둥근 퍽 + 파동',
     'scene.flowShape.note': '컨텍스트는 메인 몸 안에 차오름(반응로 기둥·기둥 액체). 나(사용자)는 홀로그램 콘솔 데스크 — 글이 화면에 바로 뜸.',
     'scene.mode.voxel': '복셀 오피스',
+    'scene.mode.lab': '복셀 연구소',
     'scene.status.active': '작업 중',
     'scene.status.idle': '대기',
     'scene.status.done': '완료',
@@ -162,6 +165,7 @@ export default {
     'scene.room.external': '외부 작업',
     'scene.room.past': '지난 사무실',
     'scene.room.office': '사무실',
+    'scene.room.lab': '연구소',
     'scene.room.annex': '별관',
     'scene.room.standalone': '독립 claude -p',
     'scene.dash.launcher': '기동기',

@@ -4,12 +4,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { menuItems, triggerText, menuKey, popVertical } from '../viewsel.mjs';
 
-test('menuItems: 표현 3종 + 화면 3D·2D, 지금 값 표시, 2D 준비 중 알림', () => {
+test('menuItems: 표현 4종 + 화면 3D·2D, 지금 값 표시, 2D 준비 중 알림', () => {
   const it = menuItems({ view: 'planet', dim: '2d' });
-  assert.deepEqual(it.map((x) => `${x.group}:${x.value}`), ['view:flow', 'view:planet', 'view:voxel', 'dim:3d', 'dim:2d']);
+  assert.deepEqual(it.map((x) => `${x.group}:${x.value}`), ['view:flow', 'view:planet', 'view:voxel', 'view:lab', 'dim:3d', 'dim:2d']);
   assert.deepEqual(it.filter((x) => x.checked).map((x) => x.value), ['planet', '2d']);
   assert.equal(it[2].text, '복셀 오피스');
-  assert.match(menuItems({ view: 'voxel', dim: '2d', pending: 'voxel' })[4].hint, /준비 중/);
+  assert.match(menuItems({ view: 'voxel', dim: '2d', pending: 'voxel' })[5].hint, /준비 중/);
+  assert.equal(it[3].text, '복셀 연구소');
   assert.equal(triggerText('flow', '3d'), '표현: 흐름 · 3D');
   assert.equal(triggerText('voxel', '2d'), '표현: 복셀 오피스 · 2D');
 });

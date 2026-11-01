@@ -55,6 +55,7 @@
       "key": "D minor",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "7af44ed2474fc76e",
       "stage": 0,
       "views": {
         "planet": [
@@ -78,6 +79,7 @@
       "key": "D dorian",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "270ebe779bd1cef3",
       "stage": 1,
       "views": {
         "flow": [
@@ -105,6 +107,7 @@
       "key": "Bb major",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "4632ac7bd7e47461",
       "stage": 1,
       "views": {
         "voxel": [
@@ -128,6 +131,7 @@
       "key": "G major",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "a793cfa30e481056",
       "stage": [
         2,
         3
@@ -154,6 +158,7 @@
       "key": "F major",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "3d7af9dbfc9c0d78",
       "stage": 1,
       "views": {
         "voxel": [
@@ -177,6 +182,7 @@
       "key": "F major",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "7f583266e5112255",
       "stage": 0,
       "views": {
         "voxel": [
@@ -200,6 +206,7 @@
       "key": "D lydian",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "7c63fb97a0eb46dc",
       "stage": 0,
       "views": {
         "planet": [
@@ -223,6 +230,7 @@
       "key": "A minor",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "262e867d13e9d115",
       "stage": 2,
       "views": {
         "flow": [
@@ -249,6 +257,7 @@
       "key": "A minor",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "a23e8e3011b84629",
       "stage": 2,
       "views": {
         "flow": [
@@ -274,6 +283,7 @@
       "key_en": "E minor (E dorian, F# minor late in the climax)",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "eb76919626dfd2c9",
       "stage": 2,
       "views": {
         "voxel": [
@@ -297,6 +307,7 @@
       "key": "F minor",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "7ada2c14376a1f9a",
       "stage": 3,
       "views": {
         "flow": [
@@ -320,6 +331,7 @@
       "key": "A major",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "f94fc72257cc3080",
       "stage": 3,
       "views": {
         "flow": [
@@ -346,6 +358,7 @@
       "key": "C minor",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "69f1dd1ab70cb971",
       "stage": 0,
       "views": {
         "flow": [
@@ -369,6 +382,7 @@
       "key": "E minor",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "37151854f1a3a78b",
       "stage": 1,
       "views": {
         "flow": [
@@ -392,6 +406,7 @@
       "key": "G minor",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "cf11c0b2699c9084",
       "stage": 3,
       "views": {
         "flow": [
@@ -415,6 +430,7 @@
       "key": "E lydian",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "b691d541f69528c1",
       "stage": 1,
       "views": {
         "planet": [
@@ -438,6 +454,7 @@
       "key": "C dorian",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "e815b83c60a5241d",
       "stage": 1,
       "views": {
         "planet": [
@@ -461,6 +478,7 @@
       "key": "A minor",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "61cff93260f255fc",
       "stage": 2,
       "views": {
         "planet": [
@@ -484,6 +502,7 @@
       "key": "D minor",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "b0f875f88a14f9d3",
       "stage": 3,
       "views": {
         "planet": [
@@ -507,6 +526,7 @@
       "key": "D major",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "409c68404ef5b445",
       "stage": 0,
       "views": {
         "voxel": [
@@ -530,6 +550,7 @@
       "key": "F major",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "98f1151cfa02e02e",
       "stage": 3,
       "views": {
         "voxel": [
@@ -554,6 +575,7 @@
       "key_en": "C major (A minor in the chase)",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "15981bd7f56e2284",
       "stage": 3,
       "views": {
         "voxel": [
@@ -577,6 +599,7 @@
       "key": "B minor",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "16c7ffc083aec197",
       "stage": 0,
       "views": {
         "flow": [
@@ -600,6 +623,7 @@
       "key": "F# minor",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "cf6b928dd9751beb",
       "stage": 0,
       "views": {
         "flow": [
@@ -623,6 +647,7 @@
       "key": "G# minor",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "1b7bf726f5af223e",
       "stage": 1,
       "views": {
         "flow": [
@@ -647,6 +672,7 @@
       "key": "Bb minor",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "c8022ad27e82e705",
       "stage": 1,
       "views": {
         "flow": [
@@ -670,6 +696,7 @@
       "key": "C# minor",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "33511cc8628415f5",
       "stage": 2,
       "views": {
         "flow": [
@@ -693,6 +720,7 @@
       "key": "Eb minor",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "a22563fc63a09e9f",
       "stage": 2,
       "views": {
         "flow": [
@@ -716,6 +744,7 @@
       "key": "D phrygian",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "39b8ae1ce248c6a6",
       "stage": 3,
       "views": {
         "flow": [
@@ -739,6 +768,7 @@
       "key": "Bb major",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "7a057034748ef6f2",
       "stage": 3,
       "views": {
         "flow": [
@@ -762,6 +792,7 @@
       "key": "Ab major",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "c3dcbbee475cb727",
       "stage": 0,
       "views": {
         "planet": [
@@ -786,6 +817,7 @@
       "key": "C# minor",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "27c895c01cb47887",
       "stage": 0,
       "views": {
         "planet": [
@@ -809,6 +841,7 @@
       "key": "Bb lydian",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "3d51a1c8e22b3f6b",
       "stage": 1,
       "views": {
         "planet": [
@@ -832,6 +865,7 @@
       "key": "G mixolydian",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "ffcb1ce259419133",
       "stage": 1,
       "views": {
         "planet": [
@@ -855,6 +889,7 @@
       "key": "F minor",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "9c80b92948e1409f",
       "stage": 2,
       "views": {
         "planet": [
@@ -878,6 +913,7 @@
       "key": "Eb major",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "00ec0e6db161e77d",
       "stage": 2,
       "views": {
         "planet": [
@@ -901,6 +937,7 @@
       "key": "F# minor",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "b970551f6fc50d16",
       "stage": 3,
       "views": {
         "planet": [
@@ -924,6 +961,7 @@
       "key": "B minor",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "121a9c255286696b",
       "stage": 3,
       "views": {
         "planet": [
@@ -947,6 +985,7 @@
       "key": "Eb major",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "e57d5000edfa3246",
       "stage": 0,
       "views": {
         "voxel": [
@@ -971,6 +1010,7 @@
       "key": "A major",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "1d33c9bc9d24d321",
       "stage": 0,
       "views": {
         "voxel": [
@@ -994,6 +1034,7 @@
       "key": "Ab major",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "510a8117f550c532",
       "stage": 1,
       "views": {
         "voxel": [
@@ -1017,6 +1058,7 @@
       "key": "G minor",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "9c9bd4add8086185",
       "stage": 1,
       "views": {
         "voxel": [
@@ -1040,6 +1082,7 @@
       "key": "E major",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "83d2a2b7e304e936",
       "stage": 2,
       "views": {
         "voxel": [
@@ -1063,6 +1106,7 @@
       "key": "Db major",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "b2122739dadedbc2",
       "stage": 2,
       "views": {
         "voxel": [
@@ -1086,6 +1130,7 @@
       "key": "D harmonic minor",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "f1cde7996fe2b78f",
       "stage": 3,
       "views": {
         "voxel": [
@@ -1109,6 +1154,7 @@
       "key": "C minor",
       "duration": 300,
       "bytes": 4800679,
+      "hash": "023d6da1e4bc891e",
       "stage": 3,
       "views": {
         "voxel": [
@@ -1117,6 +1163,198 @@
       },
       "energy": 0.94,
       "source": "자체 작곡(music/compose_mambo.py)"
+    },
+    {
+      "id": "cleanroom",
+      "label": "청정실",
+      "title": "청정실",
+      "mood": "한가 · 연구소 청정실 앰비언트 — 느린 블립 아르페지오, 50Hz 전원 험, 유리 같은 패드, 먼 피펫 물방울, 비트 없음",
+      "label_en": "Clean Room",
+      "title_en": "Clean Room",
+      "mood_en": "Idle · clean-room lab ambient — slow blip arpeggio, 50 Hz mains hum, glassy pads, distant pipette drips, no beat",
+      "file": "bgm-cleanroom.mp3",
+      "meta": "bgm-cleanroom.json",
+      "bpm": 64,
+      "key": "A minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "hash": "9777118f807c679d",
+      "stage": 0,
+      "views": {
+        "lab": [
+          0
+        ]
+      },
+      "energy": 0.12,
+      "source": "자체 작곡(music/compose_cleanroom.py)"
+    },
+    {
+      "id": "petri",
+      "label": "배양 접시",
+      "title": "배양 접시",
+      "mood": "한가 · 배양기 곁의 잔잔한 전자음 — 칼림바 아르페지오, 가이거 계수기 틱, 물방울, 부드러운 패드와 서브 베이스",
+      "label_en": "Petri Dish",
+      "title_en": "Petri Dish",
+      "mood_en": "Idle · quiet electronics beside the incubator — kalimba arpeggio, Geiger-counter ticks, drips, soft pads and sub bass",
+      "file": "bgm-petri.mp3",
+      "meta": "bgm-petri.json",
+      "bpm": 72,
+      "key": "E dorian",
+      "duration": 300,
+      "bytes": 4800679,
+      "hash": "1de3e6a92baec8ea",
+      "stage": 0,
+      "views": {
+        "lab": [
+          0
+        ]
+      },
+      "energy": 0.2,
+      "source": "자체 작곡(music/compose_petri.py)"
+    },
+    {
+      "id": "titration",
+      "label": "적정 실험",
+      "title": "적정 실험",
+      "mood": "보통 · 한 방울씩 떨어지는 적정 — 부드러운 킥과 림, 피펫 물방울 리듬, 필터가 천천히 열리는 톱니 아르페지오, 비브라폰",
+      "label_en": "Titration",
+      "title_en": "Titration",
+      "mood_en": "Normal · drop-by-drop titration — soft kick and rim, pipette-drip rhythm, slowly opening saw arpeggio, vibraphone",
+      "file": "bgm-titration.mp3",
+      "meta": "bgm-titration.json",
+      "bpm": 92,
+      "key": "F lydian",
+      "duration": 300,
+      "bytes": 4800679,
+      "hash": "c8cad4b1d0c0b8df",
+      "stage": 1,
+      "views": {
+        "lab": [
+          1
+        ]
+      },
+      "energy": 0.38,
+      "source": "자체 작곡(music/compose_titration.py)"
+    },
+    {
+      "id": "oscillo",
+      "label": "오실로스코프",
+      "title": "오실로스코프",
+      "mood": "보통 · 오실로스코프 파형처럼 흐르는 하프타임 일렉트로닉 — 사각파 아르페지오, 3:4 블립 겹 아르페지오, 계전기 딸깍, 모니터 삐 소리",
+      "label_en": "Oscilloscope",
+      "title_en": "Oscilloscope",
+      "mood_en": "Normal · half-time electronica flowing like a scope trace — square-wave arpeggio, 3-against-4 blip counter-arpeggio, relay clicks, monitor beeps",
+      "file": "bgm-oscillo.mp3",
+      "meta": "bgm-oscillo.json",
+      "bpm": 104,
+      "key": "D minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "hash": "c381c2da81e047d8",
+      "stage": 1,
+      "views": {
+        "lab": [
+          1
+        ]
+      },
+      "energy": 0.48,
+      "source": "자체 작곡(music/compose_oscillo.py)"
+    },
+    {
+      "id": "centrifuge",
+      "label": "원심분리기",
+      "title": "원심분리기",
+      "mood": "활발 · 돌아가는 원심분리기 — 4박 킥, 16분 톱니 시퀀서, 회전하는 잡음 휘이잉, 계전기 리듬, 8분 펄스 베이스",
+      "label_en": "Centrifuge",
+      "title_en": "Centrifuge",
+      "mood_en": "Busy · a spinning centrifuge — four-on-the-floor kick, 16th saw sequencer, whirring rotor noise, relay rhythm, eighth-note pulse bass",
+      "file": "bgm-centrifuge.mp3",
+      "meta": "bgm-centrifuge.json",
+      "bpm": 120,
+      "key": "C# minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "hash": "93a9cb49b81451c7",
+      "stage": 2,
+      "views": {
+        "lab": [
+          2
+        ]
+      },
+      "energy": 0.66,
+      "source": "자체 작곡(music/compose_centrifuge.py)"
+    },
+    {
+      "id": "spectro",
+      "label": "분광 분석",
+      "title": "분광 분석",
+      "mood": "활발 · 스펙트럼을 훑는 분광기 — 3:4 폴리리듬 겹 아르페지오, 하프타임 스네어와 셰이커, 옥타브 베이스, 비브라폰 모티프",
+      "label_en": "Spectral Scan",
+      "title_en": "Spectral Scan",
+      "mood_en": "Busy · a spectrometer sweeping the spectrum — 3-against-4 polyrhythmic arpeggios, half-time snare and shaker, octave bass, vibraphone motif",
+      "file": "bgm-spectro.mp3",
+      "meta": "bgm-spectro.json",
+      "bpm": 112,
+      "key": "G dorian",
+      "duration": 300,
+      "bytes": 4800679,
+      "hash": "f0d7addf804b08ed",
+      "stage": 2,
+      "views": {
+        "lab": [
+          2
+        ]
+      },
+      "energy": 0.6,
+      "source": "자체 작곡(music/compose_spectro.py)"
+    },
+    {
+      "id": "reactor",
+      "label": "임계 반응로",
+      "title": "임계 반응로",
+      "mood": "매우 활발 · 임계에 다가가는 반응로 — 몰아치는 킥과 16분 하이햇, 두 겹 시퀀서 아르페지오, 잡음 상승, 회전음과 가이거 틱",
+      "label_en": "Reactor Critical",
+      "title_en": "Reactor Critical",
+      "mood_en": "Very busy · a reactor nearing criticality — driving kick and 16th hats, double sequencer arpeggios, noise risers, rotor whir and Geiger ticks",
+      "file": "bgm-reactor.mp3",
+      "meta": "bgm-reactor.json",
+      "bpm": 136,
+      "key": "F minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "hash": "ba39b0cc106f418f",
+      "stage": 3,
+      "views": {
+        "lab": [
+          3
+        ]
+      },
+      "energy": 0.86,
+      "source": "자체 작곡(music/compose_reactor.py)"
+    },
+    {
+      "id": "collider",
+      "label": "입자 가속기",
+      "title": "입자 가속기",
+      "mood": "매우 활발 · 고리 위를 달리는 입자 — 148 BPM 드라이브 비트, 16분 사각파 시퀀서, 블립 폭주, 계전기 연타, 옥타브 베이스",
+      "label_en": "Particle Collider",
+      "title_en": "Particle Collider",
+      "mood_en": "Very busy · particles racing around the ring — 148 BPM driving beat, 16th square sequencer, blip bursts, rapid relay clicks, octave bass",
+      "file": "bgm-collider.mp3",
+      "meta": "bgm-collider.json",
+      "bpm": 148,
+      "key": "A harmonic minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "hash": "3fff78487d45c6c8",
+      "stage": 3,
+      "views": {
+        "lab": [
+          3
+        ]
+      },
+      "energy": 0.93,
+      "source": "자체 작곡(music/compose_collider.py)"
     }
   ]
 }

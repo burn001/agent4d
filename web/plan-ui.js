@@ -42,7 +42,7 @@ const f1 = (v) => v.toFixed(1);
 function boardProject(view, aid) {
   const home = view.planHome ? view.planHome(aid) : view.nodePos ? view.nodePos(aid) : null; // 노드와 함께 미끄러짐(재배치 때 앞질러 튀지 않게)
   if (!home) return null;
-  const mode = view.constructor && view.constructor.modeId;
+  const mode = view.constructor && (view.constructor.family === 'voxel' ? 'voxel' : view.constructor.modeId); // 복셀 연구소 = 복셀 판
   const wb = boardWorld(view.nodeRadius ? view.nodeRadius(aid) : 1, mode, view.holoSize ? view.holoSize(aid) : null); // 표현이 낸 모니터 크기가 있으면 그것
   const dom = view.renderer && view.renderer.domElement;
   const rect = dom ? dom.getBoundingClientRect() : { left: 0, top: 0, width: innerWidth, height: innerHeight };
@@ -55,6 +55,7 @@ function boardProject(view, aid) {
   const cam = view.camera;
   if (!cam || !home.clone) return null;
   const w = home.clone(); w.x += wb.off; w.y -= wb.drop;
+  if (wb.bottom != null && w.y < wb.bottom) w.y = wb.bottom; // 복셀 3D: 판 아래 변을 기동기 대시보드·설비 위로(구멍 평면이 바닥·낮은 물체에 묻히지 않게)
   const wp = { x: w.x, y: w.y, z: w.z };
   const d = cam.position.distanceTo(w) || 1;
   const v = w.project(cam);
@@ -238,8 +239,9 @@ export function mountPlans(h) {
     const focus = h.focusId ? h.focusId() : null;
     const opened = h.openedPlan ? h.openedPlan() : null; // 크게 보기로 연 보드는 그 카드가 대신함
     const W = innerWidth, H = innerHeight;
-    if (layer) layer.classList.toggle('vx', !!(view && view.constructor && view.constructor.modeId === 'voxel')); // 복셀: 게시판 모양
-    const punch = !!(view && !view.flat && typeof view.setPlanPunch === 'function'); // 흐름·Planet 3D
+    const vxBoard = !!(view && view.constructor && view.constructor.family === 'voxel');
+    if (layer) layer.classList.toggle('vx', vxBoard); // 복셀: 게시판 모양
+    const punch = !!(view && !view.flat && typeof view.setPlanPunch === 'function'); // 흐름·Planet 3D · 복셀 3D
     if (punchView && punchView !== view) clearPunch();
     if (layer) layer.classList.toggle('under', punch);
     const punches = [];
@@ -280,7 +282,7 @@ export function mountPlans(h) {
       if (occ) return occ;
       occ = [];
       const cam = view.camera, crect = dom ? dom.getBoundingClientRect() : { left: 0, top: 0, width: W, height: H };
-      const th = Math.tan(((cam.fov || 50) * Math.PI) / 360), vox = !!(view.constructor && view.constructor.modeId === 'voxel');
+      const th = Math.tan(((cam.fov || 50) * Math.PI) / 360), vox = !!(view.constructor && view.constructor.family === 'voxel');
       for (const id of nodes.keys()) {
         if (!shownNode(view, id)) continue;
         const p = view.nodePos(id);
@@ -317,7 +319,7 @@ export function mountPlans(h) {
       b.el.hidden = false;
       let clip = '';
       if (punch && pj.wp) { // 판 기준 월드 점 + 화면 상자 → 판 평면 네 모서리 구멍(모서리 반지름 = CSS 9px × 배율)
-        punches.push({ wx: pj.wp.x, wy: pj.wp.y, wz: pj.wp.z, box: sc.box, r: 9 * sc.s, a: curA }); // 판 기준점 = 판 DOM 이 자리·배율을 잡는 월드 점(왼쪽 아래)
+        punches.push({ wx: pj.wp.x, wy: pj.wp.y, wz: pj.wp.z, box: sc.box, r: (vxBoard ? PLAN_UI.VX_CORNER : PLAN_UI.CORNER) * sc.s, a: curA }); // 판 기준점 = 판 DOM 이 자리·배율을 잡는 월드 점(왼쪽 아래)
         hitBoxes.push({ id: c.id, x0: bx, y0: by, x1: bx + sc.box.w, y1: by + sc.box.h });
       } else if (occ3d && pj.wp) {
         const cp = view.camera.position, wc = { x: pj.wp.x + pj.wb.w / 2 - cp.x, y: pj.wp.y + pj.wb.h / 2 - cp.y, z: pj.wp.z - cp.z };

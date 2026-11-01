@@ -5,10 +5,11 @@
 // 그리기는 VoxelView 동적 빛 묶음(BoxBatch)에 상자를 넣는다(그리기 호출 추가 0).
 import * as THREE from 'three';
 import { FLOW, PacketPool, planFlow, easeInOut, linkPoint } from '../flow-core.mjs';
-import { floorRoute, routeCum, routeAt, dashStarts, lineStyle } from './office-core.mjs';
+import { floorRoute, routeCum, routeAt, dashStarts, lineStyle, routeSig } from './office-core.mjs';
 
 const ROUTE_CAP = 240, MAX_PACKETS = 160, DASH_LEN = 0.55, Y_LINE = 0.022, Y_PKT = 0.16;
 const PKT_SPEED = 9; // 바닥 패킷 속도(단위/초)
+const REBUILD_MS = 6; // 프레임당 새 길 계산 상한(ms)
 
 export class VxFlow {
   constructor(view) {
@@ -52,26 +53,50 @@ export class VxFlow {
     return null;
   }
 
-  /** 배치가 바뀌면 길 다시(자리 기준이라 프레임마다 아님) */
+  /** 배치가 바뀌면 길 다시(자리 기준이라 프레임마다 아님).
+   *  길찾기(A*)가 무거운 큰 방(복셀 연구소 ~330×330 칸)에서 한 프레임에 몰리지 않게: 같은 끝점·같은 방 길은 이전 결과를 그대로 쓰고,
+   *  새로 찾을 길은 프레임당 REBUILD_MS 안에서만 계산 — 남은 짝은 다음 프레임으로 넘긴다(그동안 그 짝 라인은 이전 길 또는 안 그림). */
   _rebuild() {
     const v = this.view;
-    this.routes.clear();
+    const prev = this.routes;
+    this.routes = new Map();
+    this._queue = [];
     for (const [id, n] of v.nodes) {
-      if (this.routes.size >= ROUTE_CAP) break;
+      if (this.routes.size + this._queue.length >= ROUTE_CAP) break;
       const p = n.parentId;
       if (!p || !v.nodes.has(p)) continue;
       const a = this._anchor(p), b = this._anchor(id);
       if (!a || !b) continue;
-      const same = a.room && b.room && a.room.id === b.room.id;
-      let pts;
-      if (same) pts = floorRoute(a.seat, b.seat, a.room);
-      else pts = [{ x: a.seat.x, z: a.seat.z }, { x: b.seat.x, z: b.seat.z }];
-      const cum = routeCum(pts);
-      const L = cum[cum.length - 1];
-      if (!(L > 0.5)) continue;
-      this.routes.set(p + '|' + id, { pid: p, cid: id, pts, cum, L, air: !same });
+      const same = !!(a.room && b.room && a.room.id === b.room.id);
+      const key = p + '|' + id;
+      if (!same) { this._put(key, p, id, [{ x: a.seat.x, z: a.seat.z }, { x: b.seat.x, z: b.seat.z }], true); continue; }
+      const sig = routeSig(a.seat, b.seat, a.room);
+      const old = prev.get(key);
+      if (old && sig && old.sig === sig) { this.routes.set(key, old); continue; }
+      if (old) this.routes.set(key, old); // 새 길이 나올 때까지 이전 길
+      this._queue.push({ key, p, id, a, b, sig });
+    }
+    this._drain();
+  }
+
+  /** 밀린 길 계산(시간 상한) */
+  _drain() {
+    const q = this._queue;
+    if (!q || !q.length) { this.stats.routes = this.routes.size; return; }
+    const t0 = performance.now();
+    while (q.length) {
+      const j = q.shift();
+      this._put(j.key, j.p, j.id, floorRoute(j.a.seat, j.b.seat, j.a.room), false, j.sig);
+      if (performance.now() - t0 > REBUILD_MS) break;
     }
     this.stats.routes = this.routes.size;
+  }
+
+  _put(key, p, id, pts, air, sig = null) {
+    const cum = routeCum(pts);
+    const L = cum[cum.length - 1];
+    if (!(L > 0.5)) { this.routes.delete(key); return; }
+    this.routes.set(key, { pid: p, cid: id, pts, cum, L, air, sig });
   }
 
   /** 라인 색: 세션 색(여러 세션) 또는 흐름 호출 색 */
@@ -83,7 +108,7 @@ export class VxFlow {
   /** 매 프레임: G = 동적 빛 묶음 */
   draw(G, now) {
     const v = this.view, tok = v.tokens, pal = v.pal;
-    if (this._ver !== v._layoutVer) { this._ver = v._layoutVer; this._rebuild(); }
+    if (this._ver !== v._layoutVer) { this._ver = v._layoutVer; this._rebuild(); } else if (this._queue && this._queue.length) this._drain();
     const floor = pal.carpet, reduced = !!v.reduced;
     let nd = 0;
     const pt = this._pt;

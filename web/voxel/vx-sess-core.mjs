@@ -4,6 +4,7 @@
 //  · 세션 간 메시지 → 종이비행기 목록
 import { t as _t } from '../i18n.mjs';
 import { translateOffice } from './campus.mjs';
+import { loungeNav } from './nav-core.mjs';
 import { conflictPairs } from '../conflict-core.mjs';
 import { sessionColorMap, nodeSessIdx } from '../multi-core.mjs';
 
@@ -74,6 +75,9 @@ export class VxSessCore {
       const nx = m.fx * f, nz = m.fz * f;
       if (Math.abs(nx - m.ax) > 1e-4 || Math.abs(nz - m.az) > 1e-4) {
         translateOffice(off, nx - m.ax, nz - m.az);
+        // 그 사무실 사람도 같이(예전엔 제자리에 남아 옮겨 가는 자리로 벽·가구를 지나 걸어갔다). 라운지 방문 중인 사람은 그대로
+        const ids = new Set(off.rooms.map((r) => r.id));
+        for (const ch of this.view.chars.values()) if (ch.room && ids.has(ch.room.id) && ch.state !== 'gone' && !(ch.target && ch.target.type === 'visit') && ch.shiftBy) ch.shiftBy(nx - m.ax, nz - m.az);
         m.ax = nx; m.az = nz; any = true;
       }
       if (k >= 1) this.moves.delete(mid);
@@ -87,6 +91,7 @@ export class VxSessCore {
   stepConflicts(now) {
     const v = this.view, lay = v.layout;
     this.pairs = this.book ? conflictPairs(this.book.items(Date.now())) : [];
+    if (lay && lay.lab) return this._stepLabConflicts(now);
     if (!lay || !lay.lounges || !lay.lounges.length) return;
     const keep = new Set();
     for (const p of this.pairs) {
@@ -107,8 +112,28 @@ export class VxSessCore {
         if (i < 0) { i = 0; while (i < lg.spots.length && used.has(i)) i++; }
         if (i >= lg.spots.length) continue;
         used.add(i);
-        ch.visit = { spot: lg.spots[i], until, lounge: lg.id, idx: i };
+        ch.visit = { spot: lg.spots[i], until, lounge: lg.id, idx: i, nav: loungeNav(lg, lay.rooms.filter((r) => r.projectId === lg.projectId)) }; // 라운지 둘레 길
       }
+    }
+    for (const id of [...this.seen.keys()]) if (!keep.has(id)) this.seen.delete(id);
+  }
+  /** 복셀 연구소(라운지 없음): 충돌 파일 블록 방위의 플랫폼 가장자리 양옆 두 칸에서 두 사람이 마주 봄(lab-walk-core conflictSpots).
+   *  블록이 없으면(작업 대상 층 끔·장부에 없음) 방문 없이 브리지 사이 곡선만 */
+  _stepLabConflicts(now) {
+    const v = this.view;
+    const keep = new Set();
+    for (const p of this.pairs) {
+      keep.add(p.id);
+      const key = p.level + '|' + p.files.join(',') + '|' + (p.fading ? 'f' : '');
+      if (p.fading || this.seen.get(p.id) === key) continue;
+      const who = [this._char(p.nodeA, p.a), this._char(p.nodeB, p.b)];
+      const room = (who[0] && who[0].room) || (who[1] && who[1].room);
+      const th = room && v._conflictTheta ? v._conflictTheta(p, room) : null;
+      if (th == null || !v._conflictSpots) continue; // 다음 프레임에 블록이 생기면 다시 봄
+      this.seen.set(p.id, key);
+      const spots = v._conflictSpots(room, th);
+      const until = now + VISIT_SEC / Math.max(1, Math.sqrt(v.ts || 1));
+      who.forEach((ch, i) => { if (ch && spots[i] && ch.room && ch.room.type === 'lab') ch.visit = { spot: spots[i], until, lab: true, idx: i }; });
     }
     for (const id of [...this.seen.keys()]) if (!keep.has(id)) this.seen.delete(id);
   }

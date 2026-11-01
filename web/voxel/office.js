@@ -3,13 +3,14 @@
 // 매 프레임 다시 채운다 → 전체 draw call 은 한 자릿수(캐릭터 수와 무관).
 import * as THREE from 'three';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { installPlanPunch } from '../plan-punch3d.js'; // 계획판 깊이 = 흐름·Planet 과 같은 구멍 사각형
 import { computeOffice, CAT_FACILITY, hashStr } from './layout.js';
 import { readTokens, palette } from './palette.js';
 import { BoxBatch, UNIT_BOX, buildRoomStatic, buildCorridor, drawFacilities, drawDeskEmitter, drawMachine, ring, roomFrame, endXf, DESK_TOP } from './props.js';
-import { xfAngle, toLocal } from './xf.mjs';
+import { xfAngle, toLocal, camQuadrant, CAM_Q0 } from './xf.mjs';
 import { Character, drawCharacter, drawCharacterFar } from './character.js';
 import { crewSpots } from './character-core.mjs';
-import { roleOf, overseeSpot } from './office-core.mjs';
+import { roleOf, overseeSpot, launcherDash } from './office-core.mjs';
 import { wardrobe, headExtra } from './appearance-core.mjs';
 import { SpotBook, takeStation, takeBreak, releaseSpot, separate } from './crowd-core.mjs'; // 겹침 막기
 import { VxHolo } from './vx-holo.js';
@@ -70,6 +71,8 @@ const isEnded = (n) => n && (n.status === 'done' || n.status === 'error' || n.st
 export class VoxelView {
   static modeId = 'voxel';
   static modeLabel = _t('scene.mode.voxel');
+  /** 표현 계열(복셀 오피스·복셀 연구소 공용 — POV·말풍선 ⚙ 등 '복셀' 판정은 이것으로). 하위 표현(web/lab/lab-view.js)은 modeId 만 바꾼다 */
+  static family = 'voxel';
 
   constructor(container, labelContainer, opts = {}) {
     ensureCss();
@@ -97,6 +100,7 @@ export class VoxelView {
     this.lastLayout = -1;
     this.focusId = null;
     this.hoverId = null;
+    this.povId = null; // 1인칭 시점 대상(그 캐릭터 몸·이름표·말풍선을 숨김, 모니터는 그대로)
     this.focusDist = 0;
     this.onFrame = null;
     this.effects = [];
@@ -104,7 +108,9 @@ export class VoxelView {
     this.staticSig = '';
     this._kids = new Map();
     this._kidsDirty = true;
-    this.cameraPrefs = { fov: 30, elevMin: 30, elevMax: 52, distMin: 10, distMax: 220, overviewScale: 1.0, nodeScale: 1.0, minR: 8, /* 노드가 main 하나일 때 너무 붙어 사람 입력 빛기둥이 화면을 가리던 것(5.5 → 8) */ azCenter: 45, azRange: 28, overviewDistMax: 1400 };
+    this.cameraPrefs = { fov: 30, elevMin: 30, elevMax: 52, distMin: 10, distMax: 220, overviewScale: 1.0, nodeScale: 1.0, minR: 8, /* 노드가 main 하나일 때 너무 붙어 사람 입력 빛기둥이 화면을 가리던 것(5.5 → 8) */ azCenter: 45, azRange: 28, overviewDistMax: 1400,
+      // 방위각 풀기: azCenter·azRange 는 첫 자리·동 배치 계산에만, 카메라는 360° — 쉬는 동안 한 방향으로 천천히 돌고(바빠도 minK 몫), 순환 샷마다 70° 돌려 잡음
+      azFree: true, azShotStep: 70, idleOrbit: { spin: 2.4, minK: 0.35 } };
     // 전체 보기: 프로젝트 = 건물 동. mode 'session' 이면 1·2차와 같은 단일 사무실 배치
     this.scope = { mode: 'session', roots: [], projects: [], showInactive: false, focusProject: null };
     this._signs = [];
@@ -114,7 +120,7 @@ export class VoxelView {
     this._dimLooks = new Map();
     this.sess = new VxSessions(this); // 라운지·이사·충돌·메시지·컨텍스트 흔적
 
-    const r = this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    const r = this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', alpha: true }); // 계획판 구멍(바탕은 scene.background 로 불투명)
     r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     container.prepend(r.domElement);
     r.domElement.tabIndex = 0;
@@ -180,7 +186,7 @@ export class VoxelView {
       overseeSpot: (ch, crew) => overseeSpot(ch.room, crew), // 볼 팀원 책상 앞 통로
       onError: (ch) => (this.quips.on ? this.quips.onError(ch) : this.bubbles.say(ch.id, _t('scene.vx.errorBubble'), { type: 'error', dur: 2, now: this._now })) };
     this._fx = { t: 0, now: 0, skill: null, error: null, ok: null, text: null, focus: false, hover: false, metaSkill: false, doneLead: false, idle: false, catColor: null, monK: 0, mugC: null, coffeeC: null, bagC: null, shoeC: null, cardC: null };
-    this._labels = Array.from({ length: 24 }, () => ({ id: null, text: '', html: null, cls: '', x: 0, y: 0, z: 0 }));
+    this._labels = Array.from({ length: 32 }, () => ({ id: null, text: '', html: null, cls: '', x: 0, y: 0, z: 0 }));
     this._roomLabels = Array.from({ length: 16 }, () => ({ id: null, text: '', html: null, cls: '', x: 0, z: 0 }));
     this._posTmp = { x: 0, y: 0, z: 0 };
     this._bubCtx = { now: 0, narrow: false, focusId: null, hoverId: null, fadeAt: (x, z) => (this._fadeOn ? this._fadeAt(x, z) : 1), posOf: (id) => this._posOf(id), labels: null, rooms: null, chars: this.chars, camera: this.camera, width: 1, height: 1 };
@@ -418,6 +424,7 @@ export class VoxelView {
   // ---- 효과 ----
   _pushFx(e) { if (this.effects.length >= MAX_FX) this.effects.shift(); e.t0 = this._now; this.effects.push(e); }
   ripple(id, color) {
+    if (this._isOut(id)) return; // 나가는·숨긴 프로젝트 자리에 연출을 띄우지 않음
     const ch = this.chars.get(id);
     if (ch) ch.flashUntil = this._now + 0.45;
     const m = this.machines.get(id);
@@ -425,6 +432,7 @@ export class VoxelView {
     if (color) this._pushFx({ type: 'ring', id, dur: 0.7, color: toColor(color), r0: 0.5, r1: 1.0 });
   }
   wave(id, color, scale = 1) {
+    if (this._isOut(id)) return; // (사용자 입력 파동 포함)
     const m = this.machines.get(id);
     if (m) { m.flashUntil = this._now + 0.35; return; }
     if (!this.chars.has(id)) return;
@@ -496,6 +504,7 @@ export class VoxelView {
     this._disposed = true;
     this.renderer.setAnimationLoop(null);
     if (this._ro) this._ro.disconnect();
+    this.disposePlanPunch();
     this.bubbles.dispose(); this.quips.dispose();
     if (this.sess) this.sess.dispose();
     this.holo.dispose(); this.ix.dispose(); this.client.dispose(); this.procs.dispose(); this.stencil.dispose(); this.heatFx.dispose();
@@ -545,9 +554,7 @@ export class VoxelView {
     this.lastLayout = now;
     this.layoutDirty = false;
     const campus = this.scope.mode === 'all';
-    const lay = campus
-      ? computeCampus(this._present(), this.scope.roots, this.scope.projects, this.layout && this.layout.campus ? this.layout : null, { showInactive: this.scope.showInactive, nowMs: Date.now(), view: packView(this.container, { prefs: this.cameraPrefs, elev: camElev(this.camera) }) }) // 가용 비율로 동 열 수
-      : computeOffice(this._present(), this.rootId, this.layout);
+    const lay = this._computeLayout(this._present(), campus);
     const oldRooms = this.roomsById;
     const movingRooms = this.sess.afterLayout(lay, now); // 이사 보간: 옮겨 간 사무실은 이전 자리에서 출발
     this.layout = lay;
@@ -591,6 +598,68 @@ export class VoxelView {
     this._kidsDirty = true;
     this._syncClusters();
   }
+
+  // ---------------- 갈고리(하위 표현 Voxel Lab — web/lab/lab-view.js 가 덮어씀). 기본 = 복셀 오피스 그대로 ----------------
+  /** 배치 함수: present(_present 결과) → OfficeLayout 호환 { rooms, seat, machine, corridors, roomOf, rootId, bounds, … } */
+  _computeLayout(present, campus) {
+    return campus
+      ? computeCampus(present, this.scope.roots, this.scope.projects, this.layout && this.layout.campus ? this.layout : null, { showInactive: this.scope.showInactive, nowMs: Date.now(), view: packView(this.container, { prefs: this.cameraPrefs, elev: camElev(this.camera) }) }) // 가용 비율로 동 열 수
+      : computeOffice(present, this.rootId, this.layout);
+  }
+  /** 방 하나의 정적 그림(정적 묶음 b = {lit, glow, glass}). o = {dim, band, cam, art} */
+  _buildRoom(r, b, o) { buildRoomStatic(r, this.pal, b, o); }
+  /** 정적 서명 앞에 더할 글(하위 표현의 정적 그림이 바뀌는 조건) */
+  _staticSigExtra() { return ''; }
+  /** 방 하나의 시설 애니메이션(동적 묶음 B) — act = 시설 활동도 */
+  _drawRoomFacilities(r, act, t, B, dim) { drawFacilities(r, act, this.pal, this.tokens, t, B, dim); }
+  /** 방 하나의 스탠딩 데스크 발광대(팀장 책상 + 직원 책상) */
+  _drawRoomDesks(r0, B, now) {
+    const G = B.glow, pal = this.pal;
+    const r = roomFrame(r0, B);
+    if (r.leadDesk) {
+      const lead = this.chars.get(r.ownerId);
+      const n = this.nodes.get(r.ownerId);
+      const st = !lead || (n && isEnded(n) && n.kind === 'claude-p') ? 'off' : this._deskState(lead, now);
+      drawDeskEmitter(G, r.leadDesk, true, st, this._emitCol(lead), pal, lead ? lead._monK || 0 : 0);
+    }
+    for (const d of r.desks) {
+      if (!d.occupant) continue;
+      const ch = this.chars.get(d.occupant);
+      if (!ch || ch.state === 'gone' || ch.state === 'leave') continue;
+      drawDeskEmitter(G, d, false, this._deskState(ch, now), this._emitCol(ch), pal, ch._monK || 0);
+    }
+    endXf(B);
+  }
+  /** 초점·가리킴 기계 바닥 고리(_drawDynamic) — 하위 표현이 그리는 자리 p 를 바꿈(연구소: 반지름 보간 자리) */
+  _machineRing(m, G, p = m.pos) {
+    ring(G, p.x, 0.04, p.z + (m.type === 'rack' ? 0.6 : 0), 0.9, 12, this.tokens.text, 0.12);
+  }
+  /** 기계 하나(서버랙·모니터 벽·화이트보드·복합기). st = 상태 묶음(재사용 객체) */
+  _drawMachineAt(m, st, B) {
+    const pal = this.pal, tok = this.tokens;
+    const mr = this.roomsById && this.roomsById.get(m.pos.roomId);
+    if (mr && mr.xf && mr.xf.k && mr.local) { // 돌린 방의 기계: 회전 전 자리에 그려 xf 로 옮김(앞면이 방 안쪽을 봄)
+      roomFrame(mr, B);
+      const lp = toLocal(mr.xf, m.pos.x, m.pos.z), q = this._mlp || (this._mlp = {});
+      Object.assign(q, m.pos); q.x = lp.x; q.z = lp.z;
+      drawMachine(q, st, pal, tok, B, this.kindColor(m.node.kind));
+      endXf(B);
+    } else drawMachine(m.pos, st, pal, tok, B, this.kindColor(m.node.kind));
+  }
+  /** 작업 대상 층 객체(켤 때만 만든다) */
+  _makeArtLayer(opts) { return new VoxelArt3D(this.scene, this, opts); }
+  /** 캐릭터 발밑 바닥 높이(세계 y) — 오피스는 늘 0, 연구소는 브리지·경사로 */
+  _floorY(ch) { return 0; }
+  /** 프레임마다(작업 대상 층 갱신 뒤, 말풍선·이름표 앞) 하위 표현이 더 할 일 */
+  _frameHook(now, dt) {}
+  /** 홀로그램 층 갱신(vx-holo update) — 갈고리: LabView 가 반지름 보간 동안 m.pos 를 보간 자리로 바꿔 부름 */
+  _holoPass(now, dt) { this.holo.update(now, dt, this.camera, this.container.clientHeight || 1); }
+  /** 끝난 기계를 지금 놓아줘도 되나(연구소: 승강판으로 내려가는 0.8초 뒤) — 오피스는 바로 */
+  _machineExitReady(m, now) { return true; }
+  /** 기계 초점 이름표 끝에 붙일 글(HTML, 연구소: 종류·종료 코드·정체 분). run = 늘 보이는 실행 이름표(정체 분은 꼬리표에 이미 있음) */
+  _machineLabelExtra(m, clockMs, run = false) { return ''; }
+  /** 방 문패를 이 방에서 그리나(연구소 다중 메인 구역은 첫 구역 방만) */
+  _roomLabelOn(r) { return true; }
 
   // ---------------- 전체 보기 ----------------
   setScope(scope = {}) {
@@ -661,9 +730,10 @@ export class VoxelView {
   // ---- 작업 대상 층(사무실 벽 바깥 띠: 서가·금고실·우편함·택배 창구·안테나·결재함). 끄면 객체가 없다 ----
   setArtifacts({ on, book, fx, style } = {}) {
     if (on && !this.vArt && book && fx) {
-      this.vArt = new VoxelArt3D(this.scene, this, { book, fx, style });
+      this.vArt = this._makeArtLayer({ book, fx, style });
       import('../art-name3d.js').then((m) => { if (this.vArt && !this.vArt.names && m.NamePlates3D) { this.vArt.names = new m.NamePlates3D(this.vArt.group, this); this.vArt.names.applyTheme(this.vArt.isLight); } }).catch(() => {});
     } else if (!on && this.vArt) { this.vArt.dispose(); this.vArt = null; }
+    this.staticSig = ''; // 창 풍경 ↔ 유리(정적 서명에 층 켬/끔이 들어 있지만 바로 다시 그림)
     return !!this.vArt;
   }
   get artOn() { return !!this.vArt; }
@@ -804,7 +874,8 @@ export class VoxelView {
     const ch = this.chars.get(id);
     const p = this._posTmp;
     if ((ch && ch.offstage) || this._isDim(id) || (this._farAll && id !== this.focusId)) return null; // 멀리서 본 전체 보기는 포커스 말풍선만
-    if (ch && ch.state !== 'gone' && ch.placed) { p.x = ch.pos.x; p.y = Math.max(ch.headY() + 0.75, this.holo.monTop(ch) + 0.35); p.z = ch.pos.z; return p; }
+    if (id === this.povId) return null; // 1인칭: 자기 말풍선은 눈앞에 뜨지 않게
+    if (ch && ch.state !== 'gone' && ch.placed) { p.x = ch.pos.x; p.y = Math.max(ch.headY() + 0.75 + this._floorY(ch), this.holo.monTop(ch) + 0.35); p.z = ch.pos.z; return p; }
     const m = this.machines.get(id);
     if (m && m.pos && !m.released) { p.x = m.pos.x; p.y = (m.type === 'rack' ? 2.1 : m.type === 'job' ? m.pos.y + 0.2 : m.pos.y + 0.6); p.z = m.pos.z; return p; }
     return null;
@@ -868,7 +939,9 @@ export class VoxelView {
     // 다른 프로젝트는 흐리게(dim) 두지 않고 묶음 페이드(_fadeAt)로 사라진다 — 페이드가 움직이는 동안은 정적 묶음도 매 프레임 다시 그림
     const fp = this.scope.mode === 'all' ? this.scope.focusProject : null;
     const bsig = lay && lay.buildings ? lay.buildings.map((b) => `${b.projectId}@${b.bounds.minX},${b.bounds.minZ},${b.bounds.maxX},${b.bounds.maxZ},${b.recent ? 1 : 0}`).join(';') : '';
-    const sig = (this.tokens.isLight ? 'L' : 'D') + '|' + (this._fadeOn ? 'f' + this.pf.ver + ':' + fp : '') + '|' + bsig + '|' + this.rooms.map((r) => `${r.id}@${r.origin.x},${r.origin.z},${r.xf ? r.xf.k : 0},${r.size.d},${r.backDoor ? 1 : 0},${r.leftDoor},${r.desks.length},${r.desks.filter((d) => d.aux).map((d) => d.x + ':' + d.z).join(';')},${dimRooms.has(r.id) ? 1 : 0}`).join('|') + '|' + (lay ? lay.corridors.length : 0) + '|' + this.sess.staticSig();
+    // 카메라 사분면(먼 쪽 벽만 높게) — 사분면이 바뀌면 정적 묶음을 다시 그림(한 바퀴에 네 번, 경계 = 벽이 카메라와 나란한 순간)
+    { const e = this.camera.matrixWorld.elements; this._camQ = camQuadrant(e[8], e[10], this._camQ || CAM_Q0); }
+    const sig = this._staticSigExtra() + (this.tokens.isLight ? 'L' : 'D') + (this.vArt ? 'A' : '') + '|q' + this._camQ.x + this._camQ.z + '|' + (this._fadeOn ? 'f' + this.pf.ver + ':' + fp : '') + '|' + bsig + '|' + this.rooms.map((r) => `${r.id}@${r.origin.x},${r.origin.z},${r.xf ? r.xf.k : 0},${r.size.d},${r.backDoor ? 1 : 0},${r.leftDoor},${r.desks.length},${r.desks.filter((d) => d.aux).map((d) => d.x + ':' + d.z).join(';')},${dimRooms.has(r.id) ? 1 : 0}`).join('|') + '|' + (lay ? lay.corridors.length : 0) + '|' + this.sess.staticSig();
     if (sig === this.staticSig) return;
     this.staticSig = sig;
     const b = this._statB;
@@ -876,7 +949,7 @@ export class VoxelView {
     if (lay && lay.buildings) for (const bd of lay.buildings) this._buildBuilding(bd, b, false);
     if (lay) {
       for (const c of lay.corridors) buildCorridor(c, this.pal, b);
-      for (const r of this.rooms) buildRoomStatic(r, this.pal, b, { dim: dimRooms.has(r.id), band: this.sess.bandColor(r) });
+      for (const r of this.rooms) this._buildRoom(r, b, { dim: dimRooms.has(r.id), band: this.sess.bandColor(r), cam: this._camQ, art: !!this.vArt });
       this.sess.buildStatic(b, fp); // 라운지·세션 색 카펫
     }
     b.lit.end(); b.glow.end();
@@ -933,7 +1006,7 @@ export class VoxelView {
       }
     }
     for (const m of this.machines.values()) {
-      if (!m.released && m.endWall != null && now >= m.heldUntil && (m.removing || !this._held || !this._held.has(m.id))) { m.released = true; this.layoutDirty = true; } // 퇴장 대상 전이면 남음
+      if (!m.released && m.endWall != null && now >= m.heldUntil && (m.removing || !this._held || !this._held.has(m.id)) && this._machineExitReady(m, now)) { m.released = true; this.layoutDirty = true; } // 퇴장 대상 전이면 남음 · 연구소 승강판(갈고리)
     }
 
     // 직원별 컨텍스트 과열(보간 heat·단계·몸짓·걸음 배율) — 상태 머신 앞(걸음 배율을 이번 프레임에 씀)
@@ -948,7 +1021,7 @@ export class VoxelView {
       if (ch.spawnMode === 'enter' && !ch.placed && !ch.spawnFrom) ch.appearT0 = now;
       ch.update(ctx);
     }
-    separate(this.chars.values(), dt, undefined, Math.min(6, this.ts || 1)); // 가벼운 밀어내기(관통·겹침 줄임)
+    separate(this.chars.values(), dt, undefined, Math.min(6, this.ts || 1), this._crowdSolid || null); // 가벼운 밀어내기(관통·겹침 줄임) · 하위 표현이 가구 안 판정을 주면 그쪽으로 밀지 않음
     // 제거된 노드: 다 나간 직원·꺼진 기계는 이제 지운다
     if (this._removing.size) for (const id of [...this._removing]) {
       const ch = this.chars.get(id), m = this.machines.get(id);
@@ -965,9 +1038,10 @@ export class VoxelView {
     }
 
     this._drawDynamic(now, dt);
-    this.holo.update(now, dt, this.camera, this.container.clientHeight || 1);
+    this._holoPass(now, dt); // 홀로그램(모니터·기동기 대시보드) — 하위 표현이 덮어씀(연구소: 반지름 보간 자리)
     this._drawSpawnLinks();
     if (this.vArt) this.vArt.update(now); // 작업 대상 층(켤 때만)
+    this._frameHook(now, dt); // 하위 표현(연구소) 갈고리
     this.stencil.frame(); // 바닥 스텐실(배치·이름이 바뀔 때만 다시 놓음)
 
     // 말풍선·이름표
@@ -981,6 +1055,7 @@ export class VoxelView {
     this.scene.fog.far = Math.max(220, fd * 3.6);
     this.renderer.render(this.scene, this.camera);
     this.labelRenderer.render(this.scene, this.camera);
+    this.planPunchAfterRender(); // 판 뒤 DOM 라벨 잘라내기
   }
 
   /** 띄움 점선: 테마 토큰 link-spawn 을 배경 쪽으로 섞어 옅게, 흐름 패킷 없음 */
@@ -1031,24 +1106,9 @@ export class VoxelView {
     const B = this._dynB, L = B.lit, G = B.glow;
     const t = now, tok = this.tokens, pal = this.pal;
     L.begin(); G.begin();
-    for (const r of this.rooms) drawFacilities(r, r._act, pal, tok, t, B, this._dimRooms && this._dimRooms.has(r.id));
+    for (const r of this.rooms) this._drawRoomFacilities(r, r._act, t, B, this._dimRooms && this._dimRooms.has(r.id));
     // 스탠딩 데스크 홀로그램 발광대(돌린 방은 회전 전 좌표로 그려 xf 로 옮김) — 모니터 자체는 vx-holo.js
-    for (const r0 of this.rooms) {
-      const r = roomFrame(r0, B);
-      if (r.leadDesk) {
-        const lead = this.chars.get(r.ownerId);
-        const n = this.nodes.get(r.ownerId);
-        const st = !lead || (n && isEnded(n) && n.kind === 'claude-p') ? 'off' : this._deskState(lead, now);
-        drawDeskEmitter(G, r.leadDesk, true, st, this._emitCol(lead), pal, lead ? lead._monK || 0 : 0);
-      }
-      for (const d of r.desks) {
-        if (!d.occupant) continue;
-        const ch = this.chars.get(d.occupant);
-        if (!ch || ch.state === 'gone' || ch.state === 'leave') continue;
-        drawDeskEmitter(G, d, false, this._deskState(ch, now), this._emitCol(ch), pal, ch._monK || 0);
-      }
-      endXf(B);
-    }
+    for (const r0 of this.rooms) this._drawRoomDesks(r0, B, now);
     // 업무 흐름: 바닥 조명 라인·흐르는 대시·빛 패킷
     this.flow.draw(G, now);
     // 탕비실 커피 머신 김(쉬는 사람이 있으면)
@@ -1076,15 +1136,8 @@ export class VoxelView {
         for (const ch of this.chars.values()) if (ch.node.parentId === m.id) { a++; if (isEnded(ch.node)) d++; }
         st.members = a; st.doneMembers = d;
       }
-      const mr = this.roomsById && this.roomsById.get(m.pos.roomId);
-      if (mr && mr.xf && mr.xf.k && mr.local) { // 돌린 방의 기계: 회전 전 자리에 그려 xf 로 옮김(앞면이 방 안쪽을 봄)
-        roomFrame(mr, B);
-        const lp = toLocal(mr.xf, m.pos.x, m.pos.z), q = this._mlp || (this._mlp = {});
-        Object.assign(q, m.pos); q.x = lp.x; q.z = lp.z;
-        drawMachine(q, st, pal, tok, B, this.kindColor(m.node.kind));
-        endXf(B);
-      } else drawMachine(m.pos, st, pal, tok, B, this.kindColor(m.node.kind));
-      if (m.id === this.focusId || m.id === this.hoverId) ring(G, m.pos.x, 0.04, m.pos.z + (m.type === 'rack' ? 0.6 : 0), 0.9, 12, tok.text, 0.12);
+      this._drawMachineAt(m, st, B);
+      if (m.id === this.focusId || m.id === this.hoverId) this._machineRing(m, G);
     }
     // 캐릭터
     const fx = this._fx;
@@ -1097,6 +1150,7 @@ export class VoxelView {
     const far = !!this._farAll, cp = this.camera.position;
     for (const ch of this.chars.values()) {
       if (ch.state === 'gone' || !ch.placed || ch.offstage) continue;
+      if (ch.id === this.povId) continue; // 1인칭: 자기 몸은 그리지 않음(near 평면에 머리 안쪽이 잘리지 않게)
       const n = ch.node;
       // 먼 캐릭터는 두 상자(LOD) — 전체 보기에서 멀리 볼 때
       const lod = far || (scoped && Math.hypot(ch.pos.x - cp.x, cp.y, ch.pos.z - cp.z) > 150);
@@ -1107,7 +1161,9 @@ export class VoxelView {
         continue;
       }
       fx.monK = ch._monK || 0;
-      if (lod && ch.id !== this.focusId) { drawCharacterFar(ch, this._look(ch), fx, L); if (ch._heat && ch._heat.on) HF.draw(ch, G, now, this.reduced, true); continue; }
+      const fy = this._floorY(ch); // 연구소 브리지·경사로(오피스는 0)
+      if (fy) { L.lift = fy; G.lift = fy; }
+      if (lod && ch.id !== this.focusId) { drawCharacterFar(ch, this._look(ch), fx, L); if (ch._heat && ch._heat.on) HF.draw(ch, G, now, this.reduced, true); if (fy) { L.lift = 0; G.lift = 0; } continue; }
       fx.focus = ch.id === this.focusId; fx.hover = ch.id === this.hoverId;
       fx.detail = fx.focus || Math.hypot(ch.pos.x - cp.x, cp.y, ch.pos.z - cp.z) < VX_DETAIL_DIST; // 잔 장식(안경알·밑창·소매 끝 등)은 가까이서만
       fx.metaSkill = !!(n.meta && n.meta.skill) && ch.state !== 'leave';
@@ -1116,6 +1172,7 @@ export class VoxelView {
       fx.catColor = ch.workCat === 'skill' ? tok.skill : this.kindColor('main');
       drawCharacter(ch, this._look(ch), fx, L, G);
       if (ch._heat && ch._heat.on) HF.draw(ch, G, now, this.reduced, false);
+      if (fy) { L.lift = 0; G.lift = 0; }
     }
     HF.end();
     this.procs.drawAll(B, now);    // 분리 프로세스 생산 라인·전광판·들여다보기 빛줄
@@ -1244,6 +1301,7 @@ export class VoxelView {
       const bc = this._bubCtx;
       bc.now = now; bc.narrow = this._narrow || !!this._farAll; bc.focusId = fid; bc.hoverId = hid; bc.quips = this.quips.on;
       bc.width = this.container.clientWidth || 1; bc.height = this.container.clientHeight || 1;
+      bc.signRects = this._signScreenRects(bc.width, bc.height);
       this.bubbles.update(bc);
       return;
     }
@@ -1251,14 +1309,16 @@ export class VoxelView {
     const labels = this._labels;
     let n = 0;
     const lay = this.layout;
+    const cap = Math.min(labels.length, this._labelCap || 24); // 복셀 오피스 24(b4d9a62 이전 그대로) · LabView 32(×N 칩·'+n' 몫)
     const put = (id, html, cls, x, y, z, ref = null, fixed = false) => {
-      if (n >= labels.length) return;
+      if (n >= cap) return;
       const L = labels[n++];
       L.id = id; L.html = html; L.text = ''; L.cls = cls; L.x = x; L.y = y; L.z = z; L.ref = ref; L.fixed = fixed;
     };
     // 팀장 > 포커스 > 호버
     for (const ch of this.chars.values()) {
       if (ch.state === 'gone' || !ch.placed || ch.offstage || this._isDim(ch.id)) continue;
+      if (ch.id === this.povId) continue; // 1인칭: 자기 이름표(발밑) 없음
       const isF = ch.id === fid, isH = ch.id === hid;
       const n0 = ch.node;
       // 팀장 말고도 이름표: 진행 중 회차(장치 앞 작업자)·독립 claude -p(대기석·외부 작업) — 꼬리표와 함께
@@ -1270,7 +1330,7 @@ export class VoxelView {
       const stH = stt ? `<span class="ntitle">${esc(trunc(stt, 40))}</span>` : '';
       const tags = ch.lead && !(n0.meta && n0.meta.orphanSdk) ? EMPTY : nodeTags(n0, this.nodes, this.clock());
       const tgH = tags.length ? `<span class="ntags">${tags.map((x) => `<i>${esc(x)}</i>`).join('')}</span>` : '';
-      put(ch.id, name + stH + tgH + sub, (named ? 'lead' : '') + (isF ? ' focus' : ''), ch.pos.x, 0.02, ch.pos.z + 0.55, ch);
+      put(ch.id, name + stH + tgH + sub, (named ? 'lead' : '') + (isF ? ' focus' : ''), ch.pos.x, 0.02 + this._floorY(ch), ch.pos.z + 0.55, ch); // 연구소 브리지 위면 덱 높이
     }
     const clockMs = this.clock();
     // 작업 이름표: 판마다 아래 칸부터(같은 기준점이라 라벨 배치가 이 순서로 아래로 민다)
@@ -1283,10 +1343,11 @@ export class VoxelView {
       const batch = m.type === 'batch';
       if (m.type === 'job') continue;
       if (m.pos && m.pos.type === 'proc' && !m.released) { this._procLabel(m, put, fid, hid); continue; } // 생산 라인 이름표(늘)
-      if (!batch && !m.released && m.pos && m.id !== fid && m.id !== hid && runVis(m.node, clockMs)) { // 오래 도는 백그라운드 셸: 늘 이름표(경과·조용함·정체)
+      if (!batch && !m.released && m.pos && m.id !== fid && m.id !== hid && !(this._farAll && this._farSkipRunLabels) && runVis(m.node, clockMs)) { // 원경(farAll)이면 생략 — LabView 만(_farSkipRunLabels) // 오래 도는 백그라운드 셸: 늘 이름표(경과·조용함·정체)
         const tags = nodeTags(m.node, this.nodes, clockMs);
         const tg = tags.length ? `<span class="ntags">${tags.map((x) => `<i>${esc(x)}</i>`).join('')}</span>` : '';
-        put(m.id, esc(trunc(m.node.label || m.node.id, 16)) + tg, 'machine run', m.pos.x, m.type === 'rack' ? 2.25 : 0.02, m.pos.z + (m.type === 'rack' ? 0 : 0.6), null, true); // 랙은 위(바닥 이름표·현황판 이름표와 겹치지 않게)
+        const ex = this._machineLabelExtra(m, clockMs, true).replace(/^ · /, ''); // 연구소: 기자재 종류·종료 코드(정체 분은 꼬리표에 이미)
+        put(m.id, esc(trunc(m.node.label || m.node.id, 16)) + tg + (ex ? `<small>${ex}</small>` : ''), 'machine run', m.pos.x, m.type === 'rack' ? 2.25 : 0.02, m.pos.z + (m.type === 'rack' ? 0 : 0.6), null, true); // 랙은 위(바닥 이름표·현황판 이름표와 겹치지 않게)
         continue;
       }
       if (m.released || !m.pos || (m.id !== fid && m.id !== hid && !batch)) continue;
@@ -1298,36 +1359,47 @@ export class VoxelView {
         const tags = nodeTags(n0, this.nodes, this.clock());
         const spt = spawnTag(n0); if (spt) tags.push(spt); // 띄움 꼬리표
         const tg = tags.length ? `<span class="ntags">${tags.map((x) => `<i>${esc(x)}</i>`).join('')}</span>` : '';
-        put(m.id, esc(trunc(n0.label || n0.id, 20)) + tg + `<small class="ndev">${esc(deviceSummary(m.info))}</small>`, 'machine batch' + (m.id === fid || m.id === hid ? ' focus' : ''), m.pos.x - 0.6 * BATCH.DEVICE_K, 1.9 * BATCH.DEVICE_K, m.pos.z - 0.6 * BATCH.DEVICE_K, null, true); // 장치 위·뒤(팀장 이름표와 겹치지 않게)
+        // 이름표 = 대시보드 판 위 끝 위(판과 겹치지 않게). 회차 요약 숫자는 판 글이 읽히는 동안 판에만 — 멀어 판 글이 안 읽힐 때만 이름표에
+        const dl = launcherDash(m.pos, BATCH.DEVICE_K).label;
+        const read = this.holo.dashRead.has(m.id), foc = m.id === fid || m.id === hid;
+        const sum = this.holo.dashRead.has(m.id) ? '' : `<small class="ndev">${esc(deviceSummary(m.info))}</small>`;
+        const nm = read && this._dashNameOnly && !foc ? '' : esc(trunc(n0.label || n0.id, 20)); // 연구소: 판 제목에 이름이 읽히면 이름표는 꼬리표만(이름 두 번 안 보이게)
+        if (!nm && !tg) continue;
+        put(m.id, nm + tg + sum, 'machine batch' + (m.id === fid || m.id === hid ? ' focus' : ''), dl.x, dl.y, dl.z, null, true);
         continue;
       }
-      put(m.id, esc(trunc(n0.label || n0.id, 16)) + `<small>${esc((KIND_LABEL[n0.kind] || n0.kind) + ' · ' + (STATUS_LABEL[n0.status] || '') + (m.standby ? ' · ' + _t('scene.standby') : ''))}</small>`, 'machine focus', m.pos.x, 0.02, m.pos.z + 0.6, null, true);
+      put(m.id, esc(trunc(n0.label || n0.id, 16)) + `<small>${esc((KIND_LABEL[n0.kind] || n0.kind) + ' · ' + (STATUS_LABEL[n0.status] || '') + (m.standby ? ' · ' + _t('scene.standby') : ''))}${this._machineLabelExtra(m, clockMs)}</small>`, 'machine focus', m.pos.x, 0.02, m.pos.z + 0.6, null, true);
     }
     // 퇴장 뒤 자리 이름표(회색, 반납 전까지)
     if (lay && !this._farAll) for (const ch of this.chars.values()) {
       if (ch.state !== 'gone' || ch.released || !ch.seat || ch.offstage || this._isDim(ch.id)) continue;
       put(ch.id + '#g', esc(trunc(ch.node.label || ch.id, 16)), 'gone', ch.seat.deskX, 0.8, ch.seat.deskZ, null, true);
     }
+    // 이름표 갈고리(계약 A): 표현별 추가 이름표(LabView — ×N 칩·+n 표지 등). VoxelView 기본에는 없음
+    if (this._extraLabels) this._extraLabels(put, { fid, hid, clockMs, farAll: !!this._farAll });
     for (let i = n; i < labels.length; i++) labels[i].id = null;
-    const used = this._lblUsed = labels.slice(0, n); // 길이 ≤ 24
+    const used = this._lblUsed = labels.slice(0, n); // 길이 ≤ 32
     // 방 문패(전체 보기에서 멀리서 볼 때는 동 간판만)
     const rl = this._roomLabels;
     let k = 0;
     const farAll = this.scope.mode === 'all' && (this.focusDist || 0) > 240;
     this._farAll = farAll;
+    const allLab = this.scope.mode === 'all'; // 전체 보기 연구소 문패: 간판(프로젝트 이름)과 두 번 보이지 않게
     for (const r of (farAll ? EMPTY : this.rooms)) {
       if (k >= rl.length) break;
+      if (!this._roomLabelOn(r)) continue;
+      if (allLab && r.type === 'lab' && r.lab) continue; // 전체 보기 연구동 = 간판(프로젝트 이름)·팀장 이름표(늘 보임)로 충분 — 문패를 두면 팀장 이름이 두 번(QA)
       const owner = this.nodes.get(r.ownerId);
       const name = esc(trunc(owner ? owner.label || owner.id : r.id, 22));
       const isMain = lay && lay.roots ? lay.roots.has(r.ownerId) : r.ownerId === this.layoutRoot;
-      const roomKey = r.type === 'meeting' ? 'meeting' : r.external ? 'external' : r.recent ? 'past' : isMain ? 'office' : 'annex';
+      const roomKey = r.type === 'meeting' ? 'meeting' : r.type === 'lab' ? 'lab' : r.external ? 'external' : r.recent ? 'past' : isMain ? 'office' : 'annex';
       const L = rl[k++];
       // 같은 프로젝트 live 메인 여럿: 문패 = 세션 색 + git 브랜치/worktree + 그 세션 컨텍스트
       const si = r.type === 'office' && isMain && !r.past ? this.sess.sessIdx(owner) : null;
       const sb = si != null ? sessBadgeHtml(si, owner.meta && owner.meta.ctx, branchOf(owner)) : '';
       const kn = _t('scene.room.' + (r.past && roomKey === 'office' ? 'past' : roomKey));
       L.id = r.id; L.html = r.external ? `<b>${kn}</b> · ${esc(trunc(r.projectName || _t('scene.room.standalone'), 22))}` : `<b>${kn}</b> · ${name}${sb}`; L.cls = (this._dimRooms && this._dimRooms.has(r.id) ? 'dim' : '') + (si != null ? ` sess s${si}` : '');
-      if (r.lounge && r.door && r.door.out) { // 라운지 둘레 사무실: 문패 = 문 위(문 밖 쪽으로 조금)
+      if ((r.lounge || r.type === 'lab') && r.door && r.door.out) { // 라운지 둘레 사무실·연구소(원형): 문패 = 문 위(문 밖 쪽으로 조금)
         const ox = r.door.out.x - r.door.x, oz = r.door.out.z - r.door.z, n = Math.hypot(ox, oz) || 1;
         L.x = r.door.x + (ox / n) * 0.9; L.z = r.door.z + (oz / n) * 0.9; L.y = 2.7;
       } else { L.x = r.bounds.minX + 0.3; L.z = r.bounds.maxZ + 1.1; L.y = null; }
@@ -1338,9 +1410,11 @@ export class VoxelView {
     this.sess.updateCabLabels(); // 캐비닛 말풍선(파일명)
     bc.labels = used; bc.rooms = this._lblRooms = rl.slice(0, k);
     bc.width = this.container.clientWidth || 1; bc.height = this.container.clientHeight || 1;
+    bc.signRects = this._signScreenRects(bc.width, bc.height);
     this.bubbles.update(bc);
   }
 }
+installPlanPunch(VoxelView); // setPlanPunch 등(plan-punch3d.js) — 계획판을 캔버스 아래에 두고 WebGL 깊이로 가림
 
 VoxelView.prototype._updateSigns = function () {
   const lay = this.layout;
@@ -1362,13 +1436,37 @@ VoxelView.prototype._updateSigns = function () {
     const cls = 'ov-bldg' + (b.recent ? ' inactive' : '') + (fp === b.projectId ? ' focus' : '');
     if (cls !== sg.cls) { sg.el.className = cls; sg.cls = cls; }
     if (sg.el.dataset.pid !== b.projectId) sg.el.dataset.pid = b.projectId;
-    sg.o.position.set((b.bounds.minX + b.bounds.maxX) / 2, 0.1, b.bounds.maxZ + 1.6);
+    if (Number.isFinite(b.labelZ)) sg.o.position.set(Number.isFinite(b.labelX) ? b.labelX : (b.bounds.minX + b.bounds.maxX) / 2, 0.1, b.labelZ); // 연구동 간판 자리(lab-campus-core)
+    else sg.o.position.set((b.bounds.minX + b.bounds.maxX) / 2, 0.1, b.bounds.maxZ + 1.6);
     // 다른 프로젝트 간판은 페이드 아웃 → 숨김(pickLabelAt 에서도 빠짐)
     const fa = this.pf.alpha(b.projectId), op = fa < 1 ? (Math.round(fa * 20) / 20).toFixed(2) : '';
     if (sg.el.style.opacity !== op) sg.el.style.opacity = op;
     const show = !this.pf.gone(b.projectId);
     if (sg.o.visible !== show) sg.o.visible = show;
   }
+};
+
+/** 전체 보기 간판 화면 상자 [[x0,y0,x1,y1]…] — 이름표 배치(bubbles)가 비킨다. 간판 기준점 = 위 가운데(center 0.5, 0).
+ *  크기는 글이 바뀔 때만 잰다(아직 안 그려져 0 이면 추정값, 다음에 다시). this._labelDodgeSigns(LabView 가 켬)가 없거나
+ *  전체 보기가 아니면 null(배치 규칙 그대로 — 복셀 오피스는 b4d9a62 이전과 같음) */
+VoxelView.prototype._signScreenRects = function (W, H) {
+  if (!this._labelDodgeSigns || this.scope.mode !== 'all' || !this._signs || !this.camera) return null; // LabView 만 켬(복셀 오피스 전체 보기 이름표 배치는 그대로)
+  const out = this._signRects || (this._signRects = []);
+  out.length = 0;
+  const v = this._signV || (this._signV = new THREE.Vector3()), cam = this.camera;
+  for (const sg of this._signs) {
+    if (!sg.o.visible || sg.el.style.opacity === '0.00') continue;
+    if (!sg._szOk || sg._szHtml !== sg.html) {
+      const w = sg.el.offsetWidth, h = sg.el.offsetHeight;
+      sg._szOk = w > 0 && h > 0; sg._szHtml = sg.html;
+      sg._w = w || 140; sg._h = h || 22;
+    }
+    v.copy(sg.o.position).project(cam);
+    if (v.z < -1 || v.z > 1) continue;
+    const x = (v.x * 0.5 + 0.5) * W, y = (-v.y * 0.5 + 0.5) * H;
+    out.push([x - sg._w / 2, y, x + sg._w / 2, y + sg._h]);
+  }
+  return out;
 };
 
 const EMPTY = Object.freeze([]);

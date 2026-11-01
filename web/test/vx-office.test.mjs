@@ -6,7 +6,7 @@ import { computeOffice } from '../voxel/layout.js';
 import { rotateOffice } from '../voxel/xf.mjs';
 import {
   STAND_CATS, OFFICE_FX, IX_FACILITY, roomPoint, ixSpot, breakSpot, BREAK_N, clientScreen, clientSpot, breakDecision, BREAK,
-  idleAct, IDLE_SLOT, roleOf, floorRoute, routeCum, routeAt, dashStarts, lineStyle, monitorWanted, stepOpen, openShape, popShape, MON,
+  idleAct, IDLE_SLOT, roleOf, floorRoute, routeCum, routeAt, dashStarts, lineStyle, monitorWanted, stepOpen, openShape, popShape, MON, DESK_MON, deskMonitorPose,
   overseeSpot, SUPERVISE, superviseAct, VX_IX, vxIxScale, vxIxThin, vxIxAlpha,
 } from '../voxel/office-core.mjs';
 import { ClientDesk, clientOp, CLIENT } from '../voxel/client-core.mjs';
@@ -160,6 +160,24 @@ test('홀로그램 모니터: 항목이 있고 책상에 서 있을 때만 펼�
   assert.ok(Math.abs(o1.sx - 1) < 1e-9 && Math.abs(o1.sy - 1) < 1e-9);
   assert.equal(popShape(0), null); assert.equal(popShape(1), null);
   assert.ok(popShape(0.5).up === 1 && popShape(0.9).up < popShape(0.5).up, '솟았다가 들어감');
+});
+
+test('책상 고정 모니터(§72.10): 책상 앞 끝·직원 쪽을 보고 뒤로 젖힘, 2배 크기', () => {
+  const seat = { deskX: 2, deskZ: 3, face: 0 }; // 직원은 책상 뒤(-z)에서 +z 를 봄
+  const P = deskMonitorPose(seat, 0.92, 0.7, DESK_MON.H);
+  assert.ok(Math.abs(P.base.z - (3 + 0.35 - DESK_MON.INSET)) < 1e-9 && P.base.x === 2, '책상 앞 끝 안쪽');
+  assert.ok(Math.abs(P.base.y - (0.92 + DESK_MON.LIFT)) < 1e-9);
+  assert.ok(P.n.z < 0 && P.n.y > 0, '앞면은 직원 쪽(-z)·조금 위');
+  assert.ok(P.u.z > 0 && P.u.y > 0.9, '윗변은 직원 반대쪽으로 젖힘');
+  assert.ok(Math.abs(P.n.x * P.u.x + P.n.y * P.u.y + P.n.z * P.u.z) < 1e-9 && Math.abs(P.r.x * P.n.x + P.r.z * P.n.z) < 1e-9, '직교');
+  assert.ok(P.top > 1.9 && P.top < 2.05, '§72.12 2배: 위 끝이 머리 위 끝(1.71)보다 조금 위'); // 가림은 허용(투명 화면)
+  assert.ok(deskMonitorPose(seat, 0.92, 0.9, DESK_MON.MAX_H * DESK_MON.LEAD_K).top < 2.45, '팀장 키움 상한');
+  // Euler('YXZ', pitch, yaw) 로 돌린 +z 가 법선과 같은지(그리기 쪽 자세 계산과 일치)
+  const cy = Math.cos(P.yaw), sy = Math.sin(P.yaw), cp = Math.cos(P.pitch), sp = Math.sin(P.pitch);
+  const nz = { x: sy * cp, y: -sp, z: cy * cp };
+  assert.ok(Math.hypot(nz.x - P.n.x, nz.y - P.n.y, nz.z - P.n.z) < 1e-9);
+  const Q = deskMonitorPose({ deskX: 0, deskZ: 0, face: Math.PI / 2 }, 0.92, 0.7, 0.5);
+  assert.ok(Q.base.x > 0 && Q.n.x < 0, '돌린 자리도 얼굴 방향 기준');
 });
 
 test('의뢰인 창구: 요청 카드·읽기, 끼어듦 메모, 질문 → 답 카드 빛남, 보고, 거부 붉은 깜빡임, 오래 대기 화면보호기', () => {

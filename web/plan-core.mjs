@@ -27,6 +27,9 @@ export const PLAN_UI = {
   DEL_MS: 1100,       // 지운 항목 잔상
   OCC_MARGIN: 0.6,    // v0.4.1 3D 앞뒤: 중심이 보드보다 이만큼(월드) 넘게 카메라에 가까운 노드만 보드를 가린다(나란히 선 이웃은 가리지 않음)
   OCC_MAX: 24,        // 보드 한 장에 뚫는 가림 구멍 상한
+  CORNER: 9,          // 판 모서리 반지름(CSS .pb border-radius px) — 구멍 사각형 둥근 모서리
+  VX_CORNER: 4,       // 복셀 게시판 모서리(#plan-boards.vx .pb border-radius px)
+  VX_BOTTOM: 2.45,   // 복셀 3D 판 아래 변 최소 높이(월드) — 바닥(앵커 y 1 − r 2 × DROP_K = 0)에 두면 책상·기동기·대시보드(위 끝 2.27)·설비가 판 아래쪽을 가려 바닥에 묻혀 보였다
 };
 
 /**
@@ -207,7 +210,7 @@ export function gatherPlans(nodes, { isRunner = (n) => !!(n && n.meta && (n.meta
  * 높이는 모니터 높이 × HOLO_H_K(1.5). 모니터 = 흐름·Planet 높이 1.25 + 0.3·r · 폭 × 1.5, 복셀(MON) 높이 1.0 · 폭 × 1.62.
  * holo = 표현이 따로 낸 모니터 크기 {w, h}(view.holoSize — 있으면 그것이 우선). 자리 = 앵커 오른쪽(x 월드) — 왼쪽 변이 앵커 원(반지름 × 1.3)
  * 바깥 GAP_W, 아래 변이 중심보다 r × DROP_K 아래. 카메라·화면과 무관(되먹임 없음).
- * 반환 {w, h, aspect(h/w), holo:{w, h}, off(앵커 중심 → 왼쪽 변 x), drop(앵커 중심 → 아래 변, 아래로)}
+ * 반환 {w, h, aspect(h/w), holo:{w, h}, off(앵커 중심 → 왼쪽 변 x), drop(앵커 중심 → 아래 변, 아래로), bottom(3D 아래 변 최소 월드 y — 복셀만)}
  */
 export function holoMonitor(worldR, mode = 'flow') {
   const r = Math.max(0.1, worldR || 1);
@@ -219,7 +222,7 @@ export function boardWorld(worldR, mode = 'flow', holo = null) {
   const r = Math.max(0.1, worldR || 1);
   const m = holo && holo.w > 0 && holo.h > 0 ? holo : holoMonitor(r, mode);
   const w = m.w * PLAN_UI.SIZE_K, h = m.h * PLAN_UI.HOLO_H_K * PLAN_UI.SIZE_K; // 크기 2배(비율은 그대로)
-  return { w, h, aspect: h / w, holo: { w: m.w, h: m.h }, boost: PLAN_UI.BOOST[mode === 'voxel' ? 'voxel' : 'flow'], off: r * 1.3 + PLAN_UI.GAP_W, drop: r * PLAN_UI.DROP_K };
+  return { w, h, aspect: h / w, holo: { w: m.w, h: m.h }, boost: PLAN_UI.BOOST[mode === 'voxel' ? 'voxel' : 'flow'], off: r * 1.3 + PLAN_UI.GAP_W, drop: r * PLAN_UI.DROP_K, bottom: mode === 'voxel' ? PLAN_UI.VX_BOTTOM : null };
 }
 
 /**

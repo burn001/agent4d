@@ -27,7 +27,7 @@ function rng(seed) { let a = seed >>> 0; return () => { a |= 0; a = (a + 0x6D2B7
 /** 'x:rest' → 'x:<px>-rest' */
 const pfx = (id, px) => (typeof id === 'string' && /^[a-z]:/.test(id) ? id[0] + ':' + px + '-' + id.slice(2) : id);
 
-export function createOverviewMock({ projects = 3, mainsPerProject = [2, 1, 1], seed = 2026, recent = true, orphan = true, launcher = true, matchAfterMs = 60000, flipEveryMs = [10000, 40000], now = () => Date.now(), sessions = true } = {}) {
+export function createOverviewMock({ projects = 3, mainsPerProject = [2, 1, 1], seed = 2026, recent = true, orphan = true, launcher = true, matchAfterMs = 60000, flipEveryMs = [10000, 40000], now = () => Date.now(), sessions = true, promptEveryMs = 0 } = {}) {
   const R = rng(seed);
   const nP = Math.max(1, Math.min(PROJ.length, projects));
   const t0 = now() - PRE;
@@ -266,6 +266,12 @@ export function createOverviewMock({ projects = 3, mainsPerProject = [2, 1, 1], 
       later(12000 + R() * 8000, send);
     };
     if (sessions) later(6000, send);
+    // ?prompts=<ms>(재현): 프로젝트를 돌아가며 그 메인에 사람 입력 — 한 프로젝트만 보는 중 다른 프로젝트 입력에 카메라가 움직이지 않는지
+    if (promptEveryMs > 0) {
+      let pi = 0;
+      const pr = () => { const live = [...new Set(roots.map((r) => r.projectId))]; const e = promptEvent(live[pi++ % live.length]); if (e) onEvent(e); later(promptEveryMs, pr); };
+      later(promptEveryMs, pr);
+    }
     if (guestRoot) {
       let g = 0;
       const gact = () => {
@@ -305,9 +311,18 @@ export function createOverviewMock({ projects = 3, mainsPerProject = [2, 1, 1], 
       });
     }
   }
+  /** 재현용: 그 프로젝트(id 또는 순번)의 첫 live 메인에 사람 입력(user, origin human, ix user prompt) 하나 — 기록에도 넣는다 */
+  let pk = 0;
+  function promptEvent(proj = 0, text = null) {
+    const pid = typeof proj === 'number' ? (PROJ[proj] || {}).projectId : proj;
+    const r = roots.find((x) => x.projectId === pid && nodes.has(x.nodeId));
+    if (!r) return null;
+    const tx = text || ['다음 단계 진행해 줘', '시험 결과 알려 줘', '커밋하고 push 해 줘'][pk++ % 3];
+    return emit({ ts: iso(now()), type: 'user', nodeId: r.nodeId, origin: 'human', text: tx, rootSessionId: r.sessionId, projectId: r.projectId, ix: { v: 1, cat: 'user', op: 'prompt', phase: 'end', text: tx } });
+  }
   function stop() { stopped = true; for (const t of timers) clearTimeout(t); timers = []; }
 
-  return { snapshot, start, stop, projects: projectsList, roots: rootsList, get seq() { return hseq; } };
+  return { snapshot, start, stop, promptEvent, projects: projectsList, roots: rootsList, get seq() { return hseq; } };
 }
 
 /** 데모 한도 값(--demo 와 같은 모양): five_hour 72%(주의) · seven_day 93%(경고) · 12분 전 기준(오래됨) */

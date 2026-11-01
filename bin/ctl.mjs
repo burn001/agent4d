@@ -36,7 +36,8 @@ const M = {
     clientsNone: 'No viewer is open.',
     local: 'local', remote: 'remote',
     seen: '{s}s ago',
-    why: { timeout: 'no answer (timeout)', disconnected: 'disconnected', remote_off: 'remote control is turned off on that screen (⚙)', not_applied: 'not applied', unsupported: 'not supported by that viewer (old version? reload it)', exception: 'error', no_scope: 'project/session scope not available on that screen', not_found: 'not found', not_ready: 'not available in this view', bad_value: 'invalid value', replaying: 'not while replaying' },
+    why: { timeout: 'no answer (timeout)', disconnected: 'disconnected', remote_off: 'remote control is turned off on that screen (⚙)', not_applied: 'not applied', unsupported: 'not supported by that viewer (old version? reload it)', exception: 'error', no_scope: 'project/session scope not available on that screen', not_found: 'not found', not_ready: 'not available in this view', bad_value: 'invalid value', replaying: 'not while replaying', not_voxel: 'not in Voxel Office 3D (add --switch to change the view first)', no_main: 'no main agent on that screen', ambiguous: 'more than one main matches' },
+    stale: 'The running server does not know this command yet (older code). Restart the server (`agent4d stop` then `agent4d start`) and try again.',
   },
   ko: {
     noConfig: 'Agent4D 설정이 없습니다({file}). 먼저 `agent4d start` 를 실행해 주세요.',
@@ -61,7 +62,8 @@ const M = {
     clientsNone: '열려 있는 화면이 없습니다.',
     local: '로컬', remote: '원격',
     seen: '{s}초 전',
-    why: { timeout: '응답 없음(시간 초과)', disconnected: '연결 끊김', remote_off: '그 화면에서 원격 조작 받기를 껐습니다(⚙)', not_applied: '적용 안 됨', unsupported: '그 화면이 모르는 명령(옛 버전? 새로고침)', exception: '오류', no_scope: '그 화면은 프로젝트·세션 범위를 쓸 수 없음', not_found: '찾을 수 없음', not_ready: '지금 표현에서는 쓸 수 없음', bad_value: '값이 올바르지 않음', replaying: '재생 중에는 안 됨' },
+    why: { timeout: '응답 없음(시간 초과)', disconnected: '연결 끊김', remote_off: '그 화면에서 원격 조작 받기를 껐습니다(⚙)', not_applied: '적용 안 됨', unsupported: '그 화면이 모르는 명령(옛 버전? 새로고침)', exception: '오류', no_scope: '그 화면은 프로젝트·세션 범위를 쓸 수 없음', not_found: '찾을 수 없음', not_ready: '지금 표현에서는 쓸 수 없음', bad_value: '값이 올바르지 않음', replaying: '재생 중에는 안 됨', not_voxel: '복셀 오피스 3D 가 아님(--switch 를 붙이면 바꾼 뒤 POV)', no_main: '그 화면에 메인 에이전트가 없음', ambiguous: '맞는 메인이 여럿' },
+    stale: '떠 있는 서버가 아직 이 명령을 모릅니다(옛 코드). 서버를 다시 켠 뒤(`agent4d stop` → `agent4d start`) 다시 보내 주세요.',
   },
 };
 const L = () => M[cliLang()] || M.en;
@@ -71,7 +73,7 @@ const whyText = (r) => (L().why[r.error] || r.error || '') + (r.detail ? ` (${r.
 
 function parseArgs(argv) {
   const out = { _: [] };
-  const FLAGS = new Set(['json', 'temp', 'help']);
+  const FLAGS = new Set(['json', 'temp', 'help', 'switch']);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a.startsWith('--') && a.length > 2) {
@@ -160,7 +162,7 @@ export async function main(argv, { log = console.log, warn = console.error, home
     return 0;
   }
 
-  const p = parseCtl(words, { at: opts.at, speed: opts.speed, sec: opts.sec });
+  const p = parseCtl(words, { at: opts.at, speed: opts.speed, sec: opts.sec, switch: !!opts.switch });
   if (!p.ok) {
     if (p.error === 'unknown_command') warn(say('unknown', { cmd: words[0] }));
     else warn(say('badValue', { usage: CTL_COMMANDS[p.cmd]?.usage || (CTL_COMMANDS[String(words[0]).toLowerCase()]?.usage) || p.hint || '' }));
@@ -184,9 +186,17 @@ export async function main(argv, { log = console.log, warn = console.error, home
     for (const c of out.candidates || []) warn(c.projectId && c.name ? `  - ${c.name}  (${c.projectId})${c.live ? ' ●' : ''}` : `  - ${c.sessionId}${c.title ? '  ' + c.title : ''}`);
     return 1;
   }
+  if (out.error === 'bad_value' && p.cmd === 'camera' && p.args.value === 'pov') { warn(say('stale')); return 1; } // 서버가 재시작 전(옛 control-core)
   if (out.error && !out.results?.length) { warn(say('badValue', { usage: CTL_COMMANDS[p.cmd]?.usage || '' })); return 1; }
   log(say('applied', { ok: out.applied || 0, n: out.sent || 0, cmd: p.cmd }));
-  for (const x of out.results || []) log(x.ok ? say('okLine', { name: x.name || '-', id: x.client }) : say('failLine', { name: x.name || '-', id: x.client, why: whyText(x) }));
+  for (const x of out.results || []) {
+    if (!x.ok && (x.error === 'ambiguous' || x.error === 'not_found') && x.detail && p.cmd === 'camera') { // POV 대상 후보(화면이 풀어 detail 에 ' | ' 로)
+      log(say('failLine', { name: x.name || '-', id: x.client, why: L().why[x.error] || x.error }));
+      for (const c of String(x.detail).split(' | ')) log(`      - ${c}`);
+      continue;
+    }
+    log(x.ok ? say('okLine', { name: x.name || '-', id: x.client }) + (x.detail && p.cmd === 'camera' ? `  ${x.detail}` : '') : say('failLine', { name: x.name || '-', id: x.client, why: whyText(x) }));
+  }
   const g = (out.results || []).filter((x) => x.ok && x.pendingGesture);
   if (g.length) log(say('gesture', { names: g.map((x) => x.name || x.client).join(', ') }));
   return out.ok ? 0 : 1;

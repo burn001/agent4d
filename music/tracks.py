@@ -20,6 +20,7 @@ copy 는 compose_<id>.py → music/, bgm-<id>.mp3·bgm-<id>.json → web/assets/
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -42,7 +43,7 @@ BUILTIN = [
      "source": "작성자의 이전 프로젝트 곡(city) 편곡"},
 ]
 DEFAULT = "lofi"
-FIELDS = ["id", "label", "title", "mood", "label_en", "title_en", "mood_en", "file", "meta", "bpm", "beats", "key", "key_en", "duration", "bytes",
+FIELDS = ["id", "label", "title", "mood", "label_en", "title_en", "mood_en", "file", "meta", "bpm", "beats", "key", "key_en", "duration", "bytes", "hash",
           "stage", "views", "energy", "source"]
 
 # 영어 화면용 곡 이름·제목·설명. 매니페스트 항목에 label_en·title_en·mood_en(key_en) 이 이미 있으면 그쪽 우선,
@@ -124,7 +125,7 @@ def norm_stage(v):
     return max(0, min(3, int(v)))
 
 
-VIEWS = ("flow", "planet", "voxel")
+VIEWS = ("flow", "planet", "voxel", "lab")  # lab = 복셀 연구소(Voxel Lab, 2026-11-01)
 
 
 def norm_views(v):
@@ -191,6 +192,7 @@ def build_manifest(ents: list[dict] | None = None) -> dict:
             "key": meta.get("key", t.get("key")),
             "duration": meta.get("duration", t.get("duration")),
             "bytes": os.path.getsize(mp3),
+            "hash": file_hash(mp3),  # 내용 sha256 앞 16자 — 웹이 곡 주소에 ?v= 로 붙여 1년 immutable 캐시
             "stage": norm_stage(t.get("stage", b.get("stage"))),
             "views": norm_views(t.get("views", b.get("views"))),
             "energy": t.get("energy", b.get("energy")),
@@ -207,6 +209,15 @@ def build_manifest(ents: list[dict] | None = None) -> dict:
             if n and n not in SECTIONS_EN and not n.isascii():
                 print(f"  구간 이름 영어 없음: {t['id']} — {n} (SECTIONS_EN 에 더하십시오)", file=sys.stderr)
     return {"version": 2, "default": read_manifest().get("default") or DEFAULT, "sections_en": SECTIONS_EN, "tracks": out}
+
+
+def file_hash(path: str) -> str:
+    """곡 파일 내용 sha256 앞 16자(CONTRACT §130 버전 주소)."""
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()[:16]
 
 
 def write_manifest(ents: list[dict] | None = None) -> dict:
@@ -296,7 +307,7 @@ def main(argv=None) -> int:
     c.add_argument("--title-en", help="영어 화면용 제목")
     c.add_argument("--mood-en", help="영어 화면용 곡 설명")
     c.add_argument("--key-en", help="영어 화면용 조 표기(조 이름에 한글이 섞일 때)")
-    c.add_argument("--views", help='표현(테마)별 단계 "flow:0,1;planet:2;voxel:1" (CONTRACT §67)')
+    c.add_argument("--views", help='표현(테마)별 단계 "flow:0,1;planet:2;voxel:1;lab:0" (CONTRACT §67)')
     r = sub.add_parser("remove", help="매니페스트에서 곡 빼기(파일은 그대로)")
     r.add_argument("id")
     a = ap.parse_args(argv)

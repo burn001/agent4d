@@ -11,7 +11,7 @@ const onoff = (v) => (v == null ? null : Object.prototype.hasOwnProperty.call(ON
 /** 명령 표: 값 목록(values) 또는 검사 함수(check). alias 는 같은 명령의 다른 이름 */
 export const CTL_COMMANDS = {
   theme: { values: ['dark', 'light', 'auto'], usage: 'theme dark|light|auto' },
-  view: { values: ['flow', 'planet', 'voxel'], alias: { shapes: 'planet', office: 'voxel' }, usage: 'view flow|planet|voxel' },
+  view: { values: ['flow', 'planet', 'voxel', 'lab'], alias: { shapes: 'planet', office: 'voxel', laboratory: 'lab', 'voxel-lab': 'lab', voxellab: 'lab', '연구소': 'lab' }, usage: 'view flow|planet|voxel|lab' },
   dim: { values: ['3d', '2d'], usage: 'dim 3d|2d' },
   scope: { usage: 'scope all | project:<name|id> | session:<id|title>' },
   visible: { usage: 'visible all | hide|show|only project:<name> | session:<id>' },
@@ -20,7 +20,7 @@ export const CTL_COMMANDS = {
   sfx: { pct: true, power: true, usage: 'sfx <0-100>|on|off|toggle     (sound effects volume, or effects on/off)' },
   bgm: { usage: 'bgm auto|cycle|shuffle|<track id or name>' },
   lang: { values: ['auto', 'en', 'ko'], usage: 'lang auto|en|ko' },
-  camera: { values: ['auto', 'manual', 'fit', 'follow'], usage: 'camera auto|manual|fit|follow' },
+  camera: { values: ['auto', 'manual', 'fit', 'follow', 'pov'], alias: { fpv: 'pov', eyes: 'pov', 'first-person': 'pov' }, usage: 'camera auto|manual|fit|follow | camera pov [main name|session id|project] [--switch]   (§72.14 main agent POV, voxel 3D; leave with camera auto)' },
   focus: { usage: 'focus <node id | session id | label> | off' },
   pause: { none: true, usage: 'pause' },
   resume: { none: true, usage: 'resume' },
@@ -34,6 +34,7 @@ export const CTL_COMMANDS = {
   timeline: { values: ['show', 'hide'], usage: 'timeline show|hide' },
   done: { values: ['on', 'off'], usage: 'done on|off   (show finished nodes)' },
   quips: { values: ['on', 'off'], usage: 'quips on|off  (voxel thought & speech bubbles)' },
+  labwalk: { values: ['on', 'off'], usage: 'labwalk on|off  (Voxel Lab: staff walk to the platform / rigs)' },
   plinks: { values: ['rotate', 'laser', 'orbit'], alias: { alternate: 'rotate', auto: 'rotate', beam: 'laser', ring: 'orbit', rings: 'orbit' }, usage: 'plinks rotate|laser|orbit  (Planet relation lines)' },
   close: { none: true, usage: 'close   (close popups and menus)' },
   reload: { none: true, usage: 'reload' },
@@ -91,6 +92,11 @@ export function normalizeCmd(cmd, args = {}) {
     if (c === 'timeline') { const b = onoff(v); if (b != null) v = b ? 'show' : 'hide'; }
     if (c === 'dim' && (v === '3' || v === '2')) v += 'd';
     if (!spec.values.includes(v)) return bad();
+    if (c === 'camera' && v === 'pov') {
+      // 메인 1인칭: 대상 who(메인 이름·세션 id·프로젝트 — 화면이 풀고 모호하면 후보, 없으면 화면이 고름)과 --switch(복셀 3D 가 아니면 바꾼 뒤)
+      const tq = String(a.who ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 80);
+      return { ok: true, cmd: c, args: { value: v, who: tq || null, switch: a.switch === true || a.switch === 'true' || a.switch === 1 } };
+    }
     return { ok: true, cmd: c, args: { value: v } };
   }
   if (spec.pct) {
@@ -168,6 +174,7 @@ export function parseCtl(words, opts = {}) {
   else if (c === 'replay') args = { session: rest[0], at: opts.at ?? rest[1], speed: opts.speed ?? rest[2] };
   else if (c === 'toast') args = { text: rest.join(' '), sec: opts.sec };
   else if (c === 'scope' || c === 'focus' || c === 'bgm') args = { value: rest.join(' ') };
+  else if (c === 'camera') args = { value: rest[0], who: rest.slice(1).join(' '), switch: !!opts.switch }; // camera pov [대상] [--switch] — 'target' 은 서버 resolve 가 범위 대상으로 읽으므로 다른 이름
   else args = { value: rest[0] };
   return normalizeCmd(c, args);
 }

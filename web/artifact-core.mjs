@@ -509,6 +509,12 @@ export function artKeyColor(key, isLight = false) {
   }
 }
 export const ARTGEO = { BOXES: 1400, CYLS: 128, LINES: 16000, DOTS: 900, LABELS: 14 };
+/** 2D 선 묶음 열쇠(색 c · 굵기 w · 알파 단계 ab 1～15). 굵기 칸은 2비트(0～3)라 LW≥4(예: 연구소 파도 띠 LP.WAVE_W 4)는
+ *  3(가장 굵음 — 3D 의 w>2 와 같음)으로 묶는다 — 안 묶으면 넘친 값이 다음 색 번호로 밀린다. LW 0～3 은 옛 식 (c*4+w)*16+ab 와 같은 값 */
+export const ART_LW_MAX = 3;
+export const artLineKey = (c, w, ab) => (c * 4 + Math.min(ART_LW_MAX, Math.max(0, w | 0))) * 16 + ab;
+/** artLineKey 풀기 → { c, w, ab }. out 을 넘기면 그 객체를 채워 돌려준다(그리기 고리에서 할당 없음) */
+export function artLineKeyParts(k, out = {}) { const rest = (k / 16) | 0; out.ab = k % 16; out.w = rest % 4; out.c = (rest / 4) | 0; return out; }
 
 /** 재사용 버퍼(프레임마다 새 배열 없음) */
 export class ArtGeo {
@@ -1130,12 +1136,15 @@ export function artHistorySample(projectId, nowMs = Date.now(), { mainNode = 's:
 }
 
 // ───────────── 토글 저장(⚙ 메뉴 '작업 대상 층') ─────────────
-export const ART_VIEWS_READY = new Set(['flow', 'planet', 'voxel']); // 흐름 · Planet·복셀
+export const ART_VIEWS_READY = new Set(['flow', 'planet', 'voxel', 'lab']); // 흐름 · Planet·복셀 · 복셀 연구소(가운데 플랫폼)
+/** 저장값이 없을 때 켜 두는 표현(복셀 연구소: 꺼 두면 가운데 플랫폼이 비어 표현의 뜻이 없음 — 설계 결정 D4) */
+export const ART_DEFAULT_ON = new Set(['lab']);
 export const artStoreKey = (view) => `ccviz.artifacts.${view}`;
-/** 켬/끔: URL ?artifacts=1|0 이 이번 접속에서 우선, 아니면 표현별 저장값, 기본 끔. 준비 안 된 표현은 늘 끔 */
+/** 켬/끔: URL ?artifacts=1|0 이 이번 접속에서 우선, 아니면 표현별 저장값, 기본 끔(ART_DEFAULT_ON 표현은 기본 켬). 준비 안 된 표현은 늘 끔 */
 export function artInitial(view, urlVal, stored) {
   if (!ART_VIEWS_READY.has(view)) return false;
   if (urlVal === '1' || urlVal === 'true') return true;
   if (urlVal === '0' || urlVal === 'false') return false;
+  if (stored == null || stored === '') return ART_DEFAULT_ON.has(view);
   return stored === '1';
 }

@@ -4,6 +4,7 @@
 //   테마별 풀: 매니페스트 views = {flow:[단계…], planet:[…], voxel:[…]} — 지금 표현(ccviz.view2)의 곡만 자동 선곡·팝업 위쪽. stage 는 하위 호환(테마 풀이 빌 때 폴백)
 //   다국어: 매니페스트의 label_en·title_en·mood_en·key_en 을 영어 화면에서 label·title·mood·key 로 쓴다(없으면 기존 이름)
 import { t as tr, isKo } from './i18n.mjs';
+import { labPoolView } from './lab/lab-audio.mjs';
 
 export const TRACK_KEY = 'ccviz.bgm.track';
 export const LAST_KEY = 'ccviz.bgm.last';
@@ -31,6 +32,12 @@ export function localTrackText(t, en = !isKo()) {
   };
 }
 
+/** 곡 주소: 매니페스트에 내용 해시가 있으면 ?v=<해시> 를 붙인다 — 서버가 1년 immutable 로 응답해 같은 곡을 다시 받지 않음 */
+export function trackUrl(t) {
+  if (!t || !t.file) return null;
+  return 'assets/' + t.file + (t.hash ? '?v=' + t.hash : '');
+}
+
 /** bgm-tracks.json → {tracks, def}. id·file 이 없는 항목·중복 id 는 버림. 하나도 안 남으면 null */
 export function parseManifest(m) {
   if (!m || !Array.isArray(m.tracks)) return null;
@@ -47,6 +54,7 @@ export function parseManifest(m) {
       title: L.title,
       mood: L.mood,
       file: t.file,
+      hash: typeof t.hash === 'string' && /^[0-9a-f]{8,64}$/i.test(t.hash) ? t.hash.toLowerCase() : null, // 내용 해시 → 버전 주소
       meta: typeof t.meta === 'string' ? t.meta : null,
       bpm: Number.isFinite(t.bpm) ? t.bpm : null,
       beats: Number.isInteger(t.beats) && t.beats >= 2 && t.beats <= 12 ? t.beats : 4, // 마디당 박 수(3/4 곡 = 3, 없으면 4)
@@ -80,7 +88,7 @@ export function parseStage(stage, energy) {
 }
 
 /** 표현(테마) id — app.js 의 ccviz.view2 값 */
-export const VIEWS = ['flow', 'planet', 'voxel'];
+export const VIEWS = ['flow', 'planet', 'voxel', 'lab']; // lab = 복셀 연구소(곡이 없으면 voxel 풀 — lab-audio labPoolView)
 
 /** views({표현: 단계 | 단계 목록}) → {표현: 정렬된 단계 목록}. 모르는 표현·빈 목록은 버림, 하나도 없으면 null */
 export function parseViews(v) {
@@ -153,6 +161,7 @@ export const loopFor = (sel) => !isMode(sel);
  * view(테마별 풀): 지금 표현의 곡을 그 표현 단계로 위에, 나머지 곡은 아래 '다른 테마' 묶음(stage 순). other = 다른 테마 곡인지
  */
 export function optionList(tracks, view = null) {
+  view = labPoolView(tracks, view); // 연구소 곡이 없으면 복셀 오피스 묶음(자동 선곡과 같은 규칙)
   const th = themed(tracks, view);
   const stOf = (t) => (th ? viewStages(t, view) : (t.stage || []));
   const opt = (t) => {

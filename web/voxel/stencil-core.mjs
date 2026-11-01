@@ -111,6 +111,18 @@ export function stencilPlace(room, lines, aspect = null) {
   return { x: c.x, z: c.z, w, h, charH, angle: Math.atan2(rz, rx), rx, rz, lines };
 }
 
+/**
+ * 카메라가 글 뒤쪽(위쪽 가장자리 쪽)으로 돌아가면 180° 뒤집어 읽히게. 읽는 자리 = 읽는 방향 (rx, rz) 의 오른쪽 수직 (−rz, rx).
+ * (hx, hz) = 시선점 → 카메라 수평 방향. 경계에서 깜빡이지 않게 prev 를 hyst 안에서는 유지. 반환 true = 뒤집음
+ */
+export function stencilFlip(pl, hx, hz, prev = false, hyst = 0.15) {
+  if (!pl) return false;
+  const l = Math.hypot(hx, hz);
+  if (!(l > 1e-6)) return prev;
+  const d = (-pl.rz * hx + pl.rx * hz) / l;
+  return d < -hyst ? true : d > hyst ? false : prev;
+}
+
 /** 동마다 스텐실을 놓을 사무실 하나: 동의 첫 사무실(현재 메인) 중 외부 작업 구역이 아닌 것 → 없으면 첫 사무실 */
 export function buildingOffice(b, officeByMain) {
   if (!b || !b.offices || !b.offices.length || b.recent) return null;

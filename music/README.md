@@ -57,6 +57,14 @@ python music/compose.py --wav 미리듣기.wav          # WAV 사본도(레포�
 | bossa | 아침 보사노바 | 아침 카페 보사노바 | `compose_bossa.py` | `bgm-bossa.mp3`·`.json` | 116 · D major | 자체 작곡 |
 | swing | 점심 빅밴드 | 점심시간 빅밴드 | `compose_swing.py` | `bgm-swing.mp3`·`.json` | 192 · F major | 자체 작곡 |
 | caper | 오피스 소동 | 오피스 소동 | `compose_caper.py` | `bgm-caper.mp3`·`.json` | 160 · C major (추격 구간 A minor) | 자체 작곡 |
+| cleanroom | 청정실 | Clean Room (복셀 연구소 `views.lab`) | `compose_cleanroom.py`(공용 편곡기 `labkit.py`) | `bgm-cleanroom.mp3`·`.json` | 64 · 4/4 | 자체 작곡 |
+| petri | 배양 접시 | Petri Dish (복셀 연구소 `views.lab`) | `compose_petri.py`(공용 편곡기 `labkit.py`) | `bgm-petri.mp3`·`.json` | 72 · 4/4 | 자체 작곡 |
+| titration | 적정 실험 | Titration (복셀 연구소 `views.lab`) | `compose_titration.py`(공용 편곡기 `labkit.py`) | `bgm-titration.mp3`·`.json` | 92 · 4/4 | 자체 작곡 |
+| oscillo | 오실로스코프 | Oscilloscope (복셀 연구소 `views.lab`) | `compose_oscillo.py`(공용 편곡기 `labkit.py`) | `bgm-oscillo.mp3`·`.json` | 104 · 4/4 | 자체 작곡 |
+| centrifuge | 원심분리기 | Centrifuge (복셀 연구소 `views.lab`) | `compose_centrifuge.py`(공용 편곡기 `labkit.py`) | `bgm-centrifuge.mp3`·`.json` | 120 · 4/4 | 자체 작곡 |
+| spectro | 분광 분석 | Spectral Scan (복셀 연구소 `views.lab`) | `compose_spectro.py`(공용 편곡기 `labkit.py`) | `bgm-spectro.mp3`·`.json` | 112 · 4/4 | 자체 작곡 |
+| reactor | 임계 반응로 | Reactor Critical (복셀 연구소 `views.lab`) | `compose_reactor.py`(공용 편곡기 `labkit.py`) | `bgm-reactor.mp3`·`.json` | 136 · 4/4 | 자체 작곡 |
+| collider | 입자 가속기 | Particle Collider (복셀 연구소 `views.lab`) | `compose_collider.py`(공용 편곡기 `labkit.py`) | `bgm-collider.mp3`·`.json` | 148 · 4/4 | 자체 작곡 |
 
 | glacier | 빙하 위의 코드 | 빙하 위의 코드 | `compose_glacier.py` | `bgm-glacier.mp3`·`.json` | 68 · B minor | 자체 작곡 |
 | cursor | 깜빡이는 커서 | 깜빡이는 커서 | `compose_cursor.py` | `bgm-cursor.mp3`·`.json` | 76 · F# minor | 자체 작곡 |
@@ -84,7 +92,7 @@ python music/compose.py --wav 미리듣기.wav          # WAV 사본도(레포�
 | mambo | 금요일 맘보 | 금요일 맘보 | `compose_mambo.py` | `bgm-mambo.mp3`·`.json` | 184 · C minor | 자체 작곡 |
 
 표에 없는 곡(dawn·orbit·drive·deephouse·funk·liquid·uplift)은 매니페스트 참고. 새 10곡(pulse～caper, 2026-10-28)은 표현별 세 에이전트가 만든 곡이고,
-glacier～mambo 24곡(2026-10-30)은 표현 × 단계마다 2곡씩 더한 곡입니다(지금 46곡). 3/4 곡(queue·deepfield·teatime)은 매니페스트에 `beats: 3` 이 있어
+glacier～mambo 24곡(2026-10-30)은 표현 × 단계마다 2곡씩 더한 곡이며, cleanroom～collider 8곡(2026-10-31)은 복셀 연구소 전용입니다(지금 54곡). 3/4 곡(queue·deepfield·teatime)은 매니페스트에 `beats: 3` 이 있어
 자동 단계 전환 크로스페이드가 실제 마디 경계에 맞춥니다.
 
 **테마별 풀**: 곡마다`views`(표현별 단계)를 두고, 자동 선곡은 지금 보고 있는 표현의 풀에서만 고릅니다(그 단계에 곡이 없으면 `stage` 전체 풀로 폴백).

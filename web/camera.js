@@ -9,6 +9,8 @@ import { legacyPack } from './overview/pack-view.js';
 import { t } from './i18n.mjs';
 import { promptCamPlan } from './camera-core.mjs'; // 입력 때 메인으로(Follow my prompts)
 import { GitHold, gitHoldPick, gitHoldLabel, GIT_HOLD } from './camera-core.mjs'; // git 동작 붙잡기
+import { azRanged, spinStep, shotYawStep } from './camera-core.mjs'; // 복셀 방위 풀기
+import { camVisible } from './camera-core.mjs'; // 카메라 대상 = 지금 보이는 노드만(범위·표시 고르기)
 const HAS = (view, id) => { const v = view && view.vis && view.vis.get(id); return !!(v && !v.gone && !v.hidden); };
 const SWITCH_EVERY = 8;      // 초
 const RESUME_AFTER = 10;     // 초
@@ -27,7 +29,9 @@ const FIT_MH = 0.95, FIT_MV = 0.94; // 여백 5～6%(예전 0.92·0.86)
  // 화면 채움 비율·노드 여백(예전 0.84·0.78·1.4·1.8 — 너무 멀다는 피드백으로 당김)
 export const CAM_MODES = ['fit', 'follow'];
 // 렌더러가 cameraPrefs 를 안 주면 쓰는 값(1차 상수와 같음). azCenter/azRange(도)는 선택: 주면 방위각을 그 범위에 묶고 공전이 왕복한다
-const PREF_DEFAULTS = { fov: 50, elevMin: 20, elevMax: 55, distMin: 8, distMax: 160, overviewScale: 1.0, nodeScale: 1.35, minR: 7, azCenter: null, azRange: null };
+// azFree: 방위각을 묶지 않음(azCenter 는 첫 자리·섬 배치 기준으로만, azRange 는 배치 계산 pack-view 에만) — 복셀. azShotStep(도): 순환 샷마다 방위를 그만큼 돌려 잡음
+const PREF_DEFAULTS = { fov: 50, elevMin: 20, elevMax: 55, distMin: 8, distMax: 160, overviewScale: 1.0, nodeScale: 1.35, minR: 7, azCenter: null, azRange: null, azFree: false, azShotStep: 0 };
+
 
 export class CameraDirector {
   /** @param {import('./scene.js').SceneView} view */
@@ -67,6 +71,7 @@ export class CameraDirector {
     this.gitHold = null;      // 이번 프레임에 붙잡는 것(최근 순) | null
     this._gitSig = '';
 
+    this.pov = null; // 메인 1인칭 시점(PovCam, app 이 붙임) — 켜져 있으면 update 가 카메라를 넘긴다
     this._onManual = () => this._manual();
     this._bindDom();
     window.addEventListener('keydown', (e) => this._key(e));
@@ -131,6 +136,7 @@ export class CameraDirector {
     if (this._panMemo) this._panMemo.clear(); // 패널·라벨 자리는 표현마다 다르다
     if (this._labMemo) this._labMemo.clear();
     this._orbitDir = 1;
+    this._azInit = false; // 새 표현의 첫 자세는 기본 방위에서
     this._startTransition();
   }
 
@@ -144,6 +150,7 @@ export class CameraDirector {
   _key(e) {
     const tag = (e.target && e.target.tagName) || '';
     if (/INPUT|SELECT|TEXTAREA/.test(tag) || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (this.pov && this.pov.active) return; // 1인칭 동안 키 이동 없음
     const k = e.key.toLowerCase();
     const pan = { arrowleft: [-1, 0], a: [-1, 0], arrowright: [1, 0], d: [1, 0], arrowup: [0, 1], w: [0, 1], arrowdown: [0, -1], s: [0, -1] }[k];
     const zoom = { '+': 0.85, '=': 0.85, '-': 1.18, '_': 1.18, q: 1.18, e: 0.85 }[k];
@@ -281,7 +288,10 @@ export class CameraDirector {
 
   // ---------- 후보 ----------
   _dim(id) { const v = this.view; return v._isOut ? !!v._isOut(id) : v._isDim ? !!v._isDim(id) : false; } // 복셀: 나가는 프로젝트는 바로 후보에서 뺌
-  _shownId(id) { return isShown(this.view.vis.get(id), this._dim(id)); }
+  _hide() { const pf = this.view && this.view.pf; return this.scope.mode === 'all' && pf && pf.hide && pf.hide.size ? pf.hide : null; } // 숨긴 세션 키
+  _shownId(id) { return camVisible(this.view.vis.get(id), { dim: this._dim(id), hide: this._hide() }); }
+  /** 카메라 대상이 될 수 있는가: 보이고(_shownId) 지금 범위(세션·프로젝트 선택) 안 — 사용자 입력·git 붙잡기가 이것으로 거른다 */
+  _visibleId(id) { const v = this.view && this.view.vis && this.view.vis.get(id); return !!v && camVisible(v, { dim: this._dim(id), hide: this._hide(), scope: this.scope, pid: this.scope.mode === 'all' ? this._clusterOf(id) : null }); }
   _lastAt(id) { const a = this.activity.get(id); return a && a.length ? a[a.length - 1] : null; }
   _parentOf(id) {
     const po = this.view.parentOf;
@@ -313,7 +323,7 @@ export class CameraDirector {
   _gitStep(now, prompting) {
     const all = this.git.active(now, this._clk());
     const follow = this.camMode === 'follow';
-    const list = gitHoldPick(all, { enabled: this.enabled, auto: this.mode === 'auto', inspect: !!this.hold, prompt: prompting, follow }, (id) => HAS(this.view, id) && this._shownId(id) && this._inScope(id, this.view.vis.get(id)), (id) => { const n = this.getNode(id); return (n && n.rootSessionId) || this._clusterOf(id) || ''; });
+    const list = gitHoldPick(all, { enabled: this.enabled, auto: this.mode === 'auto', inspect: !!this.hold, prompt: prompting, follow }, (id) => HAS(this.view, id) && this._visibleId(id), (id) => { const n = this.getNode(id); return (n && n.rootSessionId) || this._clusterOf(id) || ''; });
     const ids = [...new Set(list.map((h) => h.id))];
     const sig = ids.length ? (follow ? 'f|' : 'a|') + ids.join(',') : '';
     const was = this._gitSig;
@@ -438,7 +448,7 @@ export class CameraDirector {
    *  최근 수동 조작·상세 팝업·자동 카메라 끔·큰 재생 배속이면 옮기지 않음(0). 반환 = 빛줄기가 기다릴 카메라 이동 남은 시간(초) */
   promptFocus(id, { speed = 1 } = {}) {
     const now = performance.now() / 1000;
-    const p = promptCamPlan({ enabled: this.enabled, manual: this.mode === 'manual', hold: !!this.hold, dragging: !!this.dragging, has: !!(this.view && HAS(this.view, id)), speed });
+    const p = promptCamPlan({ enabled: this.enabled, manual: this.mode === 'manual', hold: !!this.hold, dragging: !!this.dragging, has: !!(this.view && HAS(this.view, id) && this._visibleId(id)), speed }); // 범위 밖·숨긴 메인이면 옮기지 않음
     if (!p.move) return 0;
     const same = this.prompt && this.prompt.id === id && now < this.prompt.until;
     this.prompt = { id, until: now + p.dur + p.hold };
@@ -451,7 +461,7 @@ export class CameraDirector {
   _promptStep(now) {
     const pr = this.prompt;
     if (!pr) return false;
-    if (this.mode !== 'auto' || now >= pr.until || !HAS(this.view, pr.id)) {
+    if (this.mode !== 'auto' || now >= pr.until || !HAS(this.view, pr.id) || !this._visibleId(pr.id)) { // 비추는 중에 범위를 바꾸거나 숨기면 바로 원래 흐름으로
       this.prompt = null;
       if (this.mode === 'auto') { this.lastSwitch = -1e9; this._flyNext = true; }
       return false;
@@ -739,10 +749,15 @@ export class CameraDirector {
     const rects = [];
     let y0 = Infinity, y1 = -Infinity;
     for (const { p, r } of pts) { rects.push({ x0: p.x - r, x1: p.x + r, z0: p.z - r, z1: p.z + r }); y0 = Math.min(y0, p.y - r); y1 = Math.max(y1, p.y + r); }
-    const ranged = pr.azCenter != null && pr.azRange != null;
+    const ranged = azRanged(pr);
     const view = { aspect: this._availA(), elevMin: pr.elevMin, elevMax: pr.elevMax, elevDef: curEl, hy: Math.max(0, y1 - y0 - 2) };
     if (ranged) Object.assign(view, { yaw0: pr.azCenter, yawMin: pr.azCenter - pr.azRange, yawMax: pr.azCenter + pr.azRange });
-    else view.yaw0 = this.scope.mode === 'all' ? 0 : curAz;
+    else if (pr.azFree && pr.azCenter != null) {
+      // azFree(복셀): 첫 자세는 기본 방위(azCenter) 둘레, 그 뒤는 지금 방위 둘레 ± azRange 에서 가장 크게 차는 자세 — 돌던 자리에서 크게 벗어나지 않음
+      const c0 = this._azInit ? curAz : pr.azCenter, rg = pr.azRange ?? 28;
+      this._azInit = true;
+      Object.assign(view, { yaw0: c0, yawMin: c0 - rg, yawMax: c0 + rg });
+    } else view.yaw0 = this.scope.mode === 'all' ? 0 : curAz;
     // 정사영 근사(bestPose)가 아니라 실제 원근 맞춤으로 자세를 고른다(perspPose — 높은 고도에서 원근 때문에 작아지는 것까지)
     const fov = (this.camera.fov * Math.PI) / 180, t = Math.tan(fov / 2), band = this._band();
     const fm = fitM ? 1 - FIT.M : null; // 맞춤 여백(라벨은 점마다) — 노드 맞춤 점이면 조망 샷도
@@ -817,7 +832,7 @@ export class CameraDirector {
     const h = Math.hypot(d.x, d.z) || 1;
     const c = Math.cos(ce);
     let hx = d.x / h, hz = d.z / h;
-    if (pr.azCenter != null && pr.azRange != null) {
+    if (azRanged(pr)) {
       const az = Math.atan2(hx, hz), ac = pr.azCenter * Math.PI / 180, ar = pr.azRange * Math.PI / 180;
       let dd = Math.atan2(Math.sin(az - ac), Math.cos(az - ac));
       dd = Math.max(-ar, Math.min(ar, dd));
@@ -847,16 +862,32 @@ export class CameraDirector {
       const sc = shotFitScope(s, this.scope);
       const np = sc && !legacyPack() ? this._fitPts(null, sc) : null;
       const bp = np && np.length ? np : this.scope.mode === 'all' ? this._boxPts(s) : null;
-      if (bp && this.trans) this.trans.dir = this._poseDir(bp, !!(np && np.length) || this.camMode === 'fit');
+      if (bp && this.trans) { this.trans.dir = this._poseDir(bp, !!(np && np.length) || this.camMode === 'fit'); if (this.trans.dir) this._shotTurn(); }
       this.shotFit.reset();
     }
     this._inited = true;
     this._flyNext = false;
   }
 
+  /** 순환 샷마다 방위를 돌려 잡음(복셀 azShotStep: 앞·옆·뒤·어깨 너머가 번갈아) — 맞춤(fit)·입력 붙잡기·손 조작 복귀는 그대로 */
+  _shotTurn() {
+    const st = this._prefs().azShotStep, d = this.trans && this.trans.dir;
+    if (!st || !d || d._turned || this.mode !== 'auto' || this.shot.type !== 'node' || this.shot.prompt) return;
+    d.applyAxisAngle(THREE.Object3D.DEFAULT_UP, shotYawStep(st, (this._shotN = (this._shotN || 0) + 1)));
+    d._turned = true;
+  }
+
   update(dt, now) {
     const c = this.controls, cam = this.camera;
     this._now = now;
+    if (this.pov && this.pov.active) {
+      // 메인 1인칭 시점: 카메라는 PovCam 이(대상 캐릭터가 사라지면 onPovLost — app 이 다른 메인으로 바꾸거나 나감)
+      if (this.pov.update(dt, now, this) === 'lost' && this.onPovLost) this.onPovLost();
+      this.view.camShotId = null;
+      this._emitStatus(now);
+      return;
+    }
+    if (this.pov) this.pov.after(dt, now, this); // 나간 뒤 화각·near 되돌리기
     if (this.dragging) this.lastInput = now;
     this.view.focusDist = cam.position.distanceTo(c.target);
 
@@ -912,7 +943,7 @@ export class CameraDirector {
       const f = this._frame(this.shot);
       const k = Math.min(1, (now - this.trans.t0) / this.trans.dur);
       const e = easeInOutCubic(k);
-      if (!this.trans.dir) this.trans.dir = this._dirFrom(f.center);
+      if (!this.trans.dir) { this.trans.dir = this._dirFrom(f.center); this._shotTurn(); }
       // 시선점 기준 방향·거리 보간(+섬 사이 이동은 가운데서 살짝 물러남) — 대상은 매 프레임 지금 자리(f.center)
       const p = flightPose(this.trans.fromTgt, this.trans.fromPos, f.center, this.trans.dir, f.dist, e);
       c.target.set(p.tgt.x, p.tgt.y, p.tgt.z);
@@ -939,8 +970,8 @@ export class CameraDirector {
       const off = this._v.copy(cam.position).sub(c.target);
       const len = off.length() || 1;
       const pr = this._prefs();
-      if (pr.azCenter != null && pr.azRange != null) {
-        // 방위각 범위 안에서 왕복 공전(복셀: 벽 뒤로 돌아가지 않게)
+      if (azRanged(pr)) {
+        // 방위각 범위 안에서 왕복 공전(복셀은 azFree — 360° 계속 돎, 벽은 카메라 쪽이 낮아짐)
         const az = Math.atan2(off.x, off.z), ac = pr.azCenter * Math.PI / 180, ar = pr.azRange * Math.PI / 180;
         const dd = Math.atan2(Math.sin(az - ac), Math.cos(az - ac));
         if (dd > ar && this._orbitDir > 0) this._orbitDir = -1;
@@ -967,11 +998,15 @@ export class CameraDirector {
   /** 쉬는 동안 느린 왕복 궤도: off(시선점 → 카메라)를 세로축으로 돌린다. 진폭 amp°·주기 period 초의 사인 왕복(위상은 쉼 정도만큼만 흐름) */
   _idleOrbit(off, dt, now) {
     const io = this._prefs().idleOrbit;
-    if (!io || !(io.amp > 0) || !(io.period > 0)) return;
+    if (!io || !((io.amp > 0 && io.period > 0) || io.spin > 0)) return;
     if (this._reduced == null) this._reduced = prefersReduced();
     if (this._reduced) return;
     const calm = this.calmness(now);
     this._calmK = (this._calmK || 0) + (calm - (this._calmK || 0)) * Math.min(1, dt * 0.6);
+    if (io.spin > 0) { // 한 방향으로 360° 천천히 돎(복셀) — 바쁠 때도 minK 만큼은 돈다
+      off.applyAxisAngle(THREE.Object3D.DEFAULT_UP, spinStep(io, this._calmK, dt));
+      return;
+    }
     if (this._calmK < 0.005) return;
     const ph0 = this._orbPh || 0, ph1 = ph0 + dt * ((2 * Math.PI) / io.period) * this._calmK;
     this._orbPh = ph1;
@@ -982,7 +1017,8 @@ export class CameraDirector {
   _emitStatus(now) {
     if (!this.onStatus) return;
     let s;
-    if (!this.enabled) s = { mode: 'off', text: t('app.cam.off') };
+    if (this.pov && this.pov.active) s = { mode: 'pov', text: 'POV' };
+    else if (!this.enabled) s = { mode: 'off', text: t('app.cam.off') };
     else if (this.hold) s = { mode: 'manual', text: this.hold.follow ? t('app.cam.follow') : t('app.cam.inspect') };
     else if (this.mode === 'manual') {
       const left = Math.max(0, Math.ceil(RESUME_AFTER - (now - this.lastInput)));

@@ -5,7 +5,9 @@ export default {
     // 표현 이름
     'flat.mode.flow': 'Flow',
     'flat.mode.voxel': 'Voxel Office',
+    'flat.mode.lab': 'Voxel Lab',
     'flat.pending': '{mode} 2D not ready yet · showing Flow 2D',
+    'flat.pendingVia': '{mode} 2D not ready yet · showing {base} 2D',
     // 노드 상태(라벨 부제)
     'flat.status.active': 'Working',
     'flat.status.idle': 'Idle',
@@ -59,7 +61,9 @@ export default {
   ko: {
     'flat.mode.flow': '흐름',
     'flat.mode.voxel': '복셀 오피스',
+    'flat.mode.lab': '복셀 연구소',
     'flat.pending': '{mode} 2D 준비 중 · 흐름 2D 로 표시',
+    'flat.pendingVia': '{mode} 2D 준비 중 · {base} 2D 로 표시',
     'flat.status.active': '작업 중',
     'flat.status.idle': '대기',
     'flat.status.done': '완료',

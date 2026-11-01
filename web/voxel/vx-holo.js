@@ -3,12 +3,14 @@
 // 안에 도구 이름·실제 출력 몇 줄이 흐른다. 도구 호출마다 모니터 위로 작은 창이 튀어나왔다 들어가고, 동시에 열린 다른 도구는
 // 모니터 옆 작은 창으로 남는다. 일하는 손끝에서 모니터 아래 끝까지 가는 빛줄기. 대기 중이면 모니터가 접힌다.
 // 기동기(복합기) 위에는 회차 진행·평균 시간 홀로그램 대시보드.
-// 그리기: 틀 InstancedMesh 1개(셰이더 빌보드) + 손끝 빛줄 LineSegments 1개 + 글 평면 풀(HoloText, 내용이 바뀔 때만 다시 그림).
+// 그리기: 틀 InstancedMesh 1개(인스턴스 행렬 = 세계 자세) + 손끝 빛줄 LineSegments 1개 + 글 평면 풀(HoloText 세계 모드, 내용이 바뀔 때만 다시 그림).
+// 모니터는 빌보드가 아니라 책상에 고정된 실제 모니터: 화면은 직원 쪽을 보고 조금 뒤로 젖혀져 있어 카메라 각도대로 원근이 생기고,
+// 투명 홀로그램 판이라 뒤에서는 앞면 내용(글·무늬·테두리)이 좌우 거울상으로 조금 옅게 비친다. 옆 작은 창·튀어나오는 창도 같은 판 위(모니터 양옆). 기동기 대시보드만 카메라를 본다.
 import * as THREE from 'three';
 import { HOLO, PANEL, HoloBook, panelPx } from '../holo-core.mjs';
 import { HoloText } from '../holo-text.js';
 import { catColor } from '../flow-core.mjs';
-import { MON, monitorWanted, stepOpen, openShape, popShape } from './office-core.mjs';
+import { MON, DESK_MON, VX_DASH, launcherDash, deskMonitorPose, monitorWanted, stepOpen, openShape, popShape } from './office-core.mjs';
 import { DESK_TOP } from './props.js';
 import { bodyTintOf, heatHueOf } from './vx-heat-core.mjs'; // 모니터 테두리 단계색
 import { BATCH, deviceInfo, fmtDur, cycleProgress } from '../batch-core.mjs';
@@ -21,14 +23,11 @@ attribute vec3 iColor; attribute vec3 iFlash; attribute vec4 iA; attribute vec4 
 varying vec2 vUv; varying vec3 vCol; varying vec3 vFl; varying vec4 vA; varying vec2 vSz; varying vec4 vHt;
 void main() {
   vUv = uv; vCol = iColor; vFl = iFlash; vA = iA; vHt = iHeat;
-  vec4 c = modelViewMatrix * vec4(instanceMatrix[3].xyz, 1.0);
-  vec2 sz = vec2(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz));
-  vSz = sz;
-  c.xy += position.xy * sz;
-  gl_Position = projectionMatrix * c;
+  vSz = vec2(length(instanceMatrix[0].xyz), length(instanceMatrix[1].xyz));
+  gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0); // §72.10 세계 자세(빌보드는 카메라 회전을 넣어 줌)
 }`;
 const FS = `
-uniform float uTime; uniform float uLight;
+uniform float uTime; uniform float uLight; uniform float uBack;
 varying vec2 vUv; varying vec3 vCol; varying vec3 vFl; varying vec4 vA; varying vec2 vSz; varying vec4 vHt;
 float sdBox(vec2 p, vec2 b) { vec2 d = abs(p) - b; return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0); }
 float h1(float n) { return fract(sin(n * 12.9898) * 43758.5453); }
@@ -64,6 +63,8 @@ void main() {
     col = mix(col, ec * 0.72, edge * 0.95);
     a = (0.72 + 0.25 * edge + 0.05 * head) * vA.x;
   }
+  // §72.11 뒷면 = 투명 홀로그램 판을 뒤에서 본 모습: 앞면 무늬·테두리가 그대로(양면, uv 가 그대로라 좌우 거울상) 조금 옅게
+  if (!gl_FrontFacing) a *= uBack;
   gl_FragColor = vec4(col, a);
 }`;
 
@@ -79,7 +80,7 @@ export class VxHolo {
     const geo = new THREE.PlaneGeometry(1, 1);
     this.aHeat = new THREE.InstancedBufferAttribute(new Float32Array(CAP * 4), 4).setUsage(THREE.DynamicDrawUsage); // 테두리 단계색(rgb, 세기)
     geo.setAttribute('iColor', this.aColor); geo.setAttribute('iFlash', this.aFlash); geo.setAttribute('iA', this.aA); geo.setAttribute('iHeat', this.aHeat);
-    this.uniforms = { uTime: { value: 0 }, uLight: { value: 0 } };
+    this.uniforms = { uTime: { value: 0 }, uLight: { value: 0 }, uBack: { value: DESK_MON.BACK_A } };
     this.mat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: VS, fragmentShader: FS, transparent: true, depthWrite: false, side: THREE.DoubleSide });
     this.mesh = new THREE.InstancedMesh(geo, this.mat, CAP);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -93,14 +94,15 @@ export class VxHolo {
     this.threads = new THREE.LineSegments(this.tGeo, this.tMat);
     this.threads.frustumCulled = false; this.threads.renderOrder = 4;
     scene.add(this.mesh, this.threads);
-    this.text = new HoloText(scene);
+    this.text = new HoloText(scene, { world: true, backAlpha: DESK_MON.BACK_A }); // 글도 모니터 판과 같은 자세 · 뒷면은 거울상으로 옅게
     this._tc = [];
-    this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._s = new THREE.Vector3(); this._p = new THREE.Vector3();
+    this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._e = new THREE.Euler(0, 0, 0, 'YXZ'); this._s = new THREE.Vector3(); this._p = new THREE.Vector3();
     this._c = new THREE.Color(); this._c2 = new THREE.Color();
     this._hc = new THREE.Color(); this._hw = 0; this._hWarm = new THREE.Color(); this._hRed = new THREE.Color();
     this._catC = new Map(); this._ink = new Map();
     this._fa = 1; // 지금 그리는 자리의 프로젝트 페이드(_put·_thread 가 곱함)
     this._dash = new Map(); // 기동기 id → 대시보드 패널 항목(같은 객체 유지 → 글 칸 재사용)
+    this.dashRead = new Set(); // 이번 프레임 글이 읽히는 대시보드의 기동기 id
     this.stats = { frames: 0, text: 0, monitors: 0, pops: 0, threads: 0 };
     this.applyTheme(view.tokens);
   }
@@ -162,7 +164,7 @@ export class VxHolo {
     F[n * 3] = flashC.r; F[n * 3 + 1] = flashC.g; F[n * 3 + 2] = flashC.b;
     const Ht = this.aHeat.array, hw = this._hw || 0; // 지금 그리는 직원의 과열 테두리(_hw = 0 이면 없음)
     Ht[n * 4] = this._hc.r; Ht[n * 4 + 1] = this._hc.g; Ht[n * 4 + 2] = this._hc.b; Ht[n * 4 + 3] = hw;
-    A[n * 4] = alpha * this._fa; A[n * 4 + 1] = flash; // _fa = 그 자리 동의 프로젝트 페이드 A[n * 4 + 2] = kind; A[n * 4 + 3] = hasText ? 1 : 0;
+    A[n * 4] = alpha * this._fa; A[n * 4 + 1] = flash; A[n * 4 + 2] = kind; A[n * 4 + 3] = hasText ? 1 : 0; // _fa = 그 자리 동의 프로젝트 페이드
   }
   _thread(nt, a, bx, by, bz, col, k) {
     if (nt >= THREAD_CAP) return nt;
@@ -175,7 +177,9 @@ export class VxHolo {
     this.tCol[q + 3] = c.r; this.tCol[q + 4] = c.g; this.tCol[q + 5] = c.b;
     return nt + 1;
   }
-  _cand(i) { return this._tc[i] || (this._tc[i] = { e: null, x: 0, y: 0, z: 0, W: 0, H: 0, px: 0, alpha: 0, swap: 0, score: 0, ink: '', slot: null }); }
+  _cand(i) { return this._tc[i] || (this._tc[i] = { e: null, x: 0, y: 0, z: 0, W: 0, H: 0, px: 0, alpha: 0, swap: 0, score: 0, ink: '', slot: null, q: new THREE.Quaternion() }); }
+  /** 모니터 판 위 지역 좌표(lx 가로·ly 위) → 세계 점 */
+  _onPlane(P, lx, ly, out) { out.x = P.c.x + P.r.x * lx + P.u.x * ly; out.y = P.c.y + P.u.y * ly; out.z = P.c.z + P.r.z * lx + P.u.z * ly; return out; }
 
   /** 매 프레임 */
   update(now, dt, camera, viewportH) {
@@ -208,24 +212,27 @@ export class VxHolo {
       if (pp) while (pp.length && now - pp[0].t0 > MON.POP) pp.shift();
       if (ch._monK <= 0.001 || n >= CAP - 8) { ch._monTop = 0; continue; }
       const s = ch.seat, lead = s.kind === 'lead', fc = ch.id === focus || ch.id === hover;
-      const face = s.face || 0, fx = Math.sin(face), fz = Math.cos(face);
-      let H = MON.H * (lead ? MON.LEAD_K : 1) * (fc ? 1.3 : 1);
-      const mx = s.deskX + fx * 0.12, mz = s.deskZ + fz * 0.12;
-      const dist = Math.hypot(mx - cp.x, DESK_TOP + 0.7 - cp.y, mz - cp.z);
+      // 책상 고정 모니터: 책상 앞 끝·상판 위 LIFT·직원 쪽을 보며 뒤로 젖힘. 키움(최근 활동·포커스)은 MAX_H 까지만 — 머리보다 낮게
+      const hMax = DESK_MON.MAX_H * (lead ? DESK_MON.LEAD_K : 1);
+      let H = DESK_MON.H * (lead ? DESK_MON.LEAD_K : 1) * (fc ? DESK_MON.FOCUS_K : 1);
+      const depth = lead ? 0.9 : 0.7;
+      const P0 = deskMonitorPose(s, DESK_TOP + (s.floorY || 0), depth, H); // floorY = 연구소 브리지 책상(오피스는 없음 → 0)
+      const dist = Math.hypot(P0.c.x - cp.x, P0.c.y - cp.y, P0.c.z - cp.z);
       let px = panelPx(H, dist, fov, viewportH);
-      // 최근 활동 상위·포커스 노드는 멀어도 제목이 읽히게 조금 키움(최대 BOOST 배, Flow 의 최소 크기 규칙과 같은 뜻)
-      if ((fc || top.has(ch.id)) && px > 0 && px < MON.MIN_PX && !far) { const k = Math.min(MON.BOOST, MON.MIN_PX / px); H *= k; px *= k; }
+      if ((fc || top.has(ch.id)) && px > 0 && px < MON.MIN_PX && !far) { const k = Math.min(MON.BOOST, MON.MIN_PX / px, hMax / H); if (k > 1) { H *= k; px *= k; } }
       const W = H * MON.ASP;
       const { sx, sy } = openShape(ch._monK);
-      const my = DESK_TOP + 0.16 + (H * sy) / 2;
-      ch._monTop = DESK_TOP + 0.16 + H * sy;
-      ch._monFit = { x: mx, z: mz, hw: (W * sx) / 2, px: fz, pz: -fx, top: ch._monTop, t: now }; // 전체 맞춤이 담는 모니터 자리(가로 = 얼굴 방향에 수직)
+      const P = deskMonitorPose(s, DESK_TOP + (s.floorY || 0), depth, H * sy);
+      const mx = P.c.x, my = P.c.y, mz = P.c.z;
+      ch._monTop = P.top;
+      ch._monFit = { x: mx, z: mz, hw: (W * sx) / 2, px: P.r.x, pz: P.r.z, top: ch._monTop, t: now }; // 전체 맞춤이 담는 모니터 자리(가로 = 화면 가로 방향)
       if (px < 3) continue;
+      this._e.set(P.pitch, P.yaw, 0, 'YXZ'); this._q.setFromEuler(this._e);
       const ph = main ? book.phaseOf(main, now) : null;
       const cat = main ? main.cat : 'other';
       ch._monCat = main ? cat : null;
       const col = this._cat(cat), fl = this._res(main ? main.res : 'ok');
-      // 글(가까우면): 장부 항목을 그대로 넘기되 모양은 모니터(터미널 창, 같은 가로세로비)
+      // 글(가까우면): 장부 항목을 그대로 넘기되 모양은 모니터(터미널 창, 같은 가로세로비). 화면 앞면 쪽으로 조금 띄움
       let hasText = false;
       if (main && ch._monK > 0.85 && px >= PANEL.TITLE_PX * 0.9 && !far) {
         const pe = ch._monE || (ch._monE = { id: '', panel: null, pv: 0, shape: 0, asp: MON.ASP, label: { tool: '', target: '' }, res: 'ok', result: '', cat: 'other', tool: '', scrollAt: null, scrollN: 0 });
@@ -235,37 +242,41 @@ export class VxHolo {
         }
         pe.scrollAt = main.scrollAt; pe.scrollN = main.scrollN;
         const c0 = this._cand(ntc++);
-        c0.e = pe; c0.x = mx; c0.y = my; c0.z = mz; c0.W = W * sx; c0.H = H * sy; c0.px = px; c0.alpha = Math.min(1, (ch._monK - 0.85) / 0.15) * (ph ? ph.alpha : 1) * this._fa;
+        c0.e = pe; c0.x = mx + P.n.x * 0.006; c0.y = my + P.n.y * 0.006; c0.z = mz + P.n.z * 0.006; c0.W = W * sx; c0.H = H * sy; c0.px = px; c0.alpha = Math.min(1, (ch._monK - 0.85) / 0.15) * (ph ? ph.alpha : 1) * this._fa;
+        c0.q.copy(this._q);
         c0.swap = 0; c0.score = (fc ? 1e6 : 0) + px + (main.endAt == null ? 50 : 0) + (lead ? 30 : 0); c0.ink = this._inkOf(cat);
         c0.inst = n;
         hasText = true;
       }
       this._put(n++, mx, my, mz, W * sx, H * sy, col, fl, (ph ? Math.max(0.5, ph.alpha) : 0.8) * Math.min(1, ch._monK * 1.5), ph ? ph.flash : 0, 0, hasText);
       mons++;
-      // 동시에 열린 다른 도구 = 모니터 옆 작은 창
+      // 동시에 열린 다른 도구 = 모니터 양옆 작은 창(같은 판 위 — 직원 몸 앞을 막지 않게 화면 높이 안에서)
+      const q = this._p2 || (this._p2 = new THREE.Vector3());
+      const sideX = (W * sx) / 2 + DESK_MON.SIDE_GAP + DESK_MON.MINI_W / 2, hh = (H * sy) / 2;
       let mi = 0;
       for (const e of arr) {
         if (e === main || e.slot < 0 || mi >= MON.MINI_MAX || n >= CAP) continue;
         const p2 = book.phaseOf(e, now);
         if (p2.phase === 'gone') continue;
-        const side = mi === 0 ? 1 : mi === 1 ? -1 : 0;
-        const ox = side * (W / 2 + 0.34), oy = side ? H * 0.28 : H / 2 + 0.3;
-        this._put(n++, mx + ox * fz, my + oy, mz - ox * fx, 0.56 * p2.sx, 0.36 * p2.sy, this._cat(e.cat), this._res(e.res), p2.alpha * 0.95, p2.flash, 1, false);
+        const lx = mi === 1 ? -sideX : sideX, ly = mi === 2 ? -hh + DESK_MON.MINI_H / 2 : hh - DESK_MON.MINI_H / 2;
+        this._onPlane(P, lx, ly, q);
+        this._put(n++, q.x, q.y, q.z, DESK_MON.MINI_W * p2.sx, DESK_MON.MINI_H * p2.sy, this._cat(e.cat), this._res(e.res), p2.alpha * 0.95, p2.flash, 1, false);
         mi++;
       }
-      // 도구 호출 순간 튀어나왔다 들어가는 작은 창
+      // 도구 호출 순간 튀어나왔다 들어가는 작은 창: 모니터 옆(번갈아 좌우)에서 화면 아래 → 위 끝까지 솟았다 들어감
       if (pp) for (const p of pp) {
         if (n >= CAP) break;
         const ps = popShape((now - p.t0) / MON.POP);
         if (!ps) continue;
-        const lx = ((p.i % 3) - 1) * 0.42;
-        this._put(n++, mx + lx * fz, my + H * sy * 0.5 + 0.12 + ps.up * 0.55, mz - lx * fx, 0.42 * ps.s, 0.27 * ps.s, this._cat(p.cat), this._cat(p.cat), ps.alpha, 0, 1, false);
+        const lx = (p.i % 2 ? 1 : -1) * ((W * sx) / 2 + DESK_MON.SIDE_GAP * 0.6 + DESK_MON.POP_W / 2);
+        this._onPlane(P, lx, -hh * 0.4 + ps.up * hh * 0.9, q);
+        this._put(n++, q.x, q.y, q.z, DESK_MON.POP_W * ps.s, DESK_MON.POP_H * ps.s, this._cat(p.cat), this._cat(p.cat), ps.alpha, 0, 1, false);
         pops++;
       }
       // 손끝 빛줄기(두드리는 중)
       if (ch.state === 'work' && atDesk && ch._monK > 0.6 && ch._hand && px > 8) {
-        const by = my - (H * sy) / 2, k = 0.55 + 0.35 * Math.sin(now * 9 + ch.phase);
-        for (let i = 0; i < 2; i++) { const o = (i ? 1 : -1) * W * 0.18; nt = this._thread(nt, ch._hand[i], mx + o * fz, by, mz - o * fx, col, k); }
+        const B = P.base, k = 0.55 + 0.35 * Math.sin(now * 9 + ch.phase); // 손끝 → 화면 아래 끝(발광대 위)
+        for (let i = 0; i < 2; i++) { const o = (i ? 1 : -1) * W * 0.18; nt = this._thread(nt, ch._hand[i], B.x + o * P.r.x, B.y, B.z + o * P.r.z, col, k); }
       }
     }
     // 기동기 대시보드(복합기 위)
@@ -273,8 +284,8 @@ export class VxHolo {
       if (m.type !== 'batch' || m.released || !m.pos || v._isDim(m.id) || n >= CAP) continue;
       this._fa = v._fxA ? v._fxA(m.pos.x, m.pos.z) : 1;
       this._hw = 0; // 기동기 대시보드는 과열 테두리 없음
-      const H = 0.95, W = 1.6;
-      const x = m.pos.x + 0.1 * BATCH.DEVICE_K, z = m.pos.z, y = 1.6 * BATCH.DEVICE_K + H / 2 + 0.12; // 복합기 윗면(0.75배) 위
+      const H = VX_DASH.H, W = VX_DASH.W;
+      const { x, y, z } = launcherDash(m.pos, BATCH.DEVICE_K); // 복합기 윗면(0.75배) 위
       const dist = Math.hypot(x - cp.x, y - cp.y, z - cp.z);
       const px = panelPx(H, dist, fov, viewportH);
       if (px < 3) continue;
@@ -289,6 +300,8 @@ export class VxHolo {
         c0.score = (m.id === focus ? 1e6 : 0) + 2e5 + px; c0.ink = this._inkOf('skill'); c0.inst = n;
         hasText = true;
       }
+      this._q.copy(camera.quaternion); // 대시보드는 그대로 카메라를 봄(빌보드) — 직원 앞이 아니라 기동기 위
+      if (hasText) this._tc[ntc - 1].q.copy(camera.quaternion);
       this._put(n++, x, y, z, W, H, col, col, run ? 0.95 : 0.6, 0, 2, hasText);
     }
     this._fa = 1;
@@ -297,6 +310,9 @@ export class VxHolo {
     const tf = this.text.update(this._tc, ntc, now);
     let tn = 0;
     for (let i = 0; i < ntc; i++) { const c0 = this._tc[i]; if (c0.e._txf !== tf) this.aA.array[c0.inst * 4 + 3] = 0; else tn++; }
+    // 글이 읽히는 대시보드(기동기 id) — 이름표는 이 동안 회차 요약을 빼고 이름·꼬리표만(같은 숫자가 두 번 보이지 않게)
+    const dr = this.dashRead; dr.clear();
+    for (const [mid, de] of this._dash) if (de._txf === tf) dr.add(mid);
     this.tGeo.setDrawRange(0, nt * 2);
     if (nt) { this.tGeo.attributes.position.needsUpdate = true; this.tGeo.attributes.color.needsUpdate = true; }
     this.threads.visible = nt > 0;

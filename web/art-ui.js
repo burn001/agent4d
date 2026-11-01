@@ -179,7 +179,7 @@ export function mountArtifacts(h) {
     const names = S.splice(0);
     if (speed > 4 || (typeof document !== 'undefined' && document.hidden)) return;
     const sfx = typeof window !== 'undefined' && window.__ccviz ? window.__ccviz.sfx : null;
-    if (!sfx || !sfx.enabled || sfx.held) return;
+    if (!sfx || !sfx.enabled || sfx.held || sfx.view === 'lab') return; // 복셀 연구소는 LabView 가 연출을 읽어 lab-* 소리로(겹침 방지)
     try { sfx.play(names[names.length - 1], { priority: 3, gain: 0.55 }); } catch (e) { /* 소리 없음 */ }
   }
 

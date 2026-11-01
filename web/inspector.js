@@ -5,11 +5,11 @@
 import {
   INSPECT, kindInfo, statusInfo, elapsedMs, fmtElapsed, fmtMs, fmtAgo, parentIdOf, childrenOf, childStats, childLine, nowDoing,
   InspectBook, ixLoose, deviceModel, barHeights, islandModel, limitsLine, sheetMode, placeCard, autoCloseReason, targetKey, easeToward,
-  jobCardModel, ownerJobsModel, laneTableModel, procCardModel,
+  jobCardModel, ownerJobsModel, laneTableModel, procCardModel, rigCardModel,
 } from './inspector-core.mjs';
 import { isJob, isProc, jobOf } from './job-core.mjs';
 import { runCardModel } from './run-core.mjs'; // 실행 중 셸
-import { isLauncher, isRunner } from './batch-core.mjs';
+import { isLauncher, isRunner, deviceInfo, cycleProgress } from './batch-core.mjs';
 import { ctxShort, gaugeLevel } from './ctx-core.mjs';
 import { branchOf } from './session-core.mjs';
 import { toScreen, camScale } from './flat/flat-core.mjs';
@@ -135,6 +135,7 @@ export function mountInspector(h) {
       case 'project': if (target && target.type === 'cluster') { const pid = target.pid; close('scope', { silent: true }); h.onScopeProject(pid); } break;
       case 'replay': if (n) { const nn = n; close('replay', { silent: true }); h.onReplay(nn); } break;
       case 'follow': setFollow(!follow); break;
+      case 'pov': if (n && h.onPov) { const nn = n; close('pov', { silent: true }); h.onPov(nn); } break;
       case 'foot': if (n && h.onFoot) { footNode = footNode === n.id ? null : n.id; h.onFoot(n, !!footNode); renderFoot(true); } break;
       case 'close': close('button'); break;
     }
@@ -288,6 +289,8 @@ export function mountInspector(h) {
     sess.className = 'ins-sess' + (Number.isInteger(si) ? ' s' + si : '');
     sess.innerHTML = Number.isInteger(si) ? `<i aria-hidden="true"></i>${esc(tr('cards.ins.sessColor'))}` : '';
     const parts = [];
+    const rgh = rigLineHtml(n, h.getView ? h.getView() : null, nowMs); // 연구소 기자재 줄
+    if (rgh) parts.push(rgh);
     const rows = m.rows.map((r) => {
       let v = `<span${r.title ? ` title="${esc(r.title)}"` : ''}>${esc(r.value)}</span>`;
       if (r.key === 'state') v = `<span class="ins-jstate jd-${esc(m.display)}"><i aria-hidden="true"></i>${esc(r.value)}</span>`;
@@ -343,6 +346,26 @@ export function mountInspector(h) {
     return `<section class="ins-sec"><h4>${esc(tr('cards.job.h.jobs'))} <small>${jm.total}</small></h4><ul class="ins-jobs">${li}${more}</ul></section>`;
   }
 
+  /** 기자재 한 줄: '기자재: ⚗ 시험대 · 진행 · 42% · rc 2 · 정체 3분' + 진행 막대. 연구소(modeId 'lab') 기계 자리에 rigKind 가 있을 때만 */
+  function rigLineHtml(n, view, nowMs) {
+    if (!view || !view.constructor || view.constructor.modeId !== 'lab') return '';
+    const m = view.machines && view.machines.get ? view.machines.get(n.id) : null;
+    const kind = m && m.pos && m.pos.rigKind;
+    if (!kind) return '';
+    let extra = null;
+    if (kind === 'sequencer') {
+      const info = m.info || deviceInfo(n, h.nodes);
+      const cur = info && info.currentId ? h.nodes.get(info.currentId) : null;
+      extra = { progress: cur ? cycleProgress(info, cur, nowMs) : null };
+    }
+    const rc = rigCardModel(n, kind, nowMs, m._ix || null, extra);
+    if (!rc) return '';
+    const line = rc.rows.map((r) => r.value).join(' · ');
+    const tip = rc.rows.map((r) => `${r.label}: ${r.value}`).join(' · ');
+    const bar = rc.gauge != null ? ` <span class="ins-jbar" style="display:inline-block;width:96px;vertical-align:middle;--jc:var(--accent)"><i style="width:${Math.round(rc.gauge * 1000) / 10}%"></i></span>` : '';
+    return `<section class="ins-sec ins-rig rs-${esc(rc.state)}"><p title="${esc(tip)}"><b>${esc(tr('lab.rig.card'))}:</b> ${esc(line)}${bar}</p></section>`;
+  }
+
   function renderNode(nowMs) {
     const n = h.nodes.get(target.id);
     if (!n) return;
@@ -377,6 +400,9 @@ export function mountInspector(h) {
       const rows = rm.rows.map((r) => `<dt>${esc(r.label)}</dt><dd class="k-${esc(r.key)}"${r.title ? ` title="${esc(r.title)}"` : ''}>${esc(r.value)}</dd>`).join('');
       parts.push(`<section class="ins-sec ins-run${rm.stale ? ' stale' : ''}"><h4>${esc(tr('cards.run.h'))} <small>${esc(rm.kind === 'fg' ? 'fg' : 'bg')}</small></h4><dl class="ins-jrows">${rows}</dl></section>`);
     }
+    // 복셀 연구소 기자재 줄(지금 표현이 연구소이고 이 노드가 기자재로 그려질 때만)
+    const rgh = rigLineHtml(n, pvw, nowMs);
+    if (rgh) parts.push(rgh);
     // 컨텍스트(메인·claude -p)
     const ctx = n.meta && n.meta.ctx;
     if (ctx && Number.isFinite(ctx.pct)) {
@@ -511,10 +537,12 @@ export function mountInspector(h) {
     const canScope = h.canScope();
     const rep = h.isReplaying();
     const artOn = !!(h.getArt && h.getArt());
-    const key = [target ? targetKey(target) : '', follow, canScope, rep, h.canReplay(), artOn, footNode].join('|');
+    const povOk = !!(isNode && n && h.canPov && h.canPov(n)); // 메인 노드 = '이 에이전트 시점으로'
+    const key = [target ? targetKey(target) : '', follow, canScope, rep, h.canReplay(), artOn, footNode, povOk].join('|');
     if (!force && key === footKey) return;
     footKey = key;
     const b = [];
+    if (povOk) b.push(`<button type="button" class="ins-btn ins-pov" data-act="pov" title="${esc(tr('cards.ins.pov.t'))}"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>${esc(tr('cards.ins.pov'))}</button>`);
     if (isNode && n && canScope) b.push(`<button type="button" class="ins-btn" data-act="scope" title="${esc(tr('cards.ins.scope.t'))}">${esc(tr('cards.ins.scope'))}</button>`);
     if (isNode && n && artOn) b.push(`<button type="button" class="ins-btn" data-act="foot" aria-pressed="${footNode === n.id}" title="${esc(tr('cards.ins.foot.t'))}">${esc(tr(footNode === n.id ? 'cards.ins.foot.off' : 'cards.ins.foot.on'))}</button>`);
     if (!isNode && target && target.type === 'cluster' && canScope) b.push(`<button type="button" class="ins-btn" data-act="project" title="${esc(tr('cards.ins.project.t'))}">${esc(tr('cards.ins.project'))}</button>`);

@@ -200,6 +200,87 @@ export function cardOffset(dirGroup, nodePx, w, h, stack = 0, labelPush = 0) {
   return { dx: d.x * dist, dy: -d.y * dist };
 }
 
+/**
+ * 도구 카드 겹침 풀기(T5 — 연구소 2D 만 view.cardDeclutter 로 켬; 다른 2D 는 부르지 않는다).
+ * cards: [{ anchor:{x,y,R}, w, h, dir, slot?, labelPush?, score, force? }] (화면 px, 같은 기준점 카드가 여럿이어도 됨)
+ * obstacles: [[x0,y0,x1,y1]] — 캔버스 글(문패·라운지 글) 등 카드가 피할 사각형
+ * 점수 높은 순으로 놓는다: 원래 슬롯(cardOffset) → 같은 기준점의 다른 방향(위·아래·좌·우·대각, 리더선 ≤ maxLead) →
+ * 작게(miniK) 같은 순서 → 그래도 겹치면 숨김. force(포커스·호버)는 겹쳐도 원래 슬롯에 보인다. 결정적(같은 입력 → 같은 결과).
+ * opts.forceAvoid(기본 false): force 카드도 원래 슬롯이 겹치면 같은 크기로 다른 방향 → 바깥 칸(쌓기 1·2) → 작게(miniK) 같은 순서를 시도(다 막히면 원래 슬롯, 숨기지 않음).
+ * opts.grow(기본 0): 그릴 때 카드가 커지는 비율(예: 0.1 = 펼침·섬광 1.1배) — 그만큼 넓혀 겹침을 본다(자리·크기 출력은 그대로).
+ * opts.on === false 면 겹침 검사 없이 원래 슬롯 그대로(회귀용).
+ * → 입력과 같은 순서 [{ dx, dy, w, h, x0, y0, mini, hidden, moved }] (dx·dy = 기준점 → 카드 중심)
+ */
+export const DECLUTTER_DIRS = ['search', 'agent', 'edit', 'shell', 'web', 'read', 'skill', 'misc']; // 위·아래·좌·우·대각 4(HOLO_DIR 각)
+const FORCE_STACK = 2; // forceAvoid 가 더 보는 바깥 칸 수(cardOffset stack)
+export function placeCards(cards, obstacles = [], opts = {}) {
+  const { on = true, pad = 2, maxLead = 240, miniK = 0.55, forceAvoid = false, grow = 0 } = opts;
+  const out = new Array(cards.length);
+  const at = (c, dir, w, h, slot, push) => {
+    const o = cardOffset(dir, c.anchor.R || 0, w, h, slot, push);
+    const cx = c.anchor.x + o.dx, cy = c.anchor.y + o.dy;
+    return { dx: o.dx, dy: o.dy, w, h, x0: cx - w / 2, y0: cy - h / 2 };
+  };
+  const orig = (c, k = 1) => at(c, c.dir, c.w * k, c.h * k, c.slot || 0, c.labelPush || 0);
+  if (!on) { for (let i = 0; i < cards.length; i++) out[i] = { ...orig(cards[i]), mini: false, hidden: false, moved: false }; return out; }
+  const placed = obstacles.slice(); // 사각형은 앞 네 값만 읽음(r[0..3]) — 장애물마다 사본을 만들지 않음(프레임마다 부름)
+  const hit = (p) => {
+    const gx = p.w * grow / 2 + pad, gy = p.h * grow / 2 + pad; // grow: 그릴 때 커지는 몫(섬광 1.1배 등)까지 비킴
+    const x0 = p.x0 - gx, y0 = p.y0 - gy, x1 = p.x0 + p.w + gx, y1 = p.y0 + p.h + gy;
+    for (const r of placed) if (x0 < r[2] && x1 > r[0] && y0 < r[3] && y1 > r[1]) return true;
+    return false;
+  };
+  const order = cards.map((c, i) => i).sort((a, b) => (cards[b].score - cards[a].score) || a - b);
+  const angOf = (d) => Math.round(Math.atan2(holoDir(d).y, holoDir(d).x) * 1000);
+  for (const i of order) {
+    const c = cards[i];
+    let pick = null, mini = false, moved = false;
+    if (c.force) {
+      pick = orig(c);
+      // opts.forceAvoid(연구소 2D 전체 보기 원경만): 원래 슬롯이 장애물과 겹치면 같은 크기로 다른 방향 → 한두 칸 바깥(쌓기 칸 1·2, 모든 방향) →
+      // 작게(miniK) 원래 방향·같은 순서 — 다 막히면 원래 슬롯(숨기지 않음). 포커스 카드 여럿이 노드 둘레 칸을 먼저 차지해도 바깥 칸으로 비킴
+      if (forceAvoid && hit(pick)) {
+        const own = angOf(c.dir);
+        let alt = null;
+        for (const k of [1, miniK]) {
+          if (k !== 1) { const f = orig(c, k); if (!hit(f)) { alt = f; mini = true; break; } }
+          for (let st = 0; st <= FORCE_STACK && !alt; st++) for (const d of DECLUTTER_DIRS) {
+            if (st === 0 && angOf(d) === own) continue;
+            const p = at(c, d, c.w * k, c.h * k, st, 0);
+            if (Math.hypot(p.dx, p.dy) > maxLead) continue;
+            if (!hit(p)) { alt = p; mini = k !== 1; moved = true; break; }
+          }
+          if (alt) break;
+        }
+        if (alt) pick = alt;
+      }
+    } else {
+      for (const k of [1, miniK]) {
+        const first = orig(c, k);
+        if (!hit(first)) { pick = first; mini = k !== 1; break; }
+        const own = angOf(c.dir);
+        for (const d of DECLUTTER_DIRS) {
+          if (angOf(d) === own) continue;
+          const p = at(c, d, c.w * k, c.h * k, 0, 0);
+          if (Math.hypot(p.dx, p.dy) > maxLead) continue;
+          if (!hit(p)) { pick = p; mini = k !== 1; moved = true; break; }
+        }
+        if (pick) break;
+      }
+    }
+    if (!pick) { out[i] = { ...orig(c), mini: false, hidden: true, moved: false }; continue; }
+    const gx = pick.w * grow / 2, gy = pick.h * grow / 2;
+    placed.push([pick.x0 - gx, pick.y0 - gy, pick.x0 + pick.w + gx, pick.y0 + pick.h + gy]);
+    out[i] = { ...pick, mini, hidden: false, moved };
+  }
+  return out;
+}
+
+/** 전체 보기 섬(동) 이름표 자리(세계 x·z): 배치가 준 b.labelX·b.labelZ(원형 연구동) 우선, 없으면 x = 가운데(null), z = 바닥판 앞 + 1.6 */
+export function islandLabelAt(b) {
+  return { x: b.labelX ?? null, z: b.labelZ ?? b.bounds.maxZ + 1.6 };
+}
+
 /** 카드 높이(px): 세계 높이 × 배율, 상위·포커스는 최소 높이까지 키움(3D 규칙의 2D판) */
 export function cardPx(worldH, scale, { boost = 1, minPx = 0, maxPx = 230 } = {}) {
   const px = worldH * scale * boost;

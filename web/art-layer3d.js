@@ -35,7 +35,7 @@ export function artInk(out, c, a, isLight) {
   return out;
 }
 
-class ArtLayerBase3D {
+export class ArtLayerBase3D { // export: 복셀 연구소 플랫폼(web/lab/lab-platform.js LabPlatform3D)이 이어받음
   /** solid: 상자를 배경과 섞은 불투명 색으로(복셀 가구 — 깊이 쓰기), 아니면 흐름과 같은 저휘도 혼합 */
   constructor(scene, view, { book, fx, style = null }, { solid = false } = {}) {
     ensureArtCss();

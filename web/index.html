@@ -59,7 +59,7 @@
       if (!v2d) { try { v2d = localStorage.getItem('ccviz.view2'); } catch (e) {} }
       v2d = String(v2d || '').toLowerCase(); if (v2d === 'shapes' || v2d === 'shape') v2d = 'planet';
       var pre = d === '2d'
-        ? [[v2d === 'planet' ? 'flat/planet2d.js' : v2d === 'voxel' ? 'flat/voxel2d.js' : 'flat/flow2d.js'], ['flat/flat-view.js'], ['flat/flat-core.mjs'], ['flat/flat-draw.js'], ['flat/camera2d.js'], ['html-util.mjs'], ['overview/island-label.mjs']]
+        ? [[v2d === 'planet' ? 'flat/planet2d.js' : v2d === 'voxel' || v2d === 'lab' ? 'flat/voxel2d.js' : 'flat/flow2d.js'], ['flat/flat-view.js'], ['flat/flat-core.mjs'], ['flat/flat-draw.js'], ['flat/camera2d.js'], ['html-util.mjs'], ['overview/island-label.mjs']]
         : [[cdn + 'build/three.module.js', 'sha384-GY5FqjttLCFRt/McQbyaVdCk2O1IQtOeX8Py6NfD89BIAsIyJFRl4UgSXrk2vXAk'],
            [cdn + 'examples/jsm/controls/OrbitControls.js', 'sha384-aJoe4qqS/DgF2jh9njAuvA6QIveJYoCuYOfYjdFY8P3eawzmc9bEQ40jq2TvOyuP'],
            [cdn + 'examples/jsm/renderers/CSS2DRenderer.js', 'sha384-9CXQqRjuKfYvfHem9p/LPU6b7PaeeiDuC/gp1qRz3bEV9txWG5wi9XhrkE/0/Dn9'],

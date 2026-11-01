@@ -6,6 +6,7 @@ import { stageInsets } from '../screen-insets.js';
 import { t } from '../i18n.mjs';
 import { promptCamPlan } from '../camera-core.mjs'; // 입력 때 메인으로(Follow my prompts)
 import { GitHold, gitHoldPick, gitHoldLabel, GIT_HOLD } from '../camera-core.mjs'; // git 동작 붙잡기
+import { camVisible } from '../camera-core.mjs'; // 카메라 대상 = 지금 보이는 노드만(범위·표시 고르기)
 import { FLAT, toWorld, zoomAt, panBy, boxCenterXZ, fitNeed, refineFit2D, fitMinD, flyPose, dampTo, clampD } from './flat-core.mjs';
 const HAS = (view, id) => { const v = view && view.vis && view.vis.get(id); return !!(v && !v.gone && !v.hidden); };
 
@@ -227,7 +228,7 @@ export class Director2D {
    *  최근 수동 조작·상세 팝업·자동 카메라 끔·큰 재생 배속이면 옮기지 않음(0). 반환 = 빛줄기가 기다릴 카메라 이동 남은 시간(초) */
   promptFocus(id, { speed = 1 } = {}) {
     const now = performance.now() / 1000;
-    const p = promptCamPlan({ enabled: this.enabled, manual: this.mode === 'manual', hold: !!this.hold, dragging: !!this.dragging, has: !!(this.view && HAS(this.view, id)), speed });
+    const p = promptCamPlan({ enabled: this.enabled, manual: this.mode === 'manual', hold: !!this.hold, dragging: !!this.dragging, has: !!(this.view && HAS(this.view, id) && this._visibleId(id)), speed }); // 범위 밖·숨긴 메인이면 옮기지 않음
     if (!p.move) return 0;
     const same = this.prompt && this.prompt.id === id && now < this.prompt.until;
     this.prompt = { id, until: now + p.dur + p.hold };
@@ -240,7 +241,7 @@ export class Director2D {
   _promptStep(now) {
     const pr = this.prompt;
     if (!pr) return false;
-    if (this.mode !== 'auto' || now >= pr.until || !HAS(this.view, pr.id)) {
+    if (this.mode !== 'auto' || now >= pr.until || !HAS(this.view, pr.id) || !this._visibleId(pr.id)) {
       this.prompt = null;
       if (this.mode === 'auto') { this.lastSwitch = -1e9; this._flyNext = true; }
       return false;
@@ -266,7 +267,10 @@ export class Director2D {
   // ---------- 고르기·구도 ----------
   _clusterOf(id) { const v = this.view; if (v.nodeCluster) { const p = v.nodeCluster(id); if (p) return p; } const n = this.getNode(id); return n ? n.projectId || null : null; }
   _lastAt(id) { const a = this.activity.get(id); return a && a.length ? a[a.length - 1] : null; }
-  _shown(id) { return isShown(this.view.vis.get(id)); }
+  _hide() { const pf = this.view && this.view.pf; return this.scope.mode === 'all' && pf && pf.hide && pf.hide.size ? pf.hide : null; } // 숨긴 세션 키
+  _shown(id) { return camVisible(this.view.vis.get(id), { hide: this._hide() }); }
+  /** 카메라 대상이 될 수 있는가: 보이고 지금 범위 안(3D camera.js _visibleId 와 같은 판정) */
+  _visibleId(id) { const v = this.view && this.view.vis && this.view.vis.get(id); return !!v && camVisible(v, { hide: this._hide(), scope: this.scope, pid: this.scope.mode === 'all' ? this._clusterOf(id) : null }); }
   _inScope(id, v, sc = null) {
     const all = this.scope.mode === 'all';
     const fp = sc ? sc.pid : all ? this.scope.focusProject : null, fsid = sc ? sc.sid : all ? this.scope.focusSession : null;
@@ -324,6 +328,7 @@ export class Director2D {
       return w ? { p: w.target, r: (view.fitNodeR ? view.fitNodeR(x) : w.r) * FIT.NODE_K + FIT.NODE_PAD, e: pxToE(lmemo.get(x, now), unit) } : null;
     });
     if (!(gh && gh.length)) for (const q of extra) pts.push(q);
+    if (!sc && !(gh && gh.length) && view.fitShell) view.fitShell(pts); // 복셀 연구소 2D: 전체 맞춤에 원형 연구동 외벽·라운지까지(무게 0)
     return pts;
   }
   _fitFrame(now, sc = null, hold = this.fit) {
@@ -428,7 +433,7 @@ export class Director2D {
   _gitStep(now, prompting) {
     const all = this.git.active(now, this._clk());
     const follow = this.camMode === 'follow';
-    const list = gitHoldPick(all, { enabled: this.enabled, auto: this.mode === 'auto', inspect: !!this.hold, prompt: prompting, follow }, (id) => HAS(this.view, id) && this._shown(id) && this._inScopeNow(id), (id) => { const n = this.getNode(id); return (n && n.rootSessionId) || this._clusterOf(id) || ''; });
+    const list = gitHoldPick(all, { enabled: this.enabled, auto: this.mode === 'auto', inspect: !!this.hold, prompt: prompting, follow }, (id) => HAS(this.view, id) && this._visibleId(id), (id) => { const n = this.getNode(id); return (n && n.rootSessionId) || this._clusterOf(id) || ''; });
     const ids = [...new Set(list.map((h) => h.id))];
     const sig = ids.length ? (follow ? 'f|' : 'a|') + ids.join(',') : '';
     const was = this._gitSig;

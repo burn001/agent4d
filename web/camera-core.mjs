@@ -37,6 +37,25 @@ export function isShown(v, dim = false) {
   return true;
 }
 
+/**
+ * 카메라 대상이 될 수 있는가(= 지금 화면에 보이는가) — 사용자 입력('Follow my prompts')·git 붙잡기·
+ * 활동 따라가기·맞춤이 모두 이 판정 하나를 쓴다. 3D camera.js · 2D camera2d.js 공용.
+ * - isShown(숨김·퇴장·희미·나가는 프로젝트 아님) + 표시 고르기로 숨긴 세션(hide 에 's:<rootSessionId>' — 복셀은 세션별 projOut 이 없다)
+ * - scope = 디렉터 범위 {mode, focusProject, focusSession}: 'all' 이면 세션 선택 = 그 트리, 프로젝트 선택 = 그 섬, 전체 = 섬이 있는 노드.
+ *   생략(null)하면 범위는 따지지 않는다(보이는가만). pid = 그 노드의 섬(프로젝트) id
+ */
+export function camVisible(v, { dim = false, hide = null, scope = null, pid = null } = {}) {
+  if (!isShown(v, dim)) return false;
+  const rs = v.node && v.node.rootSessionId;
+  if (hide && hide.size && rs && hide.has('s:' + rs)) return false;
+  if (!scope || scope.mode !== 'all') return true;
+  if (scope.focusSession) return rs === scope.focusSession;
+  return !!pid && (!scope.focusProject || pid === scope.focusProject);
+}
+
+/** 범위 밖·숨긴 노드 자리에 연출(파동·고리·빛 구)을 띄우지 않는다 — 렌더러 vis 항목 기준(페이드로 나가는 중도 안 띄움) */
+export function fxShown(v) { return !!v && !v.hidden && !v.gone && !v.projOut; }
+
 /** 지금 활동 중인가: 열린 도구가 있거나, 끝나지 않은 노드가 active 이거나 최근 WINDOW 초 안에 이벤트 */
 export function isLive(v, lastEventAt, now, clockMs = Date.now()) {
   const open = v.icons ? v.icons.size || 0 : 0;
@@ -652,4 +671,19 @@ export function gitHoldLabel(op, tr = null) {
   if (op === 'pr-create') return tr ? tr('prCreate') : 'PR create';
   if (op === 'pr-merge') return tr ? tr('prMerge') : 'PR merge';
   return 'git ' + op;
+}
+
+// ---------------- 방위각 풀기(복셀) ----------------
+/** 방위각을 azCenter ± azRange 에 묶는가 — azFree(복셀)면 묶지 않는다(azCenter·azRange 는 첫 자리·섬 배치 계산에만) */
+export const azRanged = (pr) => !!pr && pr.azCenter != null && pr.azRange != null && !pr.azFree;
+/** 한 방향 360° 돌기 한 걸음(rad): io = {spin(도/초), minK(바쁠 때도 도는 몫 0..1)}, calmK = 쉼 정도 0..1 */
+export function spinStep(io, calmK, dt) {
+  if (!io || !(io.spin > 0) || !(dt > 0)) return 0;
+  const lo = Math.max(0, Math.min(1, io.minK ?? 0)), k = lo + (1 - lo) * Math.max(0, Math.min(1, calmK || 0));
+  return ((io.spin * Math.PI) / 180) * k * dt;
+}
+/** 순환 샷 n 번째(1부터)의 방위 돌림(rad): 늘 같은 쪽으로 step 도 — 몇 샷이면 앞·옆·뒤를 다 돈다 */
+export function shotYawStep(stepDeg, n) {
+  if (!stepDeg || !(n >= 1)) return 0;
+  return (stepDeg * Math.PI) / 180;
 }

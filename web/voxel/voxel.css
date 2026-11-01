@@ -54,6 +54,10 @@
 .vx-label.crowded.focus { opacity: 1; }
 .vx-label.gone { color: var(--muted); opacity: .75; font-weight: 500; }
 .vx-label.machine { font-weight: 550; font-size: 10.5px; }
+/* 연구소 표지: 머리 위 대량 변경 ×N 칩 · 주인 책상 옆 기자재 '+n' */
+.vx-label.lab-chip { padding: 0 6px; border-radius: 9px; background: var(--chip-bg); border: 1px solid var(--border); font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.vx-label.lab-chip.bulk { border-color: var(--accent); color: var(--accent); font-size: 12px; }
+.vx-label.lab-chip.more { color: var(--muted); }
 /* 작업 카드 이름표: 한 줄(상태 점 · 이름 · 꼬리표), 점 색 = 카드 상태 색 */
 .vx-label.job { font-size: 10px; padding: 0 5px; }
 .vx-label.job .jrow { display: inline-flex; align-items: center; gap: 4px; }
