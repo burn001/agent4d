@@ -11,7 +11,7 @@
       prompt: 'Install Agent4D from https://github.com/burn001/agent4d — clone it to ~/agent4d, link its skills/agent4d folder into ~/.claude/skills/agent4d (a junction on Windows), then start it and give me the link.',
       copy: 'Copy', copied: 'Copied',
       f1: 'Main agent, subagents, workflows, <code>claude -p</code> sessions and background commands, streamed live from local transcripts (read-only).',
-      f2: 'Three views — Flow, Planet and Voxel Office — in 3D or lightweight 2D.',
+      f2: 'Four views — Flow, Planet, Voxel Office and the new Voxel Lab, a round lab building with rigs for background jobs — in 3D or lightweight 2D.',
       f3: 'Replay past sessions, see context usage and plan limits, and follow every project on your machine at once.',
       foot: 'Apache-2.0 · © burn001 (Dr. Cho, Sangkyu) · Not affiliated with Anthropic.'
     },
@@ -25,7 +25,7 @@
       prompt: 'https://github.com/burn001/agent4d 에서 Agent4D 를 설치해 줘. ~/agent4d 에 클론하고, skills/agent4d 폴더를 ~/.claude/skills/agent4d 로 연결(Windows 는 정션)한 뒤, 실행해서 링크를 알려 줘.',
       copy: '복사', copied: '복사했습니다',
       f1: '메인 에이전트와 서브에이전트, 워크플로, <code>claude -p</code> 세션, 백그라운드 명령까지 이 PC의 대화 기록(transcript)을 읽어 실시간으로 보여 줍니다(읽기 전용).',
-      f2: '흐름(Flow)·Planet·복셀 오피스(Voxel Office) 세 가지 화면을 3D로, 또는 가벼운 2D로 볼 수 있습니다.',
+      f2: '흐름(Flow)·Planet·복셀 오피스(Voxel Office), 그리고 백그라운드 작업을 기자재로 보여 주는 둥근 연구동 복셀 연구소(Voxel Lab)까지 네 가지 화면을 3D로, 또는 가벼운 2D로 볼 수 있습니다.',
       f3: '지난 세션을 다시 보고, 컨텍스트 사용률과 요금제 사용 한도를 확인하고, 이 PC의 모든 프로젝트를 한 화면에서 함께 지켜볼 수 있습니다.',
       foot: 'Apache-2.0 · © burn001 (Dr. Cho, Sangkyu) · Anthropic과는 관계없는 개인 프로젝트입니다.'
     }
