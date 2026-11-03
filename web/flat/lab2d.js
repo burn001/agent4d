@@ -16,6 +16,8 @@
 //         다중 메인 구역(room.lab.primary === false): 공유 껍데기(바닥·플랫폼·기자재 고리·시설·외벽·문패)는 첫 구역 방에서 한 번,
 //         책상·브리지·통신 스크린은 구역 방마다. 전체 보기 동(buildings): 연구동 바닥 원 + 비활성 = 닫힌 돔(빗금 원).
 //         작업 대상 층(VoxelArt2D)은 연구소 배치에서는 쓰지 않고 가운데 플랫폼이 대신한다(전체 보기에서는 그대로).
+// C 상호작용(3D 와 같은 사건, 가볍게): lab-ix-core LabCouriers·courierFor — 서브에이전트 생성 = 의뢰서(콘솔 → 새 책상) · 끝 = 보고 ·
+//         기자재 run → done = 산출(반출대·DB 탱크). 세션 색 작은 사각 + 꼬리 점 2 + 도착 링(_drawCour2D, 원경 _labFar 생략, 움직임 줄이기 = 정지 링)
 import { Voxel2DView } from './voxel2d.js';
 import { t as tr } from '../i18n.mjs';
 import { CAT_FACILITY } from '../voxel/layout.js';
@@ -29,11 +31,16 @@ import { canvasAng, quadXZ, wallArcs, bridgeRects, facilityQuad, nearestHit, dec
 import { drawPlatformStatic2D, drawPlatformDynamic2D } from './lab2d-platform.js';
 import { drawRigs2D, drawRigRingStatic2D } from './lab2d-rigs.js';
 import { camScale, toScreen } from './flat-core.mjs';
+import { LabCouriers, courierFor, labPendStep, courierLod, LAB_IX } from '../lab/lab-ix-core.mjs';
+import { rigState, RIG_KIND_HEX } from '../lab/lab-rig-core.mjs';
+import { labWalksToStation } from '../lab/lab-walk-core.mjs';
 
 const FONT = '"Pretendard", "Segoe UI", "Malgun Gothic", system-ui, sans-serif';
 const _q = new Array(8);
 const _one = [null];
 const _live = new Set(); // 살아 있는 Lab2DView — FAR_LABEL_S 를 바꾸면 다음 프레임에 이름표 다시 고르기
+const SUBK = new Set(['subagent', 'workflow-agent']);
+const ease2 = (u) => (u <= 0 ? 0 : u >= 1 ? 1 : u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2);
 
 /**
  * 원경 이름표 판정(순수): 전체 보기(all)이고 배율 s(px/m, flat-core camScale 과 같은 값)가 기준 thr 보다 작으면 true.
@@ -73,6 +80,11 @@ export class Lab2DView extends Voxel2DView {
     this._staticTextRects = [];    // 정적 층 글 상자(문패·라운지·브리지 이름) — 정적 층을 다시 그릴 때만 새로
     this._dynRects = []; this._dynPool = [];   // 동적 장애물(배열 재사용)
     this._rigPills = []; this._pillPool = [];  // 이번 프레임 '+n' 알약(_drawRoomDyn 에서 자리만 → 카드 위에서 _drawRigMore)
+    // C 운반 캡슐(3D LabView 와 같은 풀·같은 판정)
+    this._cour = new LabCouriers(LAB_IX.COURIERS);
+    this._pendDisp = []; this._repAt = new Map(); this._rigAt2 = -1; this._courAt = -1;
+    this._courCtx = { layout: null, nodeOf: (id) => { const v = this.vis.get(id); return v ? v.node : null; } };
+    this._pendTry = (p) => this._tryDispatch(p);
     _live.add(this);
   }
   /** 원경 기준(px/m): 전체 보기에서 이보다 작으면 연구동 안 노드 이름표는 메인·포커스·호버만(섬 이름표와 겹침 방지) ·
@@ -86,6 +98,100 @@ export class Lab2DView extends Voxel2DView {
     for (const w of _live) { w.lastLabelPass = 0; if (typeof w.invalidate === 'function') w.invalidate(); }
   }
   dispose() { _live.delete(this); super.dispose(); }
+  /** 재생 seek·보관함 열기: 3D LabView.reset 과 같이 비행 중 캡슐·생성 대기·보고 표시를 비움(새 스냅샷 위로 옛 캡슐이 날거나 같은 서브에이전트 끝 보고가 막히지 않게) */
+  reset() {
+    super.reset();
+    if (this._cour) { this._cour.clear(); this._pendDisp.length = 0; this._repAt.clear(); this._rigAt2 = -1; this._courAt = -1; }
+  }
+
+  // ---------------- C 운반 캡슐(사건) ----------------
+  addNode(node, spawn = true) {
+    super.addNode(node, spawn);
+    if (spawn && node && node.parentId && SUBK.has(node.kind) && this._pendDisp && this._pendDisp.length < 32) this._pendDisp.push({ id: node.id, at: this._now || 0 });
+  }
+  updateNode(id, patch = {}, opts = {}) {
+    super.updateNode(id, patch, opts);
+    if (!this._cour || !patch || !('status' in patch) || (opts && opts.quiet)) return;
+    const v = this.vis.get(id), n = v && v.node;
+    if (!n || !SUBK.has(n.kind)) return;
+    if (patch.status === 'active' || patch.status === 'idle') { this._repAt.delete(id); return; }
+    if (this._repAt.has(id)) return;
+    this._courCtx.layout = this.layout;
+    const c = courierFor({ type: 'node-update', node: n, patch }, this._courCtx);
+    if (!c) return;
+    if (this._repAt.size > 256) this._repAt.clear();
+    this._repAt.set(id, this._now || 0);
+    this._addCourier2D(c);
+  }
+  _tryDispatch(p) {
+    const v = this.vis.get(p.id), lay = this.layout;
+    if (!v) return true;
+    if (!lay || !lay.lab || !(lay.seat instanceof Map) || !lay.seat.has(p.id)) return false;
+    this._courCtx.layout = lay;
+    const c = courierFor({ type: 'node-add', node: v.node }, this._courCtx);
+    if (c) this._addCourier2D(c);
+    return true;
+  }
+  _addCourier2D(c) {
+    const t = this.tokens, sq = Math.sqrt(Math.max(1, this.ts || 1));
+    let col, rim;
+    if (c.color && c.color.startsWith('rig:')) col = rim = (t.isLight ? RIG_KIND_HEX.light : RIG_KIND_HEX.dark)[c.color.slice(4)] || t.muted;
+    else {
+      const ov = c.owner && this.vis.get(c.owner);
+      col = (ov && this.vsess && this.vsess.sessColor(ov.node)) || t['flow-call'] || t.text;
+      rim = c.color === 'ok' ? t.ok : c.color === 'fail' ? t.error : col;
+    }
+    const it = this._cour.add(c.kind, c.from.x, c.from.y, c.from.z, c.to.x, c.to.y, c.to.z, this._now || 0, c.dur / sq, col, c.pri);
+    if (it) { it.c2 = rim || col; it.m = c.m || 1; }
+  }
+  /** 기자재 상태 전이(0.25초 표본, 3D _frameHook 과 같은 규칙): run → done 산출 캡슐 */
+  _rigStep2D(now) {
+    if (now - this._rigAt2 < 0.25) return;
+    this._rigAt2 = now;
+    const clk = this.clock();
+    for (const m of this.machines.values()) {
+      if (m.released || !m.pos || !(m.pos.type === 'rig' || (m.pos.type === 'batch' && m.pos.rigKind))) continue;
+      const st = rigState(m.node, clk, m.pos.rigKind);
+      if (m._rs2 && m._rs2 !== st && st === 'done') {
+        this._courCtx.layout = this.layout;
+        const c = courierFor({ type: 'rig', node: m.node, prev: m._rs2, state: st, kind: m.pos.rigKind, pos: m.pos }, this._courCtx);
+        if (c) this._addCourier2D(c);
+      }
+      m._rs2 = st;
+    }
+  }
+  /** 캡슐: 세션 색(산출 = 종류색) 작은 사각 4～8px + 꼬리 점 2 + 도착 링 · 움직임 줄이기 = 도착점 정지 링 0.5초 */
+  _drawCour2D(ctx, s, now) {
+    const C = this._cour;
+    if (!C) return; // 생성자 없이 만든 시험용 보기
+    C.step(now);
+    if (!C.n || this._labFar()) return;
+    const lod = courierLod(false, !!this.reduced), X = this._X, Y = this._Y;
+    const sz = Math.max(4, Math.min(8, 0.3 * s));
+    let moving = false;
+    for (let i = 0; i < C.n; i++) {
+      const it = C.list[i], tA = now - it.t0, u = tA / it.dur;
+      if (lod === 'ring') {
+        if (tA >= 0 && tA < LAB_IX.REDUCED_RING_S) { ctx.globalAlpha = 0.8; ctx.strokeStyle = it.c2 || it.c; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(X(it.tx), Y(it.tz), 0.55 * s, 0, Math.PI * 2); ctx.stroke(); }
+        continue;
+      }
+      if (u < 0) continue;
+      if (u >= 1) {
+        const q = (tA - it.dur) / LAB_IX.RING_S;
+        if (q < 1) { moving = true; ctx.globalAlpha = 1 - q; ctx.strokeStyle = it.c2 || it.c; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(X(it.tx), Y(it.tz), (0.3 + q * 0.6) * s, 0, Math.PI * 2); ctx.stroke(); }
+        continue;
+      }
+      moving = true;
+      for (let j = 2; j >= 0; j--) { // 꼬리 2 → 몸
+        const e = ease2(u - j * 0.05), x = X(it.fx + (it.tx - it.fx) * e), y = Y(it.fz + (it.tz - it.fz) * e) - Math.sin(e * Math.PI) * 0.25 * s; // 위로 살짝(높이 암시)
+        ctx.globalAlpha = j ? 0.6 - 0.2 * j : 1;
+        if (j) { ctx.fillStyle = it.c2 || it.c; ctx.beginPath(); ctx.arc(x, y, Math.max(1.2, sz * 0.22), 0, Math.PI * 2); ctx.fill(); }
+        else { ctx.fillStyle = it.c; ctx.fillRect(x - sz / 2, y - sz / 2, sz, sz); ctx.strokeStyle = it.c2 || it.c; ctx.lineWidth = 1; ctx.strokeRect(x - sz / 2, y - sz / 2, sz, sz); }
+      }
+    }
+    ctx.globalAlpha = 1;
+    if (moving && !this.reduced) this._labAnimNext = Math.max(this._labAnimNext || 0, 1);
+  }
 
   get isLab() { return !!(this.layout && this.layout.lab); }
   /** 플랫폼 반지름(3D LabView.setPlatformRadius 와 같은 뜻) */
@@ -107,6 +213,11 @@ export class Lab2DView extends Voxel2DView {
   _computeLayout(present, campus) {
     if (campus) return computeLabCampus(present, this.scope.roots, this.scope.projects, this.layout && this.layout.campus && this.layout.lab ? this.layout : null, { showInactive: this.scope.showInactive, nowMs: Date.now(), view: packView(this.container, { flat: true }) });
     return computeLab(present, this.rootId, this.layout && this.layout.lab && !this.layout.campus ? this.layout : null, { rP: this.labRP });
+  }
+  /** 시설 자리: 연구소는 Agent·워크플로 도구면 포털로 가지 않고 자기 책상에서(3D LabView._stationSpot 과 같음, 11.02.) */
+  _stationSpot(ch, cat) {
+    if (ch && ch.room && ch.room.type === 'lab' && !labWalksToStation(cat)) return null;
+    return super._stationSpot(ch, cat);
   }
   _relayout() {
     super._relayout();
@@ -279,6 +390,12 @@ export class Lab2DView extends Voxel2DView {
       if (a.fx.active) level = 2;
     }
     if (this._labAnim) level = Math.max(level, this._labAnim);
+    // C 의뢰서(새 책상 배치 뒤) · 기자재 전이 → 산출 캡슐 · 캡슐이 있으면 다시 그림
+    if (this._cour) {
+      if (this._pendDisp.length) labPendStep(this._pendDisp, now, this._pendTry);
+      this._rigStep2D(now);
+      if (this._cour.n) level = Math.max(level, 1);
+    }
     return level;
   }
   _drawScene(ctx, now) {
@@ -542,6 +659,7 @@ export class Lab2DView extends Voxel2DView {
       }
     }
     if (s > 3 && r.lab && r.lab.primary !== false && r.lab.rigMore && r.lab.rigMore.size) this._planRigMore(ctx, r, s);
+    if (r.lab && r.lab.primary !== false && this._courAt !== now) { this._courAt = now; this._drawCour2D(ctx, s, now); } // C 운반 캡슐(프레임에 한 번)
     ctx.globalAlpha = 1;
   }
 

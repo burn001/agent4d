@@ -125,6 +125,41 @@ export function clientSpot(room) {
   return p;
 }
 
+// ---------------- 소환 창: Agent·워크플로 도구는 소환 순간에만 포털(11.02.) ----------------
+// 사용자 지적: "(자율 실행 루프 프로젝트의) claude -p 에이전트가 사무실 앞 왼쪽 소환 포털 앞에 계속 서 있다."
+// claude -p·메인·서브에이전트는 전경 Agent·Workflow 도구를 하위가 끝날 때까지 연 채 기다린다(수 분～수십 분). 예전 복셀 오피스는
+// 그 도구가 열려 있는 내내 포털 앞에서 두 팔을 뻗고 서 있었다. 이제 포털은 소환 순간(도구 시작 → 새 하위가 포털에서 나타나는
+// 1.4초 창)에만 가고, 그 뒤에는 자기 책상으로 돌아가 책상에서 기다린다(연구소 은 처음부터 책상 — 포털이 외벽이라).
+export const SUMMON_CATS = new Set(['agent', 'workflow']);
+export const SUMMON = {
+  HOLD: 1.4, // 하위가 포털에서 나타난 뒤 포털을 지키는 시간(= 포털 소용돌이 창 room._portalUntil)
+  STAY: 1.4, // 포털에 닿으면 적어도 이만큼은 팔을 뻗고 섬(하위가 먼저 나왔어도 — 짧게 들렀다 복귀)
+  WAIT: 5,   // 도구 시작 뒤 하위가 아직 안 나타났을 때 포털에서 기다리는 상한(이 뒤에 나온 하위는 부르지 않음)
+  MAX: 10,   // 도구 시작 뒤 포털에 가 있는(걷기 포함) 전체 상한(초, 벽시계)
+};
+/** 이 사람이 띄운 하위가 방금 나타남(office _spawnPoint) — Agent·워크플로 도구가 열려 있을 때만 적어 둔다 */
+export function noteSummon(p, now) {
+  if (p && p.tools && p.tools.some((t) => t.end == null && SUMMON_CATS.has(t.cat))) p.summonAt = now;
+}
+/**
+ * 지금 포털에 가 있어야 하나(순수). ch = Character(tools·summonAt·target·state·arrivedAt), now = 벽시계 초(도구 t0 와 같은 시계).
+ * 가장 최근에 연 Agent·워크플로 도구(스냅샷·따라잡기로 넣은 old 도구 제외)의 시작 t0 기준:
+ *   · MAX 넘으면 false(책상) · 포털로 걷는 중이면 끝까지 감(소환이 먼저 끝나도 짧게 들렀다 복귀)
+ *   · 포털에 섰으면 max(하위가 나온 뒤 HOLD — 아직이면 t0 + WAIT, 도착 뒤 STAY) 까지
+ *   · 책상 쪽: 하위가 아직이면 WAIT 안에서만 출발, 이미 나왔으면(t0 − 0.5 ≤ summonAt < t0 + WAIT) 나온 뒤 HOLD 안에서만
+ */
+export function summonAtPortal(ch, now) {
+  let t0 = -Infinity;
+  for (const t of ch.tools || []) if (t.end == null && !t.old && SUMMON_CATS.has(t.cat) && t.t0 > t0) t0 = t.t0;
+  if (t0 === -Infinity || now - t0 > SUMMON.MAX) return false;
+  const tg = ch.target, toPortal = !!(tg && tg.type === 'station' && SUMMON_CATS.has(tg.cat));
+  if (toPortal && ch.state === 'walk') return true;
+  const s = ch.summonAt, spawned = s != null && s >= t0 - 0.5 && s < t0 + SUMMON.WAIT;
+  const until = spawned ? s + SUMMON.HOLD : t0 + SUMMON.WAIT;
+  if (toPortal && ch.state === 'work') return now < Math.max(until, (ch.arrivedAt || 0) + SUMMON.STAY);
+  return now < until;
+}
+
 // ---------------- 쉬러 가기(대기 동작의 걷기) ----------------
 export const BREAK = {
   // 팀장(메인)은 사람 입력을 오래(3분 이상) 기다릴 때만, 한 번 다녀오면 15분 동안은 다시 가지 않는다.
@@ -282,7 +317,7 @@ export function launcherDash(pos, k) {
   return { x, y, z, top, label: { x, y: top + VX_DASH.LABEL_GAP, z } };
 }
 export const DESK_MON = { H: 1.0, LEAD_K: 1.2, FOCUS_K: 1.12, MAX_H: 1.16, LIFT: 0.1, TILT: 0.24, INSET: 0.12, MINI_W: 0.8, MINI_H: 0.52, POP_W: 0.64, POP_H: 0.4, SIDE_GAP: 0.08, BACK_A: 0.65 };
-// 화면·옆 창·팝업 2배(2026-10-31 박사님 1.5배 → 2배, "아바타가 조금 가려도 괜찮아") — 위 끝이 머리 위로 조금 올라옴, 직원은 투명한 화면 뒤로 비쳐 보임
+// 화면·옆 창·팝업 2배(2026-10-31 사용자 1.5배 → 2배, "아바타가 조금 가려도 괜찮아") — 위 끝이 머리 위로 조금 올라옴, 직원은 투명한 화면 뒤로 비쳐 보임
 // BACK_A = 뒷면(투명 홀로그램 판을 뒤에서 봄) 불투명도 배율: 앞면 글·무늬가 좌우 거울상으로 이만큼 옅게
 /**
  * 책상 고정 모니터 자세(순수). seat = {deskX, deskZ, face}, deskTop = 상판 높이, depth = 책상 깊이, H = 지금 화면 높이(열림 반영).

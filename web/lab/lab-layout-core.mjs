@@ -199,7 +199,10 @@ export function computeLab(nodesIn, rootId, prev = null, opts = {}) {
   const zones = labZones(zoneHeads.length);
   zones.forEach((z, i) => { z.ownerId = zoneHeads[i]; });
   const nZ = zones.length, headIdx = new Map(heads.map((h, i) => [h, i % nZ]));
-  const zoneOf = (n) => { let cur = n, g = 0; while (cur && g++ < 64) { if (headIdx.has(cur.id)) return headIdx.get(cur.id); cur = byId.get(cur.parentId); } return 0; };
+  // 부모 사슬 → 메인. 띄운 세션과 끊긴 독립 기동기(detached·adopt — parentId 없음, meta.spawnedBy = 띄운 메인)는 spawnedBy 로 이어 올라간다
+  //   (기동기 → 러너 → claude -p 회차 → 그 서브에이전트가 띄운 메인 구역에 앉게 — 예전엔 사슬이 끊겨 늘 0번 구역)
+  const upOf = (cur) => byId.get(cur.parentId) || (!cur.parentId && cur.meta && cur.meta.spawnedBy && cur.meta.spawnedBy !== cur.id ? byId.get(cur.meta.spawnedBy) : null);
+  const zoneOf = (n) => { let cur = n, g = 0; while (cur && g++ < 64) { if (headIdx.has(cur.id)) return headIdx.get(cur.id); cur = upOf(cur); } return 0; };
 
   // ---- 분류 ----
   const staff = [], ops = [], guests = [], rigs = [], batches = [], boards = [], jobList = [];
@@ -344,21 +347,27 @@ export function computeLab(nodesIn, rootId, prev = null, opts = {}) {
   };
   const seqThetaOf = (zi) => zones[zi].theta - ((B.W / 2 + 2.0) / R.rBridge) / DEG; // 시퀀서(기동기) 쪽 각
   const prefOf = (n, kind, zi) => {
-    if (kind === 'op') return seqThetaOf(zi);
     const ps = n.parentId && out.seat.get(n.parentId); // 하위의 하위 = 부모 책상 각 가까이
-    return ps && ps.kind !== 'lead' && ps.zone === zi ? thetaOf(cx, cz, ps.deskX, ps.deskZ) : null;
+    const near = ps && ps.kind !== 'lead' && ps.zone === zi && Number.isFinite(ps.deskX) ? thetaOf(cx, cz, ps.deskX, ps.deskZ) : null;
+    // 회차(claude -p) = 시퀀서 쪽 · 회차가 띄운 서브에이전트 = 그 회차 책상 곁(11.02. — 예전엔 회차·하위 모두 시퀀서 각이라 하위가 회차와 떨어진 칸에 앉음)
+    if (kind === 'op') return near != null ? near : seqThetaOf(zi);
+    return near;
   };
-  const place = (arr, kind) => {
+  // 자리 고정을 먼저 모두(회차·팀원), 새 사람은 그 뒤 — 예전엔 회차(op)를 통째로(고정 + 새) 먼저 놓아 새 회차·그 하위가 아직 놓이지 않은
+  //   팀원의 이전 책상을 가져가 팀원이 연구동 건너편 책상으로 밀려 걸어갔다(11.02. 헤드리스: mock 독립 claude -p 가 41초 내내 걸음)
+  const keepPrev = (arr, kind) => {
     const rest = [];
     for (const n of arr) {
       const ps = prevSeat.get(n.id), pz = ps && Number.isFinite(ps.zone) ? ps.zone : 0;
       const s = ps && ps.kind === kind && rooms[pz] && ps.roomId === rooms[pz].id ? slotOf(pz, ps.row, ps.k) : null;
       if (s && !used.has(key(pz, s.row, s.k))) take(n, kind, pz, s); else rest.push(n);
     }
-    for (const n of rest) { const zi = zoneOf(n), f = firstFree(zi, prefOf(n, kind, zi)); if (!f) break; take(n, kind, f[0], f[1]); }
+    return rest;
   };
-  place(ops, 'op');      // 자율 루프 회차 = 시퀀서에 가까운 1열 책상
-  place(staff, 'grid');  // 팀원 = 브리지에 가까운 각부터 좌우 번갈아 · 하위의 하위 = 부모 책상 곁
+  const fill = (rest, kind) => { for (const n of rest) { const zi = zoneOf(n), f = firstFree(zi, prefOf(n, kind, zi)); if (!f) break; take(n, kind, f[0], f[1]); } };
+  const opRest = keepPrev(ops, 'op'), staffRest = keepPrev(staff, 'grid');
+  fill(opRest, 'op');       // 자율 루프 회차 = 시퀀서에 가까운 1열 책상 · 회차가 띄운 하위 = 그 회차 곁
+  fill(staffRest, 'grid');  // 팀원 = 브리지에 가까운 각부터 좌우 번갈아 · 하위의 하위 = 부모 책상 곁
 
   // ---- 손님 = 출입문 안 대기석(첫 구역 방) ----
   guests.forEach((n, i) => {

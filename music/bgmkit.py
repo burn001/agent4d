@@ -1127,7 +1127,7 @@ def run(build, argv=None):
     ap.add_argument("--wav", default=None, help="미리듣기용 16bit WAV(선택)")
     args = ap.parse_args(argv)
     t0 = time.time()
-    print(f"합성 시작: {TRACK_ID} {BPM} BPM {BEATS}/4, {BARS}마디, {DUR:.3f}초, seed {SEED}")
+    print(f"합성 시작: {TRACK_ID} {BPM} BPM {'6/8' if BEATS == 6 else str(BEATS) + '/4'}, {BARS}마디, {DUR:.3f}초, seed {SEED}")
     layers = build()
     print(f"  사건 {sum(len(L.ev) for L in layers):,}개, 킥 {len(KICKS)}")
     mix, gr = render(layers)
@@ -1146,7 +1146,7 @@ def run(build, argv=None):
     with open(out, "wb") as fh:
         fh.write(mp3)
     meta = {"title": TITLE, "mood": MOOD, "stage": STAGE, "energy": ENERGY, "duration": int(round(DUR)),
-            "bpm": BPM, "key": KEY_NAME, "meter": f"{BEATS}/4",
+            "bpm": BPM, "key": KEY_NAME, "meter": ("6/8" if BEATS == 6 else f"{BEATS}/4"),
             "sections": [{"name": s["n"], "part": s["part"], "start": round(tb(s["start"]), 3)} for s in SECS],
             "seed": SEED}
     with open(os.path.splitext(out)[0] + ".json", "w", encoding="utf-8", newline="\n") as fh:
@@ -1157,7 +1157,7 @@ def run(build, argv=None):
     ok, rep = check(mix, info)
     rep["limiter_gr_db"] = round(gr, 2)
     rep["wall_s"] = round(time.time() - t0, 1)
-    rep["bpm"], rep["key"], rep["meter"] = BPM, KEY_NAME, f"{BEATS}/4"
+    rep["bpm"], rep["key"], rep["meter"] = BPM, KEY_NAME, ("6/8" if BEATS == 6 else f"{BEATS}/4")
     with open(os.path.join(outdir, f"report-{TRACK_ID}.json"), "w", encoding="utf-8") as fh:
         json.dump(rep, fh, ensure_ascii=False, indent=1)
     print(json.dumps({k: v for k, v in rep.items() if k != "rms15_curve"}, ensure_ascii=False))

@@ -36,3 +36,20 @@ test('mock 영어: 25초 분량 가짜 이벤트의 화면 문구에 한글이 �
     assert.ok(left.size <= 3, [...left].join(' | '));
   } finally { _setLangForTest('ko'); }
 });
+
+test('mock 영어: 기동기·작업·분리 프로세스·실행 중 셸·겹침 시나리오까지 켠 가짜 이벤트의 모든 문구에 한글이 남지 않음', () => {
+  const SKIP = new Set(['id', 'nodeId', 'parentId', 'toolUseId', 'sessionId', 'projectId', 'rootSessionId', 'type', 'kind', 'cat', 'tool', 'status', 'ts', 'cwd', 'path', 'file', 'p', 'd', 'marks']);
+  const left = new Set();
+  const scan = (x, k0, depth = 0) => {
+    if (x == null || depth > 9) return;
+    if (typeof x === 'string') { if (!SKIP.has(k0) && /[가-힣]/.test(x)) left.add(x); return; }
+    if (typeof x !== 'object') return;
+    for (const [k, v] of Object.entries(x)) scan(v, Array.isArray(x) ? k0 : k, depth + 1);
+  };
+  try {
+    _setLangForTest('en');
+    const gen = new MockGenerator({ seed: 2026, startMs: Date.now() - 60000, launcher: true, ix: true, jobs: true, procs: true, runs: true, crowd: true });
+    for (let i = 0; i < 3000; i++) for (const ev of gen.next().events) scan(mockEn(ev), '');
+    assert.equal(left.size, 0, [...left].slice(0, 8).join(' | '));
+  } finally { _setLangForTest('ko'); }
+});

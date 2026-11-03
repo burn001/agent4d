@@ -6,18 +6,21 @@
 // │   pos = layout.machine 값 {x, y:0, z, type:'rig'|'batch', slot, face(중심을 보는 yaw), theta, rigKind, shelf?, scale?}      │
 // │   st  = VoxelView 기계 상태 묶음 {status(runVisStatus), runStale, flash 0..1, appear 0..1, t(초), seed, id}               │
 // │         선택(리드가 채우면 더 정확): ix(rigIxOf 세부) · lift 0..1(승강판, rigLiftK) · far(멀면 LOD 6 상자) ·                │
-// │         standby(재무장 대기 = 렌즈 덮개) · band·progress·running(시퀀서 = deviceInfo)                                     │
+// │         standby(재무장 대기 = 렌즈 덮개) · watch(들여다보기, 그리기만 +30%) · band·progress·running(시퀀서 = deviceInfo)  │
+// │         동작(없으면 기본값): ts(배속, 1) · reduced(움직임 줄이기, false) · camD(카메라 거리 m, 0 = 근경 — > 60 이면 입자 생략) │
 // │   B   = 동적 {lit, glow} · tok = 테마 토큰 · node = 앱 노드 · nowMs = 렌더러 시계(재생 = 가상)                              │
 // └──────────────────────────────────────────────────────────────────────────────────────────────┘
 // ┌ 출력 ─ export ──────────────────────────────────────────────────────────────────────────────────┐
 // │ buildRigRingStatic(room, pal, b, o)   고리 바닥 표시(빈 칸 패드 + 승강판 테두리) — 정적                                     │
 // │ drawRig(pos, st, pal, tok, B, node, nowMs) → 그린 상자 수. 기자재 한 대(종류 RIG_KINDS × 상태 RIG_STATES), ≤ 40(+승강판 10), 멀면 6 │
 // │ drawRigVacant(slot, k, pal, B)   퇴장 뒤 비워 둔 자리: 회색 판 + 테두리 4변 + 가운데 X(k 0..1 = 남은 비율) — 동적 7 상자      │
+// │ rigDynOf(id) → RigDyn | null     기자재 동작 상태(읽기 전용: act·ph·pulseAt·pulses·trans·t0·lastTrans·state) — 케이블 펄스·운반 판단용 │
+// │ clearRigDyn()                    동작 상태 모두 비움(LabView.reset — 재생 seek·보관함 열기)                                     │
 // └──────────────────────────────────────────────────────────────────────────────────────────────┘
 // 성능 상한(LAB_PERF): 기자재당 상자 ≤ 40(멀면 6) + 승강판 ≤ 10, 전체 ≤ 1,800 동적 상자, 갱신 < 1.0ms/프레임(플랫폼과 합). 프레임마다 할당 0.
 import * as THREE from 'three';
 import { LAB } from './lab-const.mjs';
-import { RIG_HEX, RIG_KIND_HEX, rigModel, rigParts } from './lab-rig-core.mjs';
+import { RIG_HEX, RIG_KIND_HEX, rigModel, rigParts, newRigDyn, rigDynStep } from './lab-rig-core.mjs';
 
 const _c = new THREE.Color(), WHITE = new THREE.Color(1, 1, 1);
 const HEX = { dark: {}, light: {} };
@@ -25,6 +28,21 @@ for (const th of ['dark', 'light']) for (const [k, v] of Object.entries(RIG_HEX[
 const KHEX = { dark: {}, light: {} }; // 종류 악센트(색 키 'kind')
 for (const th of ['dark', 'light']) for (const [k, v] of Object.entries(RIG_KIND_HEX[th])) KHEX[th][k] = new THREE.Color(v);
 const _parts = [], _model = {};
+
+// 기자재 동작: id → RigDyn(lab-rig-core). 2초마다 5초 넘게 그리지 않은 id 를 지움(지우기만 — 프레임 할당 없음)
+const _dyn = new Map();
+let _sweepT = -1e9, _sweepNow = 0;
+function _sweepOne(d, id) { if (!(d.lastT >= _sweepNow - 5)) _dyn.delete(id); }
+/** 동작 상태 모두 비움 — LabView.reset(재생 seek·보관함 열기)이 부름. 다음 그리기는 새 RigDyn + _startedLongAgo 판정(사건 없는 전이 연출 없음) */
+export function clearRigDyn() { _dyn.clear(); _sweepT = -1e9; }
+/** 기자재 동작 상태(읽기 전용) | null — C(lab-view)가 케이블 펄스·운반 판단에 씀 */
+export function rigDynOf(id) { return _dyn.get(id) || null; }
+/** 처음 보는 기자재가 이미 오래 돌던 것인가(재접속·되감기 — 시동 연출 생략). 시작 시각 모르면 false */
+function _startedLongAgo(node, nowMs) {
+  const s0 = node && (node.startedAt != null ? node.startedAt : node.meta && node.meta.run && node.meta.run.since);
+  const ms = typeof s0 === 'number' ? s0 : s0 ? Date.parse(s0) : NaN;
+  return Number.isFinite(ms) && Number.isFinite(nowMs) && nowMs - ms > 3000;
+}
 
 export function buildRigRingStatic(room, pal, b, o = {}) {
   const lab = room && room.lab;
@@ -68,16 +86,25 @@ export function drawRig(pos, st, pal, tok, B, node, nowMs) {
   const H = HEX[pal.isLight ? 'light' : 'dark'], L = B.lit, G = B.glow, a = pos.face || 0;
   const kind = pos.rigKind || (pos.type === 'batch' ? 'sequencer' : 'meter');
   const M = rigModel(node, kind, nowMs, st.ix || null, st, _model);
-  M.flash = st.flash || 0; M.rearmWait = !!st.standby;
+  const fv = st.watch ? Math.max(st.flash || 0, 0.3) : st.flash || 0; // 들여다보기 +30% = 그리는 값만(rigDynStep 은 st.flash 원값)
+  M.flash = fv; M.rearmWait = !!st.standby;
   const sc = pos.scale || 1;
   const lift = Math.max(0, Math.min(1, st.lift || 0));
-  M.scale = sc; M.lift = lift;
-  const n = rigParts(M, st.t || 0, _parts, !!st.far, st.seed || 0);
+  M.scale = sc; M.lift = lift; M.mid = st.camD > 60;
+  const now = st.t || 0;
+  let d = null;
+  if (st.id != null) {
+    if (now - _sweepT > 2 || now < _sweepT) { _sweepT = now; _sweepNow = now; _dyn.forEach(_sweepOne); }
+    d = _dyn.get(st.id);
+    if (!d) { d = newRigDyn(); _dyn.set(st.id, d); if (_startedLongAgo(node, nowMs)) d.state = M.state; }
+    rigDynStep(d, now, st.flash || 0, M.state, st.ts || 1, !!st.reduced);
+  }
+  const n = rigParts(M, now, _parts, !!st.far, st.seed || 0, d, now);
   const KC = KHEX[pal.isLight ? 'light' : 'dark'][M.kind] || H.kind;
   const appear = Math.max(0.02, st.appear == null ? 1 : st.appear);
   const sy = sc * appear, dy = -lift * 2.1 * sc; // 내려감: 최고 높이(H_MAX) 만큼
   const ca = Math.cos(a), sa = Math.sin(a), id = st.id; // 집기(pick) 주인 = 노드 id — 동적 lit 묶음만 집힌다
-  const fl = st.flash > 0 ? st.flash * 0.5 : 0;
+  const fl = fv > 0 ? fv * 0.5 : 0;
   for (let i = 0; i < n; i++) {
     const p = _parts[i];
     const lx = p.x * sc, lz = p.z * sc;

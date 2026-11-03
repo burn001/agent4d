@@ -10,7 +10,7 @@ import { BoxBatch, UNIT_BOX, buildRoomStatic, buildCorridor, drawFacilities, dra
 import { xfAngle, toLocal, camQuadrant, CAM_Q0 } from './xf.mjs';
 import { Character, drawCharacter, drawCharacterFar } from './character.js';
 import { crewSpots } from './character-core.mjs';
-import { roleOf, overseeSpot, launcherDash } from './office-core.mjs';
+import { roleOf, overseeSpot, launcherDash, SUMMON_CATS, summonAtPortal, noteSummon } from './office-core.mjs';
 import { wardrobe, headExtra } from './appearance-core.mjs';
 import { SpotBook, takeStation, takeBreak, releaseSpot, separate } from './crowd-core.mjs'; // 겹침 막기
 import { VxHolo } from './vx-holo.js';
@@ -37,6 +37,7 @@ import { BATCH, batchFold, deviceInfo, deviceSummary, nodeTags, isLauncher, isCy
 import { runVis, runWorking, runVisStatus } from '../run-core.mjs'; // 실행 중 셸
 import { isJob, jobOf } from '../job-core.mjs'; // 작업 노드
 import { jobCardsGone, vxHeldEnded, endedBadly, badEndDueAt } from '../flow-core.mjs'; // 끝난 작업 카드 빼기 · 직원·기계 머무름
+import { stepLeadExit } from './lead-exit-core.mjs'; // 끝난 별관 팀장(claude -p) 퇴장
 import { jobCardModel, jobLabelAlways, jobBoardYaw, JOBCARD } from './vx-job-core.mjs';
 import { drawJobCard } from './vx-jobs.js';
 import { VxProcs } from './vx-procs.js'; // 분리 프로세스 = 생산 라인 · 들여다보기 심부름
@@ -292,7 +293,7 @@ export class VoxelView {
         if (recent) ch.startAtDoor = true;
         else { ch.state = 'gone'; ch.released = true; ch.goneAt = now; }
       }
-      for (const t of node.openTools || []) { ch.addTool(t.toolUseId, t.cat, t.tool, now - 1); this.holo.start(node.id, t, { quiet: true }); }
+      for (const t of node.openTools || []) { ch.addTool(t.toolUseId, t.cat, t.tool, now - 1, true); this.holo.start(node.id, t, { quiet: true }); }
       if ((node.openTools || []).length) ch.snapNext = !spawn;
       this.chars.set(node.id, ch);
     }
@@ -376,7 +377,7 @@ export class VoxelView {
     if (!ch) { const m = this.machines.get(nodeId); if (m) m.flashUntil = now + 0.3; return; }
     if (ch.state === 'gone') return;
     const tid = ev.toolUseId || 'anon' + Math.random();
-    ch.addTool(tid, ev.cat || 'other', ev.tool, now);
+    ch.addTool(tid, ev.cat || 'other', ev.tool, now, quiet);
     this.holo.start(nodeId, { ...ev, toolUseId: tid }, { quiet, speed: this.ts });
     if (quiet) ch.snapNext = true;
   }
@@ -449,7 +450,7 @@ export class VoxelView {
   }
 
   // ---- 카메라 질의 ----
-  layoutNow() { this._relayout(this._now); this._syncVis(this._now); }
+  layoutNow() { stepLeadExit(this, this._now, this.nodes, this.clock(), true); this._relayout(this._now); this._syncVis(this._now); } // 스냅샷 첫 배치 전에 끝난 별관 걷기
   has(id) { return this.vis.has(id); }
   nodeTarget(id) { const v = this.vis.get(id); return v ? v.target : null; }
   nodePos(id) { return this.nodeTarget(id); }
@@ -806,6 +807,7 @@ export class VoxelView {
     if (ch.lead) return n.kind === 'main' || ch.id === this.layoutRoot ? null : room.door.out;
     if (room.type === 'meeting') return room.door.out;
     const p = this.chars.get(n.parentId);
+    noteSummon(p, this._now); // 소환 순간 — 띄운 쪽은 이 뒤 HOLD 만 포털을 지키고 책상으로
     if (p && p.room === room && room.portal) {
       const atPortal = p.state === 'work' && (p.workCat === 'agent' || p.workCat === 'workflow');
       const opening = p.tools.some((t) => t.end == null && (t.cat === 'agent' || t.cat === 'workflow'));
@@ -814,7 +816,8 @@ export class VoxelView {
     return room.door.out;
   }
 
-  _stationSpot(ch, cat) { return takeStation(this.spots, ch, cat); } // 접근점 → 대기 줄, 다 차면 제자리
+  /** 접근점 → 대기 줄, 다 차면 제자리. Agent·워크플로 도구는 소환 순간에만 포털, 그 밖엔 null(자기 책상에서 기다림) */
+  _stationSpot(ch, cat) { return SUMMON_CATS.has(cat) && !summonAtPortal(ch, this._now) ? null : takeStation(this.spots, ch, cat); }
   _releaseStation(ch) { if (ch.station || this.spots.get(ch.id)) releaseSpot(this.spots, ch); }
 
   _computeKids() {
@@ -989,6 +992,7 @@ export class VoxelView {
       const sig = [...g].sort().join('|');
       if (sig !== (this._jobGoneSig || '')) { this._jobGoneSig = sig; this._jobGone = g; this.layoutDirty = true; }
     }
+    stepLeadExit(this, now, this.nodes, this.clock()); // 끝난 claude -p 별관·연구소 구역 걷기(배치 전 — 스냅샷 첫 배치에 번쩍이지 않게)
     if (this.layoutDirty && now - this.lastLayout > 0.15) this._relayout(now);
     if (this.sess.stepMoves(now)) this._layoutVer++; // 이사 보간(정적 서명이 바뀌면 다시 그림) — 바닥 라인도 다시
     this.client.step(now); // 의뢰인 창구: 팀장 심부름·카드 읽기

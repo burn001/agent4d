@@ -32,7 +32,7 @@ test('이름 → 줄: 짧으면 한 줄, 길면 가운데 가까운 구분자에
   const huge = stencilLines('x'.repeat(30) + '_' + 'y'.repeat(30));
   assert.ok(huge.every((l) => [...l].length <= STENCIL.LINE_MAX), '줄마다 LINE_MAX 이하');
   assert.ok(huge[0].endsWith('…') && huge[1].endsWith('…'));
-  assert.deepEqual(stencilLines('건축공간연구원 설문시스템 운영'), ['건축공간연구원', '설문시스템 운영']); // 한글도 글자 단위
+  assert.deepEqual(stencilLines('가상공간연구원 설문시스템 운영'), ['가상공간연구원', '설문시스템 운영']); // 한글도 글자 단위
 });
 
 test('구역: 마지막 책상 줄 앞 ~ 앞 벽, 포털·벨 대기 줄 사이, 방 안', () => {

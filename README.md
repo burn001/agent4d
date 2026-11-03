@@ -10,9 +10,9 @@
 
 See what your Claude Code agents are doing, live, in 3D — and play it back later. Agent4D is a local, read-only viewer that turns the main agent, its subagents, workflow agents, nested `claude -p` runs, background shells and monitors into one live tree in your browser: three dimensions of space, plus time through live streaming and replay. The command-line tool is `agent4d` (`ccviz` still works).
 
-[![Planet view: the main agent's tourbillon at work](docs/media/planet.gif)](https://github.com/burn001/agent4d/releases/download/v0.1.0/agent4d-intro-v0.1.0.mp4)
+[![Planet view: the main agent's tourbillon at work](docs/media/planet.gif)](https://github.com/burn001/agent4d/releases/download/v0.7.5/agent4d-intro-v0.7.5.mp4)
 
-▶ **[Watch the 24-second intro video (MP4)](https://github.com/burn001/agent4d/releases/download/v0.1.0/agent4d-intro-v0.1.0.mp4)**
+▶ **[Watch the 30-second intro video (MP4)](https://github.com/burn001/agent4d/releases/download/v0.7.5/agent4d-intro-v0.7.5.mp4)**
 
 ## Quick start
 
@@ -61,6 +61,14 @@ Agents as office workers at desks, shelves and terminals.
 |---|---|---|
 | ![Voxel Office, live loop: the team lead and staff at work](docs/media/voxel.gif) | ![All projects, Voxel Office, dark](docs/screenshots/voxel-dark.png) | ![One session, Voxel Office, light](docs/screenshots/voxel-light.png) |
 
+### Voxel Lab
+
+A round lab building: the files being worked on sit on a central platform, background jobs run as lab rigs on the ring around it, subagents work at horseshoe desks facing the platform and the main agent watches from a raised bridge. In the all-projects view each project is its own lab, domed over while idle.
+
+| Live | Dark | Light |
+|---|---|---|
+| ![Voxel Lab, live loop: edits and a new file printed on the central platform](docs/media/lab.gif) | ![One session, Voxel Lab, dark — rigs on the ring, the main agent on the bridge](docs/screenshots/lab-dark.png) | ![All projects, Voxel Lab, light — one lab per project, idle ones domed](docs/screenshots/lab-light.png) |
+
 | You, as a console next to the main agent | Work targets under the Planet view | 2D mode for slow machines |
 |---|---|---|
 | ![The user console and its detail card: a question waiting for you, recent messages, the last final answer](docs/screenshots/user-console-dark.png) | ![Edits, a new file and a push on the work-target floor](docs/screenshots/work-targets-planet-dark.png) | ![Flow view in 2D](docs/screenshots/flow-2d-dark.png) |
@@ -99,7 +107,7 @@ The server tails the transcripts that Claude Code already writes under `~/.claud
 - **Live tool activity.** Panels next to each node show the current tool (shell, read, edit, search, web, agent, skill…) and a one-line summary. A collapsible side panel shows a live text feed.
 - **Replay.** Play past or running sessions from the start at 0.5×–32×, with idle gaps compressed, a scrubbable timeline, highlight markers and continuous playback. An optional read-only **archive** folder keeps transcripts around for replay after the originals are gone (`agent4d archive add`).
 - **Gauges.** A per-session **context usage** gauge — and every agent (main, subagent, `claude -p`) visibly heats up as its own context window fills (warming at 30%, overheating at 70%, critical at 90%; cools down after a compact) — and an opt-in **usage-limit** gauge for the 5-hour and 7-day windows.
-- **Sound** (off until you turn it on). 54 background tracks synthesized from code, plus sound effects synthesized live in the browser.
+- **Sound** (off until you turn it on). 65 background tracks synthesized from code, plus sound effects synthesized live in the browser.
 - **Languages.** The web UI and the CLI are in English by default and switch to Korean on a Korean locale. Both can be forced (see [FAQ](#faq-and-troubleshooting)).
 - **Remote access** (optional). A Cloudflare quick tunnel plus a small Cloudflare Worker give you a stable, token-protected link that survives restarts.
 
@@ -195,7 +203,7 @@ To turn the check off, set `"updateCheck": false` in `config.json` or the enviro
 
 ## Background music
 
-The 54 tracks (`bgm-aurora.mp3`, `bgm-bossa.mp3`, `bgm-caper.mp3`, `bgm-centrifuge.mp3`, `bgm-chillhop.mp3`, `bgm-circuit.mp3`, `bgm-city.mp3`, `bgm-cleanroom.mp3`, `bgm-collider.mp3`, `bgm-comet.mp3`, `bgm-copier.mp3`, `bgm-cursor.mp3`, `bgm-dawn.mp3`, `bgm-deadline.mp3`, `bgm-deepfield.mp3`, `bgm-deephouse.mp3`, `bgm-drive.mp3`, `bgm-espresso.mp3`, `bgm-funk.mp3`, `bgm-glacier.mp3`, `bgm-gravity.mp3`, `bgm-hotfix.mp3`, `bgm-hyperspace.mp3`, `bgm-ionstorm.mp3`, `bgm-jazz.mp3`, `bgm-liquid.mp3`, `bgm-lofi.mp3`, `bgm-mambo.mp3`, `bgm-meeting.mp3`, `bgm-nebula.mp3`, `bgm-orbit.mp3`, `bgm-oscillo.mp3`, `bgm-overclock.mp3`, `bgm-pantry.mp3`, `bgm-petri.mp3`, `bgm-pulsar.mp3`, `bgm-pulse.mp3`, `bgm-queue.mp3`, `bgm-rainwindow.mp3`, `bgm-reactor.mp3`, `bgm-refactor.mp3`, `bgm-satellite.mp3`, `bgm-spectro.mp3`, `bgm-sprint.mp3`, `bgm-stack.mp3`, `bgm-stardust.mp3`, `bgm-supernova.mp3`, `bgm-swing.mp3`, `bgm-teatime.mp3`, `bgm-titration.mp3`, `bgm-typewriter.mp3`, `bgm-uplift.mp3`, `bgm-warp.mp3`, `bgm.mp3`; about 4.6 MB each) are attached to the [latest release](https://github.com/burn001/agent4d/releases/latest) rather than stored in the repository. Put them in `web/assets/`. Without them the viewer works fine, just without music (sound effects still play).
+The 65 tracks (`bgm-aurora.mp3`, `bgm-bossa.mp3`, `bgm-caper.mp3`, `bgm-centrifuge.mp3`, `bgm-chillhop.mp3`, `bgm-circuit.mp3`, `bgm-city.mp3`, `bgm-cleanroom.mp3`, `bgm-collider.mp3`, `bgm-comet.mp3`, `bgm-coolant.mp3`, `bgm-copier.mp3`, `bgm-cursor.mp3`, `bgm-datalog.mp3`, `bgm-dawn.mp3`, `bgm-deadline.mp3`, `bgm-deepfield.mp3`, `bgm-deephouse.mp3`, `bgm-drive.mp3`, `bgm-dubroom.mp3`, `bgm-espresso.mp3`, `bgm-filingwaltz.mp3`, `bgm-fivetubes.mp3`, `bgm-funk.mp3`, `bgm-gelrun.mp3`, `bgm-glacier.mp3`, `bgm-gravity.mp3`, `bgm-hotfix.mp3`, `bgm-hyperspace.mp3`, `bgm-ionstorm.mp3`, `bgm-jazz.mp3`, `bgm-liquid.mp3`, `bgm-lofi.mp3`, `bgm-mambo.mp3`, `bgm-meeting.mp3`, `bgm-microscope.mp3`, `bgm-nebula.mp3`, `bgm-orbit.mp3`, `bgm-oscillo.mp3`, `bgm-overclock.mp3`, `bgm-pantry.mp3`, `bgm-parkbench.mp3`, `bgm-pentameter.mp3`, `bgm-petri.mp3`, `bgm-pulsar.mp3`, `bgm-pulse.mp3`, `bgm-queue.mp3`, `bgm-rainwindow.mp3`, `bgm-reactor.mp3`, `bgm-refactor.mp3`, `bgm-satellite.mp3`, `bgm-spectro.mp3`, `bgm-sprint.mp3`, `bgm-stack.mp3`, `bgm-stardust.mp3`, `bgm-sunlitdesk.mp3`, `bgm-supernova.mp3`, `bgm-swing.mp3`, `bgm-teatime.mp3`, `bgm-tidelock.mp3`, `bgm-titration.mp3`, `bgm-typewriter.mp3`, `bgm-uplift.mp3`, `bgm-warp.mp3`, `bgm.mp3`; about 4.6 MB each) are attached to the [latest release](https://github.com/burn001/agent4d/releases/latest) rather than stored in the repository. Put them in `web/assets/`. Without them the viewer works fine, just without music (sound effects still play).
 
 ```bash
 # with the GitHub CLI, inside the clone (latest release)

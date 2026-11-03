@@ -2,7 +2,7 @@
 // 서버(session.mjs _jobEmit)와 같은 모양: kind 'bash-bg', id `j:<주인>:<작업 id>`, meta.job · meta.title(단계) · meta.jobOwner.
 // 난수 없음(정해진 시각표) — MockGenerator 의 다른 시나리오 순서를 바꾸지 않는다.
 
-const PHASES = ['DAILY 1단계 시작', 'LAW_UPDATE 3단계 시작', 'LAW_UPDATE 5단계 완료', 'LAW_UPDATE 9-3단계 선행', 'LAW_UPDATE 9-6단계 완료', 'DAILY 2단계 완료'];
+const PHASES = ['DAILY 1단계 시작', 'INGEST 3단계 시작', 'INGEST 5단계 완료', 'INGEST 9-3단계 선행', 'INGEST 9-6단계 완료', 'DAILY 2단계 완료'];
 
 export function jobMockScript(gen) {
   const M = gen.root;

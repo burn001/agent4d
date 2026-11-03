@@ -250,7 +250,8 @@ export class Vx2DExtra {
       ctx.globalAlpha = A * (0.5 + 0.4 * Math.sin(now * 5)); ctx.strokeStyle = col; ctx.lineWidth = Math.max(1.2, 0.08 * s);
       ctx.beginPath(); ctx.arc(X(sp.x), Y(sp.z), (0.9 + 0.25 * Math.sin(now * 3)) * s, 0, Math.PI * 2); ctx.stroke();
       // 책상 ↔ 시설 소포
-      const a = ch ? { x: ch.seat ? ch.seat.deskX : ch.pos.x, z: ch.seat ? ch.seat.deskZ : ch.pos.z } : m ? { x: m.pos.x, z: m.pos.z } : null;
+      let a = ch ? { x: ch.seat ? ch.seat.deskX : ch.pos.x, z: ch.seat ? ch.seat.deskZ : ch.pos.z } : m ? { x: m.pos.x, z: m.pos.z } : null;
+      if (off.type === 'lab' && f.bgNode) { const bm = v.machines.get(f.bgNode); if (bm && bm.pos && bm.pos.type === 'rig' && !bm.released) a = { x: bm.pos.x, z: bm.pos.z }; } // C 연구소: bg 기자재 자리에서 출발
       if (a && te == null) {
         const out = f.cat === 'github' ? f.op !== 'pull' && f.op !== 'fetch' && f.op !== 'clone' : f.cat === 'db' ? f.ix.rw === 'w' || f.ix.rw === 'rw' : f.cat === 'remote' ? f.ix.transfer !== 'down' : true;
         const u = (now * 0.7 + (f.seq || 0) * 0.13) % 1, P = out ? a : sp, Q = out ? sp : a;

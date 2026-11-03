@@ -966,7 +966,7 @@ function disconnect() {
   if (ovMock) { ovMock.stop(); ovMock = null; }
   if (labMock) { labMock.stop(); labMock = null; }
 }
-// ?mock=1&labmock=<1..10>: 복셀 연구소 확인 장면(web/lab/lab-mock.mjs — 설계 M1～M10)
+// ?mock=1&labmock=<1..11>: 복셀 연구소 확인 장면(web/lab/lab-mock.mjs — 설계 M1～M10 + M11 claude -p)
 let labMock = null;
 function startLabMock() {
   const n = Number(params.get('labmock')) || 0;

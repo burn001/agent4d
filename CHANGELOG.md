@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-11-03
+
+### Added
+- **11 new background tracks for the busiest activity level.** Replaying the last four weeks of transcripts through the auto-pick rules showed the music spends about 55–63% of the time at level 1 (normal), so that is where the new tracks go: Flow/Planet *Tidal Lock* (6/8), *Pentameter* (5/4) and *Server Room Dub*; Voxel Office *Park Bench* (6/8 folk), *Sunlit Desk* (fingerpicked steel guitar) and *Filing Waltz* (3/4 jazz waltz); Voxel Lab *Under the Microscope* (3/4), *Data Logger*, *Five Test Tubes* (5/4) and *Coolant Loop* (6/8), plus *Gel Run* (breakbeat) for the lab's level 2 (65 tracks in all). Each one uses a metre, key and lead sound that the other tracks at its level do not.
+
+### Changed
+- Auto music: Flow and Planet now share one track pool, so switching between them keeps the current track instead of cross-fading to another one. Voxel Office and Voxel Lab keep their own pools. The ♪ popup lists Flow and Planet tracks together at the top.
+- Auto music repeats less: it now avoids the last 2–5 tracks depending on how many tracks the level has (it used to avoid only the last 2), and skips a track that sounds close to the previous one (same metre with a similar tempo, or the same key) when at least two other choices remain.
+- **Voxel Lab, livelier**: each of the 10 rig kinds now has its own working motion (test scanner sweep, reactor stirrer, antenna signal rings, scope sweep, chart paper, sequencer arm, …) that speeds up with output and slows when quiet, plus start-up, finish, failure (shake and sparks), stall and stop (dust cover) transitions. The artifact platform shows the verb on each block (green outline for new, amber for edited), a blue scan sheet for reads (height unchanged), a print gantry for new files, a top-plate swap for edits, bouncing blocks under bulk-change waves, glowing activity arcs on busy sectors and core rings per write. Files written by a background job fly from that rig to their block. Subagent dispatch and report cards, product crates from finished rigs, data pulses along rig cables, and gestures (installing, watching, pressing stop, setting a block down, alarm, pointing, nodding).
+- README: new Voxel Lab section with a live loop and dark and light screenshots; all README screenshots, loops and the intro video were re-recorded for this version.
+- English mock data (`?mock=1&lang=en`) now also translates the background-job, detached-process and parallel-task demo labels, which used to show Korean text.
+
+### Fixed
+- Loop board: the number on each axis row is now the axis's own fixed number, not its position in the queue. Rows stay in run order (queue order), so a re-ordered queue no longer makes row 160 look like axis 160. The number comes from an explicit `AXIS_NO=172` line in the axis file, or else from a header comment that defines the axis itself (`★172번 축`, `· 172번 축.`); comments that merely mention another axis are ignored, and axes with no number show `–` instead of a guess.
+- Voxel Office: whoever opens the Agent or workflow tool (main, subagent or `claude -p`) no longer stands at the summoning portal by the front-left wall for the whole time the subagent runs. They now walk to the portal only for the summoning moment (arms out while the new subagent appears, about 1.4 seconds, capped at 10 seconds from the call), then go back to their own desk and wait there. A session that was already waiting when the page opened stays at its desk. New subagents still step out of the portal. Voxel Lab is unchanged.
+- Voxel Lab 3D drew none of the special interactions (github, db, remote, batch, tests); they now appear at the core, DB tank, remote antenna and bridge test tower.
+- Voxel Lab: after a replay seek or opening an archived session, the 2D floor plan no longer keeps flying old couriers or skips a subagent's report, and rigs no longer play a start-up or slow-down animation that no event caused.
+- Voxel Lab: a staff member watching a rig only brightens its lens; it no longer counts as the rig producing output.
+- Voxel Lab: a `claude -p` session waiting on its own subagent no longer stands alone at the airlock by the door with its arms raised for minutes. Anyone using the Agent or workflow tool now waits at their own desk (the request courier already shows the hand-off), the subagent sits at the nearest free desk beside the `claude -p` that launched it, the `claude -p` points when it sends the request and nods when the report comes back, autopilot cycles started by a detached launcher sit in the zone of the session that launched them, and a newly started cycle no longer takes the desk of someone already seated (who then had to walk across the lab). New test scene: `?mock=1&view=lab&labmock=11`.
+- Voxel Office and Voxel Lab: a `claude -p` session that has finished (for example a background test run that was already cleaned up) no longer keeps its own annex office in the Voxel Office or a desk in the Voxel Lab every time the page connects. Once it and everything it launched are done, it waits 8 seconds, walks out through the door and its annex goes with it; sessions that finished long ago are left out from the start. Live separate sessions keep their office and lab zone.
+
 ## [0.7.4] - 2026-11-01
 
 ### Added

@@ -386,7 +386,11 @@ export function mountPlans(h) {
       `${x.cy != null ? go(x.by, t('boards.plan.cycle', { n: x.cy }), 'pr-cy') : ''}${x.ago ? `<small class="ipb-ago">${esc(x.ago)}</small>` : ''}</li>`;
     const runLine = (r) => `<span class="ipb-run">${esc(t('boards.plan.runBy'))} ${go(r.owner, r.label.slice(0, 24), 'ipb-by')}${r.n > 1 ? ` <small>${esc(t('boards.plan.runPlans', { n: r.n }))}</small>` : ''}` +
       `${r.liveCy != null ? ` <b class="pb-chip live">${esc(t('boards.plan.liveChip', { n: r.liveCy }))}</b>` : r.seen ? ` · <small>${esc(t('boards.plan.seen', { ago: r.seen }))}</small>` : ''}</span>`;
-    const row = (it, i) => `<li class="pr st-${esc(it.st)}${it.cur ? ' cur' : ''}${it.emph ? ' emph' : ''}${it.run ? ' merged' : ''}"><i class="pl-m" aria-label="${esc(it.st === 'hold' ? t('boards.plan.st.hold') : it.st === 'skipped' ? t('boards.plan.st.skipped') : PLAN_ST_LABEL[it.s] || '')}">${esc(it.glyph)}</i><span class="ipb-i">${i + 1}</span><span class="pr-t">${esc(it.t)}</span>` +
+    // 번호 칸: 축 큐(src axes)는 축 **고유 번호**(it.no — 큐 위치가 아님, 큐를 재배치해도 그대로), 없으면 '–'(위치로 대신하지 않음). 그 밖 계획은 목록 순번
+    const numCell = (it, i) => (p.srcKey === 'axes'
+      ? `<span class="ipb-i ipb-no${it.no == null ? ' none' : ''}" title="${esc(it.no == null ? t('boards.plan.axisNoNone') : t('boards.plan.axisNo', { n: it.no }))}">${it.no == null ? '–' : it.no}</span>`
+      : `<span class="ipb-i">${i + 1}</span>`);
+    const row = (it, i) => `<li class="pr st-${esc(it.st)}${it.cur ? ' cur' : ''}${it.emph ? ' emph' : ''}${it.run ? ' merged' : ''}"><i class="pl-m" aria-label="${esc(it.st === 'hold' ? t('boards.plan.st.hold') : it.st === 'skipped' ? t('boards.plan.st.skipped') : PLAN_ST_LABEL[it.s] || '')}">${esc(it.glyph)}</i>${numCell(it, i)}<span class="pr-t">${esc(it.t)}</span>` +
       `${it.note ? `<b class="pr-hold">${esc(it.note)}</b>` : it.st === 'hold' ? `<b class="pr-hold">${esc(t('boards.plan.st.hold'))}</b>` : ''}` +
       `${it.steps ? `<span class="ipb-st" title="${esc(it.steps.cur || '')}"><span class="pb-sbar"><i style="width:${((it.steps.done / it.steps.total) * 100).toFixed(1)}%"></i></span>${esc(t('boards.plan.steps', { done: it.steps.done, total: it.steps.total }))}</span>` : ''}` +
       `${it.cy != null ? go(it.by, t('boards.plan.cycle', { n: it.cy }), 'pr-cy') : it.byLabel && it.s !== 'pending' ? (it.by && nodes.has(it.by) ? `<button type="button" class="ins-link ipb-by" data-goto="${esc(it.by)}">${esc(it.byLabel.slice(0, 22))}</button>` : `<small>${esc(it.byLabel.slice(0, 22))}</small>`) : ''}` +

@@ -179,9 +179,9 @@ test('연구소 효과음·POV·캐릭터 연결(원문 확인): Sfx.view·playL
   assert.match(lv, /_roomLabelOn\(r\)/);
 });
 
-test('mock 시나리오 표 10개 · M4 대량 변경 드라이버: 같은 폴더 Edit 6개 이상을 1초 간격으로(10초 안)', () => {
-  assert.equal(LAB_MOCK.length, 10);
-  assert.deepEqual(LAB_MOCK.map((x) => x.n), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+test('mock 시나리오 표 11개 · M4 대량 변경 드라이버: 같은 폴더 Edit 6개 이상을 1초 간격으로(10초 안)', () => {
+  assert.equal(LAB_MOCK.length, 11);
+  assert.deepEqual(LAB_MOCK.map((x) => x.n), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
   for (const [kind, cmd] of LAB_MOCK_RIGS) assert.equal(rigKindOf({ kind: kind === 'scope' ? 'monitor' : 'bash-bg', meta: { command: cmd } }), kind, cmd);
   const evs = [], q = [];
   const nodes = [{ id: 's:m', kind: 'main', status: 'active' }];

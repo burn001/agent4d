@@ -1,9 +1,10 @@
 // 【모듈 규격 · 음악·효과음(audio) 담당】 복셀 연구소 소리 — 순수(three·DOM·AudioContext 없음), node --test 대상.
 //
 // ┌ 배경음악 ────────────────────────────────────────────────────────────────────────────────┐
-// │ 매니페스트 web/assets/bgm-tracks.json 에 연구소 전용 8곡(단계마다 2곡, views: {lab: [단계]}) — music/compose_<id>.py +       │
-// │   music/labkit.py(연구소 편곡기) 로 합성: cleanroom·petri(한가) · titration·oscillo(보통) · centrifuge·spectro(활발) ·      │
-// │   reactor·collider(매우 활발). music/tracks.py VIEWS 에 'lab'.                                                            │
+// │ 매니페스트 web/assets/bgm-tracks.json 에 연구소 전용 13곡(views: {lab: [단계]}) — music/compose_<id>.py + music/labkit.py   │
+// │   (연구소 편곡기)로 합성: cleanroom·petri(한가) · titration·oscillo·microscope(3/4)·datalog·fivetubes(5/4)·coolant(6/8)  │
+// │   (보통) · centrifuge·spectro·gelrun(활발) · reactor·collider(매우 활발). music/tracks.py VIEWS 에 'lab'.                 │
+// │   연구소는 다른 표현과 풀을 나누지 않는다(bgm-core POOL_GROUPS 는 흐름↔Planet 만).                                       │
 // │ labPoolView(tracks, view): 그 표현 곡이 매니페스트(파싱 뒤)에 하나도 없으면 LAB_VIEW_FALLBACK(lab → voxel) 풀.                │
 // │   bgm-auto.mjs viewCandidates 가 이미 부른다. bgm-core.mjs(리드) VIEWS 에 'lab' 이 들어가야 parseViews 가 views.lab 을 남김 —   │
 // │   그 전에는 lab 곡이 파싱에서 빠져 늘 복셀 오피스 풀(안전한 대체).                                                          │
@@ -25,8 +26,8 @@ import { eventToSound } from '../sfx.mjs';
 export const LAB_BGM_FALLBACK = 'voxel';
 /** 표현 → 그 표현 곡이 없을 때 쓸 표현 */
 export const LAB_VIEW_FALLBACK = { lab: LAB_BGM_FALLBACK };
-/** 연구소 전용 배경음악(단계 0 한가 ～ 3 매우 활발마다 2곡) — 매니페스트 id */
-export const LAB_TRACKS = [['cleanroom', 'petri'], ['titration', 'oscillo'], ['centrifuge', 'spectro'], ['reactor', 'collider']];
+/** 연구소 전용 배경음악(단계 0 한가 ～ 3 매우 활발) — 매니페스트 id. 처음 8곡(단계마다 2곡) + 2026-11-03 보통 4곡·활발 1곡(체류 비중 큰 단계 보강) */
+export const LAB_TRACKS = [['cleanroom', 'petri'], ['titration', 'oscillo', 'microscope', 'datalog', 'fivetubes', 'coolant'], ['centrifuge', 'spectro', 'gelrun'], ['reactor', 'collider']];
 
 /**
  * 실제로 고를 풀의 표현: 그 표현 곡이 tracks(parseManifest 뒤)에 하나라도 있으면 그대로, 없으면 대체 표현.

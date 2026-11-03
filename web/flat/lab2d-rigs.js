@@ -7,10 +7,13 @@
 //                                           상태 6색 테(굵기 max(2, 0.12·s), 실패·정체 깜빡), 진행 호(rigGauge, null 이면 도는 점).
 //                                           보조 선반(pos.scale 0.6)도 같은 규칙, 반지름 하한 RIG2D_MIN_R(6px)
 //   drawRigRingStatic2D(ctx, view, room)   기자재 고리 빈 칸 패드(정적 층 — 3D buildRigRingStatic 과 같은 자리)
-// 쓰는 view 값: _X·_Y·_s(px/m)·_now(초, 깜빡임 시계)·reduced·tokens·vis(id → {drawS, scopeK, _sp})·focusId·hoverId
+// 쓰는 view 값: _X·_Y·_s(px/m)·_now(초, 깜빡임 시계)·reduced·ts(배속)·tokens·vis(id → {drawS, scopeK, _sp})·focusId·hoverId
+// 기자재 동작(3D 와 같은 사건, 가볍게): 기계 객체 m._rd2 = RigDyn(lab-rig-core rigDynStep — flash = m.flashUntil 뒤 0.35초) →
+//   진행 = 종류색 링 위 도는 눈금(속도 = 활동) · 출력 펄스 = 바깥으로 퍼지는 원 0.4초 · 끝 = 초록 원 퍼짐 · 실패 = 몸통 ±2px 흔들림 + 빨강 섬광 ·
+//   중지 = 회색 덮개가 위에서 내려옴. 움직임 줄이기면 정지 도형만
 import { LAB } from '../lab/lab-const.mjs';
 import { quadXZ, rigLook } from '../lab/lab2d-core.mjs';
-import { RIG_KIND_HEX } from '../lab/lab-rig-core.mjs';
+import { RIG_KIND_HEX, newRigDyn, rigDynStep, rigTransK } from '../lab/lab-rig-core.mjs';
 
 const FONT = '"Pretendard", "Segoe UI", "Malgun Gothic", system-ui, sans-serif';
 const _q = new Array(8);
@@ -51,16 +54,30 @@ export function drawRig2D(ctx, view, m, nowMs) {
   v._sp = v._sp || {}; v._sp.x = x; v._sp.y = y;
   const sc = p.scale > 0 ? p.scale : 1, ks = k * sc; // 보조 선반 = 0.6배
   const R = Math.max(RIG2D_MIN_R, (LAB.RIG.SIZE / 2) * s * ks);
+  // 동작: 3D 와 같은 RigDyn(기계마다 하나)
+  const red = !!view.reduced, d = m._rd2 || (m._rd2 = newRigDyn());
+  const flash = Math.max(0, Math.min(1, ((m.flashUntil || 0) - t) / 0.35));
+  rigDynStep(d, t, flash, L.state, view.ts || 1, red);
+  const tk = rigTransK(d, t), tr = tk < 1 ? d.trans : null;
+  const jx = tr === 'fail' && tk < 0.5 ? (2 * (1 - 2 * tk) * Math.sin(t * 88)) / Math.max(1e-6, s) : 0; // 실패 흔들림 ±2px(세계 m)
   ctx.globalAlpha = A;
   // 몸통(고리 칸 크기, 중심을 보는 판) + 앞면 패널(중심 쪽)
-  ctx.fillStyle = L.body; quad(ctx, view, p.x, p.z, 1.1 * ks, 0.9 * ks, th); ctx.fill();
+  ctx.fillStyle = L.body; quad(ctx, view, p.x + jx, p.z, 1.1 * ks, 0.9 * ks, th); ctx.fill();
   ctx.strokeStyle = L.trim; ctx.lineWidth = Math.max(0.8, 0.06 * s); ctx.stroke();
   const a = (th * Math.PI) / 180, fx = -Math.sin(a), fz = -Math.cos(a);
-  ctx.fillStyle = L.panel; quad(ctx, view, p.x + fx * 0.36 * ks, p.z + fz * 0.36 * ks, 0.8 * ks, 0.12 * ks, th); ctx.fill();
+  ctx.fillStyle = L.panel; quad(ctx, view, p.x + jx + fx * 0.36 * ks, p.z + fz * 0.36 * ks, 0.8 * ks, 0.12 * ks, th); ctx.fill();
   // 종류색 채움 링(원 아이콘 안쪽 테) — 작은 기자재·원경에서도 종류를 색으로 구별
   ctx.strokeStyle = RIG_KIND_HEX[tok.isLight ? 'light' : 'dark'][L.kind] || L.trim;
   ctx.lineWidth = Math.max(2, R * 0.3);
   ctx.beginPath(); ctx.arc(x, y, R * 0.72, 0, Math.PI * 2); ctx.stroke();
+  // 도는 눈금(진행, 호 0.5rad — 각 = 위상·2, 속도가 활동을 따름)
+  const tick = !red && L.state === 'run';
+  if (tick) {
+    const ang = d.ph * 2;
+    ctx.strokeStyle = tok.text || '#e6e6e6'; ctx.globalAlpha = A * 0.85;
+    ctx.beginPath(); ctx.arc(x, y, R * 0.72, ang, ang + 0.5); ctx.stroke();
+    ctx.globalAlpha = A;
+  }
   // 상태 테(원): 상태색 × 깜빡임(실패·정체 = 깜빡, rigBlink)
   ctx.globalAlpha = A * Math.max(0.2, L.blink);
   ctx.strokeStyle = L.ring; ctx.lineWidth = rigRingW2D(s);
@@ -81,14 +98,32 @@ export function drawRig2D(ctx, view, m, nowMs) {
     ctx.font = `600 ${Math.round(Math.max(9, Math.min(16, 0.62 * s * ks)))}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(L.glyph, x, y + 0.5);
   }
+  // 출력 펄스(0.4초): 링 바깥으로 퍼지는 원 R → 1.5R
+  const pa = t - d.pulseAt, pulse = !red && pa >= 0 && pa < 0.4;
+  if (pulse) {
+    const u = pa / 0.4;
+    ctx.globalAlpha = A * 0.6 * (1 - u); ctx.strokeStyle = L.ring; ctx.lineWidth = Math.max(1.2, 0.08 * s);
+    ctx.beginPath(); ctx.arc(x, y, R * (1 + 0.5 * u), 0, Math.PI * 2); ctx.stroke();
+  }
+  // 전이: 끝 = 초록 원 퍼짐 · 실패 = 빨강 섬광 · 중지 = 회색 덮개가 위에서 내려옴(끝에 옅어짐)
+  if (tr === 'done') {
+    ctx.globalAlpha = A * 0.8 * (1 - tk); ctx.strokeStyle = L.ring; ctx.lineWidth = Math.max(2, 0.14 * s);
+    ctx.beginPath(); ctx.arc(x, y, R * (1.05 + 0.8 * tk), 0, Math.PI * 2); ctx.stroke();
+  } else if (tr === 'fail') {
+    ctx.globalAlpha = A * 0.45 * (1 - tk); ctx.fillStyle = L.ring;
+    ctx.beginPath(); ctx.arc(x, y, R * 1.1, 0, Math.PI * 2); ctx.fill();
+  } else if (tr === 'stop') {
+    const e = 1 - (1 - tk) * (1 - tk);
+    ctx.globalAlpha = A * 0.55 * (tk < 0.7 ? 1 : (1 - tk) / 0.3); ctx.fillStyle = L.ring;
+    ctx.fillRect(x - R, y - R, 2 * R, 2 * R * e);
+  }
   // 깜빡(상태 바뀜)·포커스
-  const flash = Math.max(0, Math.min(1, ((m.flashUntil || 0) - t) / 0.35));
   if (flash > 0.2 || m.id === view.focusId || m.id === view.hoverId) {
     ctx.globalAlpha = 0.9; ctx.strokeStyle = tok.text || '#fff'; ctx.lineWidth = 1.2;
     ctx.beginPath(); ctx.arc(x, y, R * 1.55, 0, Math.PI * 2); ctx.stroke();
   }
   ctx.globalAlpha = 1;
-  return L.anim || flash > 0;
+  return L.anim || flash > 0 || tick || pulse || !!tr;
 }
 
 /** 기자재 여럿(pos.type 'rig' 만) — 하나라도 움직이면 true */

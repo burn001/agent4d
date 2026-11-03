@@ -92,7 +92,9 @@
 .ipb-bar { height: 7px; margin: 7px 0 8px; font-size: 13px; }
 .ipb-list { list-style: none; margin: 0; padding: 0; }
 .ipb-list .pr { min-height: 24px; font-size: 13px; }
-.ipb-i { flex: none; width: 1.6em; color: var(--muted); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; }
+.ipb-i { flex: none; width: 2.2em; color: var(--muted); font-size: 11px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; } /* 세 자리 고유 번호도 칸 안(11px × 3자리 ≈ 1.8em) */
+.ipb-no { cursor: help; }
+.ipb-no.none { opacity: .55; }
 .ipb-list .pr-t { white-space: normal; overflow-wrap: anywhere; }
 .ipb-ago { flex: none; color: var(--muted); font-size: 10.5px; }
 .ipb-by { font-size: 11px; }
@@ -155,12 +157,12 @@
 .ins-plan-big li.pr { flex-wrap: wrap; }
 .ins-plan-big li.pr.emph .pr-t { font-weight: 700; }
 .ins-plan-big li.pr.emph .pr-t::before { content: '★ '; color: var(--warn); }
-.ipb-sub { flex-basis: 100%; margin-left: 3.2em; font-size: .8em; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ipb-sub { flex-basis: 100%; margin-left: 3.85em; font-size: .8em; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ipb-st { flex: none; display: inline-flex; align-items: center; gap: .35em; font-size: .8em; color: var(--muted); }
 .ins-plan-big li.pr-fold { list-style: none; }
 .ins-plan-big li.pr-fold summary { cursor: pointer; color: var(--pb-ok, var(--ok)); font-weight: 600; font-size: .9em; padding: .2em 0; }
 .ins-plan-big li.pr.st-skipped .pr-t { text-decoration: line-through; color: var(--muted); }
-.ipb-steps { flex-basis: 100%; list-style: none; margin: .25em 0 .1em 3.2em; padding: 0; font-size: .84em; display: grid; gap: .1em; }
+.ipb-steps { flex-basis: 100%; list-style: none; margin: .25em 0 .1em 3.8em; padding: 0; font-size: .84em; display: grid; gap: .1em; }
 .ipb-steps li { display: flex; gap: .45em; color: var(--muted); }
 .ipb-steps li i { flex: none; width: 1.1em; font-style: normal; text-align: center; }
 .ipb-steps li.st-done i { color: var(--pb-ok, var(--ok)); }
@@ -170,7 +172,7 @@
 .pb-chip.auto { border-style: dashed; color: var(--muted); font-style: italic; } /* 자동 추정 — 확인된 설정과 구분 */
 .ipb-auto { margin: .1em 0 .3em; font-size: .82em; color: var(--muted); font-style: italic; }
 /* 축 항목에 합친 러너 단계 계획: 러너 한 줄 · 단계별 닫은 회차 · 다음 단계 강조 · 축 큐 밖 설계서 머리말 */
-.ipb-run { flex-basis: 100%; margin-left: 3.2em; font-size: .8em; color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: .1em .35em; }
+.ipb-run { flex-basis: 100%; margin-left: 3.85em; font-size: .8em; color: var(--muted); display: flex; flex-wrap: wrap; align-items: center; gap: .1em .35em; }
 .ipb-run .pb-chip { font-size: .95em; }
 .ipb-steps li > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .ipb-steps li .pr-cy, .ipb-steps li .ipb-ago { flex: none; font-size: .92em; }

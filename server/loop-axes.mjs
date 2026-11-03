@@ -40,6 +40,28 @@ function shVal(text, name) {
   return m ? m[2] : null;
 }
 
+/**
+ * 축 고유 번호 — 감독 창이 축을 세울 때 붙인 번호. 큐 위치와 다르다(큐는 재배치돼도 번호는 안 바뀐다). 없으면 null(추측하지 않음).
+ *  ① 명시 칸 `AXIS_NO=172`(따옴표 있든 없든) 우선.
+ *  ② 없으면 env 머리 주석(맨 앞 연속 주석·빈 줄, 40줄까지)에서 **자기 축을 정의하는 표식**만 인정한다: `N번 축` 바로 뒤가 한글이 아니고
+ *     (`N번 축이`·`N번 축으로` = 다른 축을 말하는 문장), 공백을 건너 한글 낱말이 오지 않는 것(`N번 축 뒤에`·`N번 축 후보` = 언급).
+ *     곧 `· 172번 축.`·`★172번 축 —`·`N번 축(…` 처럼 절을 끝맺는 꼴. `31~34번 축` 같은 범위는 앞 문자 가림으로 거른다. 첫 일치를 쓴다.
+ */
+export const AXIS_NO_RE = /(?<![\d~～–-])(\d{1,3})번 축(?![가-힣])(?!\s+[가-힣])/;
+export function axisNo(env) {
+  const text = String(env || '');
+  const ex = /^AXIS_NO=["']?(\d{1,4})["']?\s*(?:#.*)?$/m.exec(text);
+  if (ex && +ex[1] > 0) return +ex[1];
+  let n = 0;
+  for (const l of text.split(/\r?\n/)) {
+    if (++n > 40 || !/^\s*(?:#|$)/.test(l)) break;
+    if (!/^\s*#/.test(l)) continue;
+    const m = AXIS_NO_RE.exec(l);
+    if (m && +m[1] > 0) return +m[1];
+  }
+  return null;
+}
+
 /** 설계서 → 단계 [{title, state}](표식 줄 = 단계, 제목은 `### 단계 N — …` 머리) */
 export function axisSteps(text, phaseRe = LOOP_AXES.PHASE_RE, settledRe = LOOP_AXES.SETTLED_RE) {
   const mk = reOf(phaseRe), se = reOf(settledRe), bl = /⏸/;
@@ -64,6 +86,7 @@ export function axisSteps(text, phaseRe = LOOP_AXES.PHASE_RE, settledRe = LOOP_A
 /**
  * 프로젝트 뿌리(메인 cwd) → 축 큐 계획(planFromRaw 입력 꼴) | null.
  * 축 상태: 단계가 있고 모두 정착 = done, 지금 축 = current, 그 밖 pending(설계서 없음·표식 없음은 note).
+ * items 순서 = 큐 순서 = 실행 순서(정렬하지 않는다). 고유 번호는 항목 칸 `no`(axisNo).
  */
 export function loopAxesPlan(root) {
   if (!root) return null;
@@ -80,6 +103,8 @@ export function loopAxesPlan(root) {
     const env = readText(path.join(root, LOOP_AXES.AXES_DIR, id + '.env'));
     const it = { id, title: id, state: 'pending' };
     if (!env) { it.note = '축 파일 없음'; return it; }
+    const no = axisNo(env);
+    if (no != null) it.no = no; // 고유 번호(큐 위치 아님) — 없으면 칸을 안 둠
     const label = shVal(env, 'AXIS_LABEL');
     if (label) it.title = label;
     const doc0 = shVal(env, 'DESIGN_DOC');

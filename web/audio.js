@@ -13,7 +13,7 @@
 //   - 매니페스트가 없으면 예전 한 곡(bgm.mp3·bgm.json)으로 동작
 
 import { TRACK_KEY, LAST_KEY, MIG_KEY, FALLBACK_TRACKS, parseManifest, normalizeSel, initialSel, isMode, firstTrack, nextTrack, loopFor, optionList, modeLabel, stageLabel, sectionName, trackUrl } from './bgm-core.mjs';
-import { AutoPicker, activityLevel, pickForLevel, autoLabel, LEVEL_LABEL } from './bgm-auto.mjs';
+import { AutoPicker, activityLevel, pickForLevel, autoLabel, LEVEL_LABEL, RECENT_MAX } from './bgm-auto.mjs';
 import { t as tr } from './i18n.mjs';
 import { Lane, planXfade, shouldLeadEnd, takeover, XFADE, TAKEOVER_OUT, READY_TIMEOUT, SILENT } from './bgm-xfade.mjs';
 
@@ -75,7 +75,7 @@ export class Music {
     this._autoT = 0;
     this._autoLast = performance.now();
     this._autoWant = null;
-    this._recent = [];        // 최근 건 곡 id(오래된 것 → 최근, 자동이 직전 2곡을 피함)
+    this._recent = [];        // 최근 건 곡 id(오래된 것 → 최근, 최대 RECENT_MAX — 자동이 후보 수에 비례해 최근 곡·비슷한 곡을 피함)
     try {
       const s = JSON.parse(localStorage.getItem(KEY) || 'null');
       if (s && typeof s.volume === 'number') this.volume = Math.max(0, Math.min(1, s.volume));
@@ -276,7 +276,7 @@ export class Music {
   _setCur(id) {
     const t = this._trackOf(id) || this.tracks[0];
     if (!t) return null;
-    if (this.cur !== t.id) { this._recent.push(t.id); if (this._recent.length > 4) this._recent.shift(); }
+    if (this.cur !== t.id) { this._recent.push(t.id); if (this._recent.length > RECENT_MAX) this._recent.shift(); }
     this.cur = t.id;
     this._autoWant = null;
     this.meta = this._metaCache.get(t.id) || null;

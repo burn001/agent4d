@@ -147,17 +147,20 @@ test('audio.js·app.js 연결: 활동 출처·이행 키·일시정지 시 단�
   assert.match(app, /if \(fx\) \{\n    activity\.note\(ev, clockFn\(\)\);/);
 });
 
-test('§67 테마별 풀: 매니페스트 views 가 확정 분류와 같고, 지금 표현의 그 단계 곡만 후보', async () => {
+test('§67 테마별 풀: 매니페스트 views 가 확정 분류와 같고, 지금 표현(풀 묶음)의 그 단계 곡만 후보', async () => {
   const { viewCandidates } = await import('../bgm-auto.mjs');
   const m = parseManifest(JSON.parse(readFileSync(new URL('../assets/bgm-tracks.json', import.meta.url), 'utf8')));
+  const FLOW = [['lofi', 'pulse', 'glacier', 'cursor'], ['lofi', 'deephouse', 'circuit', 'refactor', 'queue'], ['drive', 'deephouse', 'stack', 'sprint'],
+    ['liquid', 'uplift', 'overclock', 'hotfix', 'deadline']];
+  const PLANET = [['orbit', 'ambient', 'aurora', 'deepfield'], ['stardust', 'nebula', 'comet', 'satellite'], ['drive', 'pulsar', 'ionstorm', 'gravity'],
+    ['uplift', 'warp', 'supernova', 'hyperspace']];
+  const FP_NEW = ['tidelock', 'pentameter', 'dubroom']; // 2026-11-03 흐름·Planet 공유 풀 보통 3곡
+  // 2026-11-03 풀 묶음: 흐름 ↔ Planet 은 한 풀(합집합), 복셀·연구소는 각자
+  const FP = FLOW.map((lv, i) => [...new Set([...lv, ...PLANET[i], ...(i === 1 ? FP_NEW : [])])]);
   const POOL = {
-    // 2026-10-30 표현×단계 2곡씩 24곡 추가(뒤쪽 두 id)
-    flow: [['lofi', 'pulse', 'glacier', 'cursor'], ['lofi', 'deephouse', 'circuit', 'refactor', 'queue'], ['drive', 'deephouse', 'stack', 'sprint'],
-      ['liquid', 'uplift', 'overclock', 'hotfix', 'deadline']],
-    planet: [['orbit', 'ambient', 'aurora', 'deepfield'], ['stardust', 'nebula', 'comet', 'satellite'], ['drive', 'pulsar', 'ionstorm', 'gravity'],
-      ['uplift', 'warp', 'supernova', 'hyperspace']],
-    voxel: [['dawn', 'bossa', 'rainwindow', 'teatime'], ['jazz', 'chillhop', 'lofi', 'typewriter', 'espresso'], ['city', 'funk', 'meeting', 'copier'],
-      ['swing', 'caper', 'pantry', 'mambo']],
+    flow: FP, planet: FP,
+    voxel: [['dawn', 'bossa', 'rainwindow', 'teatime'], ['jazz', 'chillhop', 'lofi', 'typewriter', 'espresso', 'parkbench', 'sunlitdesk', 'filingwaltz'],
+      ['city', 'funk', 'meeting', 'copier'], ['swing', 'caper', 'pantry', 'mambo']],
   };
   for (const [v, lv] of Object.entries(POOL)) {
     for (let i = 0; i < 4; i++) assert.deepEqual(viewCandidates(i, m.tracks, v).sort(), [...lv[i]].sort(), `${v} ${i}`);
@@ -166,13 +169,56 @@ test('§67 테마별 풀: 매니페스트 views 가 확정 분류와 같고, 지
       assert.ok(lv[i].includes(id), `${v} ${i} → ${id}`);
     }
   }
-  // 겹치는 곡: lofi 는 흐름 0·1, 복셀 1, Planet 풀엔 없음
+  for (const id of FP_NEW) assert.deepEqual(m.tracks.find((t) => t.id === id).views, { flow: [1], planet: [1] }, id);
+  // 겹치는 곡: lofi 는 흐름 0·1, 복셀 1 — Planet 은 흐름과 한 풀이라 lofi 도 후보
   const lofi = m.tracks.find((t) => t.id === 'lofi');
   assert.deepEqual(lofi.views, { flow: [0, 1], voxel: [1] });
   assert.equal(pickForLevel(0, m.tracks, { view: 'flow', cur: 'lofi', keep: true }), 'lofi');
   assert.equal(pickForLevel(1, m.tracks, { view: 'voxel', cur: 'lofi', keep: true }), 'lofi');
-  assert.notEqual(pickForLevel(1, m.tracks, { view: 'planet', cur: 'lofi', keep: true }), 'lofi'); // 표현을 바꾸면 그 테마 곡으로
+  assert.equal(pickForLevel(1, m.tracks, { view: 'planet', cur: 'lofi', keep: true }), 'lofi'); // 같은 묶음으로 바꾸면 곡 그대로
+  assert.equal(pickForLevel(1, m.tracks, { view: 'flow', cur: 'stardust', keep: true }), 'stardust');
   assert.notEqual(pickForLevel(0, m.tracks, { view: 'voxel', cur: 'lofi', keep: true }), 'lofi');
+  assert.notEqual(pickForLevel(1, m.tracks, { view: 'voxel', cur: 'stardust', keep: true }), 'stardust'); // 다른 묶음이면 그 풀 곡으로
+  assert.notEqual(pickForLevel(1, m.tracks, { view: 'lab', cur: 'parkbench', keep: true }), 'parkbench'); // 복셀 ↔ 연구소는 풀을 나누지 않음
+});
+
+test('§67.4 풀 묶음: poolViews·viewStages 합집합, 복셀·연구소는 따로', async () => {
+  const { poolViews, viewStages, POOL_GROUPS } = await import('../bgm-core.mjs');
+  assert.deepEqual(POOL_GROUPS, [['flow', 'planet']]);
+  assert.deepEqual(poolViews('planet'), ['flow', 'planet']);
+  assert.deepEqual(poolViews('voxel'), ['voxel']);
+  assert.deepEqual(poolViews('lab'), ['lab']);
+  assert.deepEqual(poolViews(null), []);
+  const t = { views: { flow: [2], planet: [0, 2], voxel: [1] } };
+  assert.deepEqual(viewStages(t, 'flow'), [0, 2]);
+  assert.deepEqual(viewStages(t, 'planet'), [0, 2]);
+  assert.deepEqual(viewStages(t, 'voxel'), [1]);
+  assert.deepEqual(viewStages(t, 'lab'), []);
+  assert.deepEqual(viewStages({ views: null }, 'flow'), []);
+});
+
+test('§67 반복 회피: 최근 곡 수는 후보 수에 비례(2～5), 직전 곡과 비슷한 곡은 2곡 이상 남을 때 뺌', async () => {
+  const { avoidCount, similarTracks, RECENT_MAX } = await import('../bgm-auto.mjs');
+  assert.deepEqual([1, 3, 4, 7, 10, 20].map(avoidCount), [2, 2, 2, 3, 5, 5]);
+  assert.ok(RECENT_MAX >= 5);
+  const T = (id, bpm, key, beats = 4) => ({ id, bpm, key, beats, stage: [1] });
+  assert.ok(similarTracks(T('a', 100, 'C major'), T('b', 104, 'F minor')));         // BPM 차 ≤ 6
+  assert.ok(!similarTracks(T('a', 100, 'C major'), T('b', 104, 'F minor', 3)));     // 박자가 다르면 아님
+  assert.ok(similarTracks(T('a', 100, 'A minor'), T('b', 112, 'A minor (B 구간)'))); // 같은 조 · 차 ≤ 16
+  assert.ok(!similarTracks(T('a', 100, 'A minor'), T('b', 120, 'A minor')));
+  assert.ok(!similarTracks({ id: 'a' }, { id: 'b' }));
+  // 후보 10곡: 최근 5곡을 피함
+  const ten = Array.from({ length: 10 }, (_, i) => T('t' + i, 60 + i * 10, 'k' + i + ' x'));
+  const recent = ['t0', 't1', 't2', 't3', 't4'];
+  for (let k = 0; k < 20; k++) assert.ok(!recent.includes(pickForLevel(1, ten, { recent, rand: () => k / 20 })));
+  // 직전 곡 p(100) 과 비슷한 q(103)는 빠짐(r·s 둘이 남음)
+  const sim = [T('p', 100, 'C major'), T('q', 103, 'D minor'), T('r', 140, 'E minor'), T('s', 70, 'G major')];
+  for (let k = 0; k < 20; k++) assert.notEqual(pickForLevel(1, sim, { cur: 'p', rand: () => k / 20 }), 'q');
+  // 비슷하지 않은 곡이 하나뿐이면 거르지 않음(늘 같은 곡이 되지 않게)
+  const one = [T('p', 100, 'C major'), T('q', 103, 'D minor'), T('r', 102, 'E minor'), T('s', 70, 'G major')];
+  const got = new Set();
+  for (let k = 0; k < 20; k++) got.add(pickForLevel(1, one, { cur: 'p', rand: () => k / 20 }));
+  assert.ok(got.size >= 2, [...got].join());
 });
 
 test('§67 테마별 풀 폴백: 표현 없음·views 없음·그 단계에 테마 곡 없음 → 전체 풀(stage)', async () => {
@@ -186,7 +232,8 @@ test('§67 테마별 풀 폴백: 표현 없음·views 없음·그 단계에 테�
   assert.deepEqual(tr.find((t) => t.id === 'c').views, { flow: [2] }); // 모르는 표현 버림
   assert.equal(tr.find((t) => t.id === 'd').views, null);
   assert.deepEqual(viewCandidates(0, tr, 'flow'), ['a']);
-  assert.deepEqual(viewCandidates(1, tr, 'flow'), ['b', 'c']);   // 흐름 1단계 없음 → 전체 풀 stage 1
+  assert.deepEqual(viewCandidates(1, tr, 'flow'), ['b']);        // 흐름 1단계 없음 → 같은 묶음(Planet) 곡
+  assert.deepEqual(viewCandidates(1, tr, 'voxel'), ['b', 'c']);  // 복셀 1단계 없음 → 전체 풀 stage 1
   assert.deepEqual(viewCandidates(3, tr, 'voxel'), ['d']);       // 복셀 풀 비어 있음 → 전체 풀
   assert.deepEqual(viewCandidates(1, tr, null), ['b', 'c']);     // 표현 모름 → 예전 규칙
   assert.deepEqual(viewCandidates(2, tr, 'planet'), ['c']);
@@ -203,18 +250,20 @@ test('§67 곡 목록: 지금 표현 곡이 위에 단계별, 다른 테마 곡�
     const firstOther = o.findIndex((x) => x.other);
     assert.ok(firstOther > 0, v);
     assert.ok(o.slice(firstOther).every((x) => x.other), `${v}: 다른 테마는 끝에 몰림`);
-    for (const x of o.slice(0, firstOther)) assert.ok(m.tracks.find((t) => t.id === x.value).views[v], `${v} ${x.value}`);
+    const grp = v === 'voxel' ? ['voxel'] : ['flow', 'planet']; // 흐름 ↔ Planet 은 한 묶음
+    for (const x of o.slice(0, firstOther)) assert.ok(grp.some((g) => m.tracks.find((t) => t.id === x.value).views[g]), `${v} ${x.value}`);
   }
   const f = optionList(m.tracks, 'flow').filter((x) => !isMode(x.value));
-  assert.deepEqual(f.slice(0, 4).map((x) => x.value), ['glacier', 'pulse', 'cursor', 'lofi']); // 흐름 한가: energy 0.18 → 0.22 → 0.25 → 0.35
-  assert.ok(f.every((x) => x.value !== 'orbit' || x.other));
+  assert.deepEqual(f.slice(0, 4).map((x) => x.value), ['aurora', 'ambient', 'orbit', 'deepfield']); // 흐름+Planet 한가: energy 0.08 → 0.1 → 0.12 → 0.14
+  assert.ok(f.every((x) => x.value !== 'orbit' || !x.other)); // Planet 곡도 지금 표현 곡
+  assert.ok(f.every((x) => x.value !== 'jazz' || x.other));
   assert.ok(optionList(m.tracks).every((x) => !x.other)); // 표현 없으면 예전 목록
 });
 
 test('§67 2026-10-30 24곡: 표현×단계마다 4곡 이상 — 직전 2곡을 피해도 고를 곡이 2곡 이상 남고, 3/4 곡은 beats 3', async () => {
   const { viewCandidates } = await import('../bgm-auto.mjs');
   const m = parseManifest(JSON.parse(readFileSync(new URL('../assets/bgm-tracks.json', import.meta.url), 'utf8')));
-  assert.equal(m.tracks.length, 54); // + 복셀 연구소 8곡(2026-11-01, views.lab)
+  assert.equal(m.tracks.length, 65); // + 복셀 연구소 8곡(2026-11-01, views.lab) + 2026-11-03 보통 보강 11곡(흐름·Planet 3 · 복셀 3 · 연구소 4 + 연구소 활발 1)
   for (const v of ['flow', 'planet', 'voxel']) for (let i = 0; i < 4; i++) {
     const c = viewCandidates(i, m.tracks, v);
     assert.ok(c.length >= 4, `${v} ${i}: ${c}`);
@@ -223,6 +272,8 @@ test('§67 2026-10-30 24곡: 표현×단계마다 4곡 이상 — 직전 2곡을
     assert.ok(!picks.has(c[0]) && !picks.has(c[1]) && picks.size >= 2, `${v} ${i}: ${[...picks]}`);
   }
   const beats = Object.fromEntries(m.tracks.map((t) => [t.id, t.beats]));
-  for (const id of ['queue', 'deepfield', 'teatime']) assert.equal(beats[id], 3, id);
+  for (const id of ['queue', 'deepfield', 'teatime', 'filingwaltz', 'microscope']) assert.equal(beats[id], 3, id);
+  for (const id of ['tidelock', 'parkbench', 'coolant']) assert.equal(beats[id], 6, id); // 6/8(박 = 8분음표)
+  for (const id of ['pentameter', 'fivetubes']) assert.equal(beats[id], 5, id);
   assert.equal(beats.lofi, 4);
 });

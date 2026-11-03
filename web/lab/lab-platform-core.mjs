@@ -15,6 +15,10 @@
 // │ labBlockShape(item) → [{dx,dy,dz, sx,sy,sz, c(ART_KEYS 색 번호), a}] — 종류·하위 구분 모양                             │
 // │ labPlatformGeometry(book, plans, fx, now, env, geo) → geo  (plans = Map pid → {plan, cx, cz}) — drawActs(th='lab') 호출  │
 // │ labPlatformRadius(nVisible, prevR, sinceMs) → R_P (히스테리시스: 커질 때만 바로, 줄 때 10분)                         │
+// │ 동적 표현: blockTint(it, nowMs, out) → {key 'new'|'write'|'del'|null, a, d} · sectorHeat(mem, key, t0, now)/sectorHeatA(mem, │
+// │      key, now) → 구역 활동 열 알파 · waveLift(r, rFront, k) → 파도 블록 튐. env.actOrigin(e) → {x,y,z}|null(선택 — bg 기자재  │
+// │      꼭대기, e.tu === 기자재 node.meta.toolUseId 일 때. 결과 객체는 재사용될 수 있어 바로 읽음) = carry·pour 캡슐 출발점·읽기 │
+// │      귀환 도착점·build/edit 공급선 시작. 없거나 null 이면 env.nodePos(e.node)                                                │
 // └──────────────────────────────────────────────────────────────────────────────────────────────┘
 // 성능 상한(LAB_PERF): 블록 ≤ 300 + 구역 묶음 13, 선 ≤ 7,000, 라벨 14, 동시 점등 8, 연출 ≤ 160, labSectorPlan 대상 500 < 8ms.
 //
@@ -58,6 +62,16 @@ export const LP = {
   BEACON_R: 0.28, BEACON_H: 0.5, BEACON_DOT: 0.45, BEACON_BEAM: 3.0, // 경광등 기둥·발광 점·회전 빔 길이
   HYST_MS: 10 * 60_000, R_STEP: 0.5, // 반지름 히스테리시스·양자화(바뀔 때마다 배치를 다시 하므로 0.5 단위)
   LINE_SOFT: LAB_PERF.PLATFORM_LINES - 600, // 이 선 수를 넘으면 세부 무늬 생략
+  // ── 동적 표현(Artifact Layer 담당 B) ──
+  TINT_HOLD: 30_000, TINT_END: 150_000, // 블록 동사 색: 마지막 쓰기 뒤 30초 온전히 → 150초에 0(선형)
+  TINT_TH: 0.04,              // 동사 색 윗판 두께
+  DEL_GHOST_MS: 30_000,       // 지운 칸 회색 잔상 판(알파 0.25 → 0)
+  WAVE_LIFT: 0.25,            // 대량 변경 파도: 파두 근처 블록 튐(m)
+  HEAT_WIN: 60, HEAT_HOLD: 60, HEAT_END: 180, HEAT_MAX: 64, HEAT_A: 0.35, HEAT_ARCS: 4, HEAT_LINES: 400, // 구역 활동 열(초 — 연출 시계) · 바닥 빛 호 수·프레임 선 상한
+  CORE_RING_S: 0.9, CORE_RING_DR: 1.6, CORE_RINGS: 3, // 코어 쓰기 고리
+  CORE_W0: 0.15, CORE_WK: 0.12, CORE_WMAX: 1.2, CORE_WIN: 10, CORE_DT: 0.25, // 코어 눈금 회전(rad/s) = 0.15 + 0.12·최근 10초 쓰기 수, 상한 1.2
+  EDGE_S: 1.5,                // 고치기 뒤 호박 테 지속(초)
+  CAP_S: 0.18, CAP_LIFT: 1.2, CAP_MAX: 24, // 시료 캡슐(상자 한 변)·포물선 높이·동시 상한
 };
 const MORE = '#more';
 const START = LAB.BRIDGE_THETA; // 구역 시작 각(브리지 쪽)
@@ -338,7 +352,61 @@ export function bulkNote(mem, sk, t0, now) {
 }
 export const newBulkMem = () => ({ ts: new Map(), wave: new Map(), seen: new Set() });
 
-const OWN_ACTS = new Set(['build', 'edit', 'shatter', 'read', 'radar']); // 이 모듈이 연구소 은유로 직접 그리는 연출
+/**
+ * 블록 동사 색(순수·할당 0 — out 재사용): 마지막 '쓰기' 동사(log 를 뒤에서부터, 없으면 cnt 로 추정) → out = {key, a, d}.
+ * key = 'new'(create) | 'write'(modify·write) | 'del'(delete) | null(읽기만 · 너무 오래됨), a = 0..1(쓰기 뒤 Δ ≤ 30초 1 → 150초 0, 선형),
+ * d = Δ(ms). Δ 는 그 쓰기 기록의 시각(log t) 기준 — 읽기가 it.last 를 밀어도 색이 되살아나지 않음(log 에 쓰기가 없을 때만 it.last).
+ */
+const WRITE_V = { create: 'new', modify: 'write', write: 'write', delete: 'del' };
+export function blockTint(it, nowMs, out = { key: null, a: 0, d: 0 }) {
+  out.key = null; out.a = 0; out.d = 0;
+  if (!it) return out;
+  let key = null, t = 0;
+  const L = it.log;
+  if (L) for (let i = L.length - 1; i >= 0; i--) { const k = WRITE_V[L[i].v]; if (k) { key = k; t = L[i].t || 0; break; } }
+  if (!key) {
+    const c = it.cnt; if (!c) return out;
+    if (it.del && c.delete) key = 'del';
+    else if ((c.modify || 0) + (c.write || 0) > 0) key = 'write';
+    else if (c.create) key = 'new';
+    else return out;
+    t = it.last || 0;
+  }
+  const d = nowMs - t;
+  const a = d <= LP.TINT_HOLD ? 1 : d >= LP.TINT_END ? 0 : 1 - (d - LP.TINT_HOLD) / (LP.TINT_END - LP.TINT_HOLD);
+  out.d = d;
+  if (a > 0) { out.key = key; out.a = a; }
+  return out;
+}
+
+/**
+ * 구역 활동 열(순수 — mem = Map key → {ts:[초…], n, last}, 최대 LP.HEAT_MAX 구역, 오래 안 쓴 것부터 버림).
+ * sectorHeat(mem, key, t0, now): 쓰기 하나(t0 = 연출 시계 초) 기록 → 지금 알파. sectorHeatA(mem, key, now): 읽기만.
+ * n = 마지막 쓰기까지 60초 안 쓰기 수, a = min(0.35, 0.12·log2(1+n)), 마지막 쓰기 뒤 60～180초에 걸쳐 0(선형). 시계가 뒤로 가면 다시 셈.
+ */
+export function sectorHeat(mem, key, t0, now) {
+  let e = mem.get(key);
+  if (e) mem.delete(key); // 최근 쓴 구역을 뒤로(넘치면 맨 앞 = 가장 오래 안 쓴 구역부터 버림)
+  else { if (mem.size >= LP.HEAT_MAX) mem.delete(mem.keys().next().value); e = { ts: [], n: 0, last: -1e9 }; }
+  mem.set(key, e);
+  if (t0 < e.last - 1) { e.ts.length = 0; e.last = -1e9; } // 되감기
+  e.ts.push(t0);
+  if (t0 > e.last) e.last = t0;
+  while (e.ts.length && (e.last - e.ts[0] > LP.HEAT_WIN || e.ts.length > 16)) e.ts.shift();
+  e.n = e.ts.length;
+  return sectorHeatA(mem, key, now);
+}
+export function sectorHeatA(mem, key, now) {
+  const e = mem && mem.get(key);
+  if (!e || !e.n) return 0;
+  const d = now - e.last;
+  if (d < -1 || d >= LP.HEAT_END) return 0;
+  const f = d <= LP.HEAT_HOLD ? 1 : 1 - (d - LP.HEAT_HOLD) / (LP.HEAT_END - LP.HEAT_HOLD);
+  return Math.min(LP.HEAT_A, 0.12 * Math.log2(1 + e.n)) * f;
+}
+
+// 이 모듈이 연구소 은유로 직접 그리는 연출 — carry(쓰기 시작 = 호박 시료 캡슐)·pour(DB 쓰기 = 탱크로 캡슐)는 동적 표현에서 더함
+const OWN_ACTS = new Set(['build', 'edit', 'shatter', 'read', 'radar', 'carry', 'pour']);
 const outShape = (it) => { // 산출물 모양
   if (String(it.id || '').startsWith('artifact:')) return 'panel';
   const e = extOf(it.n || it.id).toLowerCase();
@@ -372,14 +440,21 @@ export function labPlatformGeometry(book, plans, fx, now, env, geo) {
   const want = AC ? AC.keys(book, zoneKeyOf) : null;
   // 이 모듈이 그리는 연출(대상별 진행도)·나머지(drawActs)
   const own = env._own || (env._own = new Map()); own.clear();
+  const ownPool = env._ownPool || (env._ownPool = []); let nOwn = 0;
   const rest = env._rest || (env._rest = { list: [] }); rest.list.length = 0;
-  const radar = env._radar || (env._radar = []); radar.length = 0;
+  const radar = env._radar || (env._radar = []); let nRadar = 0;
+  const trips = env._trips || (env._trips = []); let nTrip = 0; // 캡슐 운반(carry·pour·읽기 귀환) — 위치(AP)가 다 찬 뒤 끝에서 그림
   if (AC) for (const e of AC.list) {
     const k = (now - e.t0) / e.dur;
     if (k < 0 || k >= 1) { if (k < 0) rest.list.push(e); continue; }
     if (!OWN_ACTS.has(e.a)) { rest.list.push(e); continue; }
-    if (e.a === 'radar') { radar.push({ pid: e.pid, k }); continue; }
-    if (e.id != null) { const key = e.pid + '|' + e.id, o = own.get(key); if (!o || e.t0 > o.t0) own.set(key, { a: e.a, k, t0: e.t0, n: e.n, sz: e.sz }); }
+    if (e.a === 'radar') { const R = radar[nRadar] || (radar[nRadar] = { pid: null, k: 0 }); R.pid = e.pid; R.k = k; nRadar++; continue; }
+    if ((e.a === 'carry' || e.a === 'pour' || e.a === 'read') && e.id != null && nTrip < LP.CAP_MAX) { const T = trips[nTrip] || (trips[nTrip] = { e: null, k: 0 }); T.e = e; T.k = k; nTrip++; }
+    if (e.a === 'carry' || e.a === 'pour') continue;
+    if (e.id != null) {
+      const key = e._lpk || (e._lpk = e.pid + '|' + e.id), o = own.get(key);
+      if (!o || e.t0 > o.t0) { const q = o || ownPool[nOwn] || (ownPool[nOwn] = { a: null, k: 0, t0: 0, n: 1, sz: 0, e: null }); if (!o) nOwn++; q.a = e.a; q.k = k; q.t0 = e.t0; q.n = e.n; q.sz = e.sz; q.e = e; own.set(key, q); }
+    }
   }
   // 대량 변경 감지 기억
   const bulk = env._bulk || (env._bulk = newBulkMem());
@@ -391,6 +466,19 @@ export function labPlatformGeometry(book, plans, fx, now, env, geo) {
     const E = plans.get(e.pid); if (!E) continue;
     const c = E.plan.cellOf.get(e.id), sk = c ? c.sector : E.plan.bundleOf.get(e.id);
     if (sk) bulkNote(bulk, e.pid + '|' + sk, e.t0, now);
+  }
+  // 쓰기 끝(rise·pulse — 쓰기 하나에 하나) → 구역 활동 열 · 코어 최근 10초 쓰기 수(연출 큐 항목마다 한 번 — WeakSet, 문자열 없음)
+  const heat = env._heat || (env._heat = new Map());
+  const coreM = env._corePh || (env._corePh = new Map()); // pid → {ph(누적 위상), at(지난 시각), ts:[쓰기 t0…]}
+  const seenW = env._seenW || (env._seenW = new WeakSet());
+  if (fx) for (const e of fx.list) {
+    if ((e.kind !== 'rise' && e.kind !== 'pulse') || seenW.has(e)) continue;
+    seenW.add(e);
+    let ce = coreM.get(e.pid); if (!ce) { ce = { ph: 0, at: null, ts: [] }; coreM.set(e.pid, ce); }
+    ce.ts.push(e.t0); if (ce.ts.length > 32) ce.ts.shift();
+    const E = plans.get(e.pid); if (!E) continue;
+    const c = E.plan.cellOf.get(e.id), sk = c ? c.sector : E.plan.bundleOf.get(e.id);
+    if (sk) sectorHeat(heat, e.pid + '|' + sk, e.t0, now);
   }
 
   for (const [pid, E] of plans) {
@@ -420,6 +508,7 @@ export function labPlatformGeometry(book, plans, fx, now, env, geo) {
     const secByKey = new Map(P.sectors.map((s) => [s.key, s]));
     const named = new Set([...P.sectors].sort((a, b) => b.n - a.n).slice(0, 6).map((s) => s.key));
     for (const s of P.sectors) {
+      s._wk = -1; s._ta = 0; s._tk = null; if (!s._hk) s._hk = pid + '|' + s.key; // 프레임 상태(파도 k·구역 최대 동사 색) · 활동 열 열쇠 캐시
       const la = LA * 0.6 * footDim;
       radial(s.th1, P.rIn - 0.2, rP - 0.15, Y, KI.zone, la);
       arc(P.rOut + 0.12, s.th0 + 0.6, s.th1 - 0.6, Y, KI.zone, la * (s.n ? 1 : 0.5));
@@ -442,6 +531,16 @@ export function labPlatformGeometry(book, plans, fx, now, env, geo) {
       const nt = alarmPlateTiles(P.rIn, P.rOut, s.th0, s.th1, _tiles);
       for (let q = 0; q < nt; q++) { const T = _tiles[q]; geo.box(cx + T.x, Y + 0.02, cz + T.z, T.s, 0.02, T.s, KI.alarm, LP.ALARM_PLATE_A * hp, null); }
     }
+    // ── 구역 활동 열: 최근 60초 쓰기 수(log) → 구역 바닥 호박 빛 호 HEAT_ARCS 줄(가산 선 — 불투명 판은 어두운 바닥에서 흙빛이 되어 선으로).
+    //    경보 구역은 경보 판 우선. 원경·구역 판은 판 윗면 안쪽 테(아래 판 절) ──
+    const heatL0 = geo.nl;
+    for (const s of P.sectors) {
+      const ha = alarmSec.has(s.key) ? 0 : sectorHeatA(heat, s._hk, now);
+      s._ha = ha;
+      if (plates || ha <= 0.01 || geo.nl - heatL0 >= LP.HEAT_LINES || geo.nl >= LP.LINE_SOFT) continue;
+      const a = Math.min(0.85, ha * 2.4), w = P.rOut - P.rIn - 0.6;
+      for (let q = 0; q < LP.HEAT_ARCS; q++) arc(P.rIn + 0.3 + (w * (q + 0.5)) / LP.HEAT_ARCS, s.th0 + 0.6, s.th1 - 0.6, Y + 0.012, KI.write, a * (q % 2 ? 0.7 : 1), 0, 2);
+    }
     // ── 대량 변경 파도(코어 → 테두리, 굵은 띠 3줄) + 지나간 블록 윗면 빛 판 + 경계 호 한 바퀴 빛남 + ×N ──
     for (const s of P.sectors) {
       const w = bulk.wave.get(pid + '|' + s.key); if (!w) continue;
@@ -456,11 +555,15 @@ export function labPlatformGeometry(book, plans, fx, now, env, geo) {
       } else {
         const r = P.rIn + (rP - P.rIn) * k; // 고른 속도(ease-out 이면 칸 띠 안쪽을 0.3초 만에 지나가 버림)
         for (let q = 0; q < 3; q++) { const rq = r - q * LP.WAVE_GAP; if (rq < P.rIn) break; arc(rq, s.th0 + 0.5, s.th1 - 0.5, q ? Y + 0.03 : Y + 0.03 + 0.15 * Math.sin(k * Math.PI), KI.write, a * (1 - 0.25 * q), 0, LP.WAVE_W); }
+        s._wk = k; // 블록 튐(블록 절에서 waveLift)
+        // 파두를 따라 지나가는 구역 바닥 호박 판(반지름 [r − 0.6, r], 한 줄 타일)
+        const r0 = Math.max(P.rIn, r - 0.6), r1 = Math.min(P.rOut, r);
+        if (r1 - r0 > 0.1) { const nt = alarmPlateTiles(r0, r1, s.th0, s.th1, _tiles, 1); for (let q = 0; q < nt; q++) { const T = _tiles[q]; geo.box(cx + T.x, Y + 0.014, cz + T.z, T.s, 0.016, T.s, KI.write, 0.35, null); } }
         for (const c of s.cells) { // 막 지나간 칸: 블록 윗면 위 얇은 빛 판이 한 번 스침
           if (c.key == null || c.r > r || c.r < r - LP.CELL) continue;
           const it = book.get(pid, c.key); if (!it) continue;
           const pc = W(c.x, c.z);
-          geo.box(pc.x, H + shapeOf(env, it).h0 + 0.03, pc.z, LP.BLOCK * 1.04, 0.03, LP.BLOCK * 1.04, KI.write, 0.9 * (1 - (r - c.r) / LP.CELL), null);
+          geo.box(pc.x, H + shapeOf(env, it).h0 + 0.03 + waveLift(c.r, r, k), pc.z, LP.BLOCK * 1.04, 0.03, LP.BLOCK * 1.04, KI.write, 0.9 * (1 - (r - c.r) / LP.CELL), null);
         }
       }
       if (!red) {
@@ -521,20 +624,20 @@ export function labPlatformGeometry(book, plans, fx, now, env, geo) {
       }
       if (plates) { // 판 위 점등·중요 점만
         if (lit > 0.05 || it.imp || sel) geo.dot(p.x, H + 0.6, p.z, 0.3, it.imp ? KI.imp : KI.file, Math.max(la, 0.5 * lit + 0.2));
+        if (s) { const TT = blockTint(it, nowMs, _tint); if (TT.key && TT.key !== 'del' && TT.a > s._ta) { s._ta = TT.a; s._tk = TT.key; } } // 구역 판 윗면 테 색(블록 절 뒤)
         if (want && want.has(key)) { const R = AP.put(key, p.x, H + 0.5, p.z, H + 0.8, H, 0.9); setOut(R, c.theta); }
         if (env.hits) env.hits.push({ pid, id, x: p.x, y: H + 0.4, z: p.z, r: 0.4 });
         continue;
       }
       const fl = M.fxBy.get(key) || null;
-      const st = fxState(fl, now, red, FS);
       const oa = own.get(key) || null;
-      // 연구소 연출 진행도
-      let print = -1, editK = -1, shatter = -1, scan = -1, sink = 0;
-      if (oa) { if (oa.a === 'build') print = oa.k; else if (oa.a === 'edit') editK = oa.k; else if (oa.a === 'shatter') shatter = oa.k; else if (oa.a === 'read') scan = oa.k; }
+      // 연구소 연출 진행도(editT = 새 윗판이 앉는 연출 시각 — 그 뒤 호박 테 EDGE_S)
+      let print = -1, editK = -1, shatter = -1, scan = -1, sink = 0, editT = null;
+      if (oa) { if (oa.a === 'build') print = oa.k; else if (oa.a === 'edit') { editK = oa.k; editT = oa.e.t0 + 0.8 * oa.e.dur; } else if (oa.a === 'shatter') shatter = oa.k; else if (oa.a === 'read') scan = oa.k; }
       if (fl) for (const e of fl) {
         const k = (now - e.t0) / e.dur; if (k < 0 || k >= 1) continue;
         if (e.kind === 'rise' && print < 0) print = k;
-        else if (e.kind === 'pulse' && editK < 0) editK = k;
+        else if (e.kind === 'pulse' && editK < 0) { editK = k; editT = e.t0 + 0.8 * e.dur; }
         else if (e.kind === 'collapse' && shatter < 0) shatter = k;
         else if (e.kind === 'read' && scan < 0) scan = k;
         else if (e.kind === 'warn') { sink = k < 0.45 ? k / 0.45 : 0; if (k >= 0.45 && print < 0) print = (k - 0.45) / 0.55; }
@@ -542,46 +645,78 @@ export function labPlatformGeometry(book, plans, fx, now, env, geo) {
       if (red) { print = print >= 0 ? 1 : -1; shatter = shatter >= 0 ? 1 : -1; }
       const SH = shapeOf(env, it), shape = SH.shape, h0 = SH.h0;
       const hk = print >= 0 ? ease(Math.min(1, print / 0.85)) : sink > 0 ? 1 - ease(sink) * 0.85 : 1;
-      const lift = editK >= 0 && !red ? 0.25 * Math.sin(editK * Math.PI) : 0;
+      // 대량 변경 파도: 파두 근처 블록이 튐(움직임 줄이기면 0) — 고치기는 들림 대신 윗판 교체(아래)
+      const lift = s && s._wk >= 0 && !red ? waveLift(c.r, P.rIn + (rP - P.rIn) * s._wk, s._wk) : 0;
       const gone = shatter >= 0 ? ease(Math.min(1, shatter * 1.6)) : 0;
       const ref = { pid, id };
       if (gone < 1) for (const b of shape) {
         const top = b.dy + b.sy / 2, bot = b.dy - b.sy / 2;
         const ctop = Math.min(top, h0 * hk), cb = Math.min(bot, h0 * hk);
         if (ctop - cb < 0.01) continue;
-        const ly = top >= h0 - 1e-6 ? lift : lift * 0.4; // 윗장이 들림
         const sy = (ctop - cb) * (1 - gone);
-        geo.box(p.x + b.dx, H + cb + sy / 2 + ly, p.z + b.dz, b.sx * (1 - gone * 0.4), sy, b.sz * (1 - gone * 0.4), b.c, b.a * BODY * 2.4 + (env.isLight ? 0.5 : 0.35) * lit, ref);
+        geo.box(p.x + b.dx, H + cb + sy / 2 + lift, p.z + b.dz, b.sx * (1 - gone * 0.4), sy, b.sz * (1 - gone * 0.4), b.c, b.a * BODY * 2.4 + (env.isLight ? 0.5 : 0.35) * lit, ref);
       }
       const topY = H + h0 * hk * (1 - gone) + lift, hb = LP.BLOCK / 2;
+      const th = c.theta * DEG, tx = Math.cos(th), tz = -Math.sin(th); // 접선(θ 방향) 단위 벡터 — polar 의 x = r·sinθ, z = r·cosθ
+      // 동사 색 윗판(새로 만듦 초록 · 고침 호박, 30초 → 150초에 바탕색으로) — 고치는 동안은 교체 연출이 대신 그림
+      const TT = blockTint(it, nowMs, _tint), PB = LP.BLOCK * 0.96, TH = LP.TINT_TH;
+      const editing = editK >= 0 && editK < 1;
+      if (gone < 1 && TT.key && TT.key !== 'del' && !editing) geo.box(p.x, topY + TH / 2, p.z, PB, TH, PB, KI[TT.key], (0.35 + 0.5 * TT.a) * Math.min(1, TT.a * 10), null);
+      // 지우기 잔상: 칸 바닥 회색 판(알파 0.25 → 0, 30초)
+      if (it.del && TT.d >= 0 && TT.d < LP.DEL_GHOST_MS) geo.box(p.x, H + 0.012, p.z, LP.BLOCK * 1.05, 0.02, LP.BLOCK * 1.05, KI.del, 0.25 * (1 - TT.d / LP.DEL_GHOST_MS), null);
       // 윗면 윤곽(+ 세부 무늬)
+      const tinted = gone < 1 && !it.del && TT.key && TT.key !== 'del' && TT.a > 0.02 && !editing; // 동사 색 윗면 테(가산 선 — 불투명 윗판만으로는 어두워 읽히지 않음)
+      if (tinted) geo.rect(p.x - hb, topY + TH + 0.006, p.z - hb, p.x + hb, p.z + hb, KI[TT.key], Math.max(la, 0.3 + 0.6 * TT.a));
       if (gone < 1 && (detail || lit > 0.05 || sel)) {
         const sub = SH.sub, c = it.del ? KI.del : shape[0].c;
-        if (sub !== 'image') geo.rect(p.x - hb, topY + 0.004, p.z - hb, p.x + hb, p.z + hb, c, la);
+        if (sub !== 'image' && !tinted) geo.rect(p.x - hb, topY + 0.004, p.z - hb, p.x + hb, p.z + hb, c, la);
         if (detail && geo.nl < LP.LINE_SOFT) {
           if (sub === 'code') { for (let q = -1; q <= 1; q++) geo.line(p.x - hb * 0.4, topY + 0.01, p.z + q * 0.12, p.x + hb * 0.4, topY + 0.01, p.z + q * 0.12, c, la * 0.7); // 칩 줄
             for (let q = -1; q <= 1; q++) { geo.line(p.x + hb, H + 0.06, p.z + q * 0.2, p.x + hb + 0.08, H + 0.02, p.z + q * 0.2, c, la * 0.6); geo.line(p.x - hb, H + 0.06, p.z + q * 0.2, p.x - hb - 0.08, H + 0.02, p.z + q * 0.2, c, la * 0.6); } } // 핀
           else if (sub === 'doc') geo.line(p.x + hb - 0.16, topY + 0.01, p.z - hb, p.x + hb, topY + 0.01, p.z - hb + 0.16, c, la);      // 귀 접힘
-          else if (sub === 'data') { for (const q of [-1, 1]) { geo.line(p.x + q * hb / 3, topY + 0.01, p.z - hb, p.x + q * hb / 3, topY + 0.01, p.z + hb, c, la * 0.6); geo.line(p.x - hb, topY + 0.01, p.z + q * hb / 3, p.x + hb, topY + 0.01, p.z + q * hb / 3, c, la * 0.6); } }
+          else if (sub === 'data') { for (let q = -1; q <= 1; q += 2) { geo.line(p.x + q * hb / 3, topY + 0.01, p.z - hb, p.x + q * hb / 3, topY + 0.01, p.z + hb, c, la * 0.6); geo.line(p.x - hb, topY + 0.01, p.z + q * hb / 3, p.x + hb, topY + 0.01, p.z + q * hb / 3, c, la * 0.6); } }
           else if (sub === 'image') { const fy = H + 0.08, fh = Math.max(0.35, labBlockHeight(it)) * hk; geo.line(p.x - hb * 0.85, fy, p.z + 0.06, p.x + hb * 0.85, fy + fh, p.z + 0.06, c, la * 0.8); geo.rect(p.x - hb, H + 0.085, p.z - hb, p.x + hb, p.z + hb, c, la * 0.6); }
           else if (sub === 'plan') { for (let q = -2; q <= 2; q++) geo.line(p.x - hb, H + 0.085, p.z + q * 0.16, p.x + hb, H + 0.085, p.z + q * 0.16, c, la * 0.45); }
         }
       }
-      // 3D 프린트: 칸 바닥 격자 + 오가는 가로 빛줄 헤드
+      // 기자재발 쓰기(e.tu = bg 기자재 toolUseId): 기자재 꼭대기 → 블록 공급선(사람발은 beams 가 이미 그림)
+      if (oa && oa.e && env.actOrigin && (oa.a === 'build' || oa.a === 'edit') && oa.k < 0.5 && !red && geo.nl < LP.LINE_SOFT) {
+        const o = env.actOrigin(oa.e);
+        if (o) geo.line(o.x, o.y, o.z, p.x, topY + 0.3, p.z, oa.a === 'build' ? KI.new : KI.write, 0.6 * (1 - oa.k / 0.5), 2);
+      }
+      // 3D 프린트: 칸 바닥 격자 + 프린트 갠트리(양옆 레일 2 · 헤드 상자가 반지름 방향 4줄 래스터 · 헤드 아래 레이저). detail 미만이면 헤드만
       if (print >= 0 && print < 1 && !red) {
-        const hy = H + h0 * hk + 0.02, a = 0.9 * (1 - Math.max(0, print - 0.85) / 0.15);
-        for (const q of [-1, 0, 1]) { geo.line(p.x - hb, H + 0.01, p.z + q * hb, p.x + hb, H + 0.01, p.z + q * hb, KI.new, a * 0.4); geo.line(p.x + q * hb, H + 0.01, p.z - hb, p.x + q * hb, H + 0.01, p.z + hb, KI.new, a * 0.4); }
-        geo.rect(p.x - hb - 0.06, hy, p.z - hb - 0.06, p.x + hb + 0.06, p.z + hb + 0.06, KI.new, a);
-        const sx = p.x - hb + 2 * hb * (0.5 + 0.5 * Math.sin(print * 30));
-        geo.line(sx, hy, p.z - hb - 0.1, sx, hy, p.z + hb + 0.1, KI.new, a); // 헤드
-        geo.dot(sx, hy + 0.05, p.z, 0.12, KI.new, a);
+        const hy = H + h0 * hk + 0.02 + lift, a = 0.9 * (1 - Math.max(0, print - 0.85) / 0.15);
+        if (geo.nl < LP.LINE_SOFT) {
+          for (let q = -1; q <= 1; q++) { geo.line(p.x - hb, H + 0.01, p.z + q * hb, p.x + hb, H + 0.01, p.z + q * hb, KI.new, a * 0.4); geo.line(p.x + q * hb, H + 0.01, p.z - hb, p.x + q * hb, H + 0.01, p.z + hb, KI.new, a * 0.4); }
+          geo.rect(p.x - hb - 0.06, hy, p.z - hb - 0.06, p.x + hb + 0.06, p.z + hb + 0.06, KI.new, a);
+        }
+        const rx = -tz, rz = tx; // 반지름(바깥) 방향 = (sinθ, cosθ)
+        const u = Math.min(1, print / 0.85), row = Math.min(3, Math.floor(u * 4)), f = u * 4 - row;
+        const ro = (row - 1.5) * (hb * 0.5), so = (row % 2 ? 1 - f : f) * 2 * hb - hb; // 줄(반지름 쪽 자리) · 줄 안 위치(접선, 왕복)
+        const gy = hy + 0.28, gx = p.x + rx * ro + tx * so, gz = p.z + rz * ro + tz * so;
+        geo.box(gx, gy, gz, 0.2, 0.08, 0.2, KI.new, Math.min(1, a + 0.1), null); // 헤드
+        if (detail && geo.nl < LP.LINE_SOFT) {
+          const RL = hb + 0.15, RO = hb + 0.12;
+          for (let q = -1; q <= 1; q += 2) geo.line(p.x + tx * q * RO - rx * RL, gy, p.z + tz * q * RO - rz * RL, p.x + tx * q * RO + rx * RL, gy, p.z + tz * q * RO + rz * RL, KI.new, a, 2); // 레일 2
+          geo.line(p.x - tx * RO + rx * ro, gy, p.z - tz * RO + rz * ro, p.x + tx * RO + rx * ro, gy, p.z + tz * RO + rz * ro, KI.new, a * 0.7); // 가로대(헤드가 탄 줄)
+          geo.line(gx, gy - 0.04, gz, gx, hy, gz, KI.new, a); // 레이저
+        }
       }
-      // 고치기: 안쪽 빛 + 바뀌는 얇은 층
-      if (editK >= 0 && editK < 1) {
+      // 고치기: 안쪽 빛 + 바뀌는 얇은 층 · 윗판 교체(k < 0.4 옛 판이 접선으로 0.5m 밀려 나가며 흐려짐 → 0.4～0.8 새 판(호박)이 0.6m 위에서 떨어져 앉음)
+      if (editing) {
         const a = 0.85 * Math.sin(editK * Math.PI), nL = Math.min(4, 1 + Math.round(Math.log10(1 + (oa ? oa.sz : 0) + 1) * 2));
-        for (let q = 0; q < nL; q++) { const ly = topY - 0.05 - q * 0.07; if (ly <= H) break; geo.rect(p.x - hb - 0.02, ly, p.z - hb - 0.02, p.x + hb + 0.02, p.z + hb + 0.02, KI.write, a * (1 - q * 0.2)); }
-        if (!red) geo.box(p.x, topY - lift / 2, p.z, LP.BLOCK * 0.9, Math.max(0.02, lift), LP.BLOCK * 0.9, KI.write, 0.6 * a, null); // 새 층이 끼워짐
+        if (geo.nl < LP.LINE_SOFT) for (let q = 0; q < nL; q++) { const ly = topY - 0.05 - q * 0.07; if (ly <= H) break; geo.rect(p.x - hb - 0.02, ly, p.z - hb - 0.02, p.x + hb + 0.02, p.z + hb + 0.02, KI.write, a * (1 - q * 0.2)); }
+        if (gone < 1) {
+          if (red) geo.box(p.x, topY + TH / 2, p.z, PB, TH, PB, KI.write, 0.85, null);
+          else if (editK < 0.4) { const v = ease(editK / 0.4), d = 0.5 * v; geo.box(p.x + tx * d, topY + TH / 2, p.z + tz * d, PB, TH, PB, shape[shape.length - 1].c, 0.85 * (1 - 0.75 * v), null); }
+          else { const v = Math.min(1, (editK - 0.4) / 0.4); geo.box(p.x, topY + TH / 2 + 0.6 * (1 - v * v), p.z, PB, TH, PB, KI.write, 0.85, null); }
+        }
+        if (editK >= 0.8 && editT != null) edgeMark(env, key, editT); // 앉은 뒤 호박 테 1.5초
       }
+      // 고친 뒤 호박 테(EDGE_S, 연출 시계)
+      const EG = env._edge ? env._edge.get(key) : undefined;
+      if (EG !== undefined) { const d = now - EG; if (d >= 0 && d < LP.EDGE_S) geo.rect(p.x - hb - 0.05, topY + 0.006, p.z - hb - 0.05, p.x + hb + 0.05, p.z + hb + 0.05, KI.write, 0.8 * (1 - d / LP.EDGE_S)); else if (d >= LP.EDGE_S || d < -5) env._edge.delete(key); }
       // 지우기: 복셀 조각이 흩어져 칸 바닥 틈으로 떨어짐
       if (shatter >= 0 && shatter < 1 && !red) {
         const k = shatter;
@@ -593,11 +728,16 @@ export function labPlatformGeometry(book, plans, fx, now, env, geo) {
         }
         geo.line(p.x - hb, H + 0.01, p.z, p.x + hb, H + 0.01, p.z, KI.del, 0.6 * (1 - k)); // 바닥 틈
       }
-      // 읽기: 스캔 고리가 아래 → 위로
+      // 읽기: 스캔 고리가 아래 → 위로 · 파란 세로 스캔 막이 윗면을 접선 방향으로 훑음 + 파란 테(0.8 → 0) — 높이·윗판 색은 그대로(쓰기와 구별)
       if (scan >= 0 && scan < 1) {
-        const y = H + h0 * hk * (red ? 1 : ease(scan)) + 0.02, a = 0.85 * (1 - scan * 0.6);
+        const y = H + h0 * hk * (red ? 1 : ease(scan)) + 0.02 + lift, a = 0.85 * (1 - scan * 0.6);
         geo.rect(p.x - hb - 0.08, y, p.z - hb - 0.08, p.x + hb + 0.08, p.z + hb + 0.08, KI.read, a);
-        if (!red) geo.rect(p.x - hb - 0.04, Math.max(H, y - 0.15), p.z - hb - 0.04, p.x + hb + 0.04, p.z + hb + 0.04, KI.read, a * 0.4);
+        geo.rect(p.x - hb - 0.03, topY + 0.008, p.z - hb - 0.03, p.x + hb + 0.03, p.z + hb + 0.03, KI.read, 0.8 * (1 - scan));
+        if (!red) {
+          geo.rect(p.x - hb - 0.04, Math.max(H, y - 0.15), p.z - hb - 0.04, p.x + hb + 0.04, p.z + hb + 0.04, KI.read, a * 0.4);
+          const alongX = Math.abs(tx) >= Math.abs(tz), sw = (scan * 2 - 1) * hb; // 축 정렬 상자: 접선에 가까운 축으로 훑음
+          geo.box(p.x + (alongX ? sw * (tx < 0 ? -1 : 1) : 0), topY + 0.15, p.z + (alongX ? 0 : sw * (tz < 0 ? -1 : 1)), alongX ? 0.03 : 0.9, 0.5, alongX ? 0.9 : 0.03, KI.read, 0.55 * (1 - 0.5 * scan), null);
+        }
       }
       if (it.imp) shield(geo, p.x, topY + 0.45, p.z, la, 0.18);
       if (it.x && it.x !== 'overwrite' && nowMs - (it.xAt || 0) < ART.ALARM_MS) geo.rect(p.x - hb - 0.1, H + 0.01, p.z - hb - 0.1, p.x + hb + 0.1, p.z + hb + 0.1, KI.alarm, 0.45 + 0.4 * lit); // 최근 10분 파괴적 = 붉은 테
@@ -607,6 +747,13 @@ export function labPlatformGeometry(book, plans, fx, now, env, geo) {
       beams(geo, it, env, foot, lit, nowMs, LA, p.x, ay, p.z);
       fxRings(geo, fl, now, p.x, H, p.z, 1);
       if (env.hits) env.hits.push({ pid, id, x: p.x, y: ay, z: p.z, r: 0.45 });
+    }
+    // ── 원경·구역 판: 판 윗면 바깥 테 = 구역 안 가장 진한 동사 색, 안쪽 테 = 활동 열(선 하나씩) ──
+    if (plates) for (const s of P.sectors) {
+      if (!s.n || (s._ta <= 0.01 && s._ha <= 0.01)) continue;
+      const h = 0.12 + 0.18 * Math.log2(1 + s.n), yy = H + h + 0.01;
+      if (s._ta > 0.01 && s._tk) arc(P.rOut - 0.1, s.th0 + 0.8, s.th1 - 0.8, yy, KI[s._tk], 0.35 + 0.5 * s._ta, 4, 2);
+      if (s._ha > 0.01) arc(P.rIn + 0.1, s.th0 + 0.8, s.th1 - 0.8, yy, KI.write, Math.min(1, s._ha * 2.4), 3, 2);
     }
     // ── 테두리 장치·코어 ──
     const pushes = { n: 0 };
@@ -696,7 +843,24 @@ export function labPlatformGeometry(book, plans, fx, now, env, geo) {
     // ── 저장소 코어: 커밋 눈금 고리 + push 흡입·빛기둥 ──
     {
       const CR = LAB.PLATFORM.CORE_R, CH = LAB.PLATFORM.CORE_H, ty = H + CH + 0.06;
-      const ticks = Math.max(4, Math.min(16, 4 + pushes.n)), ph = red ? 0 : coreSpin * 3 + t * 0.15;
+      // 눈금 고리 회전 = 누적 위상(속도 0.15 + 0.12·최근 10초 쓰기 수, 상한 1.2 rad/s, 쉬면 멈춤 · dt ≤ 0.25 · 되감기면 0)
+      let ce = coreM.get(pid); if (!ce) { ce = { ph: 0, at: null, ts: [] }; coreM.set(pid, ce); }
+      const cdt = ce.at == null ? 0 : Math.max(0, Math.min(LP.CORE_DT, now - ce.at)); ce.at = now;
+      while (ce.ts.length && (now - ce.ts[0] > LP.CORE_WIN || ce.ts[0] > now + 1)) ce.ts.shift();
+      const n10 = ce.ts.length, wsp = n10 ? Math.min(LP.CORE_WMAX, LP.CORE_W0 + LP.CORE_WK * n10) : 0;
+      if (!red) ce.ph += wsp * cdt;
+      const ticks = Math.max(4, Math.min(16, 4 + pushes.n)), ph = red ? 0 : coreSpin * 3 + ce.ph;
+      // 쓰기마다 코어 바깥으로 퍼지는 호박 고리(CORE_R → +1.6, 0.9초(배속이면 연출 길이까지), 최근 3겹) — 원경·움직임 줄이기면 생략
+      if (fx && !red && !far) {
+        let nr = 0;
+        for (let i = fx.list.length - 1; i >= 0 && nr < LP.CORE_RINGS; i--) {
+          const e = fx.list[i];
+          if ((e.kind !== 'rise' && e.kind !== 'pulse') || e.pid !== pid) continue;
+          const kk = (now - e.t0) / Math.min(LP.CORE_RING_S, e.dur);
+          if (kk < 0 || kk >= 1) continue;
+          ringW(geo, cx, Y + 0.06, cz, CR + LP.CORE_RING_DR * ease(kk), KI.write, 0.85 * (1 - kk), 24, 2); nr++;
+        }
+      }
       for (let q = 0; q < ticks; q++) { const a = ph + (q / ticks) * Math.PI * 2; geo.line(cx + Math.cos(a) * (CR + 0.12), ty, cz + Math.sin(a) * (CR + 0.12), cx + Math.cos(a) * (CR + 0.35), ty, cz + Math.sin(a) * (CR + 0.35), coreAlarm ? KI.alarm : KI.repo, LA * 0.9 + 0.4 * coreSpin); }
       geo.ring(cx, ty, cz, CR + 0.12, KI.repo, LA * 0.7, 24);
       if (pillar >= 0) {
@@ -717,7 +881,8 @@ export function labPlatformGeometry(book, plans, fx, now, env, geo) {
       }
     }
     // ── 레이더(Grep·Glob): 코어에서 고리가 퍼지고 훑는 선 ──
-    for (const R of radar) {
+    for (let ri = 0; ri < nRadar; ri++) {
+      const R = radar[ri];
       if (R.pid !== pid) continue;
       const k = R.k, r = LAB.PLATFORM.CORE_R + (rP - LAB.PLATFORM.CORE_R) * (red ? 0.6 : ease(k)), a = 0.8 * (1 - k);
       geo.ring(cx, Y + 0.02, cz, r, KI.read, a, 36);
@@ -749,12 +914,54 @@ export function labPlatformGeometry(book, plans, fx, now, env, geo) {
       }
     }
   }
+  // ── 캡슐 운반: carry(쓰기 시작 = 호박 시료 캡슐 출발점 → 블록) · pour(DB 쓰기 → 탱크) · 읽기 귀환(블록 → 사람·기자재, 파란 캡슐 2～3) ──
+  //    출발점 = env.actOrigin(e)(bg 기자재 꼭대기 — e.tu 가 그 기자재 toolUseId) → 없으면 env.nodePos(e.node) → 없으면 대상 위 하늘
+  for (let i = 0; i < nTrip; i++) {
+    const TR = trips[i], e = TR.e, k = TR.k;
+    const T = AP.get(e._lpk || (e._lpk = e.pid + '|' + e.id)); if (!T) continue;
+    if (!geo.pidStart(env, e.pid)) continue;
+    const upx = env.unitPx ? env.unitPx(e.pid) : 20, cpx = LP.CELL * upx, farT = cpx < ART.LOD_PX, tail = cpx >= ART.DETAIL_PX ? 3 : 0;
+    const o = (env.actOrigin && env.actOrigin(e)) || (e.node && env.nodePos ? env.nodePos(e.node) : null);
+    if (o) { _oa.x = o.x; _oa.y = o.y; _oa.z = o.z; } else { _oa.x = T.x; _oa.y = T.top + 6; _oa.z = T.z; }
+    _ob.x = T.x; _ob.y = T.top + 0.1; _ob.z = T.z;
+    if (e.a === 'read') {
+      if (red) continue; // 움직임 줄이기: 스캔 테만(블록 절)
+      const n = farT ? 1 : e.n > 1 ? 3 : 2;
+      for (let q = 0; q < n; q++) { const u = (k - 0.25 - q * 0.12) / 0.6; if (u > 0 && u < 1) capsule(geo, _ob, _oa, smooth(u), LP.CAP_LIFT * 0.8, KI.read, 0.9 * (1 - 0.6 * u), 0.14, tail ? 2 : 0); }
+      continue;
+    }
+    if (red) { geo.ring(_ob.x, _ob.y, _ob.z, 0.45, KI.write, 0.7 * (1 - k), 16); continue; } // 정지 도형: 도착 자리 고리만
+    const n = farT ? 1 : Math.min(3, e.n || 1);
+    for (let q = 0; q < n; q++) { const u = (k - q * 0.15) / 0.75; if (u >= 0 && u < 1) capsule(geo, _oa, _ob, smooth(u), LP.CAP_LIFT, KI.write, 1 - 0.7 * u, LP.CAP_S, tail); }
+    if (k > 0.75) { const v = (k - 0.75) / 0.25; geo.ring(_ob.x, _ob.y, _ob.z, 0.25 + 0.45 * v, KI.write, 0.7 * (1 - v), farT ? 10 : 16); } // 도착 링
+  }
   geo.ka = 1;
   if (AC && rest.list.length) drawActs(geo, rest, now, { theme: 'lab', unitPx: env.unitPx || null, KI, pos: AP, zoneOf: zoneKeyOf, book, nodePos: env.nodePos, reduced: env.reduced, isLight: env.isLight, pidAlpha: env.pidAlpha || null });
   return geo;
 }
 
 const _q0 = {}, _q1 = {}, _qa = { x: 0, z: 0 }, _pw = { x: 0, z: 0 };
+const smooth = (u) => u * u * (3 - 2 * u); // 떠오름·내려앉음(캡슐 운반)
+const _tint = { key: null, a: 0, d: 0 }, _oa = { x: 0, y: 0, z: 0 }, _ob = { x: 0, y: 0, z: 0 };
+/** 대량 변경 파도 블록 튐: 0.25·max(0, 1 − |r − 파두|/칸)·sin(π·k) */
+export function waveLift(r, rFront, k) {
+  const kk = k <= 0 ? 0 : k >= 1 ? 1 : k;
+  return LP.WAVE_LIFT * Math.max(0, 1 - Math.abs(r - rFront) / LP.CELL) * Math.sin(Math.PI * kk);
+}
+/** 고친 뒤 호박 테 시각 기록(env._edge: 'pid|id' → 연출 시각 초, 최대 64) */
+function edgeMark(env, key, t) {
+  const m = env._edge || (env._edge = new Map());
+  if (!m.has(key) && m.size >= 64) m.delete(m.keys().next().value);
+  m.set(key, t);
+}
+/** 시료 캡슐: a → b 포물선(가운데 lift 높이) 위 u 지점 몸 상자 + 꼬리(앞선 자리, 점점 작고 옅게) */
+function capsule(geo, a, b, u, lift, c, al, s, tail) {
+  for (let q = 0; q <= tail; q++) {
+    const uq = u - q * 0.06; if (uq < 0) break;
+    const x = a.x + (b.x - a.x) * uq, y = a.y + (b.y - a.y) * uq + Math.sin(Math.PI * uq) * lift, z = a.z + (b.z - a.z) * uq, sq = s * (1 - q * 0.22);
+    geo.box(x, y, z, sq, sq, sq, c, al * (1 - q * 0.25), null);
+  }
+}
 /** 굵은 수평 고리(geo.ring 은 선 폭을 넘기지 못하므로 여기서 w 를 줌) */
 function ringW(geo, x, y, z, r, c, a, seg, w) {
   for (let s = 0; s < seg; s++) { const a0 = (s / seg) * Math.PI * 2, a1 = ((s + 1) / seg) * Math.PI * 2; geo.line(x + Math.cos(a0) * r, y, z + Math.sin(a0) * r, x + Math.cos(a1) * r, y, z + Math.sin(a1) * r, c, a, w); }
@@ -776,12 +983,12 @@ function shapeOf(env, it) { // eslint-disable-line no-unused-vars
  * out[i] = {x, z(중심 기준), s(한 변)} 로 채운다. 반환 = 개수(≤ ALARM_TILE_MAX). 모든 꼭짓점이 쐐기 안(코어·바깥 테·이웃 구역 침범 0).
  */
 export const ALARM_TILE_ROWS = 3, ALARM_TILE_MAX = 48;
-export function alarmPlateTiles(rIn, rOut, th0, th1, out) {
+export function alarmPlateTiles(rIn, rOut, th0, th1, out, rows = ALARM_TILE_ROWS) { // rows: 파도 판은 1 줄
   const w = rOut - rIn, span = th1 - th0;
   if (!(w > 0) || !span) return 0;
-  const dr = w / ALARM_TILE_ROWS, perRow = Math.floor(ALARM_TILE_MAX / ALARM_TILE_ROWS);
+  const dr = w / rows, perRow = Math.floor(ALARM_TILE_MAX / rows);
   let n = 0;
-  for (let i = 0; i < ALARM_TILE_ROWS; i++) {
+  for (let i = 0; i < rows; i++) {
     const r = rIn + dr * (i + 0.5);
     const nt = Math.max(1, Math.min(perRow, Math.round((Math.abs(span) * DEG * r) / dr)));
     const dth = span / nt;

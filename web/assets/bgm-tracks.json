@@ -38,7 +38,11 @@
     "화성 전환": "Harmonic shift",
     "화음": "Chords",
     "회귀": "Return",
-    "흐름": "Drift"
+    "흐름": "Drift",
+    "선율": "Melody",
+    "숨 고르기": "Breather",
+    "다시": "Again",
+    "더브": "Dub"
   },
   "tracks": [
     {
@@ -1355,6 +1359,286 @@
       },
       "energy": 0.93,
       "source": "자체 작곡(music/compose_collider.py)"
+    },
+    {
+      "id": "tidelock",
+      "label": "조석 고정",
+      "title": "조석 고정",
+      "mood": "보통 · 6/8 흔들림 — 8분 톱니 플럭 분산화음, 'oo' 합창 패드, 점4분 서브 베이스, 1박 킥·4박 림, 셰이커, 첼로 선율",
+      "label_en": "Tidal Lock",
+      "title_en": "Tidal Lock",
+      "mood_en": "Normal · 6/8 sway — eighth-note saw plucks, 'oo' choir pads, dotted-quarter sub bass, kick on 1 and rim on 4, shaker, cello melody",
+      "file": "bgm-tidelock.mp3",
+      "meta": "bgm-tidelock.json",
+      "bpm": 156,
+      "beats": 6,
+      "key": "B dorian",
+      "duration": 300,
+      "bytes": 4800679,
+      "hash": "cb75efbfad16924c",
+      "stage": 1,
+      "views": {
+        "flow": [
+          1
+        ],
+        "planet": [
+          1
+        ]
+      },
+      "energy": 0.4,
+      "source": "자체 작곡(music/compose_tidelock.py)"
+    },
+    {
+      "id": "pentameter",
+      "label": "다섯 박 루프",
+      "title": "다섯 박 루프",
+      "mood": "보통 · 5/4(3+2) 그루브 — 3+2 자리에 끊는 오르간 화음, 8분 실로폰 분산화음, 1·4박 킥과 3·5박 클랩, 서브 베이스, 사각파 리드",
+      "label_en": "Pentameter",
+      "title_en": "Pentameter",
+      "mood_en": "Normal · 5/4 (3+2) groove — organ stabs on the 3+2 grouping, eighth-note xylophone arpeggios, kick on 1 and 4, claps on 3 and 5, sub bass, square lead",
+      "file": "bgm-pentameter.mp3",
+      "meta": "bgm-pentameter.json",
+      "bpm": 100,
+      "beats": 5,
+      "key": "Db lydian",
+      "duration": 300,
+      "bytes": 4800679,
+      "hash": "abba0c05d3dc1c49",
+      "stage": 1,
+      "views": {
+        "flow": [
+          1
+        ],
+        "planet": [
+          1
+        ]
+      },
+      "energy": 0.44,
+      "source": "자체 작곡(music/compose_pentameter.py)"
+    },
+    {
+      "id": "dubroom",
+      "label": "서버실 더브",
+      "title": "서버실 더브",
+      "mood": "보통 · 느린 더브 — 원드롭 킥과 크로스스틱, 길게 메아리치는 오프비트 기타 스탭, 서브 베이스 선율, 테이프 잡음, 아코디언 주제",
+      "label_en": "Server Room Dub",
+      "title_en": "Server Room Dub",
+      "mood_en": "Normal · slow dub — one-drop kick and cross-stick, long-echo off-beat guitar stabs, sub bass line, tape hiss, accordion theme",
+      "file": "bgm-dubroom.mp3",
+      "meta": "bgm-dubroom.json",
+      "bpm": 76,
+      "key": "F minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "hash": "9b4c0b15580068c5",
+      "stage": 1,
+      "views": {
+        "flow": [
+          1
+        ],
+        "planet": [
+          1
+        ]
+      },
+      "energy": 0.38,
+      "source": "자체 작곡(music/compose_dubroom.py)"
+    },
+    {
+      "id": "parkbench",
+      "label": "공원 벤치",
+      "title": "공원 벤치",
+      "mood": "보통 · 6/8 민속풍 산책 — 나일론 기타 8분 분산화음, 점4분 업라이트 베이스, 여린 프레임 드럼과 탬버린, 아코디언 주제, 플루트 대선율",
+      "label_en": "Park Bench",
+      "title_en": "Park Bench",
+      "mood_en": "Normal · 6/8 folk stroll — nylon guitar eighth-note arpeggios, dotted-quarter upright bass, soft frame drum and tambourine, accordion theme, flute counter-melody",
+      "file": "bgm-parkbench.mp3",
+      "meta": "bgm-parkbench.json",
+      "bpm": 180,
+      "beats": 6,
+      "key": "E major",
+      "duration": 300,
+      "bytes": 4800679,
+      "hash": "a764bcf45e4022ad",
+      "stage": 1,
+      "views": {
+        "voxel": [
+          1
+        ]
+      },
+      "energy": 0.42,
+      "source": "자체 작곡(music/compose_parkbench.py)"
+    },
+    {
+      "id": "sunlitdesk",
+      "label": "햇살 드는 자리",
+      "title": "햇살 드는 자리",
+      "mood": "보통 · 어쿠스틱 핑거피킹 — 스틸 기타 트래비스 주법, 여린 킥·림·셰이커, 일렉트릭 베이스, 실로폰 주제, 현악 화음",
+      "label_en": "Sunlit Desk",
+      "title_en": "Sunlit Desk",
+      "mood_en": "Normal · acoustic fingerpicking — Travis-picked steel guitar, soft kick, rim and shaker, electric bass, xylophone theme, string chords",
+      "file": "bgm-sunlitdesk.mp3",
+      "meta": "bgm-sunlitdesk.json",
+      "bpm": 100,
+      "key": "C major",
+      "duration": 300,
+      "bytes": 4800679,
+      "hash": "50af0c6d63d15835",
+      "stage": 1,
+      "views": {
+        "voxel": [
+          1
+        ]
+      },
+      "energy": 0.36,
+      "source": "자체 작곡(music/compose_sunlitdesk.py)"
+    },
+    {
+      "id": "filingwaltz",
+      "label": "서류철 왈츠",
+      "title": "서류철 왈츠",
+      "mood": "보통 · 재즈 왈츠 — 브러시 라이드, 2·3박 피아노 컴핑, 업라이트 베이스(B 구간 워킹), 약음 금관 주제, 피아노 선율",
+      "label_en": "Filing Waltz",
+      "title_en": "Filing Waltz",
+      "mood_en": "Normal · jazz waltz — brushed ride, piano comping on 2 and 3, upright bass (walking in the B section), muted brass theme, piano melody",
+      "file": "bgm-filingwaltz.mp3",
+      "meta": "bgm-filingwaltz.json",
+      "bpm": 132,
+      "beats": 3,
+      "key": "Eb major",
+      "duration": 300,
+      "bytes": 4800679,
+      "hash": "67f5aacff90303ac",
+      "stage": 1,
+      "views": {
+        "voxel": [
+          1
+        ]
+      },
+      "energy": 0.46,
+      "source": "자체 작곡(music/compose_filingwaltz.py)"
+    },
+    {
+      "id": "microscope",
+      "label": "현미경 관찰",
+      "title": "현미경 관찰",
+      "mood": "보통 · 3/4 연구소 왈츠 — 마림바 분산화음, 1박 킥과 2·3박 림, 셰이커, 피펫 물방울, 모니터 삐 소리, 플루트 선율",
+      "label_en": "Under the Microscope",
+      "title_en": "Under the Microscope",
+      "mood_en": "Normal · 3/4 lab waltz — marimba arpeggios, kick on 1 and rim on 2 and 3, shaker, pipette drips, monitor beeps, flute melody",
+      "file": "bgm-microscope.mp3",
+      "meta": "bgm-microscope.json",
+      "bpm": 84,
+      "beats": 3,
+      "key": "B minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "hash": "b6d8cc04ce04633f",
+      "stage": 1,
+      "views": {
+        "lab": [
+          1
+        ]
+      },
+      "energy": 0.34,
+      "source": "자체 작곡(music/compose_microscope.py)"
+    },
+    {
+      "id": "datalog",
+      "label": "데이터 기록계",
+      "title": "데이터 기록계",
+      "mood": "보통 · 셋잇단 칼림바 시퀀스와 느린 사각파 겹 아르페지오, 여린 킥·림, 계전기 딸깍, 드문 가이거 틱, 실로폰 선율",
+      "label_en": "Data Logger",
+      "title_en": "Data Logger",
+      "mood_en": "Normal · triplet kalimba sequence over a slow square-wave arpeggio, soft kick and rim, relay clicks, sparse Geiger ticks, xylophone melody",
+      "file": "bgm-datalog.mp3",
+      "meta": "bgm-datalog.json",
+      "bpm": 96,
+      "key": "Eb major",
+      "duration": 300,
+      "bytes": 4800679,
+      "hash": "337deb2c2c9b0683",
+      "stage": 1,
+      "views": {
+        "lab": [
+          1
+        ]
+      },
+      "energy": 0.42,
+      "source": "자체 작곡(music/compose_datalog.py)"
+    },
+    {
+      "id": "fivetubes",
+      "label": "다섯 시험관",
+      "title": "다섯 시험관",
+      "mood": "보통 · 5/4(3+2) 연구소 그루브 — 도약하는 블립 시퀀스, 1·4박 킥과 3·5박 림, 50Hz 험, 피펫 물방울, 일렉트릭 피아노 선율",
+      "label_en": "Five Test Tubes",
+      "title_en": "Five Test Tubes",
+      "mood_en": "Normal · 5/4 (3+2) lab groove — leaping blip sequence, kick on 1 and 4, rim on 3 and 5, 50 Hz hum, pipette drips, electric piano melody",
+      "file": "bgm-fivetubes.mp3",
+      "meta": "bgm-fivetubes.json",
+      "bpm": 100,
+      "beats": 5,
+      "key": "Ab mixolydian",
+      "duration": 300,
+      "bytes": 4800679,
+      "hash": "8d9176acff1811b3",
+      "stage": 1,
+      "views": {
+        "lab": [
+          1
+        ]
+      },
+      "energy": 0.4,
+      "source": "자체 작곡(music/compose_fivetubes.py)"
+    },
+    {
+      "id": "coolant",
+      "label": "냉각수 순환",
+      "title": "냉각수 순환",
+      "mood": "보통 · 6/8 흔들림 — 오르골 8분 분산화음, 1·4 흔들리는 킥과 림, 셰이커, 60Hz 험과 물방울, 첼로 선율",
+      "label_en": "Coolant Loop",
+      "title_en": "Coolant Loop",
+      "mood_en": "Normal · 6/8 sway — music-box eighth-note arpeggios, swaying kick and rim, shaker, 60 Hz hum and drips, cello melody",
+      "file": "bgm-coolant.mp3",
+      "meta": "bgm-coolant.json",
+      "bpm": 168,
+      "beats": 6,
+      "key": "G major",
+      "duration": 300,
+      "bytes": 4800679,
+      "hash": "130da68723c7453d",
+      "stage": 1,
+      "views": {
+        "lab": [
+          1
+        ]
+      },
+      "energy": 0.3,
+      "source": "자체 작곡(music/compose_coolant.py)"
+    },
+    {
+      "id": "gelrun",
+      "label": "전기영동",
+      "title": "전기영동",
+      "mood": "활발 · 브레이크비트 실험실 — 엇박 킥과 고스트 스네어, 공명 짙은 16분 톱니 시퀀서, 긴 서브 베이스, 계전기·모니터 삐 소리, 오르간 선율",
+      "label_en": "Gel Run",
+      "title_en": "Gel Run",
+      "mood_en": "Lively · breakbeat lab — syncopated kick and ghost-note snare, resonant 16th-note saw sequencer, long sub bass, relay and monitor beeps, organ melody",
+      "file": "bgm-gelrun.mp3",
+      "meta": "bgm-gelrun.json",
+      "bpm": 128,
+      "key": "Bb minor",
+      "duration": 300,
+      "bytes": 4800679,
+      "hash": "525d6aaf6b2ad37d",
+      "stage": 2,
+      "views": {
+        "lab": [
+          2
+        ]
+      },
+      "energy": 0.62,
+      "source": "자체 작곡(music/compose_gelrun.py)"
     }
   ]
 }

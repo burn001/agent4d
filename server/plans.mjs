@@ -53,7 +53,7 @@ export function v2Progress(items) {
   return c;
 }
 /**
- * 바깥 계획(파일· 선언 연결) → wire v2 계획. raw = {id?, src, title, doc?, current?(항목 id), items:[{id?, title, state, doc?, note?, meta?[], group?, emph?,
+ * 바깥 계획(파일· 선언 연결) → wire v2 계획. raw = {id?, src, title, doc?, current?(항목 id), items:[{id?, title, state, doc?, note?, meta?[], group?, emph?, no?(고유 번호 정수 — 목록 위치와 별개),
  * steps?: [{title, state}] | {done, total, current?}}]}. 글은 redact·상한, minimal 이면 글 없음(상태·수만)
  */
 export function planFromRaw(raw, { privacy = 'summary', at = 0, key = '' } = {}) {
@@ -73,6 +73,7 @@ export function planFromRaw(raw, { privacy = 'summary', at = 0, key = '' } = {})
     if (!minimal && x.group) out.group = txt(x.group, 40);
     if (!minimal && Array.isArray(x.meta)) { const m = x.meta.filter((v) => v != null && String(v).trim()).slice(0, PLAN_V2.META).map((v) => txt(v, 40)); if (m.length) out.meta = m; }
     if (x.emph) out.emph = 1;
+    if (Number.isInteger(x.no) && x.no > 0 && x.no < 10000) out.no = x.no; // 고유 번호(큐 위치와 다름) — 숫자라 minimal 에서도 유지
     const sp = x.steps;
     if (Array.isArray(sp) && sp.length) {
       const list = sp.filter((y) => y && typeof y === 'object').map((y, j) => { const s2 = parseState(y.state ?? y.st) || (y.s ? toV2State(y.s, y.hold) : 'pending'); return { k: planHash(String(y.id ?? y.title ?? j), 8), t: txt(y.title ?? y.t ?? '', PLAN_V2.TEXT), st: s2 }; });

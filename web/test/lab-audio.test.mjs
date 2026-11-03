@@ -167,8 +167,10 @@ test('제한: 같은 이름 0.25초 안 1번 → RateLimiter(초당 8) → voice
 const manifest = JSON.parse(readFileSync(new URL('../assets/bgm-tracks.json', import.meta.url), 'utf8'));
 const LAB_IDS = LAB_TRACKS.flat();
 
-test('배경음악 매니페스트: 연구소 8곡(단계마다 2곡) — views 는 lab 만, 메타 300초·4/4·영어 이름, 합성 스크립트 존재', () => {
-  assert.equal(LAB_IDS.length, 8);
+test('배경음악 매니페스트: 연구소 13곡(한가 2·보통 6·활발 3·매우 활발 2) — views 는 lab 만, 메타 300초·박자·영어 이름, 합성 스크립트 존재', () => {
+  assert.equal(LAB_IDS.length, 13);
+  assert.deepEqual(LAB_TRACKS.map((x) => x.length), [2, 6, 3, 2]);
+  const METER = { microscope: '3/4', fivetubes: '5/4', coolant: '6/8' };
   for (let st = 0; st < 4; st++) for (const id of LAB_TRACKS[st]) {
     const t = manifest.tracks.find((x) => x.id === id);
     assert.ok(t, `매니페스트 ${id}`);
@@ -179,7 +181,7 @@ test('배경음악 매니페스트: 연구소 8곡(단계마다 2곡) — views 
     assert.ok(t.label_en && t.title_en && t.mood_en, `${id} 영어`);
     assert.match(t.hash || '', /^[0-9a-f]{16}$/);
     const meta = JSON.parse(readFileSync(new URL(`../assets/bgm-${id}.json`, import.meta.url), 'utf8'));
-    assert.equal(meta.duration, 300); assert.equal(meta.meter, '4/4'); assert.equal(meta.stage, st);
+    assert.equal(meta.duration, 300); assert.equal(meta.meter, METER[id] || '4/4'); assert.equal(meta.stage, st);
     assert.ok(meta.sections.length >= 4);
     assert.ok(existsSync(new URL(`../../music/compose_${id}.py`, import.meta.url)), `compose_${id}.py`);
   }

@@ -86,6 +86,7 @@ SECTIONS_EN = {
     "잦아듦": "Fading", "전개": "Unfolding", "정리": "Wind-down", "정리 2": "Wind-down 2", "클라이맥스": "Climax",
     "패드 전개": "Pad bloom", "하모닉스 고조": "Harmonics rise", "화성 전환": "Harmonic shift", "화음": "Chords",
     "회귀": "Return", "흐름": "Drift",
+    "선율": "Melody", "숨 고르기": "Breather", "다시": "Again", "더브": "Dub",
 }
 
 

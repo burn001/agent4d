@@ -50,9 +50,10 @@ export class Character {
 
   get present() { return this.state !== 'gone'; }
 
-  addTool(id, cat, tool, now) {
+  /** old = 스냅샷·따라잡기로 넣은 이미 열려 있던 도구(시작 순간 연출 — 포털 소환 창 — 없음) */
+  addTool(id, cat, tool, now, old = false) {
     if (this.tools.some((t) => t.id === id)) return;
-    this.tools.push({ id, cat: cat || 'other', tool, t0: now, end: null });
+    this.tools.push({ id, cat: cat || 'other', tool, t0: now, end: null, old: !!old });
     if (this.tools.length > MAX_TOOLS) this.tools.splice(0, this.tools.length - MAX_TOOLS);
   }
   endTool(id, ok, now) {

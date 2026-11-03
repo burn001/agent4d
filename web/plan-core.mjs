@@ -13,7 +13,7 @@ export const PLAN_UI = {
   NEXT_N: 2,          // 판에 보이는 다음 단계 수(지금 단계 뒤)
   BASE_PX: 180,       // 보드 DOM 기준 폭(px) — 화면 크기는 월드 크기 × 원근 배율로 scale(글자도 함께)
   HOLO_H_K: 1.5,      // 보드 높이 = 그 표현 일반 홀로그램 모니터 높이 × 이 배(폭은 모니터와 같음)
-  SIZE_K: 2,          // 보드 크기 배수(박사님 "Plan board size -> 2x") — 월드 폭·높이에 곱함 → 화면 배율이 함께 2배라 글자·막대·칸·여백 모두 2배. 앵커 오프셋·모니터 기준(holo·BOOST)은 그대로
+  SIZE_K: 2,          // 보드 크기 배수(사용자 "Plan board size -> 2x") — 월드 폭·높이에 곱함 → 화면 배율이 함께 2배라 글자·막대·칸·여백 모두 2배. 앵커 오프셋·모니터 기준(holo·BOOST)은 그대로
   VX_MON_H: 1.0,      // 복셀 모니터(voxel/office-core MON.H·ASP — 시험이 같은지 확인)
   VX_MON_ASP: 1.62,
   BOOST: { flow: [30, 10], voxel: [64, 1.9] }, // 활동 노드 모니터와 같은 최소 크기 키움 [모니터 최소 높이 px, 배율 상한] (holo-core HOLO.MIN_PX_ACTIVE·BOOST_MAX, office-core MON.MIN_PX·BOOST)
@@ -472,12 +472,13 @@ export function planInspectModel(node, { nowMs = Date.now(), labelOf = null } = 
   return plansOf(node).map((p) => {
     const pr = planProgress(p);
     return {
-      id: p.id, title: p.title || PLAN_SRC_LABEL[p.src] || t('boards.plan.plan'), doc: p.doc || '', src: PLAN_SRC_LABEL[p.src] || p.src, glyph: PLAN_SRC_GLYPH[p.src] || '☐',
+      id: p.id, srcKey: p.src, title: p.title || PLAN_SRC_LABEL[p.src] || t('boards.plan.plan'), doc: p.doc || '', src: PLAN_SRC_LABEL[p.src] || p.src, glyph: PLAN_SRC_GLYPH[p.src] || '☐',
       count: `${pr.done}/${pr.total}`, frac: pr.frac, more: Math.max(0, (p.n || p.items.length) - p.items.length),
       updated: p.at ? fmtAgo(nowMs - p.at) : '',
       items: p.items.map((it, i) => ({
         mark: PLAN_ST_MARK[it.s] || '○', s: it.s, t: it.t || t('boards.plan.item', { n: i + 1 }), hold: !!it.hold, cur: i === pr.cur, v2: it.st || null,
         doc: it.doc || '', note: it.note || '', group: it.group || '', meta: Array.isArray(it.meta) ? it.meta : [], emph: !!it.emph, steps: it.steps && it.steps.total > 0 ? it.steps : null,
+        no: Number.isInteger(it.no) && it.no > 0 ? it.no : null, // 고유 번호(목록 위치와 별개 — 없으면 null)
         cy: it.cy ?? null, by: it.by || null, byLabel: it.by && labelOf ? labelOf(it.by) : '', ago: it.at && it.s !== 'pending' ? fmtAgo(nowMs - it.at) : '',
       })),
     };

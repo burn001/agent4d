@@ -1,4 +1,4 @@
-// 【리드·QA】 연구소 mock 시나리오(설계 M1～M10) — 순수(DOM·three 없음, 타이머만). 화면 확인 URL: ?mock=1&view=lab&labmock=<n>.
+// 【리드·QA】 연구소 mock 시나리오(설계 M1～M10 + M11 claude -p) — 순수(DOM·three 없음, 타이머만). 화면 확인 URL: ?mock=1&view=lab&labmock=<n>.
 // 기본 ?mock=1&view=lab 은 mock.js 시나리오(메인 + 서브 + bg + Monitor …)를 연구동 배치로 그리고, 작업 대상 장면은 art-mock(ArtMockDriver).
 // labmock=n 이면 LabMockDriver 가 그 장면을 더 낸다(결정적 난수 — 시드 4242 + n). app.js connect() mock 갈래가 start/stop 한다.
 // 범위·표현이 필요한 장면(7 multi·8 campus·9 stress·10 replay)은 URL 매개변수로 고르고(see 열), 드라이버는 그 위에 확인용 사건만 더한다.
@@ -13,6 +13,7 @@ export const LAB_MOCK = [
   { n: 8, id: 'campus', see: '전체 보기 캠퍼스 — 프로젝트마다 원형 연구동·비활성 돔 닫힘·표시 고르기', url: '&scope=all' },
   { n: 9, id: 'stress', see: '그리기 호출·프레임 시간(노드 60·300)', url: '&stress=60' },
   { n: 10, id: 'replay', see: '배속 8 이상 순간 이동·움직임 줄이기·라이트', url: '&theme=light' },
+  { n: 11, id: 'claude-p', see: 'claude -p 회차(분리 기동기 → 러너 → 회차)·메인이 띄운 독립 claude -p 가 전경 Agent 로 띄운 서브에이전트 — 띄운 쪽은 자기 책상, 하위는 곁 책상·의뢰서·보고', url: '' },
 ];
 
 /** M1: 10종 판정을 한눈에 보는 명령(lab-rig-core RIG_RULES 순) + Monitor */
@@ -37,7 +38,7 @@ function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) >>>
  */
 export class LabMockDriver {
   constructor({ nodes, emit, scenario = 1, seed = 4242, first = 1800 } = {}) {
-    this.nodes = nodes; this.emit = emit; this.n = Math.max(1, Math.min(10, scenario | 0 || 1));
+    this.nodes = nodes; this.emit = emit; this.n = Math.max(1, Math.min(LAB_MOCK.length, scenario | 0 || 1));
     this.r = rng(seed + this.n); this.first = first; this.timers = new Set(); this.on = false; this.k = 0; this.bg = 0;
   }
   _at(ms, fn) { const t = setTimeout(() => { this.timers.delete(t); if (this.on) fn(); }, ms); this.timers.add(t); }
@@ -55,10 +56,18 @@ export class LabMockDriver {
     return tu;
   }
   /** 백그라운드 기자재 하나(node-add) → 출력 틱 → 끝(state: done|error|stopped|stale(조용)) */
-  _bg(parentId, command, { life = 20000, end = 'done', kind = 'bash-bg', rc = null, quiet = false } = {}) {
+  _bg(parentId, command, { life = 20000, end = 'done', kind = 'bash-bg', rc = null, quiet = false, art = null } = {}) {
     const id = `b:labmock${this.n}_${String(++this.bg).padStart(3, '0')}`;
-    const node = { id, parentId, kind, label: command, status: 'active', startedAt: this._ts(), lastActivityAt: this._ts(), meta: { command, background: true } };
+    const tu = `tu_lab_bg_${this.n}_${this.bg}`; // B 기자재 → 플랫폼 운반: 띄운 Bash 의 toolUseId(실제 세션은 서버가 meta.toolUseId 로 넣음)
+    const node = { id, parentId, kind, label: command, status: 'active', startedAt: this._ts(), lastActivityAt: this._ts(), meta: { command, background: true, toolUseId: tu } };
     this.emit({ type: 'node-add', ts: this._ts(), nodeId: id, node });
+    if (art) { // 그 명령이 쓰는 산출 파일(같은 tu 의 art) — 기자재 꼭대기에서 플랫폼 블록으로 캡슐이 감
+      const fire = () => {
+        this.emit({ type: 'tool-start', ts: this._ts(), nodeId: parentId, toolUseId: tu, tool: 'Bash', cat: 'shell', text: command, brief: command, art: art.map((x) => ({ ...x })) });
+        this._at(500, () => this.emit({ type: 'tool-end', ts: this._ts(), nodeId: parentId, toolUseId: tu, tool: 'Bash', cat: 'shell', ok: true, durationMs: 500, text: '완료', brief: '완료', art: art.map((x) => ({ ...x, v: x.v === 'write' ? 'create' : x.v })) }));
+      };
+      this._at(2500, fire); // 한 번만 — 같은 tu 를 다시 보내면 ArtBook 이 tu|id 로 거르고(장부·운반 0) 주인 캐릭터에 끝난 도구가 다시 쌓임. 실제 세션도 띄운 Bash 호출은 한 번
+    }
     const t0 = Date.now();
     const tick = () => {
       if (Date.now() - t0 > life) {
@@ -81,7 +90,7 @@ export class LabMockDriver {
     if (S) S.call(this, m);
   }
   // M1 기본: 기자재 10종(명령 판정) — 오래 살아 있게
-  _m1(m) { LAB_MOCK_RIGS.forEach(([, cmd], i) => this._at(i * 350, () => this._bg(m.id, cmd, { life: 120000, kind: cmd.startsWith('tail') ? 'monitor' : 'bash-bg' }))); }
+  _m1(m) { LAB_MOCK_RIGS.forEach(([k, cmd], i) => this._at(i * 350, () => this._bg(m.id, cmd, { life: 120000, kind: cmd.startsWith('tail') ? 'monitor' : 'bash-bg', art: k === 'reactor' ? [F('dist/bundle.js', 'write', { sz: 6 })] : null }))); }
   // M2 부하: 폴더 14 × 파일 쓰기 연속(구역 상한 12 → '…')
   _m2(m) {
     let i = 0;
@@ -110,7 +119,7 @@ export class LabMockDriver {
   }
   // M5 상태 6종: 진행(출력) · 대기(Monitor 조용) · 정체(조용한 셸) · 끝 · 실패(rc 2) · 중지
   _m5(m) {
-    this._bg(m.id, 'npm test', { life: 9000, end: 'done' });
+    this._bg(m.id, 'npm test', { life: 9000, end: 'done', art: [F('reports/junit.xml', 'write', { sz: 2 })] });
     this._bg(m.id, 'npm run build', { life: 12000, end: 'error', rc: 2 });
     this._bg(m.id, 'python train.py --epochs 40', { life: 600000, quiet: true });   // 조용 → 정체
     this._bg(m.id, 'uvicorn app:api --port 8080', { life: 15000, end: 'stopped' });
@@ -137,4 +146,50 @@ export class LabMockDriver {
   _m2s(m) { const step = () => { const who = this._pick(this._live()) || m; this._tool(who.id, 'Write', 'edit', `src/m${this.k}.js`, [F(`src/m${this.k}.js`, 'write', { sz: 3 })], 500); this._at(4000, step); }; step(); }
   _m9() {}
   _m10(m) { this._m4(m); }
+  // M11 claude -p(11.02. 사용자 지적 "claude -p 가 혼자 동떨어진 곳에서 허우적댄다 — 자기가 띄운 서브에이전트와 연결도 안 됨"):
+  //   실제 자율 루프(분리 기동) 모양 그대로 — 분리 기동기(parentId 없음 · meta.spawnedBy = 메인) → 러너 → 회차 claude -p(link.by launcher).
+  //   claude -p 는 서브에이전트를 전경 Agent 로 띄워 하위가 끝날 때까지 도구가 열려 있다(mock.js spawnAgent 는 비동기 300ms라 재현 안 됨).
+  //   메인이 Bash 로 띄운 독립 claude -p(회차 아님)도 같은 모양으로 하나 더.
+  _m11(m) {
+    const L = 'b:labmock11_launch', R = L + '-r1';
+    this._add({ id: L, parentId: null, kind: 'bash-bg', label: '기동기 · relaunch.sh', meta: { detached: true, background: true, spawnedBy: m.id, command: null, launcher: { script: 'relaunch.sh', via: ['relaunch.sh'] } } });
+    this._add({ id: R, parentId: L, kind: 'bash-bg', label: '러너 · autopilot.sh', meta: { background: true, command: null, runner: { script: 'autopilot.sh', instance: 1, launcher: L } } });
+    let k = 0;
+    const cycle = () => {
+      const id = `s:labmock11-cycle-${++k}`;
+      this._add({ id, parentId: R, kind: 'claude-p', label: 'claude -p · cycle-' + k, meta: { cycle: k, cwd: 'D:/code/api-server', link: { by: 'launcher', confidence: 'high', evidence: ['script-claude-p', 'cwd', 'time', 'chain'] } } });
+      this._at(700, () => this._pAgent(id, `회차 ${k} 하위 · 축 점검`, 16000, () => this._at(1200, () => { this._end(id); this._at(2500, cycle); })));
+    };
+    cycle();
+    this._at(4000, () => { // 메인 Bash(전경) → 독립 claude -p
+      const tu = `tu_lab_mock_${this.n}_${this.k++}`, cmd = 'claude -p --output-format json "통합 시험"';
+      this.emit({ type: 'tool-start', ts: this._ts(), nodeId: m.id, toolUseId: tu, tool: 'Bash', cat: 'shell', text: cmd, brief: cmd });
+      const id = 's:labmock11-probe';
+      this._add({ id, parentId: m.id, kind: 'claude-p', label: 'claude -p · probe', meta: { toolUseId: tu, cwd: 'D:/code/api-server', command: cmd } });
+      this._at(800, () => this._pAgent(id, '독립 세션 하위 · 시험 분석', 22000, () => this._at(1000, () => {
+        this._end(id);
+        this.emit({ type: 'tool-end', ts: this._ts(), nodeId: m.id, toolUseId: tu, tool: 'Bash', cat: 'shell', ok: true, durationMs: 25000, text: '{"result":"ok"}', brief: 'exit 0' });
+      })));
+    });
+  }
+  _add(node) { const t = this._ts(); this.emit({ type: 'node-add', ts: t, nodeId: node.id, node: { status: 'active', startedAt: t, lastActivityAt: t, ...node } }); }
+  _end(id, ok = true) {
+    this.emit({ type: 'result', ts: this._ts(), nodeId: id, ok, text: ok ? '완료' : '실패' });
+    this.emit({ type: 'node-update', ts: this._ts(), nodeId: id, patch: { status: ok ? 'done' : 'error', endedAt: this._ts() } });
+  }
+  /** 전경 Agent: 띄운 쪽(pid)의 Agent 도구가 하위가 끝날 때까지 열려 있음 → 하위 node-add · 몇 번 일 · 끝(보고) → Agent 도구 끝 → done() */
+  _pAgent(pid, label, life, done) {
+    const tu = `tu_lab_mock_${this.n}_${this.k++}`;
+    this.emit({ type: 'tool-start', ts: this._ts(), nodeId: pid, toolUseId: tu, tool: 'Agent', cat: 'agent', text: label, brief: label });
+    this._at(400, () => {
+      const id = `a:labmock${this.n}_${String(++this.bg).padStart(3, '0')}`;
+      this._add({ id, parentId: pid, kind: 'subagent', label, meta: { agentType: 'general-purpose', toolUseId: tu } });
+      for (let i = 0; i * 2600 + 900 < life - 1000; i++) this._at(900 + i * 2600, () => this._tool(id, i % 2 ? 'Edit' : 'Read', i % 2 ? 'edit' : 'read', `src/axis${i}.js`, null, 1400));
+      this._at(life, () => {
+        this._end(id);
+        this.emit({ type: 'tool-end', ts: this._ts(), nodeId: pid, toolUseId: tu, tool: 'Agent', cat: 'agent', ok: true, durationMs: life, text: '완료', brief: '완료' });
+        if (done) done();
+      });
+    });
+  }
 }

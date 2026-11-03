@@ -31,6 +31,17 @@ export const WALK_RULES = {
   watch: { peek: 3, maxTs: 8, where: 'rig', waitMax: 60 },
   kill: { stay: 1.0, maxTs: 8, where: 'rig' },
 };
+/**
+ * 연구소에서 시설(에어록 포털)로 걸어가지 않고 자기 책상에서 하는 도구 범주(11.02. 사용자 지적 "claude -p 가 혼자 동떨어진 곳에서 허우적댄다").
+ * Agent·워크플로 도구는 하위가 끝날 때까지 열려 있다(claude -p 회차·서브에이전트의 전경 Agent 는 수 분～수십 분). 복셀 오피스는 포털이 자기 방
+ * 안이라 괜찮지만 연구소 포털은 출입문 옆 외벽(플랫폼 건너편 30m 남짓)이라, 그동안 자기 책상·자기가 띄운 서브에이전트와 떨어져 포털 앞에서
+ * 두 팔을 든 채(agent 포즈) 서 있었다. 연구소는 의뢰를 의뢰서 캡슐(띄운 쪽 책상 → 새 책상, lab-ix-core courierFor)로 보이므로
+ * 띄운 쪽은 자기 책상에서 기다린다(책상 자세 = 홀로그램 조작). 새 서브에이전트는 그대로 에어록 포털로 들어온다(office _spawnPoint).
+ */
+export const LAB_DESK_CATS = new Set(['agent', 'workflow']);
+/** 연구소에서 그 도구 범주로 시설에 걸어가나(false = 자기 책상에서) */
+export function labWalksToStation(cat) { return !LAB_DESK_CATS.has(cat); }
+
 /** 걷기 속도(m/s, character-core WALK_SPEED 와 같음) · 곧은 거리 → 길 길이 보정 */
 const WALK_SPEED = 3.5, PATH_K = 1.4;
 

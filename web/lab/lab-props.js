@@ -15,6 +15,7 @@
 // │ drawLabDeskEmitters(room, B, pal, info)        책상 발광대. info(nodeId) → {state:'off'|'dim'|'on'|'flash', color, k} | null   │
 // │ drawLabRigCables(room, layout, B, pal, info)   주인 책상 앞 → 기자재 바닥 케이블. info = {t, ownerOf(id), colorOf(owner), │
 // │                                                stateOf(id) → rigState, rigAt?(id, m) → 그리는 자리}. 진행만 대시. ≤ 120 상자      │
+// │                                                pulseOf?(id, out) → 펄스 수(out[i] = {u 0..1 기자재 → 책상, k 0 출력·1 끝·2 실패·3 설치(책상 → 기자재)}) · light? │
 // └──────────────────────────────────────────────────────────────────────────────────────────────┘
 // 성능 상한: 정적 상자 ≤ 2,500(외벽 원호 포함), 동적(시설·발광대) ≤ 200 상자/프레임, 케이블 ≤ CABLE_BOXES(120) 상자/프레임.
 // 다중 구역(room.lab.primary === false 인 방): 자기 구역 책상·브리지·콘솔·통신 스크린·벨만 그린다(바닥·외벽·시설은 첫 구역 방).
@@ -23,6 +24,7 @@ import * as THREE from 'three';
 import { LAB, polar, DEG, bridgeToWorld } from './lab-const.mjs';
 import { DESK_TOP } from '../voxel/props.js';
 import { cableSegsInto } from './lab-marks-core.mjs';
+import { RIG_HEX, RIG_KIND_HEX } from './lab-rig-core.mjs';
 
 const _c = new THREE.Color(), _c2 = new THREE.Color();
 const dimC = (c, dim, k = 0.55) => (dim ? _c2.copy(c).multiplyScalar(k) : c);
@@ -179,6 +181,9 @@ export const CABLE_RIGS_MAX = 30;
 const _cc = new THREE.Color();
 // 프레임마다 할당 0: 기자재 목록·조각·끝점은 모듈 버퍼를 다시 씀
 const _rigM = [], _rigId = [], _segs = [], _from = { x: 0, z: 0 };
+const _pul = [], _kc = new Map();
+/** 기자재 종류·상태 색(THREE.Color 캐시 — 테마별 hex 문자열 열쇠) */
+const hexC = (h) => { let c = _kc.get(h); if (!c) { c = new THREE.Color(h); _kc.set(h, c); } return c; };
 /**
  * 【T3】 주인 책상 앞 → 기자재 바닥 케이블(바닥 0.03 높이 얇은 상자 조각). room = 연구동 첫 구역 방(primary),
  * layout = computeLab/Campus 결과(이 연구동 원 안의 기자재·자리만 씀). 색 = info.colorOf(주인), 상태 = info.stateOf(기자재 id):
@@ -229,6 +234,21 @@ export function drawLabRigCables(room, layout, B, pal, info) {
         if (d > len) { d -= len; continue; }
         const u = len > 0 ? d / len : 0;
         G.box(g.ax + dx * u, 0.045, g.az + dz * u, 0.1, 0.03, 0.35, _cc.copy(base).lerp(_c2.set(0xffffff), 0.35), Math.atan2(dx, dz));
+        used++;
+        break;
+      }
+    }
+    // C 데이터 펄스(출력 = m.flashUntil 상승 · 끝 초록 · 실패 빨강 · 설치는 책상 → 기자재): 케이블마다 ≤ 2, 상한을 넘으면 생략
+    const np = info.pulseOf && total > 0.3 ? info.pulseOf(id, _pul) : 0;
+    for (let pi = 0; pi < np && used < CABLE_BOXES; pi++) {
+      const P = _pul[pi], H = info.light ? RIG_HEX.light : RIG_HEX.dark;
+      const pc = P.k === 1 ? hexC(H.done) : P.k === 2 ? hexC(H.fail) : _cc.copy(base).lerp(hexC((info.light ? RIG_KIND_HEX.light : RIG_KIND_HEX.dark)[m.rigKind] || H.kind), 0.5).lerp(_c2.set(0xffffff), 0.25);
+      let d = (P.k === 3 ? P.u : 1 - P.u) * total; // 기자재 → 책상(설치만 반대)
+      for (let k = 0; k < ns; k++) {
+        const g = _segs[k], dx = g.bx - g.ax, dz = g.bz - g.az, len = Math.hypot(dx, dz);
+        if (d > len) { d -= len; continue; }
+        const u = len > 0 ? d / len : 0;
+        G.box(g.ax + dx * u, 0.05, g.az + dz * u, 0.12, 0.03, 0.4, pc, Math.atan2(dx, dz));
         used++;
         break;
       }

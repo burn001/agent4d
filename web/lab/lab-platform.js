@@ -15,9 +15,12 @@
 //   반출대 카운터(θ 30～60) · DB 탱크 받침(200～250) · 안테나 받침(290～340) · 경광등 몸통 4. 상자 ≈ 200(rP 14 기준).
 // 동적(LabPlatform3D): 구역 계획(labSectorPlan, 장부 version·rP 가 바뀔 때만 · 0.25초 간격) → labPlatformGeometry → ArtGeo 업로드.
 //   단일 세션이면 보이는 대상 수로 플랫폼 반지름을 정해 view.setPlatformRadius(R) 를 부름(LabRadiusGate: 커질 때 바로 · 줄 때 10분).
+// env.actOrigin(e) = _actOrigin: 연출 e.tu 가 bg 기자재(view.machines, pos.type 'rig')의 node.meta.toolUseId 와 같으면 그 기자재 꼭대기
+//   {x, y: RIG_HEIGHT[kind] + 0.2, z}(반지름 보간 중이면 view._tweenPos 자리), 아니면 null. tu → 기자재 Map 은 view._layoutVer·기계 수가 바뀔 때만 다시.
 import { ArtLayerBase3D } from '../art-layer3d.js';
 import { LAB, DEG, polar } from './lab-const.mjs';
 import { labPlatformGeometry, labSectorPlan, rimSlotsFor, LabRadiusGate } from './lab-platform-core.mjs';
+import { RIG_HEIGHT } from './lab-rig-core.mjs';
 
 export function buildPlatformStatic(room, pal, b, o = {}) {
   const lab = room && room.lab;
@@ -68,6 +71,28 @@ export class LabPlatform3D extends ArtLayerBase3D {
     this._pk = ''; this._pkAt = -1e9;
     this.gate = new LabRadiusGate(view.labRP ?? null);
     this.stats.sectors = 0; this.stats.blocks = 0;
+    this._tuRig = new Map(); this._tuVer = -1; this._tuN = -1; this._ao = { x: 0, y: 0, z: 0 };
+    this._actOriginFn = (e) => this._actOrigin(e); // 한 번 만든 함수(프레임마다 클로저 없음)
+  }
+  /** 기자재 → 플랫폼 운반 출발점: e.tu === bg 기자재 node.meta.toolUseId 인 기자재 꼭대기(결과 객체 재사용) | null */
+  _actOrigin(e) {
+    const tu = e && e.tu; if (!tu) return null;
+    const v = this.view, ms = v.machines;
+    if (!ms || !ms.size) return null;
+    const ver = v._layoutVer || 0, C = this._tuRig;
+    if (this._tuVer !== ver || this._tuN !== ms.size) {
+      this._tuVer = ver; this._tuN = ms.size; C.clear();
+      for (const m of ms.values()) {
+        if (!m || !m.pos || m.pos.type !== 'rig') continue;
+        const n = (v.nodes && v.nodes.get(m.id)) || m.node, t = n && n.meta && n.meta.toolUseId;
+        if (t) C.set(t, m);
+      }
+    }
+    const m = C.get(tu);
+    if (!m || m.released || !m.pos) return null;
+    const q = (v._tweenPos && v._tweenPos(m)) || m.pos, o = this._ao;
+    o.x = q.x; o.z = q.z; o.y = (RIG_HEIGHT[m.pos.rigKind] || 1.2) + 0.2;
+    return o;
   }
   _nodePos(id) {
     const v = this.view, ch = v.chars && v.chars.get(id);
@@ -116,6 +141,7 @@ export class LabPlatform3D extends ArtLayerBase3D {
       let nb = 0, ns = 0; for (const E of this.plans.values()) { nb += E.plan.nBlocks; ns += E.plan.sectors.length; }
       this.stats.blocks = nb; this.stats.sectors = ns;
     }
+    env.actOrigin = this._actOriginFn; // bg 기자재발 연출 출발점
     env.unitPx = (pid) => { const E = this.plans.get(pid); return E ? this._pxAt(E.cx, LAB.PLATFORM.H, E.cz) : 20; };
     // 바닥 이름판(NamePlates3D)은 쓰지 않음 — 플랫폼 위는 블록이 덮음. 프로젝트 이름은 연구동 문패(리드)· 스텐실 몫
   }

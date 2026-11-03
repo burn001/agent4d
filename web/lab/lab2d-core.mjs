@@ -11,7 +11,7 @@
 //   bridgeRects(bridge)                   브리지 덱·경사로 둘·콘솔 [{x, z, w, d, theta, kind}] (bridgeFrame 기준)
 //   facilityQuad(spots)                   시설 자리 줄 → 시설 직사각형 {x, z, w, d, theta}(사람이 보는 쪽 0.75 앞)
 //   RIG_GLYPH · rigBlink(state, t, seed)  기자재 종류 글리프 · 표시등 밝기(3D lab-rigs.js drawRig 와 같은 규칙)
-//   rigLook(node, kind, nowMs, isLight, t, seed, reduced) → {state, kind, glyph, body, trim, panel, ring, gauge, blink, anim}
+//   rigLook(node, kind, nowMs, isLight, t, seed, reduced) → {state, kind, glyph, body, trim, panel, ring, gauge, blink, anim}(모듈 재사용 객체 — 다음 호출 전까지만 유효)
 //   nearestHit(hits, x, y, r)             화면 집기(지난 그리기 기준점 중 가장 가까운 것)
 import { DEG, LAB } from './lab-const.mjs';
 import { RIG_KINDS, RIG_HEX, rigState, rigGauge } from './lab-rig-core.mjs';
@@ -83,21 +83,23 @@ export function rigBlink(state, t = 0, seed = 0) {
 /** 움직이는 상태인가(이때만 다음 프레임이 필요 — 움직임 줄이기면 늘 false) */
 const ANIM = new Set(['run', 'fail', 'stale', 'wait']);
 
+const _look = { state: 'stop', kind: 'meter', glyph: '', body: '', trim: '', panel: '', ring: '', gauge: null, blink: 0, anim: false };
 /**
  * 기자재 한 대의 2D 모양 값(순수). kind 는 배치가 정한 pos.rigKind(없으면 'meter').
  * gauge = rigGauge(0..1 | null — null 이면 도는 점). reduced 면 깜빡임 없이 상태색 그대로.
+ * 반환은 모듈 재사용 객체(프레임 할당 0) — 다음 호출이 덮어쓰므로 그 자리에서 읽고 버린다.
  */
 export function rigLook(node, kind, nowMs, isLight = false, t = 0, seed = 0, reduced = false) {
   const k = RIG_KINDS.includes(kind) ? kind : 'meter';
   const H = RIG_HEX[isLight ? 'light' : 'dark'];
   const state = rigState(node, nowMs);
   const g = rigGauge(node, k, nowMs);
-  return {
-    state, kind: k, glyph: RIG_GLYPH[k], body: H.body, trim: H.trim, panel: H.panel, ring: H[state] || H.stop,
-    gauge: Number.isFinite(g) ? Math.max(0, Math.min(1, g)) : null,
-    blink: reduced ? (state === 'stop' ? 0.4 : 1) : rigBlink(state, t, seed),
-    anim: !reduced && ANIM.has(state),
-  };
+  const L = _look;
+  L.state = state; L.kind = k; L.glyph = RIG_GLYPH[k]; L.body = H.body; L.trim = H.trim; L.panel = H.panel; L.ring = H[state] || H.stop;
+  L.gauge = Number.isFinite(g) ? Math.max(0, Math.min(1, g)) : null;
+  L.blink = reduced ? (state === 'stop' ? 0.4 : 1) : rigBlink(state, t, seed);
+  L.anim = !reduced && ANIM.has(state);
+  return L;
 }
 
 /** 지난 그리기 집기 기준점 [{x, y, …}](화면 px) 중 (x, y) 에서 r 안 가장 가까운 것 */

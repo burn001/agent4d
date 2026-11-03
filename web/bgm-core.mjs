@@ -1,7 +1,7 @@
 // 배경음악 곡 목록·곡 선택 순수 모델. DOM 없음 — audio.js 가 쓰고 web/test/bgm.test.mjs 가 검사한다.
 //   선택값(sel): 곡 id 하나 | 'auto'(활동 단계에 맞춰 고름, — 기본) | 'cycle'(곡 끝나면 다음 곡) | 'shuffle'(곡 끝나면 무작위 다른 곡)
 //   localStorage 'ccviz.bgm.track' = 선택값 문자열, 'ccviz.bgm.last' = 마지막으로 튼 곡 id(순환·무작위가 이어서 고름)
-//   테마별 풀: 매니페스트 views = {flow:[단계…], planet:[…], voxel:[…]} — 지금 표현(ccviz.view2)의 곡만 자동 선곡·팝업 위쪽. stage 는 하위 호환(테마 풀이 빌 때 폴백)
+//   테마별 풀: 매니페스트 views = {flow:[단계…], planet:[…], voxel:[…], lab:[…]} — 지금 표현(ccviz.view2)의 풀 묶음(POOL_GROUPS, 흐름↔Planet 공유) 곡만 자동 선곡·팝업 위쪽. stage 는 하위 호환(테마 풀이 빌 때 폴백)
 //   다국어: 매니페스트의 label_en·title_en·mood_en·key_en 을 영어 화면에서 label·title·mood·key 로 쓴다(없으면 기존 이름)
 import { t as tr, isKo } from './i18n.mjs';
 import { labPoolView } from './lab/lab-audio.mjs';
@@ -102,8 +102,23 @@ export function parseViews(v) {
   return Object.keys(out).length ? out : null;
 }
 
-/** 그 표현에서 곡의 단계 목록(테마 풀에 없으면 []) */
-export const viewStages = (t, view) => (t && t.views && t.views[view]) || [];
+/**
+ * 풀 묶음(2026-11-03): 같은 묶음의 표현은 자동 선곡·소리 팝업에서 한 풀로 본다 — 흐름 ↔ Planet.
+ * 복셀 오피스(voxel)·복셀 연구소(lab)는 각자 풀(묶음 없음). 묶음 안에서 표현을 바꾸면 지금 곡이 후보에 그대로 있어 곡을 갈아치우지 않는다
+ */
+export const POOL_GROUPS = [['flow', 'planet']];
+/** 표현 → 그 표현이 속한 풀 묶음의 표현 목록(묶음이 없으면 [view], 표현 없음이면 []) */
+export const poolViews = (view) => (POOL_GROUPS.find((g) => g.includes(view)) || (view ? [view] : []));
+
+/** 그 표현(풀 묶음 단위)에서 곡의 단계 목록 — 묶음 안 표현 단계의 합집합(테마 풀에 없으면 []) */
+export function viewStages(t, view) {
+  if (!t || !t.views) return [];
+  const g = poolViews(view);
+  if (g.length <= 1) return t.views[view] || [];
+  const s = new Set();
+  for (const v of g) for (const x of t.views[v] || []) s.add(x);
+  return [...s].sort((a, b) => a - b);
+}
 
 /** 테마별 풀을 쓸 수 있는지: 표현이 정해졌고 매니페스트에 views 가 있는 곡이 하나라도 */
 export const themed = (tracks, view) => VIEWS.includes(view) && tracks.some((t) => t.views);

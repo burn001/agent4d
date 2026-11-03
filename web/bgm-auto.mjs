@@ -2,8 +2,8 @@
 //   ActivityMeter: 최근 이벤트(재생 중이면 재생 시계 기준)를 창(90초) 안에서 센다 → activitySample
 //   activityLevel: 지표 → 0 한가 · 1 보통 · 2 활발 · 3 매우 활발
 //   AutoPicker:    단계 히스테리시스(올림 45초·내림 120초 유지, 전환 뒤 최소 90초) — 덜컥거림 방지
-//   stageCandidates·pickForLevel: 매니페스트 곡의 stage(0～3, 목록 가능)로 단계 → 후보 → 직전 2곡 피해 무작위
-//   viewCandidates: 지금 표현(flow·planet·voxel·lab)의 테마 풀(views)에서 그 단계 곡, 비면 전체 풀(stageCandidates)로 폴백.
+//   stageCandidates·pickForLevel: 매니페스트 곡의 stage(0～3, 목록 가능)로 단계 → 후보 → 최근 곡(후보 수의 절반, 2～5곡)·직전 곡과 비슷한 곡 피해 무작위
+//   viewCandidates: 지금 표현(flow·planet·voxel·lab)의 테마 풀(views, 풀 묶음 단위 — 흐름↔Planet 공유, bgm-core POOL_GROUPS)에서 그 단계 곡, 비면 전체 풀(stageCandidates)로 폴백.
 //     복셀 연구소(lab)는 연구소 곡이 매니페스트에 없으면 복셀 오피스 풀(labPoolView, web/lab/lab-audio.mjs)
 import { t as tr } from './i18n.mjs';
 import { stageLabel, themed, viewStages } from './bgm-core.mjs';
@@ -152,19 +152,50 @@ export function viewCandidates(level, tracks, view = null) {
   return stageCandidates(level, tracks);
 }
 
+/** 자동이 기억하는 최근 곡 수(audio.js _recent) */
+export const RECENT_MAX = 8;
+/** 최근 몇 곡을 피할지: 후보 수의 절반(내림), 최소 2·최대 5 — 풀이 커지면 같은 곡이 덜 자주 돌아온다 */
+export const avoidCount = (n) => Math.max(2, Math.min(5, Math.floor(n / 2)));
+
+const keyOf = (t) => {
+  const w = String((t && t.key) || '').toLowerCase().split(/[\s(]+/).filter(Boolean);
+  return w.length >= 2 ? w[0] + ' ' + w[1] : null;
+};
 /**
- * 단계에 맞는 곡 하나(view 를 주면 그 표현의 테마 풀, viewCandidates). recent = 최근 재생 곡 id(오래된 것 → 최근). 후보에서 직전 2곡을 피해 무작위,
- * 다 피하면 직전 1곡만 피하고, 그래도 없으면(후보 하나) 그 곡. keep = 지금 곡이 후보에 있으면 그대로 둘지
+ * 비슷하게 들리는 두 곡: 박자(beats)가 같고 BPM 차가 6 이하, 또는 같은 조(으뜸음 + 모드)에 BPM 차 16 이하.
+ * BPM 을 모르는 곡은 비슷하지 않은 것으로 본다
+ */
+export function similarTracks(a, b) {
+  if (!a || !b || a.id === b.id || !Number.isFinite(a.bpm) || !Number.isFinite(b.bpm)) return false;
+  if ((a.beats || 4) !== (b.beats || 4)) return false;
+  const d = Math.abs(a.bpm - b.bpm);
+  if (d <= 6) return true;
+  const ka = keyOf(a);
+  return d <= 16 && ka != null && ka === keyOf(b);
+}
+
+/**
+ * 단계에 맞는 곡 하나(view 를 주면 그 표현의 테마 풀 — 풀 묶음 단위, viewCandidates). recent = 최근 재생 곡 id(오래된 것 → 최근).
+ * 후보에서 최근 avoidCount(후보 수)곡을 피해 무작위(다 피하면 피하는 곡 수를 하나씩 줄임, 후보 하나면 그 곡),
+ * 남은 후보 중 직전 곡과 비슷한 곡(similarTracks)은 빼도 2곡 이상 남으면 뺀다. keep = 지금 곡이 후보에 있으면 그대로 둘지
  */
 export function pickForLevel(level, tracks, { recent = [], cur = null, keep = false, rand = Math.random, view = null } = {}) {
   const c = viewCandidates(level, tracks, view);
   if (!c.length) return null;
   if (keep && cur && c.includes(cur)) return cur;
   const last = [...recent, ...(cur && recent[recent.length - 1] !== cur ? [cur] : [])]; // cur 가 이미 최근 끝이면 두 번 세지 않음
-  const tail2 = last.slice(-2), tail1 = last.slice(-1);
-  let pool = c.filter((id) => !tail2.includes(id));
-  if (!pool.length) pool = c.filter((id) => !tail1.includes(id));
+  let pool = [];
+  for (let n = avoidCount(c.length); n >= 1 && !pool.length; n--) {
+    const tail = last.slice(-n);
+    pool = c.filter((id) => !tail.includes(id));
+  }
   if (!pool.length) pool = c;
+  const byId = (id) => tracks.find((t) => t.id === id);
+  const prev = last.length ? byId(last[last.length - 1]) : null;
+  if (prev && pool.length > 1) {
+    const diff = pool.filter((id) => !similarTracks(prev, byId(id)));
+    if (diff.length >= 2) pool = diff; // 하나만 남으면 늘 같은 곡이 되므로 거르지 않음
+  }
   const k = Math.min(pool.length - 1, Math.floor(Math.max(0, rand()) * pool.length));
   return pool[k];
 }

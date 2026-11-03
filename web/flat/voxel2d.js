@@ -21,6 +21,7 @@ import { isJob } from '../job-core.mjs'; // 작업 노드
 import { runLabelOrder } from '../run-core.mjs'; // 실행 중 셸
 import { JOBCARD, jobCardModel, jobFlatPos, jobLabelAlways, jobColorHex, mixHex } from '../voxel/vx-job-core.mjs';
 import { catColor, jobCardsGone, vxHeldEnded, endedBadly, badEndDueAt } from '../flow-core.mjs';
+import { stepLeadExit } from '../voxel/lead-exit-core.mjs'; // 끝난 별관 팀장(claude -p) 퇴장(3D 와 같음)
 import { pickRectAt, projectAreaPad } from '../overview/pick-core.mjs';
 import { toScreen, toWorld, camScale, islandLabelAt } from './flat-core.mjs';
 import { wallSegments, yawVec, facilityRect, FACILITY_LABEL, roomKindName, charRadius, isMoving } from './plan-core.mjs';
@@ -30,7 +31,7 @@ import { VxSessCore, PLANE_DUR, ease } from '../voxel/vx-sess-core.mjs';
 import { quarter, windowWall } from '../voxel/xf.mjs';
 import { Vx2DExtra } from './vx2d-extra.js';
 import { Vx2DProcs } from './vx2d-proc.js'; // 분리 프로세스 = 생산 라인 · 들여다보기 심부름
-import { roleOf, overseeSpot } from '../voxel/office-core.mjs';
+import { roleOf, overseeSpot, SUMMON_CATS, summonAtPortal, noteSummon } from '../voxel/office-core.mjs';
 import { SpotBook, takeStation, takeBreak, releaseSpot, separate } from '../voxel/crowd-core.mjs'; // 겹침 막기(3D 와 같음)
 import { watchPhase } from '../voxel/vx-proc-core.mjs';
 import { t as tr } from '../i18n.mjs';
@@ -172,7 +173,7 @@ export class Voxel2DView extends FlatView {
         if (recent) ch.startAtDoor = true;
         else { ch.state = 'gone'; ch.released = true; ch.goneAt = now; }
       }
-      for (const t of node.openTools || []) ch.addTool(t.toolUseId, t.cat, t.tool, now - 1);
+      for (const t of node.openTools || []) ch.addTool(t.toolUseId, t.cat, t.tool, now - 1, true);
       if ((node.openTools || []).length) ch.snapNext = !spawn;
       this.chars.set(node.id, ch);
     }
@@ -275,7 +276,7 @@ export class Voxel2DView extends FlatView {
     const ch = this._adding ? null : this.chars.get(nodeId);
     if (ch) {
       if (ch.state === 'gone') return;
-      ch.addTool(ev.toolUseId || 'anon' + Math.random(), ev.cat || 'other', ev.tool, this._now);
+      ch.addTool(ev.toolUseId || 'anon' + Math.random(), ev.cat || 'other', ev.tool, this._now, quiet);
       if (quiet) ch.snapNext = true;
     } else if (!this._adding) { const m = this.machines.get(nodeId); if (m) m.flashUntil = this._now + 0.3; }
     super.toolStart(nodeId, ev, quiet);
@@ -307,13 +308,14 @@ export class Voxel2DView extends FlatView {
   }
 
   // ---------------- 시설 자리 예약(3D office.js 와 같음, SpotBook) ----------------
-  _stationSpot(ch, cat) { return takeStation(this.spots, ch, cat); }
+  _stationSpot(ch, cat) { return SUMMON_CATS.has(cat) && !summonAtPortal(ch, this._now) ? null : takeStation(this.spots, ch, cat); } // 소환 순간에만 포털
   _releaseStation(ch) { if (ch.station || this.spots.get(ch.id)) releaseSpot(this.spots, ch); }
   _spawnPoint(ch, room) {
     const n = ch.node;
     if (ch.lead) return n.kind === 'main' || ch.id === this.layoutRoot ? null : room.door.out;
     if (room.type === 'meeting') return room.door.out;
     const p = this.chars.get(n.parentId);
+    noteSummon(p, this._now); // 소환 순간 — 띄운 쪽은 이 뒤 HOLD 만 포털을 지키고 책상으로
     if (p && p.room === room && room.portal) {
       const atPortal = p.state === 'work' && (p.workCat === 'agent' || p.workCat === 'workflow');
       const opening = p.tools.some((t) => t.end == null && (t.cat === 'agent' || t.cat === 'workflow'));
@@ -542,6 +544,7 @@ export class Voxel2DView extends FlatView {
     // 퇴장한 캐릭터·끝난 기계의 자리 반납(3D 와 같은 30초/배속), 제거된 노드는 다 나간 뒤 지움
     const t = this._now;
     this._heldPass(t);
+    stepLeadExit(this, t, this._nodeMap(), this.clock()); // 끝난 claude -p 별관·연구소 구역 걷기(3D 와 같음)
     for (const ch of this.chars.values()) {
       if (ch.state === 'gone' && !ch.released) {
         if (ch.heldUntil == null) ch.heldUntil = t + this._hold();

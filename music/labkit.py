@@ -105,8 +105,8 @@ def build_track(cfg):
     """cfg 로 층을 채운다. 키:
     prog(화음 목록)·per(화음당 마디)·scale((pc, mode))
     arp {kind, rate(박당 음 수), shape, lo, hi, v, fc, gate(음 길이 비율), accent(강세 주기)}
-    arp2 (같은 형식, 선택 — 폴리리듬 겹)·drums(none·soft·half·four·drive)·bass(long·pulse8·octave·none)
-    gear(hum·relay·drip·geiger·whir·beep 집합)·relay_pat(16칸 문자열)·mel {inst, lo, hi, v}·pad {lo, hi, v}
+    arp2 (같은 형식, 선택 — 폴리리듬 겹)·drums(none·soft·half·four·drive·break = 4/4, waltz = 3/4, sway = 6/8, five = 5/4)·bass(long·pulse8·octave·none)
+    gear(hum·relay·drip·geiger·whir·beep 집합)·relay_pat(박 수 × 4 칸 문자열)·mel {inst, lo, hi, v, slot_beats}·pad {lo, hi, v}
     """
     CH = prog_at(cfg["prog"], per=cfg.get("per", 2))
     SC = scale_of(*cfg["scale"])
@@ -154,9 +154,23 @@ def build_track(cfg):
         punch = lambda i: kick(46.0, 90.0, 0.035, 0.3, 0.3, 1.6)
         kv = cfg.get("kick", 0.55)  # 4박 킥이 아르페지오(연구소 얼굴)를 덮지 않게
         rim = lambda i: tone_hit(1700.0, 0.03, 0.4, 0.004, ((1.0, 1.0), (2.4, 0.4)), 0.4, 3000, i % 3)
+        if style in ("soft", "half", "four", "drive"):
+            assert E.BEATS == 4, f"드럼 {style} 는 4/4 전용 — 3/4 waltz · 6/8 sway · 5/4 five 를 쓰십시오"
         for bar in range(E.BARS):
             if lv("drums", bar) > 0:
-                if style == "soft":
+                if style == "waltz":  # 3/4(2026-11-03): 1박 킥, 2·3박 림, 4마디째 3박 뒤 픽업
+                    E.pattern(dr, bar, "X-----------" if bar % 4 != 3 else "X---------o-", soft, 0.62, kick=True)
+                    E.pattern(dr, bar, "----x---x---", rim, 0.2, 0.25)
+                elif style == "sway":  # 6/8(박 = 8분, 칸 = 16분): 1·4(점4분) 흔들림
+                    E.pattern(dr, bar, "X-----------" if bar % 2 == 0 else "X-------x---", soft, 0.6, kick=True, sub=2)
+                    E.pattern(dr, bar, "------x-----", rim, 0.22, 0.25, sub=2)
+                elif style == "five":  # 5/4 = 3+2: 1·4박 킥, 3·5박 림
+                    E.pattern(dr, bar, "X-----------X-------" if bar % 4 != 3 else "X-----------X-----o-", soft, 0.62, kick=True)
+                    E.pattern(dr, bar, "--------x-------x---", rim, 0.22, 0.25)
+                elif style == "break":  # 4/4 브레이크비트: 엇박 킥, 백비트 스네어와 고스트 노트
+                    E.pattern(dr, bar, "X-----x---X-----" if bar % 2 == 0 else "X-----x-x-----x-", punch, 0.7 * kv, kick=True)
+                    E.pattern(dr, bar, "----X--.----X-.-" if bar % 4 != 3 else "----X--.----X.xx", lambda i: snare(i % 3, 205, 0.12, 0.5, 2800, 0.55), 0.4)
+                elif style == "soft":
                     E.pattern(dr, bar, "X-------x-------" if bar % 2 else "X-------x-----o-", soft, 0.6, kick=True)
                     E.pattern(dr, bar, "----x-------x---", rim, 0.22, 0.25)
                 elif style == "half":
@@ -169,7 +183,16 @@ def build_track(cfg):
                     E.pattern(dr, bar, "X---X---X---X-x-" if bar % 4 == 3 else "X---X---X---X---", punch, 0.75 * kv, kick=True)
                     E.pattern(dr, bar, "----X-------X---" if bar % 8 != 7 else "----X-------X.xX", lambda i: snare(i % 3, 200, 0.12, 0.45, 3000, 0.6), 0.42)
             if lv("hat", bar) > 0:
-                if style in ("soft", "half"):
+                if style == "waltz":
+                    E.pattern(hh, bar, "x-o-x-o-x-o-", lambda i: shaker(i % 4), 0.12, -0.25, swing=0.06)
+                elif style == "sway":
+                    E.pattern(hh, bar, "x.o.o.x.o.o.", lambda i: shaker(i % 4), 0.12, -0.25, sub=2)
+                elif style == "five":
+                    E.pattern(hh, bar, "x-o-x-o-x-o-x-o-x-o-", lambda i: shaker(i % 4), 0.12, -0.25, swing=0.06)
+                elif style == "break":
+                    E.pattern(hh, bar, "x.o.x.o.x.o.x.oo", lambda i: hat(i % 4), 0.12, -0.15, swing=0.1)
+                    E.pattern(hh, bar, "------x-------x-" if bar % 2 else "--------------x-", lambda i: hat(i % 4, True), 0.09, 0.25)
+                elif style in ("soft", "half"):
                     E.pattern(hh, bar, "x-o-x-o-x-o-x-oo", lambda i: shaker(i % 4), 0.12, -0.25, swing=0.08)
                 elif style == "four":
                     E.pattern(hh, bar, "--x---x---x---x-", lambda i: hat(i % 4, True), 0.12, 0.2)
@@ -179,7 +202,7 @@ def build_track(cfg):
                     E.pattern(hh, bar, "--x---x---x---x-", lambda i: hat(i % 4, True), 0.1, 0.25)
             # 빌드업: 다음 구간에서 드럼이 들어오면 2마디 잡음 상승
             nb = bar + 2
-            if style in ("four", "drive") and any(s["start"] == nb % E.BARS for s in E.SECS) and lv("drums", nb) > lv("drums", bar):
+            if style in ("four", "drive", "break") and any(s["start"] == nb % E.BARS for s in E.SECS) and lv("drums", nb) > lv("drums", bar):
                 fx.add(tb(bar), riser(2 * E.BAR, bar % 3, 600.0, 6500.0), 0.6)
         layers += [dr, hh, fx]
 
@@ -191,10 +214,10 @@ def build_track(cfg):
             if bs == "long":
                 sub.add(tb(bar), sub_note(b, E.BAR * 0.95, 0.02, 0.3, 0.1), 0.36)
             elif bs == "pulse8":
-                for k in range(8):
+                for k in range(int(round(E.BEATS * 2))):
                     sub.add(tb(bar, k * 0.5), sub_note(b, E.BEAT * 0.38, 0.004, 0.05, 0.25, 1.6), 0.3 if k % 2 else 0.36)
             else:  # octave
-                for k in range(8):
+                for k in range(int(round(E.BEATS * 2))):
                     sub.add(tb(bar, k * 0.5), sub_note(b + (12 if k % 2 else 0), E.BEAT * 0.4, 0.004, 0.05, 0.2, 1.5), 0.3)
         layers.append(sub)
 
@@ -203,11 +226,12 @@ def build_track(cfg):
         g = Layer("gear", dry=0.6, rev=0.35, echo=0.25, hp=300, lp=11000, tau=2.5, gain=cfg.get("gear_gain", 1.5))
         hi = [m for m in range(cfg.get("drip_lo", 81), cfg.get("drip_hi", 96)) if m % 12 in SC]
         pat = cfg.get("relay_pat", "x--x--x---x-x---")
+        assert "relay" not in gear or len(pat) == int(round(E.BEATS * 4)), "relay_pat 칸 수 = 박 수 × 4"
         for bar in range(E.BARS):
             if "relay" in gear:
                 E.pattern(g, bar, pat, lambda i: relay(), 0.16, 0.45, jit=0.001)
             if "drip" in gear and bar % 2 == 0:
-                for k in sorted(r.choice(16, size=int(cfg.get("drips", 2)), replace=False)):
+                for k in sorted(r.choice(int(round(E.BEATS * 4)), size=int(cfg.get("drips", 2)), replace=False)):
                     m = hi[int(r.integers(0, len(hi)))]
                     g.add(tb(bar, k / 4), drip(m), 0.22, float(r.uniform(-0.6, 0.6)))
             if "geiger" in gear:
@@ -231,7 +255,7 @@ def build_track(cfg):
         tm = [[(0, 3), (3, 1), (4, 2), (6, 2), (8, 4), (12, 4)], [(0, 2), (2, 2), (4, 4), (10, 2), (12, 4)],
               [(0, 4), (4, 1), (5, 1), (6, 2), (8, 6)], [(0, 2), (3, 3), (8, 2), (10, 2), (12, 4)]]
         melody(ml, mc.get("inst", "vibes"), 0, E.BARS - E.BARS % 4, [11, 23, 37, 51], tm, CH, SC, mc.get("v", 0.28),
-               mc.get("pan", 0.15), mc.get("lo", 67), mc.get("hi", 84), slot_beats=0.5, per=4)
+               mc.get("pan", 0.15), mc.get("lo", 67), mc.get("hi", 84), slot_beats=mc.get("slot_beats", 0.5), per=4)
         layers.append(ml)
     return layers
 

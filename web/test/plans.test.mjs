@@ -465,3 +465,37 @@ test('§72.13 복셀 3D 계획판도 구멍 모드 — 직원 뒤 원형 마스�
   assert.match(ui, /vxBoard \? PLAN_UI\.VX_CORNER : PLAN_UI\.CORNER/);
   assert.match(css, /#plan-boards\.under\.vx \.pb \{ box-shadow: inset[^;]*; \}/);
 });
+
+test('§132 축 번호 칸: 크게 보기 모델은 큐 순서 그대로 + 고유 번호(no)·출처 키 · 번호 없으면 null(위치 대신 쓰지 않음) · 판 코드·CSS·한영 문구', async () => {
+  const { readFileSync } = await import('node:fs');
+  // 큐를 재배치한 상태: 위치 1,2,3 의 고유 번호가 172, (없음), 7 — 정렬하지 않고 큐(실행) 순서 그대로여야 한다
+  const items = [
+    { k: 'a', t: '앞선 큐 자리', st: 'done', s: 'done', no: 172 },
+    { k: 'b', t: '번호 없는 축', st: 'current', s: 'in_progress' },
+    { k: 'c', t: '뒤 큐 자리', st: 'pending', s: 'pending', no: 7 },
+    { k: 'd', t: '엉뚱한 값', st: 'pending', s: 'pending', no: '9' }];
+  const axes = { v: 2, id: 'pn', src: 'axes', title: '자율 루프 축', at: 1, n: 4, items };
+  const [m] = sheetInspectModel([{ owner: 's:m', runner: false, plan: axes }], { mainId: 's:m' });
+  assert.equal(m.srcKey, 'axes');
+  assert.deepEqual(m.items.map((x) => x.t), ['앞선 큐 자리', '번호 없는 축', '뒤 큐 자리', '엉뚱한 값'], '줄 순서 = 큐 순서');
+  assert.deepEqual(m.items.map((x) => x.no), [172, null, 7, null], '위치(1..4)가 아니라 고유 번호, 없으면 null');
+  // 축이 아닌 계획(러너 단계)은 no 가 없고 srcKey 가 다름 → 목록 순번 그대로
+  const ph = { id: 'pp', src: 'phases', title: '설계서', at: 1, n: 1, items: [{ k: 'z', t: '단계 0', st: 'done', s: 'done' }] };
+  const [pm] = planInspectModel({ meta: { plans: [ph] } });
+  assert.equal(pm.srcKey, 'phases'); assert.equal(pm.items[0].no, null);
+  // 판 코드: 축 큐는 고유 번호 칸(없으면 –), 그 밖은 목록 순번
+  const ui = readFileSync(new URL('../plan-ui.js', import.meta.url), 'utf8');
+  assert.match(ui, /const numCell = \(it, i\) => \(p\.srcKey === 'axes'/);
+  assert.match(ui, /it\.no == null \? '–' : it\.no/);
+  assert.match(ui, /\$\{numCell\(it, i\)\}/);
+  assert.ok(!/<span class="ipb-i">\$\{i \+ 1\}<\/span><span class="pr-t">/.test(ui), '번호 칸을 위치로 바로 찍지 않음');
+  // 세 자리 번호가 칸을 넘치지 않음: 11px 글자 × 3자리(tabular ≈ .6em)=1.8em ≤ 칸 폭
+  const css = readFileSync(new URL('../plan.css', import.meta.url), 'utf8');
+  const w = /\.ipb-i \{[^}]*?width: ([\d.]+)em;/.exec(css);
+  assert.ok(w && +w[1] >= 3 * 0.62, `번호 칸 폭 ${w && w[1]}em`);
+  assert.match(css, /\.ipb-i \{[^}]*white-space: nowrap;/);
+  // 한영 문구
+  const bd = readFileSync(new URL('../i18n/boards.mjs', import.meta.url), 'utf8');
+  assert.equal((bd.match(/'boards\.plan\.axisNo':/g) || []).length, 2, '한영 모두');
+  assert.equal((bd.match(/'boards\.plan\.axisNoNone':/g) || []).length, 2);
+});

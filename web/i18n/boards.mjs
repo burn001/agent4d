@@ -138,6 +138,8 @@ export default {
     'boards.plan.apart': 'Design doc not in the axis queue — shown separately',
     'boards.plan.mergedN': (v) => `${pl(v.n, 'runner phase plan', 'runner phase plans')} merged`,
     'boards.plan.pillIdle': 'No cycle running',
+    'boards.plan.axisNo': 'Axis no. {n} (fixed ID — not the queue position; rows are in run order)',
+    'boards.plan.axisNoNone': 'No axis number (rows are in run order)',
     // 평면도 시설·방 이름(flat/plan-core)
     'boards.facility.shelf': 'Bookshelf',
     'boards.facility.files': 'Files',
@@ -284,6 +286,8 @@ export default {
     'boards.plan.apart': '축 큐에 없는 설계서 — 따로 표시',
     'boards.plan.mergedN': '러너 단계 계획 {n}개 합침',
     'boards.plan.pillIdle': '쉬는 중(진행 중 회차 없음)',
+    'boards.plan.axisNo': '축 고유 번호 {n}번 (큐 위치가 아님 · 줄 순서 = 실행 순서)',
+    'boards.plan.axisNoNone': '축 번호 없음 (줄 순서 = 실행 순서)',
     'boards.facility.shelf': '책장',
     'boards.facility.files': '서류함',
     'boards.facility.board': '게시판',

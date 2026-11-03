@@ -10,9 +10,11 @@
 //           경보(alarm·warn) = 붉은 동심원 · 점등(lit·pulse·edit) = 밝은 테두리. 동시 점등 ≤ LAB_PERF.PLATFORM_LIT, 연출 ≤ PLATFORM_ACTS
 //     계획 추가 필드(플랫폼 담당 구현 메모)도 그린다: 테두리 장치 plan.rim · 접힌 묶음 블록 sectors[].bundle('+n') ·
 //     plan.agg(블록 300 넘음) = 구역 판(대상 수만큼 채움 세기 + 수). posOfId(plan, id) = 칸·장치·묶음 자리(연출·집기 공용)
+// 동적(3D 와 같은 사건을 가볍게): 블록 윗면 동사 색(blockTint — 새로 만듦 초록·고침 호박·지움 빨강→회색) · 읽기 연출 중 칸 테 파랑 2px ·
+//       대량 변경 파도 중 파두 근처 칸 1.15배 · 구역 활동 열(sectorHeat — 쐐기 호박 채움) · 쓰기마다 코어 고리 퍼짐. 움직임 줄이기면 정지 도형만
 //   집기: view._labHits 에 [{pid, id, x, y(화면 px), wx, wz}] 를 채운다(Lab2DView.pickArtifact·artPos 가 읽음)
 import { LAB, LAB_PERF } from '../lab/lab-const.mjs';
-import { labBlockShape, labAlarmSectors, bulkNote, newBulkMem, LP } from '../lab/lab-platform-core.mjs';
+import { labBlockShape, labAlarmSectors, bulkNote, newBulkMem, LP, blockTint, sectorHeat, sectorHeatA } from '../lab/lab-platform-core.mjs';
 import { ART_KEYS, ART_GLYPH, artKeyColor } from '../artifact-core.mjs';
 import { canvasAng, quadXZ } from '../lab/lab2d-core.mjs';
 import { t as tr } from '../i18n.mjs';
@@ -21,6 +23,8 @@ const FONT = '"Pretendard", "Segoe UI", "Malgun Gothic", system-ui, sans-serif';
 const TILT = 0.3; // 높이 → 화면 아래 앞면
 const _q = new Array(8);
 const ALARM_COL = { dark: '#ef4444', light: '#dc2626' };
+const _t2 = { key: null, a: 0, d: 0 };
+const KW = ART_KEYS.indexOf('write'), KR = ART_KEYS.indexOf('read'), KN = ART_KEYS.indexOf('new'), KD = ART_KEYS.indexOf('del');
 
 function quad(ctx, view, x, z, w, d, th, dy = 0) {
   quadXZ(x, z, w, d, th, _q);
@@ -158,7 +162,8 @@ export function drawPlatformDynamic2D(ctx, view, room, plan, book, fx, now) {
   const PX = view._X(cx), PY = view._Y(cz);
   const rIn2 = (plan.rIn || LAB.PLATFORM.CORE_R + 1) * s, rOut2 = (plan.rOut || lab.rP - 1) * s;
   // 경보 구역(최근 10분 파괴적): 옅은 붉은 채움 + 굵은 빗금 — 블록 아래
-  const AS = alarm2D(view, plan, items, book ? book.version : 0, view.clock ? view.clock() : Date.now());
+  const nowMs = view.clock ? view.clock() : Date.now();
+  const AS = alarm2D(view, plan, items, book ? book.version : 0, nowMs);
   if (AS.set.size) {
     ctx.lineWidth = W2; ctx.strokeStyle = RED; ctx.fillStyle = RED;
     for (const sc of plan.sectors) {
@@ -173,19 +178,55 @@ export function drawPlatformDynamic2D(ctx, view, room, plan, book, fx, now) {
       ctx.stroke();
     }
   }
+  // 대량 변경(같은 구역 10초 안 쓰기 6개 이상 — 3D 와 같은 bulkNote) · 쓰기 끝(rise·pulse) → 구역 활동 열 — 블록보다 먼저(파도 칸 키움·열 쐐기)
+  const reduced = !!view.reduced;
+  const bulk = view._labBulk || (view._labBulk = newBulkMem());
+  const heat = view._labHeat || (view._labHeat = new Map()), seenW = view._labSeenW || (view._labSeenW = new WeakSet());
+  const secOf = secOfMap(plan);
+  if (fx) for (const e of fx.list || []) {
+    if (e.pid != null && e.pid !== pid) continue;
+    if ((e.kind === 'rise' || e.kind === 'pulse') && !seenW.has(e)) { seenW.add(e); const sk = secOf.get(e.id); if (sk != null) sectorHeat(heat, pid + '|' + sk, e.t0, now); }
+    if (e.kind !== 'lit' || (e.amp || 1) < 1) continue;
+    const key = pid + '|' + e.id + '|' + e.t0;
+    if (bulk.seen.has(key)) continue;
+    bulk.seen.add(key); if (bulk.seen.size > 400) bulk.seen.delete(bulk.seen.values().next().value);
+    const sk = secOf.get(e.id);
+    if (sk != null) bulkNote(bulk, pid + '|' + sk, e.t0, now);
+  }
+  let moving = false;
+  for (const sc of plan.sectors) {
+    sc._w2 = -1;
+    const w = bulk.wave.size ? bulk.wave.get(pid + '|' + sc.key) : null;
+    if (w) { const k = (now - w.t0) / LP.WAVE_S; if (k >= 0 && k < 1) sc._w2 = k; }
+    // 구역 활동 열: 쐐기 호박 채움(경보 구역은 경보 채움 우선)
+    const ha = AS.set.has(sc.key) ? 0 : sectorHeatA(heat, sc._hk2 || (sc._hk2 = pid + '|' + sc.key), now);
+    if (ha > 0.01) { ctx.globalAlpha = A * ha; ctx.fillStyle = cols[KW]; wedge(ctx, PX, PY, rIn2, rOut2, sc); ctx.fill(); }
+  }
+  const pRin = plan.rIn || LAB.PLATFORM.CORE_R + 1, pRout = plan.rOut || lab.rP - 1;
   let nBlocks = 0;
   const shapeOf =(id, it) => { let sh = IC.shapes.get(id); if (!sh) { sh = labBlockShape(it); IC.shapes.set(id, sh); } return sh; };
   /** 블록 하나(위에서 본 판 + 높이 기울임) — 그렸으면 true */
-  const block = (id, it, wx, wz, th, extra = null) => {
+  const block = (id, it, wx, wz, th, extra = null, sc = 1) => {
     const shapes = it ? shapeOf(id, it) : null;
     if (!shapes || !shapes.length) return false;
+    let topL = 0;
     for (const b of shapes) {
       const col = cols[b.c] || cols[0];
-      const bx = wx + (b.dx || 0), bz = wz + (b.dz || 0), lift = ((b.dy || 0) + (b.sy || 0) / 2) * TILT * s;
+      const bx = wx + (b.dx || 0) * sc, bz = wz + (b.dz || 0) * sc, lift = ((b.dy || 0) + (b.sy || 0) / 2) * TILT * s;
+      if (lift > topL) topL = lift;
       ctx.globalAlpha = A * Math.min(1, (b.a ?? 0.6) * 0.8);
-      ctx.fillStyle = col; quad(ctx, view, bx, bz, b.sx, b.sz, th); ctx.fill(); // 앞면(바닥)
+      ctx.fillStyle = col; quad(ctx, view, bx, bz, b.sx * sc, b.sz * sc, th); ctx.fill(); // 앞면(바닥)
       ctx.globalAlpha = A * Math.min(1, (b.a ?? 0.6) + 0.25);
-      quad(ctx, view, bx, bz, b.sx, b.sz, th, -lift); ctx.fill(); // 윗면(높이만큼 위로)
+      quad(ctx, view, bx, bz, b.sx * sc, b.sz * sc, th, -lift); ctx.fill(); // 윗면(높이만큼 위로)
+    }
+    // 동사 색(마지막 쓰기 30초 온전히 → 150초에 바탕색으로): 윗면에 한 겹 더
+    if (!extra) {
+      const TT = blockTint(it, nowMs, _t2);
+      if (TT.key) {
+        ctx.globalAlpha = A * Math.min(1, (0.3 + 0.5 * TT.a) * Math.min(1, TT.a * 10));
+        ctx.fillStyle = TT.key === 'del' ? (TT.d <= LP.TINT_HOLD ? RED : cols[KD]) : cols[TT.key === 'new' ? KN : KW];
+        quad(ctx, view, wx, wz, LP.BLOCK * sc, LP.BLOCK * sc, th, -topL); ctx.fill();
+      }
     }
     const X = view._X(wx), Y = view._Y(wz);
     hits.push({ pid, id, x: X, y: Y, wx, wz });
@@ -210,7 +251,9 @@ export function drawPlatformDynamic2D(ctx, view, room, plan, book, fx, now) {
         if (nBlocks >= LAB_PERF.PLATFORM_BLOCKS) break;
         if (c.key == null) continue;
         const it = items ? items.get(c.key) : null;
-        if (block(c.key, it, cx + c.x, cz + c.z, c.theta ?? 0)) nBlocks++;
+        let k2 = 1; // 파도 중 파두 근처 칸 1.15배
+        if (sc._w2 >= 0 && !reduced && c.r != null) { k2 = 1 + 0.15 * Math.max(0, 1 - Math.abs(c.r - (pRin + (pRout - pRin) * sc._w2)) / LP.CELL); if (k2 > 1) moving = true; }
+        if (block(c.key, it, cx + c.x, cz + c.z, c.theta ?? 0, null, k2)) nBlocks++;
       }
       // 묶음 블록(구역 칸이 모자라 접힌 대상) — 쌓인 상자 + '+n'
       const bd = sc.bundle;
@@ -231,19 +274,22 @@ export function drawPlatformDynamic2D(ctx, view, room, plan, book, fx, now) {
   const list = [];
   for (const e of fx.list || []) list.push(e);
   if (fx.acts && fx.acts.list) for (const e of fx.acts.list) list.push(e);
-  let drawn = false, nLit = 0, nAct = 0;
-  const reduced = !!view.reduced;
-  // 대량 변경(같은 구역 10초 안 쓰기 6개 이상 — 3D 와 같은 bulkNote): 구역 위 굵은 호 띠 3줄 + ×N 알약
-  const bulk = view._labBulk || (view._labBulk = newBulkMem());
-  const secOf = secOfMap(plan);
-  for (const e of fx.list || []) {
-    if (e.kind !== 'lit' || (e.amp || 1) < 1 || (e.pid != null && e.pid !== pid)) continue;
-    const key = pid + '|' + e.id + '|' + e.t0;
-    if (bulk.seen.has(key)) continue;
-    bulk.seen.add(key); if (bulk.seen.size > 400) bulk.seen.delete(bulk.seen.values().next().value);
-    const sk = secOf.get(e.id);
-    if (sk != null) bulkNote(bulk, pid + '|' + sk, e.t0, now);
+  let drawn = moving, nLit = 0, nAct = 0;
+  // 쓰기마다 코어에서 퍼지는 호박 고리(최근 3겹, 0.9초 — 배속이면 연출 길이까지)
+  if (!reduced && fx.list) {
+    let nr = 0;
+    ctx.strokeStyle = cols[KW]; ctx.lineWidth = Math.max(1.5, 0.08 * s);
+    for (let i = fx.list.length - 1; i >= 0 && nr < LP.CORE_RINGS; i--) {
+      const e = fx.list[i];
+      if ((e.kind !== 'rise' && e.kind !== 'pulse') || (e.pid != null && e.pid !== pid)) continue;
+      const u = (now - e.t0) / Math.min(LP.CORE_RING_S, e.dur || 1);
+      if (u < 0 || u >= 1) continue;
+      ctx.globalAlpha = A * 0.8 * (1 - u);
+      ctx.beginPath(); ctx.arc(PX, PY, (LAB.PLATFORM.CORE_R + LP.CORE_RING_DR * u) * s, 0, Math.PI * 2); ctx.stroke();
+      nr++; drawn = true;
+    }
   }
+  // 대량 변경: 구역 위 굵은 호 띠 3줄 + ×N 알약
   if (bulk.wave.size) for (const sc of plan.sectors) {
     const w = bulk.wave.get(pid + '|' + sc.key); if (!w) continue;
     const k = (now - w.t0) / LP.WAVE_S; if (k < 0 || k >= 1) continue;
@@ -306,6 +352,10 @@ export function drawPlatformDynamic2D(ctx, view, room, plan, book, fx, now) {
         ctx.globalAlpha = A * (0.55 + 0.4 * (1 - uu));
         ctx.beginPath(); ctx.arc(X, Y, (0.4 + uu * 2.2) * s, 0, Math.PI * 2); ctx.stroke();
       }
+    } else if (kind === 'read' && e.a) { // 읽기 연출(read): 칸 테 파랑 2px — 높이·채움은 그대로(쓰기와 구별)
+      ctx.globalAlpha = A * (reduced ? 0.9 : 0.5 + 0.5 * (1 - u)); ctx.strokeStyle = cols[KR] || tok.link || '#5b8fd6';
+      ctx.lineWidth = Math.max(2, 0.12 * s);
+      quad(ctx, view, wx, wz, 1.05, 1.05, th); ctx.stroke();
     } else if (LIT.has(kind)) {
       if (nLit >= LAB_PERF.PLATFORM_LIT) continue;
       nLit++;

@@ -14,6 +14,12 @@
 //               _tweenPos 한 곳: _drawMachineAt 몸체 · _drawJob 카드 · _labelPass 이름표 · _holoPass 기동기 대시보드 · _drawSpawnLinks 띄움 점선 · _machineRing 바닥 고리 · _posOf 말풍선 · _syncVis 초점 대상, 같은 k)
 //             · 주인 책상→기자재 케이블(_drawRoomFacilities → drawLabRigCables) · 표지 _extraLabels(put, ctx)(office _labelPass 갈고리:
 //               ×N 칩 · rigMore '+n', lab-marks-core labMarks) · 시료 카드는 computeLab 이 machine type 'job' 으로 냄(VoxelView _drawJob — 보간 중만 자리 사본)
+// C   상호작용 — 특별 상호작용 ix(vx-ix 연구소 분기 → _labIxDraw → lab-ix drawLabIx: 코어·DB 탱크·원격 안테나·시험 신호탑)
+//             · 운반 캡슐(lab-ix-core LabCouriers·courierFor): 서브에이전트 생성 = 의뢰서(콘솔 → 새 책상) · 끝 = 보고(책상 → 콘솔) ·
+//               기자재 run → done = 산출(꼭대기 → 반출대 θ45 · 탱크는 DB 탱크 방울) — _drawRoomFacilities 첫 연구동 방에서 drawCouriers
+//             · 사람 몸짓 ch.gesture(lab-gesture-core — character.js poseBase 한 줄 갈고리): _walk 성공(install·watch·kill·field·alarm) ·
+//               의뢰(dispatch)·보고 받기(receive) · 케이블 데이터 펄스(_cableInfo.pulseOf — 출력 = m.flashUntil 상승 · 끝·실패·설치)
+//             · drawRig 부드러운 계약 st.ts·st.reduced·st.camD(lab-rigs 가 읽음)
 // 각 모듈의 입력·출력·성능 상한은 그 파일 머리 주석(모듈 규격). 공용 상수는 lab-const.mjs 한 곳.
 import { VoxelView } from '../voxel/office.js';
 import { t as _t } from '../i18n.mjs';
@@ -24,15 +30,20 @@ import { computeLabCampus } from './lab-campus-core.mjs';
 import { buildLabShell, drawLabFacilities, drawLabDeskEmitters, buildLabDome, drawLabRigCables } from './lab-props.js';
 import { radialLerp, RadiusTween, labMarks, LAB_MARKS } from './lab-marks-core.mjs';
 import { buildPlatformStatic, LabPlatform3D } from './lab-platform.js';
-import { buildRigRingStatic, drawRig, drawRigVacant } from './lab-rigs.js';
-import { rigIxOf, rigLiftK, rigLiftSec, rigState, rigRc, rigStaleMs, RIGW } from './lab-rig-core.mjs';
+import { buildRigRingStatic, drawRig, drawRigVacant, clearRigDyn } from './lab-rigs.js';
+import { rigIxOf, rigLiftK, rigLiftSec, rigState, rigRc, rigStaleMs, RIGW, RIG_HEIGHT, RIG_KIND_HEX } from './lab-rig-core.mjs';
+import { LabCouriers, courierFor, labIxRoute, labIxShouldDraw, newPulseMem, cablePulseEdge, cablePulsePush, cablePulseRead, labPendStep, LAB_IX } from './lab-ix-core.mjs';
+import { drawLabIx, drawCouriers, drawWatchBeam, hexColor } from './lab-ix.js';
+import { labGestureSet, labGestureArrive, gestureT0, GESTURE_STAY } from './lab-gesture-core.mjs';
 import { LabRadiusGate, newBulkMem, bulkNote } from './lab-platform-core.mjs';
-import { FieldPlanner, walkKindFor, conflictSpots } from './lab-walk-core.mjs';
+import { FieldPlanner, walkKindFor, conflictSpots, labWalksToStation } from './lab-walk-core.mjs';
 import { labSoundFor } from './lab-audio.mjs';
 import { labWalkOn, onLabWalk } from './lab-pref.mjs';
 import { packView, camElev } from '../overview/pack-view.js';
 
 const LAB_RIG_HALF = LAB.RIG.SIZE / 2; // 기자재 길찾기 상자 반폭(lab-layout-core sq(m, SIZE / 2))
+const SUBK = new Set(['subagent', 'workflow-agent']);
+const walking = (ch) => ch.state === 'walk' || ch.state === 'leave' || ch.state === 'enter';
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
 export class LabView extends VoxelView {
@@ -69,9 +80,29 @@ export class LabView extends VoxelView {
     this._farSkipRunLabels = true;
     this._labelCap = 32;            // 이름표 칸(office _labels 32 중) — 복셀 오피스는 24
     this._dashNameOnly = true;      // 시퀀서(기동기): 대시보드 판 글이 읽히는 동안 이름표에서 이름 빼기(QA 7 — 이름 두 번)
+    // C 상호작용(모두 사건에 묶임 — 프레임 할당 0: 풀·버퍼·함수는 여기서 한 번)
+    this._cour = new LabCouriers(LAB_IX.COURIERS); // 운반 캡슐(의뢰·보고·산출)
+    this._pendDisp = [];            // 배치를 기다리는 의뢰 {id, at}(새 책상이 정해진 뒤 캡슐)
+    this._repAt = new Map();        // 서브에이전트 id → 보고 캡슐 시각(updateNode·result 중복 막기, 재개하면 지움)
+    this._courCtx = { layout: null, nodeOf: (id) => this.nodes.get(id) || null };
+    this._pendTry = (p) => this._tryDispatch(p);
+    this._lixRoute = { from: { x: 0, y: 0, z: 0 }, to: { x: 0, y: 0, z: 0 }, dir: 'out', key: '', rig: null, m: 1 };
+    this._lixQ = { x: 0, z: 0, rigKind: null };
+    this._lixRigOf = (id) => { // 연구소 기자재 그리는 자리(반지름 보간 포함) | null
+      const m = this.machines.get(id);
+      if (!m || m.released || !this._isLabRig(m)) return null;
+      const p = this._tweenPos(m), q = this._lixQ;
+      q.x = p.x; q.z = p.z; q.rigKind = m.pos.rigKind || null;
+      return q;
+    };
+    this._lixAt = -1; this._lixUsed = 0; this._courAt = -1;
   }
   dispose() { if (this._offWalk) this._offWalk(); super.dispose(); }
-  reset() { super.reset(); this._clearWalks(); this._vacant.clear(); this._bulk = newBulkMem(); this._bulkChip.clear(); this._bulkWho.clear(); this._rt = null; }
+  reset() {
+    super.reset(); this._clearWalks(); this._vacant.clear(); this._bulk = newBulkMem(); this._bulkChip.clear(); this._bulkWho.clear(); this._rt = null;
+    if (this._cour) { this._cour.clear(); this._pendDisp.length = 0; this._repAt.clear(); }
+    clearRigDyn(); // 재생 seek: 같은 id 의 옛 동작 상태로 사건 없는 시동·감속 전이가 돌지 않게
+  }
 
   /** 플랫폼 반지름 바꾸기(LabPlatform3D 가 부름 — 0.5 단위·히스테리시스는 부르는 쪽) */
   setPlatformRadius(r) { if (Number.isFinite(r) && Math.abs(r - this.labRP) > 1e-3) { this.labRP = r; this.layoutDirty = true; this.staticSig = ''; } }
@@ -247,6 +278,7 @@ export class LabView extends VoxelView {
     if (r.type !== 'lab') return super._drawRoomFacilities(r, act, t, B, dim);
     drawLabFacilities(r, act, this.pal, this.tokens, t, B, dim);
     if (r.lab && r.lab.primary !== false && !dim && !this._farAll) drawLabRigCables(r, this.layout, B, this.pal, this._cableInfo(t)); // 주인 책상 → 기자재
+    if (r.lab && r.lab.primary !== false && this._courAt !== t) { this._courAt = t; this._drawLabC(r, B, t); } // C 운반 캡슐·들여다보기 빛줄(프레임에 한 번)
     if (r.lab && r.lab.primary !== false && this._vacant.size && !(this.scope && this.scope.mode === 'all')) {
       const now = this._now || 0, span = RIGW.VACANT_S / Math.max(1, this.ts || 1);
       for (const v of this._vacant.values()) if (v.until > now) drawRigVacant(v, Math.min(1, (v.until - now) / span), this.pal, B);
@@ -274,8 +306,17 @@ export class LabView extends VoxelView {
       // 반지름 보간 중이면 기자재 몸체가 그려지는 보간 자리(_drawMachineAt 과 같은 rt.m · rt.tw.k) — 케이블 끝이 몸체와 벌어지지 않게
       rigAt: (id, m) => { const rt = this._rt, f = rt && rt.m.get(id); return f ? radialLerp(f, m, rt.cx, rt.cz, rt.tw.k(this._now || 0), ci._q) : m; },
       _q: { x: 0, z: 0 },
+      // C 데이터 펄스: 출력(app output → wave → m.flashUntil 상승, 진행 중일 때만) · 끝 초록 · 실패 빨강 · 설치(책상 → 기자재)
+      pulseOf: (id, out) => {
+        const m = this.machines.get(id);
+        if (!m || m.released || this.reduced) return 0;
+        const now = this._now || 0, mem = m._cp || (m._cp = newPulseMem());
+        if (cablePulseEdge(mem, m.flashUntil, now)) { const s = ci.stateOf(id); if (s === 'run' || s === 'stale' || s === 'wait') cablePulsePush(mem, now, 0); }
+        return cablePulseRead(mem, now, LAB_IX.PULSE_S / Math.sqrt(Math.max(1, this.ts || 1)), out);
+      },
+      light: false,
     });
-    ci.t = this.reduced ? 0 : t; ci.clk = this.clock();
+    ci.t = this.reduced ? 0 : t; ci.clk = this.clock(); ci.light = !!(this.tokens && this.tokens.isLight);
     return ci;
   }
   /** 연구소 기자재(고리 rig · 브리지 뒤 시퀀서)인가 */
@@ -287,7 +328,11 @@ export class LabView extends VoxelView {
     if (!m._ixAt || now - m._ixAt > 0.25) { m._ixAt = now; m._ix = rigIxOf(this.ix && this.ix.model, m.node); }
     st.ix = m._ix || null;
     const cp = this.camera.position, dx = cp.x - m.pos.x, dz = cp.z - m.pos.z, dy = cp.y;
-    st.far = !!this._farAll || dx * dx + dz * dz + dy * dy > 120 * 120;
+    const d2 = dx * dx + dz * dz + dy * dy;
+    st.far = !!this._farAll || d2 > 120 * 120;
+    // 부드러운 계약(lab-rigs 가 읽음 — 없으면 기존 st.far 만): 배속 · 움직임 줄이기 · 카메라 거리(LOD 근경 ≤ 60 · 중경 ≤ 120)
+    st.ts = this.ts || 1; st.reduced = !!this.reduced; st.camD = Math.sqrt(d2);
+    st.watch = m._watchAt === now; // 들여다보기: 렌즈·화면 밝기 +30% — 그리는 값만(lab-rigs drawRig). 동작 펄스(rigDynStep)에 넣는 st.flash 는 그대로(가짜 출력 펄스 방지)
     st.standby = !!m.standby;
     st.lift = rigLiftK(m.liftT0, now, this.ts);
     // 반지름 보간: 그리는 자리만(원본 pos 는 새 값 — 길찾기·걷기 목표는 새 자리 · 카드·이름표·말풍선은 _drawJob·_labelPass·_posOf 가 같은 _tweenPos)
@@ -446,6 +491,9 @@ export class LabView extends VoxelView {
     const res = this.field.want(kind, ch.id, { ...target, room: ch.room, from: ch.pos }, now, this.ts || 1);
     if (!res) return false;
     ch.visit = { spot: res.spot, until: res.until, field: kind };
+    // C 몸짓: 도착(추정) 뒤 머무는 동안 — 같은 예약을 다시 받으면(현장 투입 간격) 이어서
+    const g = ch.gesture;
+    if (GESTURE_STAY[kind] && !(g && g.kind === kind && g.res === res.until)) labGestureSet(ch, kind, gestureT0(now, ch.pos, res.spot, this.ts || 1, res.until), res.until, target.rigId || null);
     return true;
   }
   _frameHook(now, dt) {
@@ -465,6 +513,7 @@ export class LabView extends VoxelView {
         if (!this._isLabRig(m) || m.released) continue;
         const s = rigState(m.node, clk, m.pos.rigKind);
         if (m._rs && m._rs !== s && s === 'stale') this._sound(labSoundFor({ type: 'rig-state' }, { view: 'lab', rigState: s }));
+        if (m._rs && m._rs !== s) this._rigTrans(m, m._rs, s, now); // C 산출 캡슐·케이블 끝 펄스·주인 멈칫
         m._rs = s;
       }
     }
@@ -543,6 +592,11 @@ export class LabView extends VoxelView {
     return null;
   }
   _conflictSpots(room, theta) { return conflictSpots(room, theta); }
+  /** 시설 자리(office 갈고리): 연구소는 Agent·워크플로 도구면 포털로 가지 않고 자기 책상에서(null → character-core 가 책상 inPlace, 11.02.) */
+  _stationSpot(ch, cat) {
+    if (ch && ch.room && ch.room.type === 'lab' && !labWalksToStation(cat)) return null;
+    return super._stationSpot(ch, cat);
+  }
   /** 장부 대상 → 걷기 목표(플랫폼 칸 방위 · 테두리 장치 · 없으면 null) */
   _targetOf(pid, id) {
     const P = this.vArt && this.vArt.planOf ? this.vArt.planOf(pid) : null;
@@ -560,7 +614,7 @@ export class LabView extends VoxelView {
     const kind = walkKindFor({ tool: ev.tool, cat: ev.cat });
     if (kind !== 'watch' && kind !== 'kill') return;
     const rig = this._rigOfTool(ev);
-    if (rig) this._walk(kind, nodeId, { rig: rig.pos, until: kind === 'watch' ? (this._now || 0) + 20 : undefined }, this._now || 0);
+    if (rig) this._walk(kind, nodeId, { rig: rig.pos, rigId: rig.id, until: kind === 'watch' ? (this._now || 0) + 20 : undefined }, this._now || 0);
   }
   /** TaskOutput·KillShell 의 대상 백그라운드 노드(입력 shell_id·task_id → meta 일치) */
   _rigOfTool(ev) {
@@ -574,24 +628,143 @@ export class LabView extends VoxelView {
     }
     return best;
   }
-  /** 기자재 설치(백그라운드 띄움): 띄운 사람이 새 기자재 앞으로 */
+  /** 기자재 설치(백그라운드 띄움): 띄운 사람이 새 기자재 앞으로 · C 서브에이전트 띄움: 의뢰서 캡슐(새 책상이 정해진 뒤) */
   addNode(n, animate = true) {
     super.addNode(n, animate);
-    if (!animate || !this.walkOn || !n || (n.kind !== 'bash-bg' && n.kind !== 'monitor') || !n.parentId) return;
+    if (!animate || !n || !n.parentId) return;
+    if (SUBK.has(n.kind) && this._pendDisp && this._pendDisp.length < 32) this._pendDisp.push({ id: n.id, at: this._now || 0 });
+    if (n.kind !== 'bash-bg' && n.kind !== 'monitor') return;
     this._pendInstall = this._pendInstall || [];
     this._pendInstall.push({ id: n.id, owner: n.parentId, at: this._now || 0 });
   }
+  /** C 서브에이전트 끝(status done/error): 보고 캡슐 + 팀장 보고 받기(도착 때) */
+  updateNode(id, patch = {}, opts = {}) {
+    super.updateNode(id, patch, opts);
+    if (!this._repAt || !patch || !('status' in patch) || (opts && opts.quiet)) return;
+    const n = this.nodes.get(id);
+    if (!n || !SUBK.has(n.kind)) return;
+    if (patch.status === 'active' || patch.status === 'idle') { this._repAt.delete(id); return; } // 재개 = 다음 끝에 다시 보고
+    this._report(n, { type: 'node-update', node: n, patch });
+  }
+  /** C 서브에이전트 result 이벤트(흐름 연출 길 — quiet 제외)도 보고(끝 상태와 한 번만) */
+  flowEvent(ev, opts = {}) {
+    super.flowEvent(ev, opts);
+    if (!this._repAt || !ev || ev.type !== 'result' || !ev.nodeId) return;
+    const n = this.nodes.get(ev.nodeId);
+    if (n && SUBK.has(n.kind)) this._report(n, { type: 'result', node: n, ok: ev.ok });
+  }
+  _report(n, ev) {
+    if (this._repAt.has(n.id)) return;
+    const now = this._now || 0;
+    this._courCtx.layout = this.layout;
+    const c = courierFor(ev, this._courCtx);
+    if (!c) return;
+    if (this._repAt.size > 256) this._repAt.clear();
+    this._repAt.set(n.id, now);
+    this._addCourier(c, now);
+  }
+  /** 배치를 기다리던 의뢰: 새 책상이 정해졌으면 캡슐(true = 처리됨) */
+  _tryDispatch(p) {
+    const lay = this.layout, n = this.nodes.get(p.id);
+    if (!n) return true;
+    if (!lay || !lay.lab || !(lay.seat instanceof Map) || !lay.seat.has(p.id)) return false;
+    this._courCtx.layout = lay;
+    const c = courierFor({ type: 'node-add', node: n }, this._courCtx);
+    if (c) this._addCourier(c, this._now || 0);
+    return true;
+  }
+  /** 기자재 상태 전이(0.25초 표본): run → done 산출 캡슐 · 끝·실패 케이블 펄스 · 실패면 주인 멈칫(0.9초) */
+  _rigTrans(m, prev, s, now) {
+    if (s !== 'done' && s !== 'fail') return;
+    cablePulsePush(m._cp || (m._cp = newPulseMem()), now, s === 'done' ? 1 : 2);
+    if (s === 'fail') {
+      const ch = m.node && this.chars.get(m.node.parentId);
+      if (ch && ch.placed && ch.state !== 'gone' && !walking(ch)) ch.flinchUntil = now + 0.9;
+      return;
+    }
+    this._courCtx.layout = this.layout;
+    const c = courierFor({ type: 'rig', node: m.node, prev, state: s, kind: m.pos.rigKind, pos: m.pos }, this._courCtx);
+    if (c) { const p = this._tweenPos(m); if (p && p !== m.pos) { c.from.x = p.x; c.from.z = p.z; } this._addCourier(c, now); }
+  }
+  /** 캡슐 판 색 = 그 방 메인의 세션 색 */
+  _courSess(owner) {
+    const main = owner && this.nodes.get(owner);
+    return (main && this.sess && this.sess.sessColor && this.sess.sessColor(main)) || this.tokens['flow-call'] || this.tokens.text;
+  }
+  /** courierFor 결과 → 캡슐(색: 'sess' 세션 색 · 'ok'·'fail' 보고 테(판은 세션 색) · 'rig:<종류>' 종류색, 시간 ÷√배속) */
+  _addCourier(c, now) {
+    const sq = Math.sqrt(Math.max(1, this.ts || 1));
+    let col, rim;
+    if (c.color && c.color.startsWith('rig:')) col = rim = hexColor((this.tokens.isLight ? RIG_KIND_HEX.light : RIG_KIND_HEX.dark)[c.color.slice(4)] || '#7aa2f7');
+    else { col = this._courSess(c.owner); rim = c.color === 'ok' ? this.tokens.ok : c.color === 'fail' ? this.tokens.error : col; }
+    const it = this._cour.add(c.kind, c.from.x, c.from.y, c.from.z, c.to.x, c.to.y, c.to.z, now, c.dur / sq, col, c.pri);
+    if (!it) return null;
+    it.c2 = rim || col; it.m = c.m || 1;
+    if (c.kind === 'dispatch') { it.arr = c.arrive; it.act = 'flash'; }
+    else if (c.kind === 'report' && c.lead) { it.arr = c.lead; it.act = 'receive'; }
+    if (c.gesture === 'dispatch' && c.lead) { // 팀장 가리킴(걷는 중이면 생략)
+      const ch = this.chars.get(c.lead);
+      if (ch && ch.placed && !walking(ch)) labGestureSet(ch, 'dispatch', now, now + GESTURE_STAY.dispatch / sq);
+    }
+    return it;
+  }
+  /** 캡슐 도착: 새 책상 발광대 섬광 · 팀장 보고 받기(걷는 중이면 생략) */
+  _courArrive(it, now) {
+    const ch = it.arr && this.chars.get(it.arr);
+    if (!ch || !ch.placed || ch.state === 'gone') return;
+    if (it.act === 'flash') ch.flashUntil = now + 0.45;
+    else if (it.act === 'receive' && !walking(ch)) labGestureSet(ch, 'receive', now, now + GESTURE_STAY.receive / Math.sqrt(Math.max(1, this.ts || 1)));
+  }
+  /** C 연구소 특별 상호작용(vx-ix draw 의 연구소 분기가 부름 — room.type 'lab' 일 때만). 그리면 true */
+  _labIxDraw(B, f, act, room, sp, tt, te, A, ck, now) {
+    if (!labIxShouldDraw(room) || !act) return false;
+    if (this._lixAt !== now) { this._lixAt = now; this._lixUsed = 0; }
+    if (this._lixUsed > LAB_IX.TOTAL_MAX - LAB_IX.FX_MAX) return false; // 프레임 합 ≤ 60 상자
+    const ch = this.chars.get(act.id);
+    act.floorY = ch ? this._floorY(ch) : 0; // 브리지 위 팀장(덱 1.6)
+    const rt = labIxRoute(f, act, room, this._lixRigOf, this._lixRoute);
+    if (!rt) return false;
+    const ix = this.ix, used = drawLabIx(B, f, rt, tt, te, A, ck, ix.s, !!this.reduced, ix);
+    this._lixUsed += used;
+    return used > 0;
+  }
+  /** C 운반 캡슐 + 들여다보기 빛줄(첫 연구동 방 _drawRoomFacilities — 같은 동적 묶음) */
+  _drawLabC(r, B, now) {
+    const C = this._cour;
+    if (!C) return;
+    for (let i = 0; i < C.n; i++) { const it = C.list[i]; if (!it.hit && now >= it.t0 + it.dur) { it.hit = true; this._courArrive(it, now); } }
+    C.step(now);
+    const cp = this.camera.position, dx = cp.x - r.lab.cx, dz = cp.z - r.lab.cz, d2 = dx * dx + dz * dz + cp.y * cp.y;
+    const far = this._farAll || d2 > 150 * 150 ? true : d2 > 60 * 60 || (this.ts || 1) >= 8 ? 'mid' : false; // 배속 ≥ 8 = 잔연출(꼬리) 생략
+    if (C.n) drawCouriers(B.glow, B.lit, C.list, C.n, now, this.pal, !!this.reduced, far);
+    if (far === true) return;
+    const light = !!this.tokens.isLight;
+    for (const ch of this.chars.values()) { // 들여다보기: 기자재 화면 → 손 빛줄 + 렌즈 밝기(_drawMachineAt 이 m._watchAt 을 읽음)
+      const g = ch.gesture;
+      if (!g || g.kind !== 'watch' || !(g.until > now) || !g.rig || walking(ch) || !(ch.target && ch.target.type === 'visit')) continue;
+      const m = this.machines.get(g.rig);
+      if (!m || m.released || !m.pos) continue;
+      m._watchAt = now;
+      if (far !== false) continue;
+      const p = this._tweenPos(m), kind = m.pos.rigKind || 'meter', fy = this._floorY(ch);
+      drawWatchBeam(B.glow, p.x, (RIG_HEIGHT[kind] || 1.4) * 0.75, p.z, ch.pos.x, fy + 1.1, ch.pos.z, now, hexColor((light ? RIG_KIND_HEX.light : RIG_KIND_HEX.dark)[kind] || '#7aa2f7'), !!this.reduced);
+    }
+  }
   _drawDynamic(now, dt) {
     this._stepRadiusTween(now); // 앉은 사람 반지름 보간(상태 머신·밀어내기 뒤, 그리기 앞)
-    if (this._pendInstall && this._pendInstall.length) { // 배치가 기자재 자리를 정한 뒤(다음 배치) 걷기
+    if (this._pendInstall && this._pendInstall.length) { // 배치가 기자재 자리를 정한 뒤(다음 배치) 걷기 · C 케이블 설치 펄스(책상 → 기자재)
       const keep = [];
       for (const p of this._pendInstall) {
         const m = this.machines.get(p.id);
-        if (m && m.pos && m.pos.type === 'rig') this._walk(walkKindFor({ spawnBg: true }), p.owner, { rig: m.pos }, now);
-        else if (now - p.at < 2) keep.push(p);
+        if (m && m.pos && m.pos.type === 'rig') {
+          if (!this.reduced) cablePulsePush(m._cp || (m._cp = newPulseMem()), now, 3);
+          if (this.walkOn) this._walk(walkKindFor({ spawnBg: true }), p.owner, { rig: m.pos, rigId: m.id }, now);
+        } else if (now - p.at < 2) keep.push(p);
       }
       this._pendInstall = keep;
     }
+    if (this._pendDisp && this._pendDisp.length) labPendStep(this._pendDisp, now, this._pendTry); // C 의뢰서 캡슐(새 책상 배치 뒤)
+    for (const ch of this.chars.values()) if (ch.gesture && ch.gesture.wait) labGestureArrive(ch, now, this.ts || 1, walking(ch)); // 현장 몸짓은 실제 도착부터
     return super._drawDynamic(now, dt);
   }
 }

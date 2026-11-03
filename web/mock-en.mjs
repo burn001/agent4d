@@ -54,6 +54,13 @@ const WHOLE = {
   '새 축 둘 세우고 루프 재기동': 'Add two tracks and restart the loop',
   '전달함 — 검증 담당이 받음': 'Delivered — received by the verifier',
   '백그라운드로 시작 — 진행은 갱신으로': 'Started in background — progress via updates',
+  // 작업·분리 프로세스 mock(job-mock)
+  '[회차] ⚠생존 신호(heartbeat_at)가 40분째 끊겼다 — 마지막 21:22:00': '[cycle] ⚠ no heartbeat (heartbeat_at) for 40 min — last 21:22:00',
+  '══ 쌍 모집단 — 137,981쌍 · 날짜 확정 12,205 · 16s': '══ pair population — 137,981 pairs · 12,205 dated · 16s',
+  '재확인까지 LLM 없이 기다림': 'Waiting without the LLM until the recheck',
+  '판 갈래 호출 탐침': 'Branch call probe',
+  '독립 세션 하위 · 시험 분석': 'Standalone session helper · test analysis',
+  '진행': 'Progress',
 };
 
 // 숫자·이름이 끼는 모양
@@ -74,6 +81,10 @@ const RULES = [
   [/^분기 (\d+)$/, (m, a) => `Branch ${a}`],
   [/^할 일 (\d+)\/(\d+)$/, (m, a, b) => `Todo ${a}/${b}`],
   [/^(.+) 보조$/, (m, a) => `${en(a)} helper`],
+  [/^(\S+) ([\d-]+)단계 (시작|완료|선행)$/, (m, a, n, s) => `${a} stage ${n} ${s === '시작' ? 'started' : s === '완료' ? 'done' : 'prerequisite'}`],
+  [/^\[회차·팔\] runner — (.+)$/, (m, a) => `[cycle·arm] runner — ${en(a)}`],
+  [/^회차 (\d+) 하위 · 축 점검$/, (m, a) => `Cycle ${a} helper · track check`],
+  [/^동시 작업 (\d+)$/, (m, a) => `Parallel task ${a}`],
   [/^(.+) 작업을 맡아 계약대로 진행하고$/, (m, a) => `Take on ${en(a)} and follow the spec;`],
 ];
 
@@ -107,6 +118,12 @@ const PHRASES = Object.entries({
   '라이브·재생 같은 패널': 'same panels live and replay', '계약': 'spec', '이벤트 형식': 'Event format', '필드': 'fields',
   '홀로그램 패널 내용': 'Hologram panel content', '실행': 'Run', '스냅샷 openTools 에도 같은 마스킹': 'same masking for snapshot openTools',
   '(백그라운드)': '(background)',
+  '일일 회차': 'Daily cycle', '측정 체인': 'Measure chain', '측정 run': 'Measure run', '판정 대기': 'Judge waiting', '판정': 'Judge',
+  '분리 프로세스 대기 끝': 'Detached process wait over', '분리 프로세스 대기': 'Waiting on detached process', '분리 실행': 'Detached run',
+  '다음 run 기다림': 'Waiting for next run', '오류 0': '0 errors', '칸 오류': 'cell errors', 'run 끝 · 행': 'run done · rows', '끝 · 행': 'done · rows',
+  'DAILY 끝': 'DAILY done', '끝 · ended': 'done · ended', '12분': '12 min', '증거 없이': 'unbacked', '바퀴': 'iterations', '최장': 'max',
+  '[회차]': '[cycle]', '러너': 'Runner', '칸 오류 0': '0 cell errors', '세션 모니터': 'Session monitor', '[커밋]': '[commit]',
+  '쌍 모집단': 'pair population', '137,981쌍': '137,981 pairs', '날짜 확정': 'dated', '정시 보고 — 루프와 회차 상태를 두세 줄로 보고': 'Hourly report — loop and cycle status in two or three lines',
 }).sort((a, b) => b[0].length - a[0].length);
 
 /** 문구 하나 → 영어(바꿀 게 없으면 그대로) */

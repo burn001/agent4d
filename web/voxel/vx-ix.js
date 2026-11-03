@@ -72,6 +72,7 @@ export class VxIx {
   _office(room) {
     if (!room) return null;
     if (room.type === 'office') return room;
+    if (room.type === 'lab') return room; // 복셀 연구소: 구역 방이 자기 ixSpots(computeLab) — 그리기는 LabView._labIxDraw · holdPts(git 붙잡기 = 연구소 코어)·CI 실패 잔광도 연구소 방(2D vx2d-extra.holdPts 와 같은 판정, 의도)
     return room.officeId ? this.view.roomsById.get(room.officeId) || null : null;
   }
   /** 고리 진행 u(0..1 반복): 움직임 줄이기면 고정 자리 */
@@ -123,6 +124,13 @@ export class VxIx {
       const ck = this.col(f.ok === false ? 'err' : f.cat);
       const desk = this._a; desk.x = act.x; desk.y = act.y; desk.z = act.z;
       const s = this.s;
+      if (room.type === 'lab') { // 연구소: 사무실 은유(roomFrame 지역 좌표) 대신 LabView 갈고리(코어·DB 탱크·원격 안테나·시험 신호탑)
+        if (v._labIxDraw && v._labIxDraw(B, f, act, room, sp, tt, te, A, ck, now)) {
+          if (!v._farAll && A > 0.2) chips.push({ f, x: sp.x, y: sp.y + 1.25, z: sp.z, at: f.lastAt || f.t0, A });
+          n++;
+        }
+        continue;
+      }
       switch (f.cat) {
         case 'github': ia.github = Math.max(ia.github || 0, A); this._github(G, L, pal, f, ix, sp, desk, tt, te, A, ck, now); break;
         case 'db': {

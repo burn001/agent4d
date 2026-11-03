@@ -38,7 +38,7 @@ python music/compose.py --wav 미리듣기.wav          # WAV 사본도(레포�
 
 웹 상단 바의 곡 선택기(자동 + 단계별 곡 묶음 + 순환·무작위)는`web/assets/bgm-tracks.json` 매니페스트를 읽습니다.
 매니페스트가 곡 목록의 원본입니다 — 곡마다 `stage`(자동 선곡 단계 0 한가 · 1 보통 · 2 활발 · 3 매우 활발, 여러 단계 겸용이면 배열)와
-`energy`(0～1, 같은 단계 안 순서·단계가 없을 때 `round(energy×3)`)를 둡니다. 자동은 지금 활동 단계의 곡 중 직전 2곡을 피해 무작위로 고릅니다.
+`energy`(0～1, 같은 단계 안 순서·단계가 없을 때 `round(energy×3)`)를 둡니다. 자동은 지금 활동 단계의 곡 중 최근 곡(후보 수의 절반, 2～5곡)과 직전 곡과 비슷한 곡을 피해 무작위로 고릅니다.
 
 | id | 선택기 | 제목 | 합성 스크립트 | 파일 | BPM · 조 | 원곡 |
 |---|---|---|---|---|---|---|
@@ -92,16 +92,39 @@ python music/compose.py --wav 미리듣기.wav          # WAV 사본도(레포�
 | mambo | 금요일 맘보 | 금요일 맘보 | `compose_mambo.py` | `bgm-mambo.mp3`·`.json` | 184 · C minor | 자체 작곡 |
 
 표에 없는 곡(dawn·orbit·drive·deephouse·funk·liquid·uplift)은 매니페스트 참고. 새 10곡(pulse～caper, 2026-10-28)은 표현별 세 에이전트가 만든 곡이고,
-glacier～mambo 24곡(2026-10-30)은 표현 × 단계마다 2곡씩 더한 곡이며, cleanroom～collider 8곡(2026-10-31)은 복셀 연구소 전용입니다(지금 54곡). 3/4 곡(queue·deepfield·teatime)은 매니페스트에 `beats: 3` 이 있어
+glacier～mambo 24곡(2026-10-30)은 표현 × 단계마다 2곡씩 더한 곡이며, cleanroom～collider 8곡(2026-10-31)은 복셀 연구소 전용이고, 2026-11-03 체류 비중이 가장 큰 보통(1단계)을 보강한 11곡(아래 표)을 더해 지금 65곡입니다. 3/4 곡(queue·deepfield·teatime)은 매니페스트에 `beats: 3` 이 있어
 자동 단계 전환 크로스페이드가 실제 마디 경계에 맞춥니다.
 
 **테마별 풀**: 곡마다`views`(표현별 단계)를 두고, 자동 선곡은 지금 보고 있는 표현의 풀에서만 고릅니다(그 단계에 곡이 없으면 `stage` 전체 풀로 폴백).
+**흐름과 Planet 은 한 풀을 나눠 씁니다**(2026-11-03, `web/bgm-core.mjs` `POOL_GROUPS`) — 아래 두 줄의 합집합이 둘 다의 풀이고, 복셀·연구소는 각자 풀입니다.
 
 | 표현 | 0 한가 | 1 보통 | 2 활발 | 3 매우 활발 |
 |---|---|---|---|---|
-| flow (Intense 코딩) | lofi·pulse·glacier·cursor | lofi·deephouse·circuit·refactor·queue | drive·deephouse·stack·sprint | liquid·uplift·overclock·hotfix·deadline |
-| planet (Cosmic Ambient) | orbit·ambient·aurora·deepfield | stardust·nebula·comet·satellite | drive·pulsar·ionstorm·gravity | uplift·warp·supernova·hyperspace |
-| voxel (카페·사무실) | dawn·bossa·rainwindow·teatime | jazz·chillhop·lofi·typewriter·espresso | city·funk·meeting·copier | swing·caper·pantry·mambo |
+| flow (Intense 코딩) | lofi·pulse·glacier·cursor | lofi·deephouse·circuit·refactor·queue·**tidelock·pentameter·dubroom** | drive·deephouse·stack·sprint | liquid·uplift·overclock·hotfix·deadline |
+| planet (Cosmic Ambient) | orbit·ambient·aurora·deepfield | stardust·nebula·comet·satellite·**tidelock·pentameter·dubroom** | drive·pulsar·ionstorm·gravity | uplift·warp·supernova·hyperspace |
+| voxel (카페·사무실) | dawn·bossa·rainwindow·teatime | jazz·chillhop·lofi·typewriter·espresso·**parkbench·sunlitdesk·filingwaltz** | city·funk·meeting·copier | swing·caper·pantry·mambo |
+| lab (복셀 연구소) | cleanroom·petri | titration·oscillo·**microscope·datalog·fivetubes·coolant** | centrifuge·spectro·**gelrun** | reactor·collider |
+
+### 2026-11-03 보통 보강 11곡
+
+최근 4주 transcript 를 자동 선곡 규칙(`web/bgm-auto.mjs`)에 흘려 본 단계 체류 비율은 한가 19% · 보통 60% · 활발 19% · 매우 활발 2% 였습니다.
+같은 단계 기존 곡과 박자·조·리드 음색·드럼이 겹치지 않게 골랐습니다. 6/8 곡은 `setup(beats=6)` 으로 박 = 8분음표(BPM 도 8분음표 기준), 메타 `meter: "6/8"` → 매니페스트 `beats: 6`.
+
+| id | 제목 | 풀 · 단계 | BPM · 박자 · 조 | 특징 |
+|---|---|---|---|---|
+| tidelock | 조석 고정 | 흐름·Planet 1 | 156(8분) · 6/8 · B dorian | 8분 톱니 플럭, 'oo' 합창 패드, 점4분 서브, 첼로 |
+| pentameter | 다섯 박 루프 | 흐름·Planet 1 | 100 · 5/4 · Db lydian | 3+2 오르간 스탭, 실로폰, 1·4박 킥·3·5박 클랩, 사각파 리드 |
+| dubroom | 서버실 더브 | 흐름·Planet 1 | 76 · 4/4 · F minor | 원드롭 킥, 메아리 오프비트 기타, 서브 선율, 테이프 잡음, 아코디언 |
+| parkbench | 공원 벤치 | 복셀 1 | 180(8분) · 6/8 · E major | 나일론 분산화음, 업라이트, 탬버린, 아코디언·플루트 |
+| sunlitdesk | 햇살 드는 자리 | 복셀 1 | 100 · 4/4 · C major | 스틸 기타 트래비스 주법, 일렉트릭 베이스, 실로폰, 현악 |
+| filingwaltz | 서류철 왈츠 | 복셀 1 | 132 · 3/4 · Eb major | 재즈 왈츠 — 브러시, 피아노 컴핑, 워킹 베이스, 약음 금관 |
+| microscope | 현미경 관찰 | 연구소 1 | 84 · 3/4 · B minor | 마림바 아르페지오, 왈츠 드럼(`waltz`), 물방울·삐, 플루트 |
+| datalog | 데이터 기록계 | 연구소 1 | 96 · 4/4 · Eb major | 셋잇단 칼림바 시퀀스, 느린 사각파, 계전기, 실로폰 |
+| fivetubes | 다섯 시험관 | 연구소 1 | 100 · 5/4 · Ab mixolydian | 도약 블립, 3+2 드럼(`five`), 50Hz 험, 일렉트릭 피아노 |
+| coolant | 냉각수 순환 | 연구소 1 | 168(8분) · 6/8 · G major | 오르골 8분, 흔들림 드럼(`sway`), 60Hz 험, 첼로 |
+| gelrun | 전기영동 | 연구소 2 | 128 · 4/4 · Bb minor | 브레이크비트(`break`), 공명 짙은 16분 톱니, 오르간 |
+
+연구소 곡은 `labkit.py` 설정(`CFG`)만, 나머지는 `bgmkit.py` 로 편곡합니다. `labkit.py` 의 새 드럼(`waltz`·`sway`·`five`·`break`)은 새 곡에만 쓰이고 기존 연구소 8곡 합성 결과는 그대로입니다.
 
 ### 공용 엔진 `bgmkit.py` (2026-10-30 24곡)
 

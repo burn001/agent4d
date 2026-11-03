@@ -13,6 +13,7 @@ import { Character } from './character-core.mjs';
 import { idleAct } from './office-core.mjs';
 import { watchPhase } from './vx-proc-core.mjs';
 import { applyTired, tiredMode, flushOf, bodyTintOf, heatHueOf } from './vx-heat-core.mjs'; // 지친 직원
+import { labGesturePose as GESTURE_POSE } from '../lab/lab-gesture-core.mjs'; // 연구소 몸짓(ch.gesture 는 LabView 만 세움)
 
 export { Character };
 
@@ -68,6 +69,7 @@ function poseBase(ch, fx, t) {
     else if (tt === 'desk' && ch._fromBreak) { P.mug = true; P.armR = -1.0; } // 커피 들고 자리로
     return P;
   }
+  if (ch.gesture && ch.gesture.until > t && GESTURE_POSE(P, ch, t)) return P; // 연구소 몸짓(설치·들여다보기·끄기·현장·경보·의뢰·보고)
   // 탕비실: 커피 한 잔 — 3.2초마다 한 모금, 팀장은 왼손으로 가볍게 손짓(잡담)
   if (tt === 'break') {
     P.mug = true;
