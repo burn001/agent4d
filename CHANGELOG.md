@@ -4,6 +4,9 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Changed
+- README (English and Korean) now opens with a 17-second demo GIF (`docs/media/demo.gif`, cut from the v0.7.5 intro video: Flow, Planet, Voxel Office, Voxel Lab, a prompt close-up, light theme) that links to the intro video; it replaces the Planet loop that sat under the intro paragraph (the Planet loop stays in the Views section).
+
 ## [0.7.6] - 2026-11-07
 
 ### Added

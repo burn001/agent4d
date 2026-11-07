@@ -1,5 +1,7 @@
 # Agent4D
 
+[![Agent4D 시연: 흐름, Planet, 복셀 오피스, 복셀 연구소, 프롬프트 근접, 라이트 테마(누르면 30초 소개 영상)](docs/media/demo.gif)](https://github.com/burn001/agent4d/releases/download/v0.7.5/agent4d-intro-v0.7.5.mp4)
+
 **Agent4D — 코딩 에이전트를 3D 공간 + 시간으로**
 
 *외로운 바이브코더의 친구*
@@ -11,8 +13,6 @@
 [English](README.md) · **한국어**
 
 Claude Code 에이전트가 지금 무엇을 하는지 브라우저 3D 화면으로 실시간 보여 주고, 나중에 다시 재생합니다. Agent4D 는 메인 에이전트와 서브에이전트, 워크플로 에이전트, 안에서 띄운 `claude -p` 실행, 백그라운드 셸·모니터를 하나의 살아 있는 트리로 그리는 로컬·읽기 전용 뷰어입니다. 공간 3차원에 실시간 스트리밍·재생이라는 시간 축을 더했습니다. 명령줄 도구 이름은 `agent4d` 이고, 예전 이름 `ccviz` 도 그대로 동작합니다.
-
-[![Planet 표현: 일하는 메인 에이전트의 뚜르비용](docs/media/planet.gif)](https://github.com/burn001/agent4d/releases/download/v0.7.5/agent4d-intro-v0.7.5.mp4)
 
 ▶ **[30초 소개 영상 보기(MP4)](https://github.com/burn001/agent4d/releases/download/v0.7.5/agent4d-intro-v0.7.5.mp4)**
 

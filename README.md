@@ -1,5 +1,7 @@
 # Agent4D
 
+[![Agent4D demo: Flow, Planet, Voxel Office, Voxel Lab, a prompt close-up and the light theme (click for the 30-second intro video)](docs/media/demo.gif)](https://github.com/burn001/agent4d/releases/download/v0.7.5/agent4d-intro-v0.7.5.mp4)
+
 **Agent4D — your coding agents in 3D space + time**
 
 *Visual Companion for Lonely Vibecoders*
@@ -9,8 +11,6 @@
 **English** (canonical) · [한국어](README.ko.md)
 
 See what your Claude Code agents are doing, live, in 3D — and play it back later. Agent4D is a local, read-only viewer that turns the main agent, its subagents, workflow agents, nested `claude -p` runs, background shells and monitors into one live tree in your browser: three dimensions of space, plus time through live streaming and replay. The command-line tool is `agent4d` (`ccviz` still works).
-
-[![Planet view: the main agent's tourbillon at work](docs/media/planet.gif)](https://github.com/burn001/agent4d/releases/download/v0.7.5/agent4d-intro-v0.7.5.mp4)
 
 ▶ **[Watch the 30-second intro video (MP4)](https://github.com/burn001/agent4d/releases/download/v0.7.5/agent4d-intro-v0.7.5.mp4)**
 
