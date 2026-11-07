@@ -197,7 +197,7 @@ export async function collectExtras({ from, sid, index = null }) {
   const want = new Set([...rt.launchNodes.values()].map((L) => L.toolUseId).filter(Boolean));
   for (const a of Object.values(pins.cycles)) want.add(a.toolUseId);
   for (const f of li.files.values()) for (const L of f.launches) {
-    if (want.has(L.toolUseId)) pins.launches[L.toolUseId] = { key: L.key, script: L.script, cwd: L.cwd, via: L.via };
+    if (want.has(L.toolUseId)) pins.launches[L.toolUseId] = { key: L.key, script: L.script, cwd: L.cwd, via: L.via, ...(L.innerDetach ? { innerDetach: true } : {}) };
   }
   return { children, outputs, missing: { children: missChildren, outputs: missOut }, pins };
 }

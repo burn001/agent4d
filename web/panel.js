@@ -5,9 +5,37 @@ import { KIND_LABEL } from './layout.js';
 import { filterChip, FILTER_HINT } from './filter-ui.mjs';
 import { insertIndexDesc, splitArrivals, atTop, keepAnchor } from './panel-order.mjs';
 import { nodeSubtitle } from './node-title.mjs';
-import { ixHtml, ensureIxCss } from './ix-core.mjs'; // 범주 글리프·요약
+import { ixHtml, ensureIxCss, userWho } from './ix-core.mjs'; // 범주 글리프·요약 · 보낸 이
 import { t, fmtTime, fmtNum } from './i18n.mjs';
+import './panel-side.mjs'; // 저장된 패널 위치를 처음 그리기 전에 body 에 반영
+import './md-links.js'; // 각주 왕복 링크
+import './math.js'; // 수식 조판(수식이 있을 때만 로컬 KaTeX)
+import { renderCard, badgeHtml, cardState } from './ask-card.mjs'; // 선택형 질문·계획 승인 카드
+import { renderMarkdown, renderMarkdownInline } from './markdown.mjs'; // 실황 응답 줄의 인라인 Markdown · 원문(md)이 오면 블록 전체
+import { effortMeterHtml } from './effort-core.mjs'; // 줄 머리 5칸 미니 미터(하위 노드만)
+import { ensureEffortUiCss } from './effort-ui.mjs'; // 미터 자리 맞춤 CSS · 범례 한 줄
 ensureIxCss();
+ensureEffortUiCss();
+let _mdN = 0; // 실황 응답마다 다른 각주 범위
+// 잘린 응답 '전체 보기' 단추(서버가 잘렸을 때만 mdRef 를 실음 — 옛 서버·minimal 이면 단추 없음). 값은 이스케이프해 data- 속성에만
+const fullBtn = (r) => (r && typeof r.s === 'string' && typeof r.u === 'string' && Number.isInteger(r.b)
+  ? ` <button type="button" class="md-full" data-s="${escapeHtml(r.s)}" data-u="${escapeHtml(r.u)}" data-b="${r.b}">${escapeHtml(t('app.panel.mdFull'))}</button>` : '');
+/** 단추 → 서버에서 그 응답 원문(보기 토큰 쿠키·가림·상한)을 받아 그 상자를 다시 그림 */
+async function loadFull(btn) {
+  if (btn.disabled) return;
+  const box = btn.closest('.md-live');
+  if (!box) return;
+  btn.disabled = true; btn.textContent = t('app.panel.mdFullLoading');
+  try {
+    const q = new URLSearchParams({ s: btn.dataset.s || '', u: btn.dataset.u || '', b: btn.dataset.b || '' });
+    const r = await fetch(`md/full?${q}`, { credentials: 'same-origin', cache: 'no-store' });
+    const j = r.ok ? await r.json() : null;
+    if (!j || typeof j.md !== 'string') throw new Error(String(r.status));
+    box.classList.add('md-full-on');
+    box.innerHTML = renderMarkdown(j.md, { scope: 'lv' + (++_mdN) }) + (j.cut ? `<p class="md-cut">${escapeHtml(t('app.panel.mdFullCut'))}</p>` : '');
+    box.dispatchEvent(new CustomEvent('md-render', { bubbles: true }));
+  } catch { btn.disabled = false; btn.textContent = t('app.panel.mdFullFail'); }
+}
 
 const MAX_LINES = 1000;
 // 브라우저 스크롤 앵커링(overflow-anchor)이 있으면 과거 읽기 중 화면 고정을 맡긴다. 직접 보정하면 content-visibility 줄이
@@ -73,6 +101,8 @@ export class Panel {
     }, { passive: true });
     this.latestBtn.addEventListener('click', () => this._toTop());
     this.el.addEventListener('click', (e) => {
+      const fb = e.target.closest('button.md-full'); // 잘린 응답 전체 보기
+      if (fb) { e.stopPropagation(); loadFull(fb); return; }
       const who = e.target.closest('.who');
       if (!who) return;
       const id = who.parentElement.dataset.node;
@@ -184,7 +214,9 @@ export class Panel {
     const anchor = !NATIVE_ANCHOR && !this.stick && !this.collapsed ? this._anchor() : null;
     const divs = [], ts = [];
     let shown = 0;
+    const settled = [];
     for (const { ev, html, pid, rsid } of this.queue) {
+      if (ev.type === 'tool-end' && ev.cardRes && ev.toolUseId) settled.push(ev);
       const div = document.createElement('div');
       const t = Date.parse(ev.ts) || 0;
       div.dataset.t = String(t);
@@ -213,6 +245,16 @@ export class Panel {
         const j = insertIndexDesc(times, ts[i]);
         this.el.insertBefore(divs[i], kids[j] || null);
         times.splice(j, 0, ts[i]);
+      }
+    }
+    // 답이 온 질문·계획: 앞서 그린 '대기 중' 카드의 표지를 결과로 바꾼다(결과 카드는 끝 줄에 따로)
+    for (const ev of settled) {
+      for (const c of this.el.querySelectorAll('.ask-card.s-pending, .ask-card.s-planPending')) {
+        if (c.dataset.tu !== ev.toolUseId || c.closest('.k-tool-end')) continue;
+        const st = cardState(ev.card, ev.cardRes);
+        c.classList.remove('s-pending', 's-planPending'); c.classList.add('s-' + st);
+        const b = c.querySelector('.ask-badge'); if (b) b.outerHTML = badgeHtml(ev.card, ev.cardRes);
+        for (const h of c.querySelectorAll('.ask-hint')) h.remove();
       }
     }
     // 줄 상한: 가장 오래된 줄(맨 아래)부터 지운다
@@ -276,17 +318,26 @@ export class Panel {
           const what = ev.brief || ev.text || '', more = ev.detail && ev.detail !== what ? ev.detail : '';
           msg = `<span class="tag">${escapeHtml(CAT_LABEL[ev.cat] || ev.cat || '')}</span><b>${escapeHtml(ev.tool || '')}</b>${what ? ' ' + escapeHtml(what) : ''}${more ? ' <span class="dim">' + escapeHtml(more) + '</span>' : ''}`;
         }
+        if (ev.card) msg += renderCard(ev.card, null, { id: ev.toolUseId, live: true }); // 질문·계획 카드(대기 중)
         break;
       }
       case 'tool-end': {
         const ok = ev.ok !== false;
         msg = `<span class="tag ${ok ? 'ok' : 'err'}">${ok ? t('app.panel.tag.done') : t('app.panel.tag.failed')}</span>${escapeHtml(ev.tool || '')} <span class="dim">${escapeHtml(dur(ev.durationMs))}${(ev.brief || ev.text) ? ' · ' + escapeHtml(ev.brief || ev.text) : ''}</span>`;
+        if (ev.card && ev.cardRes) msg += renderCard(ev.card, ev.cardRes, { id: ev.toolUseId, live: true }); // 답한 결과 카드
         break;
       }
-      case 'text': msg = (ev.role === 'system' ? `<span class="tag">${t('app.panel.tag.summary')}</span>` : '') + escapeHtml(ev.text || ''); break;
+      // 응답 줄: text 는 서버가 한 줄로 합친 글(400자) → 인라인만. 줄바꿈이 있는 응답은 서버가 원문 md(3000자 상한, 넘으면 mdCut)를 함께 실어 블록 전체(표·목록·코드)로
+      case 'text':
+        if (ev.role === 'system') msg = `<span class="tag">${t('app.panel.tag.summary')}</span>${escapeHtml(ev.text || '')}`;
+        else if (ev.md) msg = `<div class="md md-live">${renderMarkdown(ev.md, { scope: 'lv' + (++_mdN) })}${ev.mdCut ? `<p class="md-cut">${escapeHtml(t('app.panel.mdCut'))}${fullBtn(ev.mdRef)}</p>` : ''}</div>`;
+        else msg = `<span class="md md-inline">${renderMarkdownInline(ev.text || '')}</span>`;
+        break;
       case 'thinking': msg = `<span class="dim">${t('app.panel.thinking', { n: Number(ev.chars || 0), s: fmtNum(Number(ev.chars || 0)) })}</span>`; break;
       case 'user': {
-        const o = ev.origin === 'human' ? t('app.panel.tag.user') : ev.origin === 'task-notification' ? t('app.panel.tag.notify') : ev.origin === 'schedule' ? t('app.panel.tag.schedule') : t('app.panel.tag.system');
+        // 교차 세션 메시지: Interactive = '사용자 · <별칭>', 다른 Claude 세션 = '세션 <이름>'
+        const via = ev.ix && ev.ix.src === 'ix' ? ` · ${escapeHtml(ev.ix.who || 'Interactive')}` : '';
+        const o = ev.origin === 'peer' ? t('app.panel.tag.peer', { name: escapeHtml((ev.ix && ev.ix.who) || '?') }) : ev.origin === 'human' ? t('app.panel.tag.user') + via : ev.origin === 'task-notification' ? t('app.panel.tag.notify') : ev.origin === 'schedule' ? t('app.panel.tag.schedule') : t('app.panel.tag.system');
         // Monitor 출력으로 시작한 턴은 그 출력 한 줄을 덧붙임(알림 요약은 'Monitor event: 이름' 뿐)
         const xt = ev.ix && ev.ix.op === 'auto' && ev.ix.src === 'monitor' && ev.ix.text ? ` <span class="dim">› ${escapeHtml(ev.ix.text)}</span>` : '';
         msg = `<span class="tag${ev.origin === 'schedule' ? ' sched' : ''}">${o}</span>${escapeHtml(ev.text || '')}${xt}`;
@@ -323,7 +374,7 @@ export class Panel {
     if (ev.ix && (ev.type === 'tool-start' || ev.type === 'tool-end' || ev.type === 'output')) msg = ixHtml(ev.ix) + msg;
     else if (ev.type === 'user' && ev.ix && ev.ix.cat === 'user' && ev.ix.op !== 'auto') { // '나 › …' 줄은 금빛으로 구분
       const h = ixHtml(ev.ix);
-      msg = `<span class="ix-user-msg">${h.replace(/<span class="ixs[^"]*">[^<]*<\/span> /, `<b class="ixs ix-c-user">${escapeHtml(t('app.panel.me'))}</b> `)}${escapeHtml(ev.text || '')}</span>`;
+      msg = `<span class="ix-user-msg">${h.replace(/<span class="ixs[^"]*">[^<]*<\/span> /, `<b class="ixs ix-c-user">${escapeHtml(ev.ix.src === 'ix' || ev.ix.src === 'peer' ? userWho(ev.ix, t) : t('app.panel.me'))}</b> `)}${escapeHtml(ev.text || '')}</span>`;
     }
     const kind = (node && node.kind) || 'subagent';
     const label = trunc((node && node.label) || ev.nodeId || '', 40); // 첫 줄을 혼자 쓰므로 넉넉히(넘치면 CSS 말줄임)
@@ -337,7 +388,9 @@ export class Panel {
     // 같은 프로젝트 live 세션이 여럿이면 이름을 그 세션 색으로
     const si = this.getSessIdx ? this.getSessIdx(node || (ev.rootSessionId ? { rootSessionId: ev.rootSessionId } : null)) : null;
     const sc = si != null ? ` class="sess s${si}"` : '';
-    return `<time${tAttr}>${late ? '↶' : ''}${hhmmss(ev.ts)}</time><span class="who" title="${escapeHtml(whoTip + t('app.panel.whoTip'))}"><i${sc} style="background:var(--k-${kind})"></i><b${sc}>${escapeHtml(label)}</b></span><span class="msg">${msg}</span>`;
+    // 종류색 점 바로 뒤 5칸 미니 미터(subagent·workflow-agent·claude-p 만, 무늬 없으면 ''). 툴팁 = 요청값·적용값. 그 시점 값으로 고정
+    const eff = node ? effortMeterHtml(node) : '';
+    return `<time${tAttr}>${late ? '↶' : ''}${hhmmss(ev.ts)}</time><span class="who" title="${escapeHtml(whoTip + t('app.panel.whoTip'))}"><i${sc} style="background:var(--k-${kind})"></i>${eff}<b${sc}>${escapeHtml(label)}</b></span><span class="msg">${msg}</span>`;
   }
 }
 

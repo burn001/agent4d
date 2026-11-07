@@ -69,6 +69,7 @@ export async function handleEvents(req, res, url, manager, opts = {}) {
   };
   attach(rt, true);
   const limitsOff = attachLimits(write, opts.limits);
+  const memOff = attachMem(write, opts.mem);
 
   let autoUnsub = null;
   if (param === 'auto' && manager.onAuto) {
@@ -94,6 +95,7 @@ export async function handleEvents(req, res, url, manager, opts = {}) {
     unsub?.();
     autoUnsub?.();
     limitsOff();
+    memOff();
     manager.release(rt);
   };
   req.on('close', cleanup);
@@ -110,9 +112,17 @@ function attachLimits(write, limits) {
   return () => { off(); offViewer(); };
 }
 
+/** 시스템 메모리: 연결 직후 지금 값 한 번 + 의미 있게 바뀔 때. 값만({used,total,pct}), id 없음 */
+function attachMem(write, mem) {
+  if (!mem) return () => {};
+  const cur = mem.current();
+  if (cur) write(formatEvent('mem', cur));
+  return mem.onChange((v) => write(formatEvent('mem', v)));
+}
+
 /**
  * 3차: /events?scope=all&since=<hseq>. hub 는 OverviewHub. 기본 구독자만(비활성 세션은 장면에 싣지 않는다)
- * snapshot(전체 보기 형식) → ev(id = hseq) · projects · limits · 15초 ping
+ * snapshot(전체 보기 형식) → ev(id = hseq) · projects · limits · mem · 15초 ping
  */
 export async function handleOverviewEvents(req, res, url, hub, opts = {}) {
   const sinceRaw = url.searchParams.get('since') ?? req.headers['last-event-id'];
@@ -139,6 +149,7 @@ export async function handleOverviewEvents(req, res, url, hub, opts = {}) {
   const unsub = hub.subscribe(sub);
   if (evs) write(formatEvent('projects', { projects: hub.projectsState.projects, roots: hub.rootsPayload() }));
   const limitsOff = attachLimits(write, opts.limits);
+  const memOff = attachMem(write, opts.mem);
   const ping = setInterval(() => write(': ping\n\n'), PING_MS);
   const cleanup = () => {
     if (closed) return;
@@ -147,6 +158,7 @@ export async function handleOverviewEvents(req, res, url, hub, opts = {}) {
     out.close();
     unsub();
     limitsOff();
+    memOff();
   };
   req.on('close', cleanup);
   res.on('error', cleanup);

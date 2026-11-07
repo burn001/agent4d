@@ -56,14 +56,14 @@ before(() => {
   const now = Date.now();
   const T = (sec) => new Date(now - 600_000 + sec * 1000).toISOString();
   const base = { sessionId: M, cwd, version: '2.1.309', entrypoint: 'cli' };
-  const A = (sec, id, used, text = '응답') => ({ type: 'assistant', timestamp: T(sec), ...base, message: { id, role: 'assistant', model: 'claude-sonnet-5-5', content: [{ type: 'text', text }],
+  const A = (sec, id, used, text = '응답', extra = {}) => ({ type: 'assistant', timestamp: T(sec), ...base, ...extra, message: { id, role: 'assistant', model: 'claude-sonnet-5-5', content: [{ type: 'text', text }],
     usage: { input_tokens: 2, cache_creation_input_tokens: 1000, cache_read_input_tokens: used - 1002, output_tokens: 50 } } });
   const recs = [
     { type: 'user', timestamp: T(1), ...base, message: { role: 'user', content: '시작' } },
     A(10, 'msg1', 40_000), A(10, 'msg1', 40_000, '같은 응답 둘째 블록'),
-    A(20, 'msg2', 150_000),
+    A(20, 'msg2', 150_000, '응답', { effort: 'medium', perTurnEffort: 'medium' }),
     { type: 'system', subtype: 'compact_boundary', timestamp: T(25), ...base, content: 'Conversation compacted' },
-    A(30, 'msg3', 24_000),
+    A(30, 'msg3', 24_000, '응답', { effort: 'xhigh' }),
     { type: 'assistant', timestamp: T(31), ...base, message: { role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text: 'x' }], usage: { input_tokens: 0, output_tokens: 0 } } },
   ];
   const dir = path.join(projects, cwd.replace(/[^A-Za-z0-9]/g, '-'));
@@ -86,6 +86,10 @@ for (const offline of [false, true]) {
       // 기준선: 첫 응답(40k)을 유지하다 compact 뒤 값(24k)이 더 작으면 낮춤 — 라이브·재생 같은 값
       const bases = rt.graph.ring.filter((e) => e.nodeId === `s:${M}` && e.type === 'node-update' && e.patch?.meta?.ctx).map((e) => e.patch.meta.ctx.base);
       assert.deepEqual(bases, [40_000, 40_000, 24_000]);
+      // 추론 effort: 마지막 assistant 기록 값, 없던 동안(msg1)은 싣지 않음, 바뀐 때만 이벤트
+      assert.equal(n.meta.effort, 'xhigh');
+      const effs = rt.graph.ring.filter((e) => e.nodeId === `s:${M}` && e.type === 'node-update' && e.patch?.meta?.effort).map((e) => e.patch.meta.effort);
+      assert.deepEqual(effs, ['medium', 'xhigh']);
     } finally { rt.close(); }
   });
 }

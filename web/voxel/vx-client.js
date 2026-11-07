@@ -1,7 +1,7 @@
 // 의뢰인 창구(사용자 ↔ 메인) 3D 연출. 규칙은 client-core.mjs(순수, 2D 와 공용).
 // 팀장 사무실 뒤 벽 화상 스크린 + 날아가는 의뢰서 카드 + 책상 위 메모 + 질문 선택지 카드 + 붉은 깜빡임 + 화면보호기.
 import * as THREE from 'three';
-import { ClientDesk, clientOp, CLIENT } from './client-core.mjs';
+import { ClientDesk, clientOp, CLIENT, cardLabel, cardPath } from './client-core.mjs';
 import { clientLocal, clientScreen, clientSpot } from './office-core.mjs';
 import { roomFrame, endXf, DESK_TOP } from './props.js';
 import { CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
@@ -19,7 +19,41 @@ export class VxClient {
     this.screens = []; // 이번 프레임 {root, x, y, z}(세계, 스크린 가운데)
     this.hits = [];    // {root, x0,y0,x1,y1}(px, 캔버스 기준)
     this.labels = [];
+    this.tags = []; // 카드 리본 글(CSS2D)
     this._v = new THREE.Vector3();
+  }
+  /** 카드 출발점: 다른 세션이 보낸 것은 보낸 세션 팀장 책상(없으면 그 캐릭터)이 이 화면에 보일 때 거기, 아니면 스크린 */
+  _cardFrom(c, r0, a0) {
+    c.sd = false;
+    if (c.src !== 'peer' || !c.from || c.from === r0.ownerId) return a0;
+    const v = this.view;
+    if (!v.nodes.has(c.from) || (v._isDim && v._isDim(c.from))) return a0;
+    const room = (v.rooms || []).find((q) => q.ownerId === c.from && q.leadDesk && !q.external);
+    let p = null;
+    if (room) p = { x: room.leadDesk.x, y: DESK_TOP + 0.1, z: room.leadDesk.z };
+    else { const ch = v.chars && v.chars.get(c.from); if (ch && ch.pos && !ch.offstage && ch.state !== 'gone') p = { x: ch.pos.x, y: (ch.pos.y || 0) + 1.2, z: ch.pos.z }; }
+    if (!p) return a0;
+    c.sd = true;
+    return p;
+  }
+  /** 리본 글 하나(풀 i) — 글자는 textContent 로만 */
+  _tag(i, x, y, z, text, src, a) {
+    let T = this.tags[i];
+    if (!T) {
+      const el = document.createElement('div');
+      el.className = 'vx-card-tag';
+      const o = new CSS2DObject(el);
+      o.center.set(0.5, 1); o.visible = false;
+      this.view.scene.add(o);
+      T = this.tags[i] = { o, el, text: null, src: undefined };
+    }
+    T.o.position.set(x, y, z);
+    if (T.text !== text) { T.el.textContent = text; T.text = text; }
+    if (T.src !== src) { T.el.dataset.src = src || 'human'; T.src = src; }
+    T.el.style.opacity = String(Math.max(0, Math.min(1, a)));
+    const col = ixKeyColor('user', !!(this.view.tokens && this.view.tokens.isLight));
+    if (T.col !== col) { T.el.style.setProperty('--ix-c', col); T.col = col; }
+    if (!T.o.visible) T.o.visible = true;
   }
   _label(i) {
     let L = this.labels[i];
@@ -87,7 +121,7 @@ export class VxClient {
     }
     for (; k < this.labels.length; k++) { const L = this.labels[k]; L.root = null; if (L.o.visible) L.o.visible = false; }
   }
-  dispose() { for (const L of this.labels) { L.o.removeFromParent(); L.el.remove(); } this.labels = []; }
+  dispose() { for (const L of [...this.labels, ...this.tags]) { L.o.removeFromParent(); L.el.remove(); } this.labels = []; this.tags = []; }
   desk(id) { let d = this.desks.get(id); if (!d) { d = new ClientDesk(); this.desks.set(id, d); } return d; }
   clear() { this.desks.clear(); this.screens.length = 0; this.hits.length = 0; }
 
@@ -131,6 +165,7 @@ export class VxClient {
     const G = B.glow, L = B.lit;
     const user = tok['flow-call'] || tok['k-main'];
     this.screens.length = 0;
+    let tagN = 0;
     for (const r0 of v.rooms) {
       if (r0.type !== 'office' || !r0.leadDesk || r0.external) continue;
       const lead = v.nodes.get(r0.ownerId);
@@ -139,7 +174,8 @@ export class VxClient {
       const waiting = lead.status === 'idle';
       const mode = d ? d.screen(now, waiting) : (waiting ? 'idle' : 'idle');
       const wsc = clientScreen(r0); // 세계 좌표(이름표·집기·카드 자리)
-      if (wsc) this.screens.push({ root: r0.ownerId, x: wsc.x, y: wsc.y, z: wsc.z, a: v._fxA ? v._fxA(wsc.x, wsc.z) : 1 });
+      const r0Fade = wsc && v._fxA ? v._fxA(wsc.x, wsc.z) : 1;
+      if (wsc) this.screens.push({ root: r0.ownerId, x: wsc.x, y: wsc.y, z: wsc.z, a: r0Fade });
       const cl = clientLocal(r0);
       const r = roomFrame(r0, B);
       const sx = r.origin.x + cl.x, sz = r.origin.z + cl.z + cl.inward * 0.06, sy = 1.5, W = 2.4, H = 1.3;
@@ -182,21 +218,34 @@ export class VxClient {
         }
       }
       endXf(B);
-      // 날아가는 카드(세계 좌표): 스크린 → 팀장 책상
+      // 날아가는 카드(세계 좌표): 스크린 → 팀장 책상. 다른 세션이 보낸 것은 보낸 세션 팀장 책상이 보이면 거기서 출발, 리본 글 앞에 ◇/⇄
       if (d) {
         const cards = d.liveCards(now);
         if (cards.length) {
-          const a = clientScreen(r0), ld = r0.leadDesk;
+          const a0 = clientScreen(r0), ld = r0.leadDesk;
+          const b = { x: ld.x, y: DESK_TOP + 0.1, z: ld.z };
           for (const c of cards) {
-            const u = (now - c.t0) / CLIENT.CARD_DUR, e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
-            const x = a.x + (ld.x - a.x) * e, z = a.z + (ld.z - a.z) * e, y = a.y + (DESK_TOP + 0.1 - a.y) * e + Math.sin(e * Math.PI) * 1.1;
-            G.box(x, y, z, 0.34, 0.03, 0.26, c.kind === 'memo' ? this._c2.copy(pal.paper).lerp(tok.skill, 0.35) : c.kind === 'answer' ? this._c2.copy(pal.paper).lerp(tok.ok, 0.3) : pal.paper, now * 4);
+            const p = cardPath(this._cardFrom(c, r0, a0), b, (now - c.t0) / CLIENT.CARD_DUR, c.sd ? 1.8 : 1.1);
+            G.box(p.x, p.y, p.z, 0.34, 0.03, 0.26, c.kind === 'memo' ? this._c2.copy(pal.paper).lerp(tok.skill, 0.35) : c.kind === 'answer' ? this._c2.copy(pal.paper).lerp(tok.ok, 0.3) : pal.paper, now * 4);
+          }
+        }
+        // 리본 글(흐름 리본과 같은 글: ◇ Interactive · ⇄ 다른 세션 + 첫 몇 단어) — 날아가는 동안 카드 위, 닿은 뒤 잠깐 책상 위
+        if (r0.leadDesk) {
+          const a0 = clientScreen(r0), ld = r0.leadDesk, b = { x: ld.x, y: DESK_TOP + 0.1, z: ld.z };
+          for (const c of d.liveTags(now)) {
+            const lab = cardLabel(c);
+            if (!lab || tagN >= CLIENT.TAGS_MAX * 2) continue;
+            const u = (now - c.t0) / CLIENT.CARD_DUR;
+            const p = cardPath(this._cardFrom(c, r0, a0), b, u, c.sd ? 1.8 : 1.1);
+            const fade = u <= 1 ? 1 : Math.max(0, 1 - ((now - c.t0) - CLIENT.CARD_DUR) / CLIENT.TAG_HOLD);
+            this._tag(tagN++, p.x, p.y + 0.45, p.z, lab, c.src, fade * (r0Fade ?? 1));
           }
         }
         // 책상 위 메모(작업 중 추가 메시지)
         for (let i = 0; i < d.memo; i++) L.box(ld0(r0).x - 0.75 + (i % 3) * 0.05, DESK_TOP + 0.02 + i * 0.022, ld0(r0).z + 0.18 - (i % 2) * 0.04, 0.24, 0.018, 0.24, this._c2.copy(pal.paper).lerp(tok.skill, 0.45), 0.2 * (i % 3) - 0.2);
       }
     }
+    for (let k = tagN; k < this.tags.length; k++) if (this.tags[k].o.visible) this.tags[k].o.visible = false;
   }
 }
 

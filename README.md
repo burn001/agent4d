@@ -90,6 +90,7 @@ _All screenshots and loops use the built-in mock data (`?mock=1&lang=en`). Proje
 - [Background music](#background-music)
 - [Remote access (optional)](#remote-access-optional)
 - [Usage-limit gauge (opt-in)](#usage-limit-gauge-opt-in)
+- [Interactive panel (opt-in, off by default)](#interactive-panel-opt-in-off-by-default)
 - [Security and privacy](#security-and-privacy)
 - [Configuration](#configuration)
 - [FAQ and troubleshooting](#faq-and-troubleshooting)
@@ -107,7 +108,7 @@ The server tails the transcripts that Claude Code already writes under `~/.claud
 - **Live tool activity.** Panels next to each node show the current tool (shell, read, edit, search, web, agent, skill…) and a one-line summary. A collapsible side panel shows a live text feed.
 - **Replay.** Play past or running sessions from the start at 0.5×–32×, with idle gaps compressed, a scrubbable timeline, highlight markers and continuous playback. An optional read-only **archive** folder keeps transcripts around for replay after the originals are gone (`agent4d archive add`).
 - **Gauges.** A per-session **context usage** gauge — and every agent (main, subagent, `claude -p`) visibly heats up as its own context window fills (warming at 30%, overheating at 70%, critical at 90%; cools down after a compact) — and an opt-in **usage-limit** gauge for the 5-hour and 7-day windows.
-- **Sound** (off until you turn it on). 65 background tracks synthesized from code, plus sound effects synthesized live in the browser.
+- **Sound** (off until you turn it on). 65 background tracks synthesized from code, plus sound effects synthesized live in the browser. The ♪ panel is a playlist (per view or all tracks) with selection rules: by work status (default), shuffle, loop, a fixed mood or mood by time of day.
 - **Languages.** The web UI and the CLI are in English by default and switch to Korean on a Korean locale. Both can be forced (see [FAQ](#faq-and-troubleshooting)).
 - **Remote access** (optional). A Cloudflare quick tunnel plus a small Cloudflare Worker give you a stable, token-protected link that survives restarts.
 
@@ -253,6 +254,18 @@ The 5-hour / 7-day gauge is filled by a small collector that reads the Claude Co
 
 It is **off by default**. To turn it on, run `node bin/agent4d.mjs start --limits` once; this saves `"limits": { "source": "oauth" }` in the config (restart a running server with `stop`, then `start`). `start --no-limits` turns it off again. `node bin/agent4d.mjs limits --once` queries it once from the command line. Use it at your own discretion.
 
+## Interactive panel (opt-in, off by default)
+
+The side panel can switch from **Live** to **Interactive**: pick a running Claude Code session (it follows the node you select), type a message, and the whole conversation of that session (prompts from the terminal or the Claude app, messages from other sessions, replies) appears below it. Agent4D does not start any model itself; it hands the message to the session that is already running, through Claude Code's local cross-session inbox. When a session waits for you, a "Needs input" badge in the panel header takes you to its card.
+
+> **Warning.** Anyone who can use an approved device can type into your sessions, and those sessions may run tools on your machine. Approve only devices you own, and revoke them when you are done.
+
+- **Off by default.** Turn it on with `node bin/agent4d.mjs interact on` (and `off`). While it is off, nothing is registered or sent.
+- **Approved devices only.** The first time a browser opens Interactive it creates a device key (the private key never leaves the browser) and shows up as *pending* with a generated alias such as `blue-sky-cat`. Approve it on the PC with `interact allow <alias>`; `interact list`, `revoke` and `remove` manage the list. Every request is signed by the device key and needs the view token as well; approval works only from the PC itself, never through the tunnel.
+- **Audit log.** Registrations, approvals and every message (time, device, target session, first 80 characters) are written to `~/.cc-agent-viz/interact/audit.jsonl` (`interact audit`).
+- **Answering question boxes, plan approvals and permission prompts.** If the session is connected with Remote Control (claude.ai/code), an approved device can answer its question box (AskUserQuestion, including "Other" and multiple choice), approve or reject a plan, and allow or deny one tool call from the Interactive panel. The answer goes through that session's Remote Control link, the same way the Claude app answers, so the box in the terminal closes with it; whichever answer arrives first wins. Agent4D uses this PC's Claude sign-in for it (`~/.claude/.credentials.json`; the token is never refreshed, logged or sent anywhere but Anthropic's API). "Always allow" rules are never saved, and risky commands (deletes, force push, `reset --hard`, piping a download into a shell, …) need a second press, checked again by the server. Each answer is written to the audit log. This relies on an unpublished Claude Code interface and may stop working with a later release; every waiting card also links to the session in the Claude app. Sessions without Remote Control can only receive a message, which arrives after the box is answered in the terminal.
+- **Unofficial protocol.** The inbox format is internal to Claude Code (tested with 2.1.318) and may change; Agent4D refuses to send when the format does not match. A session that runs with permission checks bypassed holds each message until someone approves it in that session's terminal, unless its `crossSessionInbound` setting says otherwise.
+
 ## Security and privacy
 
 Read this before you share any link.
@@ -261,7 +274,7 @@ Read this before you share any link.
 - **The token is the only lock.** Every request needs the view token (query `t`, cookie, or `X-CCVIZ-Token` header). There is no localhost exemption. Treat a link with `?t=` like a password: keep it out of chats, tickets and screenshots. If it leaks, run `rotate-token`.
 - **All projects are visible by default.** Unless `project` is set (or `start --project`), a token holder can browse every Claude Code session on the machine. Limit it to one project before giving a link to anyone else.
 - **Local only by default.** The server binds to `127.0.0.1`. It is reachable from the internet only through the optional tunnel and Worker, which you turn on yourself (`--tunnel`, `"remote": true`, or a deployed Worker).
-- **Read-only.** The server only reads transcripts and task output. The archive feature writes only to the archive folder you choose, and only when you run `agent4d archive add`.
+- **Read-only, unless you turn on Interactive.** The server only reads transcripts and task output. The optional [Interactive panel](#interactive-panel-opt-in-off-by-default) is the one exception: when you turn it on, approved devices can send messages into running sessions and, for sessions connected with Remote Control, answer their question boxes, plan approvals and permission prompts (see above). The archive feature writes only to the archive folder you choose, and only when you run `agent4d archive add`.
 - **Redaction is best-effort.** All text passes through `server/redact.mjs`, which masks API keys, bearer tokens, JWTs, PEM blocks, credentials in URLs, `password=`-style pairs, emails, phone and ID numbers, and long opaque strings. Thinking content and full tool inputs are never sent. `"privacy": "minimal"` sends even less. Redaction cannot catch everything, so don't rely on it for sensitive work.
 - **Tokens stay out of log files.** The CLI prints the tokenized link to the console only.
 - **Update check.** The server and `agent4d update --check` make one unauthenticated request to the GitHub API (`api.github.com/repos/burn001/agent4d/releases/latest`) at most once a day. Nothing else is sent: no session data, paths, tokens or identifiers beyond the usual HTTP headers (`User-Agent: agent4d/<version>`). Turn it off with `"updateCheck": false` or `AGENT4D_NO_UPDATE_CHECK=1`.

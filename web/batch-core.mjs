@@ -10,6 +10,7 @@
 import { t as tr } from './i18n.mjs';
 import { isJob, jobOf, jobTags, jobFold, isProc, procTags, jobLabelKey } from './job-core.mjs'; // 작업 노드 · 분리 프로세스
 import { runOf, runTags, runLabelKey } from './run-core.mjs'; // 실행 중 셸(meta.run)
+import { effortTagText } from './effort-core.mjs'; // 꼬리표 effort 글 규칙
 
 export const BATCH = {
   KEEP_ENDED: 2,        // 장치에 작게 붙여 둘 끝난 회차 수(서버 BATCH_KEEP_ENDED 와 같은 값)
@@ -169,6 +170,8 @@ export function nodeTags(n, byId = null, nowMs = Date.now()) {
   if (n && n.kind === 'monitor' && (m.rearmCount || m.rearmOf)) t.push(tr('cards.tag.rearm', { n: m.rearmCount || 1 }));
   if (isOrphanRoot(n)) t.push(tr(m.likelyMain ? 'cards.tag.likely' : 'cards.tag.external'));
   if (m.inheritedFrom) t.push(tr('cards.tag.inherited')); // /clear 앞 세션에서 이어받은 작업
+  const eff = effortTagText(n); // 추론 effort(마지막 응답) · 무늬가 생긴 노드는 빼고, 메인은 medium 이 아닐 때만
+  if (eff) t.push(tr('cards.tag.effort', { v: eff }));
   if (isProc(n)) t.push(...procTags(n)); // 정체·rc·들여다봄 N
   if (runOf(n)) t.push(...runTags(n, nowMs, { proc: isProc(n) })); // 실행 경과·조용함·정체·버퍼링?·rc
   return t;

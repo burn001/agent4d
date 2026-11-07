@@ -7,7 +7,7 @@ import { t } from './i18n.mjs';
 
 const EYE = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
 const CSS = `
-#pov-bar { position: fixed; top: calc(var(--topbar-h, 48px) + 10px); left: 12px; z-index: 16; display: flex; align-items: center; gap: 6px; pointer-events: none; }
+#pov-bar { position: fixed; top: calc(var(--topbar-h, 48px) + 10px); left: calc(var(--inset-l, 0px) + 12px); z-index: 16; display: flex; align-items: center; gap: 6px; pointer-events: none; }
 #pov-bar[hidden] { display: none; }
 #pov-bar > * { pointer-events: auto; }
 #btn-pov-eye { width: 34px; height: 34px; border-radius: 999px; display: grid; place-items: center; padding: 0; cursor: pointer;
@@ -28,7 +28,7 @@ const CSS = `
 #pov-menu button { display: block; width: 100%; text-align: left; border: 0; background: transparent; color: var(--text); font-size: 12.5px; padding: 6px 10px; border-radius: 6px; cursor: pointer; }
 #pov-menu button:hover, #pov-menu button[aria-current="true"] { background: color-mix(in srgb, var(--skill) 18%, transparent); }
 #pov-menu small { color: var(--muted); margin-left: 6px; }
-#pov-hint { position: fixed; left: 50%; bottom: calc(var(--tl-h, 0px) + 18px); transform: translateX(-50%); z-index: 16; pointer-events: none;
+#pov-hint { position: fixed; left: var(--stage-cx, 50%); bottom: calc(var(--tl-h, 0px) + 18px); transform: translateX(-50%); z-index: 16; pointer-events: none;
   padding: 4px 12px; border-radius: 999px; font-size: 12px; color: var(--muted); background: var(--chip-bg); border: 1px solid var(--border); transition: opacity .6s ease; }
 #pov-hint.off { opacity: 0; }
 body.pov-on #cam-chip { display: none !important; }

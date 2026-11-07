@@ -11,9 +11,14 @@
 //       → 출력. 컨텍스트가 없거나 아직 멈춰 있으면 같은 곡선을 요소 volume 으로
 //   - 다 꺼진 덱은 pause() 만 하고 src·노드는 그대로 두어 다음 전환에 다시 쓴다(요소·노드는 덱 두 개분만 만든다)
 //   - 매니페스트가 없으면 예전 한 곡(bgm.mp3·bgm.json)으로 동작
+//   - 플레이리스트·선곡 기준(순수 bgm-list.mjs): 플레이리스트 list('view' 지금 표현 풀 | 'all' 전체) × 기준 rule
+//       (activity 작업 상태 · shuffle · loop 순차 루프 · mood 무드 고정 · time 시간대별 무드) + 한 곡 반복 토글 repeat.
+//       행을 눌러 고른 곡·'이전' 곡은 그 곡이 끝날 때까지 붙잡고(pinned — 작업 상태 기준의 단계 전환도 쉼), 끝나면 기준대로.
+//       예전 선택값 sel('auto'|'cycle'|'shuffle'|곡 id)은 읽기 전용 호환 값(getter)으로 남는다
 
-import { TRACK_KEY, LAST_KEY, MIG_KEY, FALLBACK_TRACKS, parseManifest, normalizeSel, initialSel, isMode, firstTrack, nextTrack, loopFor, optionList, modeLabel, stageLabel, sectionName, trackUrl } from './bgm-core.mjs';
+import { LAST_KEY, MIG_KEY, FALLBACK_TRACKS, parseManifest, optionList, modeLabel, stageLabel, sectionName, trackUrl } from './bgm-core.mjs';
 import { AutoPicker, activityLevel, pickForLevel, autoLabel, LEVEL_LABEL, RECENT_MAX } from './bgm-auto.mjs';
+import { RULES, LISTS, MOODS, TIME_SLOTS, loadPrefs, savePrefs, nextFor, prevFor, fitsRule, timeSlot, activeMood, playlist, normTimeMoods, pickActivity, tabOf, effectiveTab } from './bgm-list.mjs';
 import { t as tr } from './i18n.mjs';
 import { Lane, planXfade, shouldLeadEnd, takeover, XFADE, TAKEOVER_OUT, READY_TIMEOUT, SILENT } from './bgm-xfade.mjs';
 
@@ -57,8 +62,18 @@ export class Music {
     this.tracks = FALLBACK_TRACKS;
     this.def = 'ambient';
     this.sectionsEn = null;   // 구간 이름 영어 표(매니페스트 sections_en)
-    this.sel = null;          // 선택값: 'auto' | 곡 id | 'cycle' | 'shuffle'
-    this.cur = null;          // 지금 걸린 곡 id(전환 중이면 들어오는 곡)
+    // 선곡 기준·플레이리스트(저장값은 _probe 에서 읽음)
+    this.rule = 'activity';   // activity | shuffle | loop | mood | time
+    this.list = 'view';       // view(지금 표현의 탭을 따라감) | flow | voxel | all(그 탭 고정)
+    this.mood = 'focus';      // 무드 고정의 무드
+    this.timeMoods = normTimeMoods(null); // 시간대 → 무드
+    this.repeat = false;      // 한 곡 반복
+    this.pinned = null;       // 사용자가 고른 곡(끝날 때까지 기준 전환 쉼)
+    this._back = [];          // '이전'으로 돌아갈 곡(오래된 것 → 최근)
+    this._goingBack = false;
+    this._slot = null;        // 마지막으로 본 시간대(바뀌면 다시 그림)
+    this.clock = null;        // 시험용: () => Date(시간대 기준)
+    this.cur = null;        // 지금 걸린 곡 id(전환 중이면 들어오는 곡)
     this._metaCache = new Map();
     this._switchId = 0;
     this._xf = null;          // 진행 중 전환 {sid, from, to, fromId, toId, kind, started, plan}
@@ -98,6 +113,35 @@ export class Music {
 
   /** 지금 곡 덱의 <audio>(sound.mjs 가 paused 를 본다) */
   get audio() { return this.decks[this.active].el; }
+
+  /** 예전 선택값(호환·읽기 전용): 한 곡 반복이면 곡 id, 아니면 auto(작업 상태)·cycle(순차 루프)·shuffle·mood·time. 확인 전엔 null */
+  get sel() {
+    if (!this._probed) return null;
+    if (this.repeat && this.cur) return this.cur;
+    return { activity: 'auto', loop: 'cycle' }[this.rule] || this.rule;
+  }
+
+  /** 시간대 기준 시각 */
+  _date() { return (this.clock && this.clock()) || new Date(); }
+
+  /** 기준 계산 묶음(bgm-list) */
+  _ctx(extra = {}) {
+    return { rule: this.rule, tracks: this.tracks, list: this.list, view: this.view, level: this.autoLevel, mood: this.mood,
+      timeMoods: this.timeMoods, date: this._date(), cur: this.cur, recent: this._recent, ...extra };
+  }
+
+  /** 지금 플레이리스트 행(sound-pop 이 그림). list = 저장값 또는 탭 id */
+  playlist(list = this.list) { return playlist(this.tracks, list, this.view); }
+  /** 지금 보이는 탭(flow | voxel | all) */
+  tab() { return effectiveTab(this.list, this.view); }
+
+  /** 무드 기준이 지금 고르는 무드(mood·time 기준이 아니면 null) */
+  activeMood() { return activeMood({ rule: this.rule, mood: this.mood, timeMoods: this.timeMoods, date: this._date() }); }
+
+  _savePrefs() {
+    savePrefs(lsSet, { rule: this.rule, list: this.list, mood: this.mood, repeat: this.repeat, timeMoods: this.timeMoods });
+    lsSet(MIG_KEY, '2');
+  }
 
   _mountSelect() {
     if (!document.getElementById('bgm-track-css')) {
@@ -171,13 +215,16 @@ export class Music {
     this.available = ok;
     this.vol.disabled = !ok;
     this.vol.title = ok ? tr('sound.vol.title') : tr('sound.vol.none');
-    const ini = initialSel(lsGet(TRACK_KEY), lsGet(MIG_KEY) === '2', this.tracks); // 이행: 없음·예전 기본 로파이 → 자동
-    this.sel = ini.sel;
-    if (ini.write) { lsSet(TRACK_KEY, this.sel); lsSet(MIG_KEY, '2'); }
+    // 선곡 기준·플레이리스트·무드 저장값(예전 ccviz.bgm.track 이행: auto→작업 상태, cycle→순차 루프, 곡 id→한 곡 반복)
+    const p = loadPrefs(lsGet, this.tracks);
+    Object.assign(this, { rule: p.rule, list: p.list, mood: p.mood, repeat: p.repeat, timeMoods: p.timeMoods });
+    if (p.track) lsSet(LAST_KEY, p.track);
+    if (p.migrated) this._savePrefs();
+    this._slot = timeSlot(this._date());
     this._probed = true;
     if (ok) {
       this.decks.forEach((d, i) => d.el.addEventListener('timeupdate', () => { if (i === this.active) this._onTime(); }));
-      if (this.sel === 'auto') this._autoTick(true);
+      if (this.rule === 'activity') this._autoTick(true);
       // 외부(Worker·터널) 경유는 4.8MB 를 받는 데 시간이 걸리므로, 켜 둔 사용자라면 미리 받아 둔다
       this._coldLoad(this._firstId(), this.wantOn ? 'auto' : 'metadata');
     }
@@ -185,9 +232,14 @@ export class Music {
     if (this.onAvailable) this.onAvailable(ok);
   }
 
+  /** 켤 때 첫 곡: 한 곡 반복이면 마지막 곡, 아니면 마지막 곡이 기준에 맞으면 그 곡(이어 듣기), 아니면 기준대로 */
   _firstId() {
-    if (this.sel === 'auto' && this.autoLevel != null) return pickForLevel(this.autoLevel, this.tracks, { recent: this._recent, view: this.view });
-    return firstTrack(this.sel, this.tracks, lsGet(LAST_KEY), this.def);
+    const last = lsGet(LAST_KEY);
+    const has = (id) => this.tracks.some((t) => t.id === id);
+    if (this.repeat && has(last)) return last;
+    if (this.rule === 'activity' && this.autoLevel != null) return pickActivity(this._ctx({ cur: null }));
+    if (has(last) && fitsRule(this._ctx({ cur: last }))) return last;
+    return nextFor(this._ctx({ cur: null })) || (has(this.def) ? this.def : this.tracks[0] && this.tracks[0].id);
   }
 
   /** 활동 지표 출처: fn → {events, tools, spawns, working, windowMs}(bgm-auto.mjs ActivityMeter.sample), isHeld → 시각화 일시정지. app.js 가 건다 */
@@ -206,8 +258,12 @@ export class Music {
     v = typeof v === 'string' ? v : null;
     if (v === this.view) return;
     this.view = v;
-    if (this.sel === 'auto' && this.autoLevel != null && this._probed && this.available && !this.loading && !this._autoWant) {
-      const want = pickForLevel(this.autoLevel, this.tracks, { recent: this._recent, cur: this.cur, keep: true, view: this.view });
+    // '이 표현' 플레이리스트에서 자동 성격 기준(작업 상태·무드·시간대)이면 새 풀 곡으로. 한 곡 반복·고른 곡·셔플·순차 루프는 그대로(끝나면 새 풀에서)
+    const auto = this.rule === 'activity' || this.rule === 'mood' || this.rule === 'time';
+    if (auto && this.list === 'view' && !this.repeat && !this.pinned && this._probed && this.available && !this.loading && !this._autoWant) {
+      let want = null;
+      if (this.rule === 'activity') { if (this.autoLevel != null) want = pickActivity(this._ctx({ keep: true })); }
+      else if (!fitsRule(this._ctx())) want = nextFor(this._ctx());
       if (want && want !== this.cur) { this._autoWant = want; this._switchTo(want, { kind: 'auto' }); return; }
     }
     this._renderSelect();
@@ -230,10 +286,16 @@ export class Music {
     this.metrics = m;
     const prev = this.autoLevel;
     this.autoLevel = this.picker.step(activityLevel(m), this._autoT);
-    if (this.sel !== 'auto' || !this._probed || !this.available) { if (prev !== this.autoLevel) this._renderSelect(); return; }
-    if (this.loading) { if (prev !== this.autoLevel) this._renderSelect(); return; } // 켜는 중(play 대기)에 src 를 바꾸면 play() 가 AbortError — 다음 틱에
+    // 시간대가 바뀌면 다시 그림(시간대별 무드의 곡 바꿈은 지금 곡이 끝난 뒤 — 곡 중간에 끊지 않음)
+    const slot = timeSlot(this._date());
+    const slotChanged = slot !== this._slot;
+    this._slot = slot;
+    const redraw = prev !== this.autoLevel || slotChanged;
+    // 작업 상태 기준만 곡 중간에 바꾼다. 한 곡 반복·사용자가 고른 곡(pinned)은 끝날 때까지 그대로
+    if (this.rule !== 'activity' || this.repeat || this.pinned || !this._probed || !this.available) { if (redraw) this._renderSelect(); return; }
+    if (this.loading) { if (redraw) this._renderSelect(); return; } // 켜는 중(play 대기)에 src 를 바꾸면 play() 가 AbortError — 다음 틱에
     // 지금 곡이 새 단계 후보에 있으면 그대로(여러 단계 겸용 곡), 없으면 그 단계 곡 중 직전 2곡을 피해 무작위
-    const want = this._autoWant ? null : pickForLevel(this.autoLevel, this.tracks, { recent: this._recent, cur: this.cur, keep: true, view: this.view });
+    const want = this._autoWant ? null : pickActivity(this._ctx({ keep: true }));
     if (want && want !== this.cur) { this._autoWant = want; this._switchTo(want, { kind: 'auto' }); }
     else if (prev !== this.autoLevel) this._renderSelect();
   }
@@ -254,6 +316,8 @@ export class Music {
       decks: this.decks.map((d) => ({ id: d.id || null, src: d.el.getAttribute('src'), paused: d.el.paused, pos: d.el.currentTime })),
       xf: xf ? { kind: xf.kind, fromId: xf.fromId, toId: xf.toId, started: xf.started, plan: xf.plan } : null,
       queued: this._queued ? { ...this._queued } : null,
+      rule: this.rule, list: this.list, mood: this.mood, repeat: this.repeat, pinned: this.pinned, back: [...this._back],
+      slot: timeSlot(this._date()), activeMood: this.activeMood(), timeMoods: { ...this.timeMoods },
       auto: { level: this.autoLevel, label: this.autoLevel == null ? null : LEVEL_LABEL[this.autoLevel], raw: this.picker.raw, metrics: this.metrics, picker: this.picker.state(this._autoT) },
       selText: this.selEl && this.selEl.selectedOptions[0] ? this.selEl.selectedOptions[0].textContent : null };
   }
@@ -276,7 +340,10 @@ export class Music {
   _setCur(id) {
     const t = this._trackOf(id) || this.tracks[0];
     if (!t) return null;
-    if (this.cur !== t.id) { this._recent.push(t.id); if (this._recent.length > RECENT_MAX) this._recent.shift(); }
+    if (this.cur !== t.id) {
+      this._recent.push(t.id); if (this._recent.length > RECENT_MAX) this._recent.shift();
+      if (this.cur && !this._goingBack) { this._back.push(this.cur); if (this._back.length > 30) this._back.shift(); } // '이전'
+    }
     this.cur = t.id;
     this._autoWant = null;
     this.meta = this._metaCache.get(t.id) || null;
@@ -301,7 +368,7 @@ export class Music {
     if (!t) return;
     d.id = t.id;
     d.leadDone = false;
-    d.el.loop = loopFor(this.sel);
+    d.el.loop = this.repeat;
     if (preload) d.el.preload = preload;
     const src = trackUrl(t); // ?v=<내용 해시> — 1년 immutable 캐시
     if (d.el.getAttribute('src') !== src) d.el.src = src;
@@ -315,29 +382,97 @@ export class Music {
     const d = this.decks[this.active];
     if (d.id !== t.id || d.el.getAttribute('src') !== trackUrl(t)) this._deckLoad(this.active, t.id, preload);
     else if (preload) d.el.preload = preload;
-    d.el.loop = loopFor(this.sel);
+    d.el.loop = this.repeat;
   }
 
-  /** 선택기에서 고름('auto' | 곡 id | 'cycle' | 'shuffle'). 켜져 있으면 곡을 바꿔 튼다. 곡을 고르면 자동은 풀린다 */
+  /**
+   * 예전 선택값으로 고름(호환 — 숨은 선택기 #bgm-track·ctl bgm): 'auto' = 작업 상태, 'cycle' = 순차 루프, 'shuffle'·'mood'·'time' = 그 기준
+   * (한 곡 반복은 끔), 곡 id = 그 곡 재생(playTrack)
+   */
   select(v) {
     if (!this.available) return;
-    const sel = normalizeSel(v, this.tracks, this.def);
-    this.sel = sel;
-    lsSet(TRACK_KEY, sel);
-    lsSet(MIG_KEY, '2');
-    for (const d of this.decks) d.el.loop = loopFor(sel);
-    const autoId = sel === 'auto' && this.autoLevel != null ? pickForLevel(this.autoLevel, this.tracks, { recent: this._recent, cur: this.cur, keep: true, view: this.view }) : null;
-    if (autoId && autoId !== this.cur) this._switchTo(autoId, { kind: 'manual' });
-    else if (!isMode(sel) && sel !== this.cur) this._switchTo(sel, { kind: 'manual' });
-    else this._renderSelect(); // 순환·무작위: 지금 곡은 그대로 두고 끝나면 다음 곡
+    const rule = { auto: 'activity', cycle: 'loop' }[v] || (RULES.includes(v) ? v : null);
+    if (rule) { this.repeat = false; for (const d of this.decks) d.el.loop = false; this.setRule(rule); return; }
+    if (this.tracks.some((t) => t.id === v)) this.playTrack(v);
+  }
+
+  // ───────── 선곡 기준·플레이리스트 ─────────
+
+  /** 기준을 바꾼 뒤: 고른 곡 붙잡기를 풀고, 지금 곡이 새 기준에 안 맞으면 맞는 곡으로(한 곡 반복이면 그대로) */
+  _applyRule() {
+    this.pinned = null;
+    this._savePrefs();
+    if (!this._probed || !this.available) { this._renderSelect(); this._changed(); return; }
+    if (!this.repeat && !fitsRule(this._ctx())) {
+      const id = this.rule === 'activity' && this.autoLevel != null ? pickActivity(this._ctx({ keep: true })) : nextFor(this._ctx());
+      if (id && id !== this.cur) { this._switchTo(id, { kind: 'manual' }); this._changed(); return; }
+    }
+    this._renderSelect();
     this._changed();
   }
 
-  /** 곡이 끝난 뒤 다음 곡 id(자동: 같은 단계의 다른 곡, 하나뿐이면 같은 곡 — 다른 덱에서 처음부터) */
+  /** 선곡 기준: activity | shuffle | loop | mood | time */
+  setRule(r) { if (!RULES.includes(r)) return; this.rule = r; this._applyRule(); }
+  /** 플레이리스트 탭: flow | voxel | all(고정) | view(따라가기). 지금 표현의 탭을 누르면 따라가기로 */
+  setList(l) {
+    if (!LISTS.includes(l)) return;
+    if (l !== 'all' && l === tabOf(this.view)) l = 'view';
+    if (l === this.list) { this._renderSelect(); return; }
+    this.list = l; this._applyRule();
+  }
+  /** 무드 고정의 무드(고르면 기준도 무드 고정으로) */
+  setMood(m) { if (!MOODS.includes(m)) return; this.mood = m; this.rule = 'mood'; this._applyRule(); }
+  /** 시간대 → 무드 한 칸(지금 시간대면 지금 곡도 맞춤) */
+  setTimeMood(slot, m) {
+    if (!MOODS.includes(m) || !TIME_SLOTS.some((s) => s.id === slot)) return;
+    this.timeMoods = { ...this.timeMoods, [slot]: m };
+    if (this.rule === 'time') this._applyRule(); else { this._savePrefs(); this._renderSelect(); }
+  }
+  /** 한 곡 반복 켬/끔 */
+  setRepeat(on) {
+    this.repeat = !!on;
+    for (const d of this.decks) { d.el.loop = this.repeat; d.leadDone = false; }
+    if (this.repeat) this.pinned = null;
+    this._savePrefs();
+    this._renderSelect();
+    this._changed();
+  }
+  /** 플레이리스트에서 곡 하나 재생: 그 곡이 끝날 때까지 붙잡고(한 곡 반복이면 계속), 끝나면 기준대로 */
+  playTrack(id) {
+    if (!this.available || !this.tracks.some((t) => t.id === id)) return;
+    this.pinned = this.repeat ? null : id;
+    if (id !== this.cur) this._switchTo(id, { kind: 'manual' });
+    this._renderSelect();
+    this._changed();
+  }
+  /** 다음 곡(기준대로 — 순차 루프는 목록 다음, 그 밖은 후보 중 다른 곡) */
+  next() {
+    if (!this.available) return;
+    this.pinned = null;
+    const id = nextFor(this._ctx());
+    if (id) this._switchTo(id, { kind: 'manual', force: true });
+    this._renderSelect();
+    this._changed();
+  }
+  /** 이전 곡(들은 기록에서, 없으면 플레이리스트 앞 곡) — 그 곡이 끝날 때까지 붙잡음 */
+  prev() {
+    if (!this.available) return;
+    const { id, fromBack } = prevFor({ back: this._back, tracks: this.tracks, list: this.list, view: this.view, cur: this.cur });
+    if (!id) return;
+    if (fromBack >= 0) this._back.splice(fromBack);
+    this.pinned = this.repeat ? null : id;
+    this._goingBack = true;
+    try { this._switchTo(id, { kind: 'manual', force: true }); } finally { this._goingBack = false; }
+    this._renderSelect();
+    this._changed();
+  }
+
+  /** 곡이 끝난 뒤 다음 곡 id(한 곡 반복이면 없음 — <audio loop>). 고른 곡 붙잡기는 여기서 풀린다 */
   _nextAfterEnd() {
-    if (!isMode(this.sel)) return null;
-    if (this.sel === 'auto') return pickForLevel(this.autoLevel != null ? this.autoLevel : 1, this.tracks, { recent: this._recent, cur: this.cur, view: this.view });
-    return nextTrack(this.sel, this.tracks, this.cur);
+    if (this.repeat) return null;
+    this.pinned = null;
+    if (this.rule === 'activity') return pickActivity(this._ctx());
+    return nextFor(this._ctx());
   }
 
   /** 재생 위치: 구간 표시 + 끝 3초 전 다음 곡 미리 시작 */
@@ -345,7 +480,7 @@ export class Music {
     this._section();
     const d = this.decks[this.active];
     if (d.leadDone || this._xf || this._queued || !this.on || this.paused || d.el.paused) return;
-    if (!shouldLeadEnd({ loop: d.el.loop, mode: isMode(this.sel), pos: d.el.currentTime, duration: d.el.duration })) return;
+    if (!shouldLeadEnd({ loop: d.el.loop, mode: !this.repeat, pos: d.el.currentTime, duration: d.el.duration })) return;
     d.leadDone = true;
     const id = this._nextAfterEnd();
     if (id) this._switchTo(id, { kind: 'ended', force: true });
@@ -353,7 +488,7 @@ export class Music {
 
   _onEnded() {
     // 보통은 끝 3초 전에 이미 넘어갔다(_onTime). 놓쳤을 때(백그라운드 등)만 여기서
-    if (this._xf || !isMode(this.sel)) return;
+    if (this._xf || this.repeat) return;
     const id = this._nextAfterEnd();
     if (id) this._switchTo(id, { kind: 'ended', force: true });
   }

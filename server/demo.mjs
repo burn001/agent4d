@@ -43,6 +43,9 @@ const TEXTS = [
   '파일 구조를 먼저 확인하겠습니다.', '테스트가 통과했습니다.', '설정 값을 바꿔 다시 실행해 보겠습니다.',
   '결과를 정리하면 다음과 같습니다.', '오류 원인은 경로 구분자 차이입니다.',
 ];
+// 가끔 표·목록·코드가 있는 응답(원문 md 를 함께 싣는다)
+const DEMO_MD = '결과를 정리하면 다음과 같습니다.\n\n| 단계 | 상태 | 시간 |\n|---|:-:|--:|\n| 빌드 | **통과** | 12s |\n| 시험 | 1건 실패 | 48s |\n\n'
+  + '1. `server/` 경로 구분자 수정\n2. 시험 다시 실행\n   - 실패한 `parse.test.mjs` 만 먼저\n\n```sh\nnpm test -- parse\n```';
 
 class DemoRuntime {
   /**
@@ -159,7 +162,7 @@ class DemoRuntime {
         break;
       }
     } else if (kind === 2) {
-      { const tx = pick(TEXTS); g.emit({ ts, type: 'text', nodeId, role: 'assistant', text: tx, brief: tx }); }
+      { const tx = pick(TEXTS), md = Math.random() < 0.3 ? DEMO_MD : null; g.emit({ ts, type: 'text', nodeId, role: 'assistant', text: md ? md.replace(/\s+/g, ' ') : tx, brief: tx, ...(md ? { md } : {}) }); }
     } else if (kind === 5) {
       g.emit({ ts, type: 'thinking', nodeId, chars: 200 + Math.floor(Math.random() * 1800) });
       { const line = `[dev] ${ts.slice(11, 19)} 요청 처리 200 OK`; const tl = (this._demoTail ||= []); tl.push(line); if (tl.length > 12) tl.shift();

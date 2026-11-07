@@ -34,6 +34,7 @@ import { camScale, toScreen } from './flat-core.mjs';
 import { LabCouriers, courierFor, labPendStep, courierLod, LAB_IX } from '../lab/lab-ix-core.mjs';
 import { rigState, RIG_KIND_HEX } from '../lab/lab-rig-core.mjs';
 import { labWalksToStation } from '../lab/lab-walk-core.mjs';
+import { labFwd } from '../voxel/vx-effort-core.mjs'; // 책상 소품(직원이 보는 앞 = 플랫폼 쪽)
 
 const FONT = '"Pretendard", "Segoe UI", "Malgun Gothic", system-ui, sans-serif';
 const _q = new Array(8);
@@ -627,11 +628,14 @@ export class Lab2DView extends Voxel2DView {
       const con = bridgeRects(br).find((q) => q.kind === 'console');
       if (con) { ctx.fillStyle = col(lead); this._quad(ctx, con.x, con.z, con.w - 0.3, B.CONSOLE_D * 0.3, con.theta); ctx.fill(); }
     }
+    if (lead && lead.state !== 'gone' && r.leadDesk && br) { const f = labFwd((br.theta * Math.PI) / 180); this._deskProps2D(ctx, r.ownerId, s, now, r.leadDesk.x, r.leadDesk.z, f.x, f.z, B.CONSOLE_W / 2, null, br.theta || 1e-6, r._alpha ?? 1); } // 자리 분위기
     for (const d of r.desks) {
       const ch = d.occupant && this.chars.get(d.occupant);
-      if (!ch || ch.state === 'gone' || ch.state === 'leave' || !(ch._monK > 0.05)) continue;
-      const th = d.theta ?? 0, a = (th * Math.PI) / 180;
-      ctx.fillStyle = col(ch); this._quad(ctx, d.x - Math.sin(a) * 0.23, d.z - Math.cos(a) * 0.23, D.W * 0.55, 0.09, th); ctx.fill();
+      if (!ch || ch.state === 'gone' || ch.state === 'leave') continue;
+      const on = ch._monK > 0.05;
+      const th = d.theta ?? 0, a = (th * Math.PI) / 180, ex = d.x - Math.sin(a) * 0.23, ez = d.z - Math.cos(a) * 0.23;
+      if (on) { ctx.fillStyle = col(ch); this._quad(ctx, ex, ez, D.W * 0.55, 0.09, th); ctx.fill(); }
+      const f = labFwd(a); this._deskProps2D(ctx, d.occupant, s, now, d.x, d.z, f.x, f.z, D.W / 2, null, th || 1e-6, r._alpha ?? 1); // 자리 분위기(오피스 2D 와 같은 규칙)
     }
     // 쓰는 중인 시설 테두리(맥동)·포털 열림·벨 흔들림
     const act = r._act;

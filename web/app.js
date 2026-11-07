@@ -20,11 +20,14 @@ import { mountArchiveCard } from './replay/archive-card.js'; // 보관함 설명
 import { demoTargetSpeed, nextInPlaylist, DEMO } from './replay/demo-core.mjs'; // 연속 재생
 import { mountEnv } from './env/env.js';
 import { mountLimits } from './limits.js';
+import { mountMem } from './sysmem.js'; // 시스템 메모리 게이지
 import { EvQueue, batchItems } from './ev-queue.mjs'; // SSE 이벤트 처리 예산·따라잡기 · 서버 묶음
 import { mountTimeline } from './timeline.mjs';
 import { CAT_ORDER, catColor, EXIT_ERR } from './flow-core.mjs';
 import { mountCtx } from './ctx-ui.js';
 import { mountSettings } from './settings-menu.js'; // 상단 바 정리 · ⚙ 설정 메뉴
+import { panelSide, setPanelSide } from './panel-side.mjs'; // ctl panel left|right
+import { DOCK_QUERY } from './panel-size.mjs';
 import { mountSoundPop } from './sound-pop.js'; // 소리 켜짐일 때 소리 버튼 옆 ♪ 소리 설정 팝업
 import { MockCtx } from './ctx-mock.mjs';
 import { ConflictBook } from './conflict-core.mjs';
@@ -43,7 +46,7 @@ import { mountPlans } from './plan-ui.js'; // 계획 보드(⚙ 켬/끔)
 import { t as tr, applyDom, fmtNum } from './i18n.mjs'; // 다국어
 import { setLangPref, lang as curLang } from './i18n.mjs'; // 원격 조작 lang 명령
 import { mountControl } from './control.js'; // 화면 원격 조작(받는 쪽)
-import { MODES as BGM_MODES } from './bgm-core.mjs'; // bgm 명령
+import { bgmCommand } from './bgm-list.mjs'; // bgm 명령(선곡 기준·플레이리스트·곡)
 import { localizeEvent, localizeSnapshot, localizeProjects } from './i18n-server.mjs'; // 서버가 조합한 문구 → 지금 언어(ko 면 그대로)
 import { quipsOn, setQuipsOn } from './voxel/quip-pref.mjs'; // 복셀 생각·말풍선(ctl quips)
 import { labWalkOn, setLabWalkOn } from './lab/lab-pref.mjs'; // 복셀 연구소 현장 걷기(ctl labwalk)
@@ -51,6 +54,8 @@ import { plinksPref, setPlinksPref } from './plinks-core.mjs'; // Planet 관계�
 import { mountPlanetLinks } from './plinks-ui.js'; // ⚙ 관계선 줄·범례
 import { mountPov } from './pov-ui.js'; // 메인 1인칭 시점(복셀 3D)
 import { PovCam } from './pov.js';
+import { askHead } from './wait-core.mjs'; // 입력 대기 배지: 열린 질문·계획 카드 머리표를 openTools 에
+import { effortSnap } from './effort-core.mjs'; // 스냅샷(스크럽) 경계 = effort 보간 없이 즉시
 
 // index.html 정적 문구(data-i18n*)·문서 제목을 지금 언어로 — 가능한 한 일찍
 applyDom();
@@ -619,6 +624,7 @@ function onSnapshot(snap, o = {}) {
   syncSessColors();
   conflicts.reset([]);
   store.nodes.clear();
+  effortSnap();
   view.reset();
   panel.reset();
   director.resetActivity();
@@ -691,6 +697,7 @@ function onEvent(ev, opts = {}) {
         if (focusId === id) { focusId = null; view.setFocus(null); }
         if (panel.filter === id) panel.setFilter(null);
       }
+      if (art) art.nodeRemoved(ev.ids || [ev.nodeId]); // 그 노드 자리에서만 그리던 연출(웹 신호파)·끝 짝 정리
       statsDirty = true;
       return;
     }
@@ -705,7 +712,7 @@ function onEvent(ev, opts = {}) {
     case 'tool-start':
       if (n) {
         n.openTools = n.openTools || [];
-        if (!n.openTools.some((t) => t.toolUseId === ev.toolUseId)) n.openTools.push({ toolUseId: ev.toolUseId, tool: ev.tool, cat: ev.cat, skill: ev.skill, startedAt: ev.ts, text: ev.text, ...(ev.brief ? { brief: ev.brief } : {}), ...(ev.panel ? { panel: ev.panel } : {}) });
+        if (!n.openTools.some((t) => t.toolUseId === ev.toolUseId)) n.openTools.push({ toolUseId: ev.toolUseId, tool: ev.tool, cat: ev.cat, skill: ev.skill, startedAt: ev.ts, text: ev.text, ...(ev.brief ? { brief: ev.brief } : {}), ...(ev.panel ? { panel: ev.panel } : {}), ...(ev.card ? { ask: askHead(ev.card) } : {}) });
         view.toolStart(n.id, ev, quiet);
         if (sayOk && (ev.text || ev.tool)) view.say(n.id, ev.text || ev.tool, { type: 'tool', cat: ev.cat });
       }
@@ -727,7 +734,7 @@ function onEvent(ev, opts = {}) {
     case 'thinking': break;
     case 'user':
       if (!fx) break;
-      if (ev.origin === 'human') {
+      if (ev.origin === 'human' || ev.origin === 'peer') { // peer = 다른 Claude 세션이 보낸 교차 세션 메시지
         // 'Follow my prompts': 받는 메인으로 카메라가 옮겨 감(옮길 수 있을 때만). 메시지 연출은 사용자 콘솔의 금빛 빔 하나
         // 화면 테두리 빛줄기는 0.3.0 에서 없앰. 서버 user 범주(ix)가 없는 연결이면 메인에 작은 파동만
         if (followPrompt && !opts.resume && director.promptFocus) director.promptFocus(ev.nodeId, { speed });
@@ -768,6 +775,7 @@ function onEvent(ev, opts = {}) {
 
 // ---------------- 프로젝트 목록·한도 게이지 ----------------
 const lg = mountLimits({ el: $('limits') });
+const mg = mountMem(); // 상단 바 RAM 게이지(한도 게이지 뒤). SSE mem, 재생 중 숨김
 function demoLimitsFor() {
   // mock·demo 화면: 서버 --demo 와 같은 모양의 고정 값(주의·경고·오래됨)
   const H = 3600e3, now = Date.now(), cap = new Date(now - 12 * 60000).toISOString();
@@ -984,6 +992,7 @@ function onSnapshotAll(snap, o = {}) {
   if (pauseBuf.paused && !o.resume) { pauseBuf.sawSnapshot(); pendingSnap = snap; return; }
   streamAll = true;
   store.nodes.clear();
+  effortSnap();
   view.reset();
   panel.reset();
   director.resetActivity();
@@ -1081,19 +1090,21 @@ function connect() {
   src.addEventListener('batch', (e) => { if (src !== es) return; try { for (const it of batchItems(JSON.parse(e.data))) { it.batch = true; evq.push(it); } } catch (err) { console.warn('batch parse', err); } }); // 서버가 몰림 창을 정리해 보낸 묶음(뒤쪽만 연출)
   src.addEventListener('projects', (e) => { if (src !== es) return; try { const d = JSON.parse(e.data); evq.push({ fn: () => onProjects(d) }); } catch (err) { console.warn('projects parse', err); } }); // 이벤트와 순서 유지
   src.addEventListener('limits', (e) => { if (src !== es) return; try { lg.set(JSON.parse(e.data)); } catch (err) { console.warn('limits parse', err); } });
+  src.addEventListener('mem', (e) => { if (src !== es) return; try { mg.set(JSON.parse(e.data)); mg.setStale(false); } catch (err) { console.warn('mem parse', err); } });
   src.addEventListener('root', (e) => {
     if (src !== es || replaying) return; // 재생 중엔 자동 전환 무시
     try { const d = JSON.parse(e.data); toastRoot(d.sessionId); } catch (err) { /* 무시 */ }
   });
-  src.onopen = () => { if (src !== es) return; setConn('ok', all ? tr('app.conn.okAll') : tr('app.conn.ok')); notice(''); };
+  src.onopen = () => { if (src !== es) return; setConn('ok', all ? tr('app.conn.okAll') : tr('app.conn.ok')); notice(''); mg.setStale(false); };
   src.onerror = async () => {
     if (src !== es) return;
     if (src.readyState === EventSource.CLOSED) {
       setLoading('');
       setConn('bad', tr('app.conn.lost'));
+      mg.setStale(true);
       if (await authFailed()) return;
       if (src === es && !replaying) retryTimer = setTimeout(connect, 4000);
-    } else setConn('wait', tr('app.conn.retry'));
+    } else { setConn('wait', tr('app.conn.retry')); mg.setStale(true); }
   };
 }
 
@@ -1196,6 +1207,7 @@ async function startReplay(sid, { at = null, speed = null, autoplay = true } = {
   replayProject = replayProjectHint || projectOfSession(sid) || (sel.scope === 'all' ? null : focusProjectOf(sel));
   replayProjectHint = null;
   lg.setReplaying(true);
+  mg.setReplaying(true);
   $('btn-replay').setAttribute('aria-pressed', 'true');
   if (isArc(sid)) arcCard.show(archiveSession(sid) || { sessionId: sid }); else arcCard.hide();
   const e = (eng = new ReplayEngine({
@@ -1243,6 +1255,7 @@ function stopReplay({ reconnect = true } = {}) {
   if (macro) macro.setPlayhead(null);
   panel.markLate = true;
   lg.setReplaying(false);
+  mg.setReplaying(false);
   $('btn-replay').setAttribute('aria-pressed', 'false');
   setClock(Date.now);
   setTimeScale(1);
@@ -1595,16 +1608,18 @@ const ctlHooks = {
     const el = $('sfx-vol'); sfx.setVolume(value / 100); if (el) el.value = String(sfx.volume); return {};
   },
   bgm: ({ value }) => {
-    const v = value.toLowerCase();
-    let pick = BGM_MODES.includes(v) ? v : null;
-    if (!pick) {
-      const ts = music.tracks || [];
-      const t = ts.find((x) => x.id.toLowerCase() === v) || ts.find((x) => x.id.toLowerCase().includes(v) || String(x.label || '').toLowerCase().includes(v));
-      if (!t) return { ok: false, error: 'not_found', detail: ts.map((x) => x.id).join(', ') };
-      pick = t.id;
-    }
-    music.select(pick);
-    return { detail: pick };
+    const c = bgmCommand(value, music.tracks || []);
+    if (c.act === 'not_found') return { ok: false, error: 'not_found', detail: (music.tracks || []).map((x) => x.id).join(', ') };
+    if (c.act === 'bad') return { ok: false, error: 'bad_value', detail: c.detail };
+    if (c.act === 'rule') { if (music.repeat) music.setRepeat(false); music.setRule(c.rule); }
+    else if (c.act === 'mood') { if (music.repeat) music.setRepeat(false); music.setMood(c.mood); }
+    else if (c.act === 'time') music.setTimeMood(c.slot, c.mood);
+    else if (c.act === 'list') music.setList(c.list);
+    else if (c.act === 'repeat') music.setRepeat(c.on === 'toggle' ? !music.repeat : c.on);
+    else if (c.act === 'next') music.next();
+    else if (c.act === 'prev') music.prev();
+    else if (c.act === 'track') music.playTrack(c.id);
+    return { detail: [music.rule + (music.rule === 'mood' ? ':' + music.mood : ''), music.list, music.repeat ? 'repeat' : '', music.cur].filter(Boolean).join(' · ') };
   },
   lang: ({ value }, { temp }) => {
     if (temp) { const u = new URL(location.href); u.searchParams.set('lang', value); return { after: () => location.replace(u.href) }; }
@@ -1651,7 +1666,10 @@ const ctlHooks = {
   quips: ({ value }) => { setQuipsOn(value === 'on'); return familyOf(viewMode) === 'voxel' ? {} : { detail: 'saved (voxel only)' }; }, // 복셀 오피스·연구소
   labwalk: ({ value }) => { setLabWalkOn(value === 'on'); return viewMode === 'lab' ? {} : { detail: 'saved (lab only)' }; }, // 복셀 연구소 현장 걷기
   plinks: ({ value }) => { setPlinksPref(value); return viewMode === 'planet' ? {} : { detail: 'saved (planet only)' }; },
-  panel: ({ value }) => { panel.setCollapsed(value === 'close'); return {}; },
+  panel: ({ value }) => { // left|right = 패널 위치(⚙ 메뉴와 같은 저장, --temp 는 snapshot/restore 가 되돌림), open|close = 펼침
+    if (value === 'left' || value === 'right') { setPanelSide(value); return { detail: value + (matchMedia(DOCK_QUERY).matches ? ' (saved; portrait phone keeps the bottom dock)' : '') }; }
+    panel.setCollapsed(value === 'close'); return {};
+  },
   timeline: ({ value }) => { document.body.classList.toggle('tl-show', value === 'show'); return {}; },
   done: ({ value }) => { setShowDone(value === 'on'); return {}; },
   close: () => {
@@ -1670,7 +1688,7 @@ ctl = mountControl({
     view: viewMode, dim, theme: themePref, themeResolved: resolveTheme(), scope: serializeSelection(sel),
     scopeLabel: CAN_ALL ? selectionLabel(sel, store.projects, archive) : null,
     sound: sound.on ? 'on' : 'off', soundStatus: sound.status(), music: sound.musicOn ? 'on' : 'off', sfx: sound.sfxOn ? 'on' : 'off', paused: pauseBuf.paused, replaying,
-    replaySession: replaying && eng ? eng.sessionId : null, lang: curLang(), panel: panel.collapsed ? 'closed' : 'open',
+    replaySession: replaying && eng ? eng.sessionId : null, lang: curLang(), panel: panel.collapsed ? 'closed' : 'open', panelSide: panelSide(),
     artifacts: !!(art && art.on), plans: !!(plans && plans.on), grid: env.gridOn, quips: quipsOn() ? 'on' : 'off', labwalk: labWalkOn() ? 'on' : 'off', plinks: plinksPref(), weather: weather ? weather.mode : null,
     camera: povUi && povUi.active ? 'pov' : autoCam ? 'auto' : 'manual', camMode: director.camMode, mode: MODE, size: `${innerWidth}×${innerHeight}`,
   }),
@@ -1685,7 +1703,7 @@ if (MODE === 'live') {
   if (sel.scope === 'session' && sel.sessionId !== 'auto') {
     await Promise.race([loadProjects(), new Promise((r) => setTimeout(r, 3000))]);
   }
-} else lg.set(demoLimitsFor());
+} else { lg.set(demoLimitsFor()); mg.set({ used: Math.round(26.2 * 2 ** 30), total: 32 * 2 ** 30, pct: 81.9 }); } // mock·demo: 고정 값(주의 색)
 const replayParam = params.get('replay');
 if (replayParam) {
   const at = params.has('at') ? Number(params.get('at')) : null;

@@ -8,16 +8,15 @@
 
 /* ---------- 재생 막대 ---------- */
 .rp-bar {
-  position: fixed; left: 0; right: var(--panel-w, 360px); bottom: 0; z-index: 17;
+  position: fixed; left: var(--inset-l, 0px); right: var(--inset-r, 360px); bottom: 0; z-index: 17;
   height: var(--rp-h); padding: 0 12px;
   display: grid; grid-template-columns: auto minmax(120px, 1fr) auto auto; align-items: center; gap: 12px;
   background: var(--panel-bg); border-top: 1px solid var(--rp-line); color: var(--text);
   backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-  transition: right .25s ease;
+  transition: left .25s ease, right .25s ease;
   font-variant-numeric: tabular-nums;
 }
 .rp-bar[hidden] { display: none; }
-body.panel-collapsed .rp-bar { right: 40px; }
 .rp-bar .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
 .rp-ctl, .rp-end-ctl, .rp-info { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -90,11 +89,10 @@ body.replaying #stats-chip { bottom: calc(var(--rp-h, 56px) + 12px); }
 @media (max-width: 719px) {
   .rp-bar {
     --rp-h: 92px;
-    left: 0; right: 0; bottom: 45vh; padding: 6px 10px; gap: 6px 8px; border-radius: 0;
+    left: var(--inset-l, 0px); right: var(--inset-r, 0px); bottom: var(--panel-h, 0px); padding: 6px 10px; gap: 6px 8px; border-radius: 0;
     grid-template-columns: auto 1fr auto; grid-template-areas: "ctl info end" "tl tl tl";
     transition: bottom .25s ease;
   }
-  body.panel-collapsed .rp-bar { right: 0; bottom: 40px; }
   .rp-ctl { grid-area: ctl; gap: 6px; }
   .rp-info { grid-area: info; justify-content: center; flex-direction: column; gap: 0; }
   .rp-end-ctl { grid-area: end; gap: 6px; }
@@ -105,8 +103,7 @@ body.replaying #stats-chip { bottom: calc(var(--rp-h, 56px) + 12px); }
   .rp-btn { height: 30px; padding: 0 8px; }
   .rp-play { width: 34px; height: 34px; }
   .rp-prog { max-width: 150px; }
-  body.replaying #stats-chip { bottom: calc(45vh + var(--rp-h, 92px) + 8px); }
-  body.replaying.panel-collapsed #stats-chip { bottom: calc(40px + var(--rp-h, 92px) + 8px); }
+  body.replaying #stats-chip { bottom: calc(var(--panel-h, 0px) + var(--rp-h, 92px) + 8px); }
 }
 
 /* ---------- 세션 고르기 ---------- */

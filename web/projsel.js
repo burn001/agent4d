@@ -7,7 +7,7 @@
 import { mountProjectList, selectionLabel, dotOf, groupProjects } from './projects.js';
 import { t } from './i18n.mjs';
 
-export function mountProjectSelector({ host, onSelect = () => {}, getNodeCount = null, visibility = null } = {}) {
+export function mountProjectSelector({ host, onSelect = () => {}, getNodeCount = null, visibility = null, getNodes = null } = {}) {
   host.classList.add('psel');
   host.innerHTML = `
     <button type="button" class="tb psel-btn" id="proj-btn" aria-haspopup="listbox" aria-expanded="false" title="${t('app.psel.title')}">
@@ -24,6 +24,7 @@ export function mountProjectSelector({ host, onSelect = () => {}, getNodeCount =
 
   const pl = mountProjectList({
     el: host.querySelector('.psel-list'), sessions: false, getNodeCount, visibility, // 체크박스
+    getNodes, // 세션 줄 툴팁 effort 집계(없으면 앱 핸들에서)
     onSelect: (s) => { close(); if (!s.again) onSelect(s); },
   });
   function renderBtn() {

@@ -8,14 +8,16 @@
 //  · 서브(SubCages): 같은 계열 단순형(스틸 케이지 테 + 브리지 팔 3 + 금 톱니 테 + 루비·블루)을 장면 전체 InstancedMesh 하나로.
 //  · 지오메트리는 한 번만 만들어 모든 노드가 같이 쓴다(BufferGeometryUtils 없이 직접 합침 — importmap SRI 목록을 늘리지 않음).
 import * as THREE from 'three';
-import { TOURB_GEO as TG, GEAR_M, PINION_R, ESC_ARBOR, pinionAngle } from './tourbillon-core.mjs';
+import { TOURB_GEO as TG, GEAR_M, PINION_R, ESC_ARBOR, pinionAngle, TOURB_EFF as TE } from './tourbillon-core.mjs';
+import { effortInk } from './effort-core.mjs'; // 무채색 잉크(보석 고리·max 반짝임)
 import { PHEAT, warmOf } from './planet-heat-core.mjs'; // 과열 곡선(30% 기준)
 
 const TAU = Math.PI * 2;
 let G = null;
 
-/** 지오메트리 여럿(각자 행렬·정점색)을 비색인 하나로 합침. parts = [{g, m?: Matrix4, c?: [r,g,b]}] */
-function merge(parts, withColor = false) {
+/** 지오메트리 여럿(각자 행렬·정점색)을 비색인 하나로 합침. parts = [{g, m?: Matrix4, c?: [r,g,b], tag?: {이름: 값}}]
+ *  tags = 정점 꼬리표 속성 이름들(— 부품마다 한 값, 없으면 −1) */
+function merge(parts, withColor = false, tags = null) {
   let n = 0;
   const flat = parts.map((p) => { const g = p.g.index ? p.g.toNonIndexed() : p.g; n += g.attributes.position.count; return { ...p, g }; });
   const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), col = withColor ? new Float32Array(n * 3) : null;
@@ -35,6 +37,12 @@ function merge(parts, withColor = false) {
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
   if (col) g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  for (const name of tags || []) {
+    const arr = new Float32Array(n);
+    let k = 0;
+    for (const p of flat) { const val = p.tag && p.tag[name] != null ? p.tag[name] : -1; arr.fill(val, k, k + p.g.attributes.position.count); k += p.g.attributes.position.count; }
+    g.setAttribute(name, new THREE.BufferAttribute(arr, 1));
+  }
   return g;
 }
 const M = () => new THREE.Matrix4();
@@ -214,15 +222,30 @@ function geo() {
   // 4번 휠 받침 블루 나사 3(허브)
   for (let i = 0; i < 3; i++) os.push(up(dirA(0.3 + (i * TAU) / 3 + Math.PI / TG.FOURTH_SPOKES, 0.58, TG.FOURTH_Y + 0.03)));
 
-  // 서브 단일 케이지(정점색: 스틸·금·루비·블루) — 테 + 팔 3 + 금 톱니 테 + 정수리 루비 + 블루 3
+  // 서브 단일 케이지(정점색: 스틸·금·루비·블루) — 테 + 팔 + 금 톱니 테 + 정수리 루비 + 팔 발 블루 나사
+  // 팔(자오선 호)·발 나사는 방위 0 에 ARC_MAX 벌을 꼬리표(aArc 0～5)로 만들어 두고, 셰이더가 호 수 c 에 맞춰 360°/c 로 돌리고
+  // 남는 호는 접는다(미상·medium = 3 이라 지금 모습). 안쪽 케이지 고리(aArc 7)는 맨 위 단계(xhigh·max) 확정 때만(반대로 째깍).
   const S = [0.9, 0.92, 0.96], GD = [1.0, 0.78, 0.38], RB = [0.8, 0.08, 0.18], BL = [0.25, 0.4, 1.0];
   const subParts = [{ g: sweep(chamfer(0.12, 0.06, 0.016), ringFrame(TG.SUB_R, -0.22), 56, true), c: S }];
-  for (let i = 0; i < TG.SUB_ARMS; i++) { const a = (i * TAU) / TG.SUB_ARMS; subParts.push({ g: sweep(chamfer(0.08, 0.045, 0.013), archFrame(a, [TG.SUB_R, -0.2], [TG.SUB_R + 0.1, 0.55], [0.8, 1.18], [0.08, 1.16]), 16), c: S }); }
+  const armG = sweep(chamfer(0.08, 0.045, 0.013), archFrame(0, [TG.SUB_R, -0.2], [TG.SUB_R + 0.1, 0.55], [0.8, 1.18], [0.08, 1.16]), 16);
+  for (let i = 0; i < TE.ARC_MAX; i++) subParts.push({ g: armG, c: S, tag: { aArc: i } });
   const sg = new THREE.Shape(); gearOutline(sg, 40, TG.SUB_R + 0.06, TG.SUB_R + 0.15); circleHole(sg, TG.SUB_R - 0.04);
   subParts.push({ g: extrudeFlat(sg, 0.04, 0.007), m: at(0, -0.34, 0), c: GD });
   subParts.push({ g: sweep(chamfer(0.06, 0.05, 0.012), ringFrame(0.1, 1.16), 18, true), c: S });
   subParts.push({ g: jewelG, m: at(0, 1.2, 0), c: RB });
-  for (let i = 0; i < TG.SUB_ARMS; i++) subParts.push({ g: screwG, m: up(dirA((i * TAU) / TG.SUB_ARMS, TG.SUB_R, -0.18)), c: BL });
+  for (let i = 0; i < TE.ARC_MAX; i++) subParts.push({ g: screwG, m: up(dirA(0, TG.SUB_R, -0.18)), c: BL, tag: { aArc: i } });
+  // 안쪽 케이지(기울이지 않은 원점 고리 + 피벗 보스 둘·루비 — 셰이더가 rotY(cage2) → rotX(INNER_TILT))
+  subParts.push({ g: sweep(chamfer(0.045, 0.035, 0.01), ringFrame(TE.INNER_R, 0), 48, true), c: S, tag: { aArc: TE.INNER_TAG } });
+  for (const sx of [1, -1]) subParts.push({ g: jewelG, m: at(0, 0, sx * (TE.INNER_R + 0.03)).multiply(M().makeRotationX(sx * Math.PI / 2)), c: RB, tag: { aArc: TE.INNER_TAG } });
+  // 보석 고리(claude -p·워크플로 에이전트): 고리 반지름 1, 가는 고리(aPart 0) + 방위 0 의 보석 자리 GEM_N 벌(받침 aPart 2 · 보석 aPart 1, aSlot j)
+  const gr = TE.GEM_D / 2;
+  const gemParts = [{ g: sweep(chamfer(TE.RING_W, TE.RING_W * 0.6, TE.RING_W * 0.18), ringFrame(1, 0), 72, true), tag: { aPart: 0 } }];
+  const cab = merge([{ g: new THREE.CylinderGeometry(gr, gr, gr * 0.4, 14) }, { g: new THREE.SphereGeometry(gr * 0.82, 12, 6, 0, TAU, 0, Math.PI / 2), m: at(0, gr * 0.15, 0) }]);
+  const bezel = sweep(chamfer(gr * 0.32, gr * 0.42, gr * 0.08), ringFrame(gr * 1.12, 0), 18, true);
+  for (let j = 0; j < TE.GEM_N; j++) {
+    gemParts.push({ g: bezel, m: at(1, TE.RING_W * 0.3, 0), tag: { aPart: 2, aSlot: j } });
+    gemParts.push({ g: cab, m: at(1, TE.RING_W * 0.3 + gr * 0.12, 0), tag: { aPart: 1, aSlot: j } });
+  }
 
   G = {
     frame: merge(frame), aE, aP, rP, yE,
@@ -231,7 +254,8 @@ function geo() {
     screws: merge(os.map((m) => ({ g: screwG, m }))),
     inner, innerJewels: merge([1, -1].map((s) => ({ g: jewelG, m: at(0, 0, s * (TG.INNER_R + 0.04)).multiply(M().makeRotationX(s * Math.PI / 2)) }))),
     balRim, balScrews, hair,
-    sub: merge(subParts, true),
+    sub: merge(subParts, true, ['aArc']),
+    gems: merge(gemParts, false, ['aPart', 'aSlot']),
   };
   return G;
 }
@@ -397,20 +421,58 @@ export class TourbMain {
   dispose() { this.group.removeFromParent(); for (const m of this.mats) m.dispose(); }
 }
 
-/** 서브 단일 케이지 — 장면 전체 InstancedMesh 하나. begin() → put(...) × n → end() */
+/** 서브 단일 케이지 — 장면 전체 InstancedMesh 하나. begin → put(...) × n → end
+ * 인스턴스 속성 aEff = (호 수 c(보간 소수) · 요청 투명 시작 번호 lo · 안쪽 케이지 불투명도 · 안쪽 케이지 각 cage2),
+ *  aGl = max 반짝임 위상(0～1, 없으면 −1). 정점 꼬리표 aArc(0～5 호·발 나사, 7 안쪽 고리, −1 그 밖) — 그리기 호출 1 그대로 */
+const SUB_V_HEAD = /* glsl */`
+attribute float aOp; attribute float aArc; attribute vec4 aEff; attribute float aGl;
+varying float vOp; varying float vInner; varying float vGl; varying vec2 vInP;
+vec3 tbRotY(vec3 p, float a) { float c = cos(a), s = sin(a); return vec3(c * p.x + s * p.z, p.y, -s * p.x + c * p.z); }
+vec3 tbRotX(vec3 p, float a) { float c = cos(a), s = sin(a); return vec3(p.x, c * p.y - s * p.z, s * p.y + c * p.z); }`;
+const SUB_V_NORMAL = /* glsl */`
+float tbAng = 0.0, tbA = 1.0, tbIn = 0.0;
+if (aArc > -0.5 && aArc < 6.5) {
+  float tbC = max(aEff.x, 1.0);
+  tbAng = aArc * 6.2831853 / tbC;
+  tbA = clamp(aEff.x - aArc, 0.0, 1.0) * (aArc > aEff.y - 0.5 ? ${TE.HOLLOW_A.toFixed(3)} : 1.0);
+} else if (aArc > 6.5) { tbIn = 1.0; tbA = aEff.z; }
+objectNormal = tbIn > 0.5 ? tbRotX(tbRotY(objectNormal, aEff.w), ${TE.INNER_TILT.toFixed(3)}) : tbRotY(objectNormal, tbAng);`;
+const SUB_V_POS = /* glsl */`
+vInP = position.xz;
+transformed = tbIn > 0.5 ? tbRotX(tbRotY(transformed, aEff.w), ${TE.INNER_TILT.toFixed(3)}) : tbRotY(transformed, tbAng);
+if (tbA < 0.004) transformed = vec3(0.0);
+vOp = aOp * tbA; vInner = tbIn; vGl = aGl;`;
+const SUB_F_HEAD = /* glsl */`
+uniform vec3 uGlintCol; uniform float uGlintA;
+varying float vOp; varying float vInner; varying float vGl; varying vec2 vInP;`;
+const SUB_F_END = /* glsl */`
+if (vInner > 0.5 && vGl >= 0.0) { // §147 max 반짝임 — 안쪽 고리를 따라 한 바퀴 흐르는 옅은 빛
+  float sw = vGl * 6.2831853 - 3.14159265;
+  float d = abs(mod(atan(vInP.y, vInP.x) - sw + 3.14159265, 6.2831853) - 3.14159265);
+  float b = (1.0 - smoothstep(0.0, 0.8, d)) * sin(3.14159265 * vGl);
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, uGlintCol, b * uGlintA);
+}
+gl_FragColor.a *= vOp;`;
+
 export class SubCages {
   constructor(scene, cap = 256, renderer = null) {
     const g = geo();
     this.cap = cap; this.renderer = renderer;
     this.op = new THREE.InstancedBufferAttribute(new Float32Array(cap), 1).setUsage(THREE.DynamicDrawUsage);
-    const geom = g.sub.clone(); geom.setAttribute('aOp', this.op);
+    this.eff = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4).setUsage(THREE.DynamicDrawUsage);
+    this.gl = new THREE.InstancedBufferAttribute(new Float32Array(cap).fill(-1), 1).setUsage(THREE.DynamicDrawUsage);
+    const geom = g.sub.clone(); geom.setAttribute('aOp', this.op); geom.setAttribute('aEff', this.eff); geom.setAttribute('aGl', this.gl);
     this.mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.24, metalness: 0.88, transparent: true });
+    this.GU = { uGlintCol: { value: new THREE.Color(1, 1, 1) }, uGlintA: { value: 0.85 } };
     this.mat.onBeforeCompile = (sh) => {
-      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float aOp;\nvarying float vOp;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvOp = aOp;');
-      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vOp;').replace('#include <dithering_fragment>', '#include <dithering_fragment>\ngl_FragColor.a *= vOp;');
+      Object.assign(sh.uniforms, this.GU);
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>' + SUB_V_HEAD)
+        .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>' + SUB_V_NORMAL)
+        .replace('#include <begin_vertex>', '#include <begin_vertex>' + SUB_V_POS);
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>' + SUB_F_HEAD).replace('#include <dithering_fragment>', '#include <dithering_fragment>' + SUB_F_END);
     };
     this.U = rimU();
-    rimInject(this.mat, this.U, '-sub');
+    rimInject(this.mat, this.U, '-sub-eff');
     this.mesh = new THREE.InstancedMesh(geom, this.mat, cap);
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.mesh.setColorAt(0, new THREE.Color(1, 1, 1));
@@ -425,12 +487,17 @@ export class SubCages {
     this.mat.envMap = tourbEnv(this.renderer, L); this.mat.envMapIntensity = L ? 0.9 : 1.1; this.mat.needsUpdate = true;
     setRim(this.U, L, _c.set(0x9ec2ff));
     if (L) this.U.uInk.value = 0.45; else this.U.uRim.value = 0.4;
+    const gk = effortInk(L).glint; this.GU.uGlintCol.value.setRGB(...gk.rgb); this.GU.uGlintA.value = gk.a;
   }
   begin() { this.n = 0; }
-  /** worldPos = 노드 세계 위치, s = 몸체 반지름(세계), tiltX·tiltZ = 축 기울기, ang = 케이지 각, op = 투명도, col = 노드 색(조금 섞음) */
-  put(worldPos, s, tiltX, tiltZ, ang, op, col) {
+  /** worldPos = 노드 세계 위치, s = 몸체 반지름(세계), tiltX·tiltZ = 축 기울기, ang = 케이지 각, op = 투명도, col = 노드 색(조금 섞음)
+   *  eff(없으면 지금 모습) = { arcs 호 수(보간 소수), lo 요청 투명 시작 번호, inner 안쪽 케이지 불투명도, cage2 안쪽 각, glint 반짝임 위상 | −1 } */
+  put(worldPos, s, tiltX, tiltZ, ang, op, col, eff = null) {
     if (this.n >= this.cap || !(op > 0.02)) return;
     const i = this.n++;
+    const E = this.eff.array, o = i * 4;
+    if (eff) { E[o] = eff.arcs; E[o + 1] = eff.lo; E[o + 2] = eff.inner; E[o + 3] = eff.cage2 || 0; this.gl.array[i] = eff.inner > 0.5 && eff.glint != null ? eff.glint : -1; }
+    else { E[o] = TE.ARC_BASE; E[o + 1] = TE.ARC_MAX; E[o + 2] = 0; E[o + 3] = 0; this.gl.array[i] = -1; }
     this._e.set(tiltX, ang, tiltZ, 'XZY'); this._q.setFromEuler(this._e);
     this._m.compose(worldPos, this._q, this._s.setScalar(s));
     this.mesh.setMatrixAt(i, this._m);
@@ -441,7 +508,90 @@ export class SubCages {
     this.mesh.count = this.n;
     this.mesh.instanceMatrix.needsUpdate = true;
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
-    this.op.needsUpdate = true;
+    this.op.needsUpdate = true; this.eff.needsUpdate = true; this.gl.needsUpdate = true;
+  }
+  dispose() { this.mesh.removeFromParent(); this.mesh.geometry.dispose(); this.mat.dispose(); this.mesh.dispose?.(); }
+}
+
+/**
+ * 보석 고리(케이지가 없는 claude -p·워크플로 에이전트) — 장면 전체 InstancedMesh 하나(그리기 호출 +1, 상한 256).
+ * 본체 적도 바로 밖 가는 고리(--effort-ink-dim, max 확정 = --effort-ink) 위에 보석 알 n 개(무채색 금속 — 다크 = 로듐, 라이트 = 먹색),
+ * 카메라 쪽(정면)을 가운데로 30° 간격. 요청 상태 = 받침(베젤)만. 인스턴스 aEff = (보석 수 c(보간 소수) · 받침만 0/1 · 고리 0/0.5/1 · 투명도).
+ * begin → put(...) × n → end
+ */
+const GEM_V_HEAD = /* glsl */`
+attribute float aPart; attribute float aSlot; attribute vec4 aEff;
+varying float vGA; varying float vRing;
+vec3 gmRotY(vec3 p, float a) { float c = cos(a), s = sin(a); return vec3(c * p.x + s * p.z, p.y, -s * p.x + c * p.z); }`;
+const GEM_V_NORMAL = /* glsl */`
+float gmAng = 0.0, gmA = aEff.w;
+if (aSlot > -0.5) {
+  gmAng = (aSlot - (max(aEff.x, 1.0) - 1.0) * 0.5) * ${TE.GEM_STEP.toFixed(5)};
+  float f = clamp(aEff.x - aSlot, 0.0, 1.0);
+  f *= aPart < 1.5 ? 1.0 - aEff.y : 1.0; // 보석(aPart 1)은 확정일 때만, 받침(2)은 늘
+  gmA *= f;
+} else gmA *= step(0.01, aEff.z);
+objectNormal = gmRotY(objectNormal, gmAng);`;
+const GEM_V_POS = /* glsl */`
+transformed = gmRotY(transformed, gmAng);
+if (gmA < 0.004) transformed = vec3(0.0);
+vGA = gmA; vRing = aSlot > -0.5 ? -1.0 : aEff.z;`;
+// uGem*: rimInject 의 float uInk 와 이름이 겹치지 않게(같은 재질에 둘 다 들어감)
+const GEM_F_HEAD = /* glsl */`
+uniform vec4 uGemInk; uniform vec4 uGemDim;
+varying float vGA; varying float vRing;`;
+const GEM_F_END = /* glsl */`
+if (vRing >= 0.0) { vec4 rc = mix(uGemDim, uGemInk, clamp(vRing * 2.0 - 1.0, 0.0, 1.0)); gl_FragColor = vec4(rc.rgb, rc.a * vGA); }
+else gl_FragColor.a *= vGA;`;
+
+export class EffortGems {
+  constructor(scene, cap = 256, renderer = null) {
+    const g = geo();
+    this.cap = cap; this.renderer = renderer;
+    this.eff = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4).setUsage(THREE.DynamicDrawUsage);
+    const geom = g.gems.clone(); geom.setAttribute('aEff', this.eff);
+    this.mat = new THREE.MeshStandardMaterial({ roughness: 0.2, metalness: 0.9, transparent: true, depthWrite: false });
+    this.IU = { uGemInk: { value: new THREE.Vector4(1, 1, 1, 0.6) }, uGemDim: { value: new THREE.Vector4(1, 1, 1, 0.2) } };
+    this.mat.onBeforeCompile = (sh) => {
+      Object.assign(sh.uniforms, this.IU);
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>' + GEM_V_HEAD)
+        .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>' + GEM_V_NORMAL)
+        .replace('#include <begin_vertex>', '#include <begin_vertex>' + GEM_V_POS);
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>' + GEM_F_HEAD).replace('#include <dithering_fragment>', '#include <dithering_fragment>' + GEM_F_END);
+    };
+    this.U = rimU();
+    rimInject(this.mat, this.U, '-gems');
+    this.mesh = new THREE.InstancedMesh(geom, this.mat, cap);
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.count = 0; this.mesh.frustumCulled = false; this.mesh.raycast = () => {};
+    this.mesh.renderOrder = 2; // 몸체·케이지 뒤에 그려 반투명 고리가 몸체를 가리지 않게
+    scene.add(this.mesh);
+    this.n = 0; this._m = new THREE.Matrix4(); this._q = new THREE.Quaternion(); this._s = new THREE.Vector3(); this._ax = new THREE.Vector3(0, 1, 0);
+  }
+  theme(L) {
+    const k = effortInk(L);
+    this.IU.uGemInk.value.set(...k.ink.rgb, k.ink.a); this.IU.uGemDim.value.set(...k.dim.rgb, k.dim.a);
+    this.mat.color.set(L ? 0x2a313d : 0xd4d9e2); // 무채색 금속(루비 붉은색은 쓰지 않음)
+    this.mat.emissive.set(L ? 0x000000 : 0x10141a);
+    this.mat.envMap = tourbEnv(this.renderer, L); this.mat.envMapIntensity = L ? 1.0 : 1.4; this.mat.needsUpdate = true;
+    setRim(this.U, L, _c.set(0xd8dee8));
+  }
+  begin() { this.n = 0; }
+  /** worldPos = 노드 세계 위치, ringR = 보석 고리 반지름(세계), yaw = 정면(카메라 쪽) 방위(rad), op = 투명도,
+   *  e = { gems 보석 수(보간 소수), hollow 0/1, ring 0/0.5/1 } */
+  put(worldPos, ringR, yaw, op, e) {
+    if (this.n >= this.cap || !(op > 0.02) || !e || !(e.gems > 0.004)) return;
+    const i = this.n++;
+    this._q.setFromAxisAngle(this._ax, yaw);
+    this._m.compose(worldPos, this._q, this._s.setScalar(ringR));
+    this.mesh.setMatrixAt(i, this._m);
+    const E = this.eff.array, o = i * 4;
+    E[o] = e.gems; E[o + 1] = e.hollow ? 1 : 0; E[o + 2] = e.ring; E[o + 3] = op;
+  }
+  end() {
+    this.mesh.count = this.n;
+    this.mesh.instanceMatrix.needsUpdate = true;
+    this.eff.needsUpdate = true;
   }
   dispose() { this.mesh.removeFromParent(); this.mesh.geometry.dispose(); this.mat.dispose(); this.mesh.dispose?.(); }
 }

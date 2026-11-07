@@ -19,9 +19,26 @@ export const CLIENT = {
   SAVER_AFTER: 90,    // 이만큼 사용자 입력이 없으면(팀장 대기 중) 화면보호기
   MEMO_MAX: 6,
   CARDS_MAX: 6,
+  TAG_HOLD: 1.2,      // 카드가 책상에 닿은 뒤 리본 글이 더 남는 시간(흐름 리본 ≈ 2.2초와 비슷하게)
+  TAGS_MAX: 6,
 };
 
 const ASK_TOOL = 'AskUserQuestion';
+
+/** 출처(흐름·Planet 과 같은 기준): Interactive(src 'ix') · 다른 Claude 세션(src 'peer', from = 보낸 세션 노드) · 그 밖(터미널·휴대폰) */
+function srcOf(ix) {
+  const src = ix && (ix.src === 'ix' || ix.src === 'peer') ? ix.src : null;
+  return { src, from: src === 'peer' && typeof ix.from === 'string' ? ix.from : null, text: ix && typeof ix.text === 'string' && ix.text.trim() ? ix.text.replace(/\s+/g, ' ').trim() : null };
+}
+/** 카드 리본 글리프: Interactive ◇ · 다른 세션 ⇄ · 그 밖 없음(ix-core userGlyph 와 같은 글자) */
+export const cardGlyph = (c) => (c && c.src === 'ix' ? '◇ ' : c && c.src === 'peer' ? '⇄ ' : '');
+/** 카드 리본 글: 글리프 + 첫 17자(흐름 리본과 같은 자르기). 글이 없으면 글리프만(출처가 있을 때) 또는 null */
+export function cardLabel(c) {
+  if (!c) return null;
+  const g = cardGlyph(c), t = c.text || '';
+  if (!t) return g ? g.trim() : null;
+  return g + (t.length > 18 ? t.slice(0, 17) + '…' : t);
+}
 
 /** 이벤트 → 의뢰인 창구 동작(순수). isMain(nodeId) → 이 사무실 팀장(메인) 노드인가. 반환: {op, lead, ...} | null */
 export function clientOp(ev, isMain, st = null) {
@@ -33,8 +50,8 @@ export function clientOp(ev, isMain, st = null) {
     if (st) st.ixSeen = true;
     const op = String(ix.op || '');
     switch (op) {
-      case 'prompt': case 'command': case 'message': return { op: 'request', lead: ev.nodeId };
-      case 'midturn': return { op: 'memo', lead: ev.nodeId, mid: true };
+      case 'prompt': case 'command': case 'message': return { op: 'request', lead: ev.nodeId, ...srcOf(ix) };
+      case 'midturn': return { op: 'memo', lead: ev.nodeId, mid: true, ...srcOf(ix) };
       case 'interrupt': case 'deny': return { op: 'alert', lead: ev.nodeId, why: op };
       case 'reply': case 'final': return { op: 'report', lead: ev.nodeId };
       case 'ask':
@@ -74,8 +91,8 @@ export class ClientDesk {
     let op = o.op;
     if (op === 'request' && (o.mid || leadBusy)) op = 'memo';
     switch (op) {
-      case 'request': this._card(now, 'request'); this.readUntil = now + CLIENT.CARD_DUR + CLIENT.READ; this.lastUserAt = now; this.onAt = now; this.report = null; break;
-      case 'memo': this._card(now, 'memo'); this.memo = Math.min(CLIENT.MEMO_MAX, this.memo + 1); this.lastUserAt = now; this.onAt = now; break;
+      case 'request': this._card(now, 'request', o); this.readUntil = now + CLIENT.CARD_DUR + CLIENT.READ; this.lastUserAt = now; this.onAt = now; this.report = null; break;
+      case 'memo': this._card(now, 'memo', o); this.memo = Math.min(CLIENT.MEMO_MAX, this.memo + 1); this.lastUserAt = now; this.onAt = now; break;
       case 'ask': this.ask = { t0: now, n: Math.max(2, Math.min(5, o.options || 3)), chosen: -1, chosenAt: null }; this.askId = o.toolUseId || null; this.onAt = now; break;
       case 'answer':
         if (this.ask) { this.ask.chosen = o.choice != null ? Math.max(0, Math.min(this.ask.n - 1, o.choice)) : 0; this.ask.chosenAt = now; }
@@ -87,7 +104,12 @@ export class ClientDesk {
     }
     return true;
   }
-  _card(now, kind) { this.cards.push({ t0: now, kind }); if (this.cards.length > CLIENT.CARDS_MAX) this.cards.shift(); }
+  _card(now, kind, o = null) {
+    const c = { t0: now, kind, src: (o && o.src) || null, from: (o && o.from) || null, text: (o && o.text) || null };
+    if (c.src || c.text) { (this.tagged || (this.tagged = [])).push(c); if (this.tagged.length > CLIENT.TAGS_MAX) this.tagged.shift(); }
+    this.cards.push(c); if (this.cards.length > CLIENT.CARDS_MAX) this.cards.shift(); }
+  /** 리본 글이 보일 카드(날아가는 동안 + TAG_HOLD) */
+  liveTags(now) { if (!this.tagged) return []; this.tagged = this.tagged.filter((c) => now - c.t0 < CLIENT.CARD_DUR + CLIENT.TAG_HOLD); return this.tagged; }
   /** 날고 있는 카드만 남김 */
   liveCards(now) { this.cards = this.cards.filter((c) => now - c.t0 < CLIENT.CARD_DUR); return this.cards; }
   /** 고른 카드 빛남이 끝난 질문은 정리 */
@@ -110,4 +132,10 @@ export class ClientDesk {
     if (this.report && now < this.report.until) return { kind: 'report', until: this.report.until };
     return null;
   }
+}
+
+/** 카드 비행 자리(3D·2D 공용): a → b, u(0～1, 넘으면 도착), hop = 포물선 높이. 반환 {x, y, z, e}(e = 이징 값) */
+export function cardPath(a, b, u, hop = 1.1) {
+  const k = Math.max(0, Math.min(1, u)), e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+  return { x: a.x + (b.x - a.x) * e, y: (a.y ?? 0) + ((b.y ?? 0) - (a.y ?? 0)) * e + Math.sin(e * Math.PI) * hop, z: a.z + (b.z - a.z) * e, e };
 }

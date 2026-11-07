@@ -100,7 +100,7 @@ export class LabMockDriver {
   // M3 위험 동작: rm -rf · DROP · force push 를 돌아가며
   _m3(m) {
     const D = [
-      ['Bash', 'rm -rf build/cache', [F('build/cache', 'delete', { est: 1, x: 'rm' })]],
+      ['Bash', 'rm -rf build/old', [F('build/old', 'delete', { est: 1, x: 'rm' })]],
       ['Bash', "psql -c 'DROP TABLE tmp_import'", [{ k: 'db', id: 'db:postgres/shop', n: 'shop', v: 'write', coll: ['tmp_import'], x: 'drop', imp: 'db' }]],
       ['Bash', 'git push --force origin feat-x', [{ k: 'repo', id: 'repo:viz', n: 'viz', v: 'push', x: 'force' }]],
     ];

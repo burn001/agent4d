@@ -4,7 +4,7 @@
 // 컨텍스트 게이지는 몸 안에 통합: 반응로 = 기둥 여섯이 차오름(한 기둥 ≈ 17%), 기둥 = 유리 안 액체 높이. 예전 칩 둘레 고리는 메인에 없다.
 // 데이터 기둥 띠 글 = 실제 최근 도구 이름·대상(v.hist — 서버가 redact, privacy minimal 이면 도구 이름만), 도구 중 가운데 띠 = 지금 도구(호박색).
 import * as THREE from 'three';
-import { MAIN_RIG, mainLook } from './main-rig-core.mjs';
+import { MAIN_RIG, mainLook, mainPartOrder } from './main-rig-core.mjs';
 import { assignMainShapes, mainSetSig, ctxFrac, ctxTone, reactorFills, bandWords, toolBand } from './shape-core.mjs';
 import { nodeVisualStateAt, paletteOf, stateColor, NODE_STATE } from './flow-style.mjs';
 import { heatColor, heatPulse } from './heat-fx-core.mjs'; // 과열 물듦
@@ -254,6 +254,7 @@ export class MainRigs {
         if (m.isShaderMaterial) m.uniforms.uA.value = 0.85 * a; else m.opacity = base * a;
         if (!m.userData.add && m.depthWrite !== undefined && !(r.glass === m)) m.depthWrite = a > 0.9;
       }
+      for (const o of r.grp.children) if (o.material) o.renderOrder = mainPartOrder(o.material.depthWrite); // 깊이 안 쓰는 부분은 칩 다음에(뒤 노드가 덮지 않게)
       const ctx = ctxFrac(v.node), tone = ctx == null ? 0 : ctxTone(ctx);
       const cc = this._c2.set(tone === 0 ? P.holo : tone === 1 ? P.tool : P.error);
       const cpul = tone === 2 && !reduced ? 0.6 + 0.4 * Math.sin(now * 5) : 1;

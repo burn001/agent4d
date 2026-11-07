@@ -1,55 +1,162 @@
-/* 소리 설정 팝업 — sound-pop.js 가 붙인다. 색은 테마 토큰만(밝은·어두운 공용). */
+/* 음악 패널(소리 팝업, → 플레이리스트) — sound-pop.js 가 붙인다. 색은 테마 토큰만(밝은·어두운 공용). */
 #btn-sound-pop { display: inline-flex; align-items: center; justify-content: center; width: 34px; padding: 0; flex: none; }
 #btn-sound-pop[hidden] { display: none; }
 #btn-sound-pop.on { border-color: var(--accent); color: var(--accent); }
 
 #sound-pop {
-  position: fixed; z-index: 60; width: 330px; max-width: calc(100vw - 16px); max-height: calc(100vh - 80px); overflow: auto;
+  /* 무드 점 색(테마별로 아래에서 다시) */
+  --md-calm: #7dd3fc; --md-dreamy: #c4b5fd; --md-warm: #fbbf24; --md-focus: #5eead4; --md-bright: #a3e635; --md-drive: #fb7185;
+  position: fixed; z-index: 60; width: 384px; max-width: calc(100vw - 16px); max-height: calc(100vh - 80px);
+  display: flex; flex-direction: column; overflow: hidden;
   padding: 10px 12px 8px; border-radius: 12px; background: var(--panel-bg); border: 1px solid var(--border); box-shadow: var(--shadow);
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); font-size: 12.5px; color: var(--text); box-sizing: border-box;
 }
 #sound-pop[hidden] { display: none; }
+#sound-pop > * { flex: none; }
+#sound-pop button, #sound-pop select { font: inherit; color: inherit; }
+#sound-pop button:focus-visible, #sound-pop select:focus-visible, #sound-pop input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
 #sound-pop .sp-head { display: flex; align-items: baseline; gap: 8px; }
 #sound-pop .sp-state { color: var(--muted); font-size: 11.5px; min-width: 0; }
-#sound-pop .sp-now { margin: 8px 0 4px; padding: 8px 10px; border-radius: 8px; background: var(--chip-bg); border: 1px solid var(--border); }
+
+/* 지금 곡 + 재생 제어 */
+#sound-pop .sp-now { display: flex; align-items: center; gap: 10px; margin: 8px 0 2px; padding: 8px 8px 8px 10px; border-radius: 9px;
+  background: var(--chip-bg); border: 1px solid var(--border); }
+#sound-pop .sp-now-i { flex: 1 1 auto; min-width: 0; }
 #sound-pop .sp-now-t { font-weight: 650; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#sound-pop .sp-now-s { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+#sound-pop .sp-now-s { color: var(--muted); font-size: 11.5px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #sound-pop .sp-now-s:empty { display: none; }
-#sound-pop .sp-row { display: grid; grid-template-columns: 52px minmax(0, 1fr); align-items: center; gap: 4px 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
-#sound-pop .sp-row:last-of-type { border-bottom: none; }
-#sound-pop .sp-k { color: var(--muted); font-size: 11.5px; font-weight: 600; }
-#sound-pop .sp-seg, #sound-pop .sp-tracks, #sound-pop .sp-vols { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; }
+#sound-pop .sp-ctl { display: flex; align-items: center; gap: 2px; flex: none; }
+#sound-pop .sp-tbtn { width: 30px; height: 30px; padding: 0; border-radius: 50%; border: 1px solid transparent; background: transparent; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; color: var(--text); }
+#sound-pop .sp-tbtn:hover:not(:disabled) { background: var(--hover); }
+#sound-pop .sp-tbtn:disabled { opacity: .4; cursor: not-allowed; }
+#sound-pop .sp-play { width: 34px; height: 34px; background: var(--accent); color: var(--bg); }
+#sound-pop .sp-play:hover:not(:disabled) { background: var(--accent); filter: brightness(1.1); }
+#sound-pop .sp-rep { margin-left: 4px; color: var(--muted); }
+#sound-pop .sp-rep[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+
+/* 선곡 기준 */
+#sound-pop .sp-sec { padding: 8px 0 6px; border-bottom: 1px solid var(--border); }
+#sound-pop .sp-k { color: var(--muted); font-size: 11px; font-weight: 600; margin-bottom: 5px; }
+#sound-pop .sp-seg, #sound-pop .sp-moods { display: flex; flex-wrap: wrap; gap: 4px; }
+/* 기준 칩은 한 줄을 고르게 채움(넘치면 두 줄도 고르게) */
+#sound-pop .sp-seg .sp-chip, #sound-pop .sp-moods .sp-chip { flex: 1 1 auto; justify-content: center; padding: 0 6px; }
 #sound-pop .sp-chip {
-  height: 26px; padding: 0 9px; border-radius: 7px; cursor: pointer; white-space: nowrap; font: inherit; font-size: 12px;
-  background: transparent; color: var(--text); border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 5px;
+  height: 26px; padding: 0 9px; border-radius: 7px; cursor: pointer; white-space: nowrap; font-size: 12px;
+  background: transparent; border: 1px solid var(--border); display: inline-flex; align-items: center; gap: 5px;
 }
 #sound-pop .sp-chip:hover:not(:disabled) { background: var(--hover); }
 #sound-pop .sp-chip:disabled { opacity: .45; cursor: not-allowed; }
-#sound-pop .sp-chip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
-#sound-pop .sp-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-#sound-pop .sp-grp { flex: 0 0 100%; color: var(--muted); font-size: 10.5px; font-weight: 600; margin-top: 2px; }
-#sound-pop .sp-grp.other { margin-top: 6px; padding-top: 4px; border-top: 1px dashed var(--border); }
-#sound-pop .sp-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border); flex: none; }
-#sound-pop .sp-track.cur .sp-dot { background: var(--accent); box-shadow: 0 0 5px var(--accent); }
+#sound-pop .sp-chip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--hover); }
+#sound-pop .sp-extra { margin-top: 6px; }
+#sound-pop .sp-moods[hidden], #sound-pop .sp-times[hidden] { display: none; }
+#sound-pop .sp-mood { height: 24px; padding: 0 8px; font-size: 11.5px; }
+#sound-pop .sp-md { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--muted); display: inline-block; }
+#sound-pop [data-mood="calm"] > .sp-md { background: var(--md-calm); }
+#sound-pop [data-mood="dreamy"] > .sp-md { background: var(--md-dreamy); }
+#sound-pop [data-mood="warm"] > .sp-md { background: var(--md-warm); }
+#sound-pop [data-mood="focus"] > .sp-md { background: var(--md-focus); }
+#sound-pop [data-mood="bright"] > .sp-md { background: var(--md-bright); }
+#sound-pop [data-mood="drive"] > .sp-md { background: var(--md-drive); }
+#sound-pop .sp-times { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; }
+#sound-pop .sp-slot { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 3px 4px 3px 8px; border-radius: 7px;
+  border: 1px solid var(--border); min-width: 0; }
+#sound-pop .sp-slot.now { border-color: var(--accent); }
+#sound-pop .sp-slot-n { display: flex; flex-direction: column; line-height: 1.15; min-width: 0; }
+#sound-pop .sp-slot-n b { font-weight: 600; font-size: 11.5px; }
+#sound-pop .sp-slot.now .sp-slot-n b { color: var(--accent); }
+#sound-pop .sp-slot-r { color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+#sound-pop .sp-slot-sel { height: 24px; max-width: 84px; border-radius: 6px; border: 1px solid var(--border); background: var(--chip-bg); font-size: 11.5px; padding: 0 2px; }
+#sound-pop .sp-note { margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.4; }
+
+/* 플레이리스트 */
+#sound-pop .sp-listsec { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding-top: 6px; }
+#sound-pop .sp-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); flex: none; }
+#sound-pop .sp-tab { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 9px; margin-bottom: -1px;
+  background: transparent; border: none; border-bottom: 2px solid transparent; cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 600; }
+#sound-pop .sp-tab:hover:not(:disabled) { color: var(--text); }
+#sound-pop .sp-tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+#sound-pop .sp-tab-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 지금 보는 표현의 탭: 이름 앞 작은 점 */
+#sound-pop .sp-tab.here .sp-tab-n::before { content: ''; display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
+  margin-right: 5px; vertical-align: middle; position: relative; top: -1px; }
+#sound-pop .sp-tab-c { font-size: 10.5px; font-weight: 600; color: var(--muted); padding: 0 5px; border-radius: 8px; background: var(--chip-bg);
+  border: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+#sound-pop .sp-list { flex: 1 1 auto; min-height: 120px; max-height: 340px; overflow-y: auto; overscroll-behavior: contain; padding: 2px 0 4px;
+  scrollbar-width: thin; outline: none; }
+#sound-pop .sp-gh { display: flex; align-items: baseline; gap: 6px; padding: 7px 6px 4px; position: sticky; top: -2px; z-index: 1;
+  background: linear-gradient(var(--panel-bg), var(--panel-bg)), var(--bg); color: var(--muted); font-size: 10.5px; font-weight: 600;
+  letter-spacing: .02em; }
+#sound-pop .sp-gh-c { font-weight: 500; opacity: .8; font-variant-numeric: tabular-nums; }
+#sound-pop .sp-gh-now { display: none; margin-left: auto; color: var(--accent); }
+#sound-pop .sp-gh.now .sp-gh-n { color: var(--accent); }
+#sound-pop .sp-gh.now .sp-gh-now { display: inline; }
+#sound-pop .sp-trk { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 8px; width: 100%; min-height: 40px;
+  padding: 4px 8px 4px 4px; border: none; border-radius: 7px; background: transparent; cursor: pointer; text-align: left; }
+#sound-pop .sp-trk:hover:not(:disabled) { background: var(--hover); }
+#sound-pop .sp-trk:disabled { cursor: default; opacity: .5; }
+#sound-pop .sp-ix { position: relative; display: inline-flex; justify-content: center; align-items: center; height: 16px; color: var(--muted);
+  font-size: 11px; font-variant-numeric: tabular-nums; }
+#sound-pop .sp-eq { display: none; align-items: flex-end; gap: 2px; height: 12px; }
+#sound-pop .sp-eq i { width: 2.5px; height: 40%; border-radius: 1px; background: var(--accent); }
+#sound-pop .sp-trk.cur .sp-n { display: none; }
+#sound-pop .sp-trk.cur .sp-eq { display: inline-flex; }
+#sound-pop.sp-playing .sp-trk.cur .sp-eq i { animation: sp-eq 1.1s ease-in-out infinite; }
+#sound-pop.sp-playing .sp-trk.cur .sp-eq i:nth-child(2) { animation-delay: -.45s; }
+#sound-pop.sp-playing .sp-trk.cur .sp-eq i:nth-child(3) { animation-delay: -.8s; }
+#sound-pop .sp-eq i:nth-child(2) { height: 85%; }
+#sound-pop .sp-eq i:nth-child(3) { height: 60%; }
+@keyframes sp-eq { 0%, 100% { height: 30%; } 50% { height: 100%; } }
+@media (prefers-reduced-motion: reduce) { #sound-pop.sp-playing .sp-trk.cur .sp-eq i { animation: none; } }
+#sound-pop .sp-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+#sound-pop .sp-tt { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#sound-pop .sp-trk.cur .sp-tt { color: var(--accent); font-weight: 650; }
+#sound-pop .sp-tags { display: flex; gap: 8px; color: var(--muted); font-size: 10.5px; min-width: 0; overflow: hidden; white-space: nowrap; }
+#sound-pop .sp-tag { display: inline-flex; align-items: center; gap: 4px; }
+#sound-pop .sp-tag .sp-md { width: 5px; height: 5px; }
+#sound-pop .sp-vw { opacity: .75; overflow: hidden; text-overflow: ellipsis; }
+#sound-pop .sp-vw::before { content: '·'; margin-right: 8px; }
+#sound-pop .sp-tags .sp-tag + .sp-vw::before, #sound-pop .sp-tags .sp-vw:first-child::before { content: ''; margin: 0; }
+#sound-pop .sp-du { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+/* 기준이 지금 고르는 곡(작업 상태 = 지금 단계 곡, 무드·시간대 = 그 무드 곡)만 또렷하게, 나머지는 옅게(누르면 재생은 됨) */
+#sound-pop .sp-list.sp-filtered .sp-trk:not(.cand):not(.cur) .sp-body, #sound-pop .sp-list.sp-filtered .sp-trk:not(.cand):not(.cur) .sp-du { opacity: .48; }
+#sound-pop .sp-empty { margin: 16px 8px; color: var(--muted); font-size: 12px; }
+
+/* 음량 */
+#sound-pop .sp-vols { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding: 8px 0 2px; border-top: 1px solid var(--border); }
 #sound-pop .sp-range { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11.5px; }
-#sound-pop .sp-part { min-width: 68px; }
+#sound-pop .sp-vk { font-weight: 600; min-width: 28px; }
+#sound-pop .sp-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border); flex: none; }
+#sound-pop .sp-part { height: 24px; padding: 0 8px; }
 #sound-pop .sp-part[aria-pressed="true"] .sp-dot { background: var(--accent); box-shadow: 0 0 5px var(--accent); }
 #sound-pop .sp-range.off input[type="range"] { opacity: .45; }
 /* 좁은 화면 규칙이 상단 바 볼륨 슬라이더를 숨기던 것을 팝업 안에선 되살림 */
-#sound-pop #vol, #sound-pop #sfx-vol { display: inline-block !important; width: 84px; accent-color: var(--accent); }
+#sound-pop #vol, #sound-pop #sfx-vol { display: inline-block !important; width: 96px; accent-color: var(--accent); }
 #sound-pop #bgm-track { display: none !important; }
-/* 음악 끔: 지금 곡 이름 흐리게 + 부제(sound.pop.musicOff.sub), 방식·곡 칩은 누를 수 있되 흐리게 */
-#sound-pop.sp-music-off .sp-now-t { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 1px; }
+/* 음악 멈춤(재생/일시정지 = 음악 켬/끔): 부제는 '일시정지', 재생 중 막대는 멈춤 */
+#sound-pop.sp-music-off .sp-now-t { color: var(--muted); }
 #sound-pop.sp-music-off .sp-now-s { color: var(--warn, #f59e0b); font-weight: 600; }
-#sound-pop.sp-music-off .sp-seg .sp-chip, #sound-pop.sp-music-off .sp-tracks .sp-chip { opacity: .55; }
-#sound-pop.sp-music-off .sp-seg .sp-chip:hover, #sound-pop.sp-music-off .sp-tracks .sp-chip:hover,
-#sound-pop.sp-music-off .sp-seg .sp-chip:focus-visible, #sound-pop.sp-music-off .sp-tracks .sp-chip:focus-visible { opacity: .85; }
-#sound-pop.sp-music-off .sp-track.cur .sp-dot { background: var(--muted); box-shadow: none; }
-#sound-pop .sp-hint { margin: 6px 0 0; color: var(--muted); font-size: 11px; }
+#sound-pop .sp-hint { margin: 5px 0 0; color: var(--muted); font-size: 10.5px; }
+
+/* 밝은 테마: 무드 점을 진하게 */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) #sound-pop { --md-calm: #0284c7; --md-dreamy: #7c3aed; --md-warm: #d97706; --md-focus: #0d9488; --md-bright: #65a30d; --md-drive: #e11d48; }
+}
+:root[data-theme="light"] #sound-pop { --md-calm: #0284c7; --md-dreamy: #7c3aed; --md-warm: #d97706; --md-focus: #0d9488; --md-bright: #65a30d; --md-drive: #e11d48; }
+
 /* 좁은 화면(시트가 실황 패널 위를 덮음)·2D(backdrop-filter 끔): 반투명 패널색을 불투명 바탕(--bg) 위에 겹쳐 뒤 글자가 비치지 않게.
    넓은 3D 화면은 그대로(흐림 유리) */
 @media (max-width: 719px) {
   #sound-pop { left: 8px !important; right: 8px !important; width: auto; max-width: none;
     background: linear-gradient(var(--panel-bg), var(--panel-bg)), var(--bg); }
+  #sound-pop .sp-list { max-height: none; }
+  #sound-pop .sp-trk { min-height: 44px; }
+  #sound-pop .sp-tbtn { width: 36px; height: 36px; }
+  #sound-pop .sp-play { width: 40px; height: 40px; }
+  #sound-pop .sp-chip { height: 30px; }
+  #sound-pop .sp-mood { height: 28px; }
+  #sound-pop #vol, #sound-pop #sfx-vol { width: 88px; }
+  #sound-pop .sp-hint { display: none; }
 }
 html[data-dim="2d"] #sound-pop { background: linear-gradient(var(--panel-bg), var(--panel-bg)), var(--bg); }

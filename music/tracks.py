@@ -11,7 +11,7 @@ web/assets/<곡>.json(합성 스크립트가 쓴 메타)에서 다시 읽는다.
   # 합성 결과 폴더(compose_<id>.py·bgm-<id>.mp3·bgm-<id>.json 이 있는 곳)에서 레포로 복사 + 매니페스트 갱신
   python music/tracks.py copy jazz --from <폴더>
   # 새 곡: 단계(0 한가 · 1 보통 · 2 활발 · 3 매우 활발, 여러 단계면 1,2)·energy(0～1)·짧은 이름을 함께
-  python music/tracks.py copy chillhop --from <폴더> --stage 1 --energy 0.4 --label 칠홉 --source "자체 작곡" \
+  python music/tracks.py copy chillhop --from <폴더> --stage 1 --energy 0.4 --label 칠홉 --source "자체 작곡" --moods warm,focus \
       --label-en Chillhop --title-en "Slow Pour" --mood-en "chillhop / lo-fi jazz"   # 영어 화면용(없으면 아래 EN 표)
 
 copy 는 compose_<id>.py → music/, bgm-<id>.mp3·bgm-<id>.json → web/assets/ 로 덮어쓴다(report.md·spectrogram.png 는 복사하지 않음).
@@ -44,7 +44,7 @@ BUILTIN = [
 ]
 DEFAULT = "lofi"
 FIELDS = ["id", "label", "title", "mood", "label_en", "title_en", "mood_en", "file", "meta", "bpm", "beats", "key", "key_en", "duration", "bytes", "hash",
-          "stage", "views", "energy", "source"]
+          "stage", "views", "energy", "moods", "source"]
 
 # 영어 화면용 곡 이름·제목·설명. 매니페스트 항목에 label_en·title_en·mood_en(key_en) 이 이미 있으면 그쪽 우선,
 # 없으면 이 표. 새 곡은 copy --label-en·--title-en·--mood-en 으로 주거나 여기에 더한다. 클라이언트는 영어 화면에서 이 필드를, 없으면 기존 이름을 쓴다
@@ -127,6 +127,21 @@ def norm_stage(v):
 
 
 VIEWS = ("flow", "planet", "voxel", "lab")  # lab = 복셀 연구소(Voxel Lab, 2026-11-01)
+# 무드 태그(— 플레이리스트 '무드 고정'·'시간대별 무드' 기준). 순서 = 화면 순서. web/bgm-core.mjs MOODS 와 같아야 한다
+MOODS = ("calm", "dreamy", "warm", "focus", "bright", "drive")
+
+
+def norm_moods(v):
+    """["focus", "warm"] 또는 "focus,warm" → 아는 무드만 중복 없이(순서 유지), 없으면 None"""
+    if isinstance(v, str):
+        v = [x.strip() for x in v.split(",")]
+    if not isinstance(v, list):
+        return None
+    out = []
+    for x in v:
+        if x in MOODS and x not in out:
+            out.append(x)
+    return out or None
 
 
 def norm_views(v):
@@ -197,6 +212,7 @@ def build_manifest(ents: list[dict] | None = None) -> dict:
             "stage": norm_stage(t.get("stage", b.get("stage"))),
             "views": norm_views(t.get("views", b.get("views"))),
             "energy": t.get("energy", b.get("energy")),
+            "moods": norm_moods(t.get("moods", b.get("moods"))),
             "source": t.get("source") or b.get("source") or "",
         }
         en = EN.get(t["id"], {})
@@ -204,7 +220,7 @@ def build_manifest(ents: list[dict] | None = None) -> dict:
             e[k] = t.get(k) or en.get(k)
         if not e["title_en"] and e["label_en"] and e["title"] == e["label"]:
             e["title_en"] = e["label_en"]
-        out.append({k: e[k] for k in FIELDS if e[k] is not None or k not in ("label_en", "title_en", "mood_en", "key_en", "views", "beats")})
+        out.append({k: e[k] for k in FIELDS if e[k] is not None or k not in ("label_en", "title_en", "mood_en", "key_en", "views", "beats", "moods")})
         for sec in meta.get("sections") or []:
             n = sec.get("name") if isinstance(sec, dict) else None
             if n and n not in SECTIONS_EN and not n.isascii():
@@ -240,7 +256,7 @@ def parse_stage(s: str | None):
     return parts[0] if len(parts) == 1 else parts
 
 
-def copy_track(tid: str, src: str, stage=None, energy=None, label=None, title=None, source=None, en=None, views=None) -> list[dict]:
+def copy_track(tid: str, src: str, stage=None, energy=None, label=None, title=None, source=None, en=None, views=None, moods=None) -> list[dict]:
     ents = entries()
     t = next((x for x in ents if x["id"] == tid), None)
     b = next((x for x in BUILTIN if x["id"] == tid), None)
@@ -273,6 +289,11 @@ def copy_track(tid: str, src: str, stage=None, energy=None, label=None, title=No
             t["stage"] = max(0, min(3, round(energy * 3)))
     if views is not None:
         t["views"] = views or None
+    if moods is not None:
+        m = norm_moods(moods)
+        if not m:
+            raise SystemExit(f"--moods 는 {','.join(MOODS)} 중에서(쉼표로 여럿): {moods}")
+        t["moods"] = m
     if label:
         t["label"] = label
     if title:
@@ -309,6 +330,7 @@ def main(argv=None) -> int:
     c.add_argument("--mood-en", help="영어 화면용 곡 설명")
     c.add_argument("--key-en", help="영어 화면용 조 표기(조 이름에 한글이 섞일 때)")
     c.add_argument("--views", help='표현(테마)별 단계 "flow:0,1;planet:2;voxel:1;lab:0" (CONTRACT §67)')
+    c.add_argument("--moods", help="무드 태그 calm·dreamy·warm·focus·bright·drive 중 쉼표로 여럿 (CONTRACT §146)")
     r = sub.add_parser("remove", help="매니페스트에서 곡 빼기(파일은 그대로)")
     r.add_argument("id")
     a = ap.parse_args(argv)
@@ -316,7 +338,7 @@ def main(argv=None) -> int:
     if a.cmd == "copy":
         ents = copy_track(a.id, a.src, parse_stage(a.stage), a.energy, a.label, a.title, a.source,
                           {"label_en": a.label_en, "title_en": a.title_en, "mood_en": a.mood_en, "key_en": a.key_en},
-                          parse_views(a.views))
+                          parse_views(a.views), a.moods)
     elif a.cmd == "remove":
         ents = [t for t in entries() if t["id"] != a.id]
     write_manifest(ents)

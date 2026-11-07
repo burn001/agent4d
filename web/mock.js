@@ -1,12 +1,14 @@
 // 서버 없이 쓰는 가짜 이벤트 원천.
 //   ?mock=1            : 결정적 시뮬레이터를 실시간으로 돌린다(시작 시 25초 분량을 미리 돌려 snapshot 으로 보냄)
 //   ?mock=1&stress=300 : 노드 수백 개·초당 수십 이벤트 부하 시험
+//   ?mock=1&effort=ladder : 추론 effort 사다리(web/effort-mock.mjs)
 //   ?demo=1            : demo-events.jsonl(녹화된 이벤트)을 시각 간격대로 재생, 끝나면 처음부터
 // 이벤트 형식은 과 같다. DOM·three 에 의존하지 않아 Node 에서도 import 가능(tools/gen-demo.mjs).
 import { ixMockScript } from './ix-mock.mjs';
 import { jobMockScript, procMockScript } from './job-mock.mjs'; // 작업 노드 · 분리 프로세스
 import { crowdMockScript } from './crowd-mock.mjs'; // 겹침 확인
 import { runMockScript } from './run-mock.mjs'; // 실행 중 셸(meta.run)
+import { effortMockScript } from './effort-mock.mjs'; // 추론 effort 사다리
 import { t as tr } from './i18n.mjs';
 
 const TOOLS = [
@@ -78,7 +80,7 @@ function rng(seed) { // mulberry32
 }
 
 export class MockGenerator {
-  constructor({ seed = 2026, startMs = Date.now(), stress = 0, launcher = false, ix = false, jobs = false, procs = false, runs = false, crowd = false } = {}) {
+  constructor({ seed = 2026, startMs = Date.now(), stress = 0, launcher = false, ix = false, jobs = false, procs = false, runs = false, crowd = false, effort = false } = {}) {
     this.r = rng(seed);
     this.t0 = startMs;
     this.t = 0;              // 가상 시각(ms)
@@ -98,6 +100,7 @@ export class MockGenerator {
     if (procs) procMockScript(this); // 분리 프로세스·진행 레인·들여다보기(난수 없음)
     if (runs) runMockScript(this); // 오래 도는 전경·백그라운드 셸(난수 없음)
     if (crowd) crowdMockScript(this); // 여럿이 한꺼번에 커피·같은 시설(?crowd=1 일 때만)
+    if (effort) effortMockScript(this); // effort 사다리(?effort=ladder 일 때만)
   }
 
   // ---------- 도우미 ----------
@@ -533,7 +536,8 @@ export function createMockSource(handlers, { mode = 'mock', stress = 0, url = 'd
 
   // 실시간 시뮬레이터: 25초 미리 돌려 snapshot, 이후 실시간
   const PRE = 25000;
-  const gen = new MockGenerator({ seed: 2026, startMs: Date.now() - PRE, stress, launcher: !stress, ix: !stress, jobs: !stress, procs: !stress, runs: !stress, crowd: !stress && typeof location !== 'undefined' && /[?&]crowd=1(&|$)/.test(location.search) });
+  const gen = new MockGenerator({ seed: 2026, startMs: Date.now() - PRE, stress, launcher: !stress, ix: !stress, jobs: !stress, procs: !stress, runs: !stress, crowd: !stress && typeof location !== 'undefined' && /[?&]crowd=1(&|$)/.test(location.search),
+    effort: !stress && typeof location !== 'undefined' && /[?&]effort=ladder(&|$)/.test(location.search) });
   while (true) {
     const peekAt = Math.min(...gen.q.map((x) => x.at));
     if (peekAt > PRE) break;

@@ -136,3 +136,10 @@
   @keyframes vx-qpop-a { from { opacity: 0; } to { opacity: 1; } }
   @keyframes vx-qpop-b { from { opacity: 0; } to { opacity: 1; } }
 }
+/* 의뢰서 카드 리본 글(흐름 리본과 같은 모양·글 — ◇ Interactive · ⇄ 다른 세션) */
+.vx-card-tag {
+  pointer-events: none; white-space: nowrap; font: 600 11px system-ui, "Segoe UI", sans-serif; max-width: 220px; overflow: hidden; text-overflow: ellipsis;
+  padding: 1px 7px 2px; color: var(--text, #e5e7eb); border: 1px solid color-mix(in srgb, var(--ix-c, #fcd34d) 45%, transparent);
+  background: color-mix(in srgb, var(--ix-c, #fcd34d) 16%, rgba(5, 5, 16, .78)); border-radius: 10px 10px 10px 2px;
+}
+:root[data-theme="light"] .vx-card-tag { background: color-mix(in srgb, var(--ix-c, #a16207) 10%, rgba(255, 255, 255, .92)); }

@@ -1,0 +1,77 @@
+/* Interactive 패널. 테마 토큰만 쓴다(다크·라이트 공통). interact.js 가 처음 열 때 붙인다. */
+#panel .ix-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; flex: none; }
+#panel .ix-seg button {
+  font: inherit; font-size: 12px; font-weight: 600; padding: 2px 10px; border: none; background: transparent; color: var(--muted); cursor: pointer;
+}
+#panel .ix-seg button + button { border-left: 1px solid var(--border); }
+#panel .ix-seg button.on { background: var(--hover); color: var(--text); }
+#panel .ix-seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* 펼침: 머리 제목 대신 전환 칸. 접힘: 세로 제목만(전환 칸 숨김) */
+#panel.ix-ready header h2 { display: none; }
+body.panel-collapsed #panel.ix-ready header h2 { display: block; }
+body.panel-collapsed #panel .ix-seg { display: none; }
+#panel.ix-mode header .count, #panel.ix-mode header .filter, #panel.ix-mode #stream, #panel.ix-mode #to-latest { display: none !important; }
+body.panel-collapsed #ix-pane { display: none; }
+
+#ix-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; font-size: 12.5px; }
+#ix-pane[hidden] { display: none; }
+#ix-pane .ix-head { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); flex: none; }
+#ix-session {
+  flex: 1; min-width: 0; font: inherit; font-size: 12px; color: var(--text); background: var(--chip-bg);
+  border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px;
+}
+#ix-pane .ix-me { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+#ix-pane .ix-note { margin: 8px 10px 0; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--hover); line-height: 1.45; flex: none; }
+#ix-pane .ix-note.warn { border-color: var(--warn); }
+#ix-pane .ix-note code {
+  display: block; margin: 6px 0 2px; padding: 4px 6px; border-radius: 4px; background: var(--chip-bg);
+  font: 11.5px/1.4 "Cascadia Mono", Consolas, monospace; user-select: all; overflow-wrap: anywhere;
+}
+#ix-pane .ix-note small { display: block; color: var(--muted); font-size: 11px; }
+#ix-pane .ix-feed { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 6px 0 8px; overscroll-behavior: contain; }
+#ix-pane .ix-empty { color: var(--muted); padding: 10px 12px; margin: 0; }
+#ix-pane .ix-row { padding: 5px 12px; }
+#ix-pane .ix-row b { font-size: 11px; font-weight: 650; color: var(--muted); margin-right: 6px; }
+#ix-pane .ix-row p { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24em; overflow-y: auto; }
+#ix-pane .ix-row.k-assistant b { color: var(--k-main); }
+/* 출처 꼬리표 · 사람 글(원문) · 다른 세션 · 시스템 알림 묶음 · 더 보기 */
+#ix-pane .ix-src { display: inline-block; font-size: 10px; line-height: 1.5; padding: 0 6px; margin-right: 4px; border-radius: 999px; background: var(--chip-bg); color: var(--muted); border: 1px solid var(--border); max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: 1px; }
+#ix-pane .ix-src.ix-mid { border-style: dashed; }
+#ix-pane .ix-row.s-peer { border-left: 2px solid var(--border); margin-left: 6px; }
+#ix-pane .ix-hid { color: var(--muted); font-style: italic; }
+#ix-pane .ix-sys { margin: 1px 12px; font-size: 11px; color: var(--muted); }
+#ix-pane .ix-sys summary { cursor: pointer; list-style: none; padding: 1px 0; }
+#ix-pane .ix-sys summary::-webkit-details-marker { display: none; }
+#ix-pane .ix-sys summary::before { content: '⚙ '; }
+#ix-pane .ix-sys[open] summary { color: var(--text); }
+#ix-pane .ix-sys ul { margin: 2px 0 4px; padding: 0 0 0 14px; }
+#ix-pane .ix-sys li { overflow-wrap: anywhere; margin: 1px 0; }
+#ix-pane .ix-sys li .ix-src { max-width: none; }
+#ix-pane .ix-more { display: block; margin: 2px auto 6px; font: inherit; font-size: 11px; color: var(--muted); background: var(--chip-bg); border: 1px solid var(--border); border-radius: 999px; padding: 2px 12px; cursor: pointer; }
+#ix-pane .ix-more:disabled { opacity: .6; cursor: default; }
+#ix-pane .ix-row.k-user p, #ix-pane .ix-row.k-peer p { color: var(--muted); }
+#ix-pane .ix-row.k-mine { margin: 4px 10px 4px 32px; border-radius: 10px; background: var(--hover); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+#ix-pane .ix-row.k-mine b { color: var(--accent); }
+#ix-pane .ix-row.k-tool { color: var(--muted); font-size: 11px; padding-top: 1px; padding-bottom: 1px; }
+#ix-pane .ix-st { font-style: normal; font-size: 10.5px; color: var(--muted); }
+#ix-pane .ix-st.s-delivered, #ix-pane .ix-st.s-replied { color: var(--ok); }
+#ix-pane .ix-st.s-held, #ix-pane .ix-st.s-waiting, #ix-pane .ix-st.s-unconfirmed { color: var(--warn); }
+#ix-pane .ix-st.s-failed { color: var(--error); }
+#ix-pane .ix-warn { flex: none; margin: 0 10px; padding: 6px 9px; border: 1px solid var(--warn); border-radius: 8px; font-size: 12px; line-height: 1.45; white-space: pre-line; color: var(--text); background: var(--chip-bg); } /* 입력창 바로 위 안내 */
+#ix-pane .ix-warn.info { border-color: var(--border); color: var(--muted, var(--text)); }
+#ix-pane .ix-form { display: flex; gap: 6px; padding: 8px 10px calc(10px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border); flex: none; }
+#ix-pane textarea {
+  flex: 1; min-width: 0; resize: none; font: inherit; color: var(--text); background: var(--chip-bg);
+  border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; max-height: 9em;
+}
+#ix-pane textarea:disabled { opacity: .55; }
+#ix-pane .ix-form button {
+  flex: none; font: inherit; font-weight: 650; padding: 0 12px; border-radius: 8px; border: none; background: var(--accent); color: var(--bg); cursor: pointer;
+}
+#ix-pane .ix-form button:disabled { opacity: .4; cursor: default; }
+#ix-pane .ix-form button.ix-confirm { background: var(--warn); border-color: var(--warn); color: #111; } /* 확인 단계 */
+/* 선택 창이 열린 동안 보낸 글: 대기열에서 기다림(실패 아님) */
+#ix-pane .ix-st.s-sentAsk, #ix-pane .ix-st.s-queued, #ix-pane .ix-st.s-queuedAsk { color: var(--accent); }
+#ix-pane .ask-card.wait-flash { animation: ix-wait-flash 1.3s ease-in-out 2; box-shadow: 0 0 0 2px var(--warn, #f59e0b); }
+@keyframes ix-wait-flash { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn, #f59e0b) 55%, transparent); } }
+@media (prefers-reduced-motion: reduce) { #ix-pane .ask-card.wait-flash { animation: none; } }

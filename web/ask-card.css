@@ -1,0 +1,81 @@
+/* 선택형 질문·계획 승인 카드 — 실황 줄·Interactive 공통. 테마 토큰만(다크·라이트). */
+.ask-card {
+  display: block; margin: 4px 0 2px; padding: 7px 9px 8px; border-radius: 8px; line-height: 1.45; white-space: normal;
+  border: 1px solid color-mix(in srgb, var(--warn, #f59e0b) 55%, var(--border)); background: color-mix(in srgb, var(--warn, #f59e0b) 6%, var(--panel-bg));
+  max-height: 34em; overflow-y: auto; overscroll-behavior: contain; min-width: 0;
+}
+.ask-card:not(.s-pending):not(.s-planPending) { border-color: var(--border); background: color-mix(in srgb, var(--chip-bg) 60%, var(--panel-bg)); }
+.ask-card.s-declined, .ask-card.s-rejected { border-color: color-mix(in srgb, var(--error) 50%, var(--border)); }
+.ask-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.ask-kind { font-size: .92em; }
+.ask-badge { font-size: .85em; padding: 0 7px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.ask-badge.s-pending, .ask-badge.s-planPending { color: var(--warn, #f59e0b); border-color: var(--warn, #f59e0b); font-weight: 650; }
+.ask-badge.s-answered, .ask-badge.s-other, .ask-badge.s-approved, .ask-badge.s-approvedEdited { color: var(--ok); border-color: var(--ok); }
+.ask-badge.s-declined, .ask-badge.s-rejected { color: var(--error); border-color: var(--error); }
+.ask-q { margin: 6px 0 0; }
+.ask-q + .ask-q { border-top: 1px dashed var(--border); padding-top: 6px; }
+.ask-qh { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 2px; }
+.ask-h { font-size: .8em; font-weight: 700; padding: 0 6px; border-radius: 4px; background: var(--chip-bg); border: 1px solid var(--border); }
+.ask-multi { font-size: .8em; color: var(--muted); }
+.ask-qt { margin: 2px 0 4px; font-weight: 600; overflow-wrap: anywhere; }
+.ask-qt code { font: .92em/1.4 "Cascadia Mono", Consolas, monospace; background: var(--chip-bg); padding: .05em .3em; border-radius: 4px; }
+.ask-opts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.ask-o { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 6px; padding: 3px 6px; border-radius: 6px; border: 1px solid transparent; }
+.ask-o .ask-mark { color: var(--muted); }
+.ask-o .ask-ol { min-width: 0; overflow-wrap: anywhere; }
+.ask-o .ask-ol small { display: block; color: var(--muted); font-size: .88em; }
+.ask-o.rec { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.ask-rec { font-style: normal; font-size: .75em; margin-left: 6px; padding: 0 5px; border-radius: 999px; color: var(--accent); border: 1px solid var(--accent); }
+.ask-o.picked { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.ask-o.picked .ask-mark { color: var(--ok); }
+.ask-o[role="button"] { cursor: pointer; }
+.ask-o[role="button"]:hover, .ask-o[role="button"]:focus-visible { outline: none; border-color: var(--accent); }
+.ask-prev { grid-column: 1 / -1; margin-top: 3px; }
+.ask-prev pre.md-pre { margin: 0; max-height: 14em; overflow: auto; font-size: .9em; }
+.ask-ans { margin: 4px 0 0; padding: 3px 7px; border-left: 3px solid var(--ok); background: color-mix(in srgb, var(--ok) 7%, transparent); overflow-wrap: anywhere; }
+.ask-ans.dim { color: var(--muted); border-left-color: var(--border); background: none; }
+.ask-hint { margin: 6px 0 0; font-size: .85em; color: var(--muted); }
+.ask-ix { margin-top: 6px; display: flex; flex-direction: column; gap: 5px; align-items: flex-start; }
+.ask-send { font: inherit; font-size: .9em; padding: 3px 10px; border-radius: 6px; cursor: pointer; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); }
+.ask-send:disabled { opacity: .5; cursor: default; }
+/* 질문창에 답하기(주 단추) · Claude 앱에서 답하기(링크) · 기타(직접 입력) */
+.ask-btns { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ask-answer { font: inherit; font-size: .92em; font-weight: 650; padding: 4px 12px; border-radius: 6px; cursor: pointer; border: 1px solid var(--accent); background: var(--accent); color: var(--panel-bg, #fff); }
+.ask-answer:disabled { opacity: .45; cursor: default; }
+.ask-app { font-size: .88em; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--border); color: var(--text); text-decoration: none; background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.ask-app:hover, .ask-app:focus-visible { border-color: var(--accent); outline: none; }
+.ask-otherw { display: flex; flex-direction: column; gap: 2px; margin: 5px 0 0; font-size: .85em; color: var(--muted); }
+.ask-other { font: inherit; font-size: 1.05em; padding: 3px 7px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel-bg); color: var(--text); width: 100%; box-sizing: border-box; min-width: 0; }
+.ask-other:focus { outline: none; border-color: var(--accent); }
+/* 보내기 단추 줄은 카드 바닥에 붙는다 — 긴 카드·좁은 화면·휴대폰 하단 패널에서도 스크롤 중 늘 보임 */
+#ix-pane .ask-ix { position: sticky; bottom: 0; z-index: 1; margin-top: 8px; padding: 6px 0 4px; background: color-mix(in srgb, var(--warn, #f59e0b) 6%, var(--panel-bg)); border-top: 1px solid var(--border); }
+.ask-sentst { margin: 0; font-size: .88em; font-weight: 650; color: var(--ok); }
+.ask-sentst.st-failed { color: var(--error); }
+.ask-sentst.st-sending { color: var(--muted); }
+.ask-sentst.st-answered { color: var(--ok); }
+.plan-md { margin-top: 2px; max-height: 24em; overflow-y: auto; }
+.plan-md .md-cut { color: var(--muted); font-style: italic; }
+/* 실황 줄 안에서는 조금 작게 */
+.ln .msg .ask-card { font-size: .95em; }
+/* Interactive 는 대화 칸이 스크롤하므로 카드 높이 상한 없음(보내기 단추가 카드 안 스크롤에 숨지 않게) */
+#ix-pane .ask-card { max-height: none; overflow: visible; }
+/* 대기 중 카드 맨 위: 이 창은 그 세션 화면에서만 답할 수 있음(눈에 띄게) */
+.ask-hint.ask-only { margin: 2px 0 5px; padding: 4px 8px; border-radius: 6px; font-size: .88em; font-weight: 650; color: var(--text); background: color-mix(in srgb, var(--warn, #f59e0b) 15%, transparent); border-left: 3px solid var(--warn, #f59e0b); overflow-wrap: anywhere; }
+/* 계획 승인·도구 권한 확인 창 카드 */
+.perm-tool { font: .85em/1.3 "Cascadia Mono", Consolas, monospace; padding: 0 6px; border-radius: 4px; background: var(--chip-bg); border: 1px solid var(--border); }
+.perm-card.perm-hot { border-color: var(--error); background: color-mix(in srgb, var(--error) 7%, var(--panel-bg)); }
+.perm-danger { margin: 4px 0; padding: 4px 8px; border-radius: 6px; font-size: .88em; font-weight: 650; color: var(--error); background: color-mix(in srgb, var(--error) 12%, transparent); border-left: 3px solid var(--error); overflow-wrap: anywhere; }
+.perm-code pre.md-pre { margin: 3px 0; max-height: 16em; overflow: auto; font-size: .9em; white-space: pre-wrap; overflow-wrap: anywhere; }
+.perm-path { margin: 4px 0 2px; overflow-wrap: anywhere; }
+.perm-path code { font: .9em/1.4 "Cascadia Mono", Consolas, monospace; background: var(--chip-bg); padding: .05em .3em; border-radius: 4px; }
+.perm-path small, .perm-dim, .perm-desc, .perm-lbl { color: var(--muted); font-size: .86em; }
+.perm-desc, .perm-lbl { margin: 2px 0; }
+.perm-deny { font: inherit; font-size: .92em; padding: 4px 12px; border-radius: 6px; cursor: pointer; border: 1px solid var(--error); background: color-mix(in srgb, var(--error) 10%, transparent); color: var(--text); }
+.perm-deny:disabled { opacity: .45; cursor: default; }
+.perm-allow.perm-risky { background: color-mix(in srgb, var(--error) 75%, var(--accent)); border-color: var(--error); }
+.perm-allow.perm-risky.armed { outline: 2px solid var(--error); outline-offset: 2px; animation: perm-arm 1s ease-in-out infinite alternate; }
+@keyframes perm-arm { from { filter: none; } to { filter: brightness(1.25); } }
+@media (prefers-reduced-motion: reduce) { .perm-allow.perm-risky.armed { animation: none; } }
+textarea.perm-msg, input.perm-msg { font: inherit; font-size: 1.02em; padding: 3px 7px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel-bg); color: var(--text); width: 100%; box-sizing: border-box; min-width: 0; resize: vertical; }
+.perm-msg:focus { outline: none; border-color: var(--accent); }
+.ask-sentst.st-denied { color: var(--error); }

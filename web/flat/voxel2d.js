@@ -23,7 +23,7 @@ import { JOBCARD, jobCardModel, jobFlatPos, jobLabelAlways, jobColorHex, mixHex 
 import { catColor, jobCardsGone, vxHeldEnded, endedBadly, badEndDueAt } from '../flow-core.mjs';
 import { stepLeadExit } from '../voxel/lead-exit-core.mjs'; // 끝난 별관 팀장(claude -p) 퇴장(3D 와 같음)
 import { pickRectAt, projectAreaPad } from '../overview/pick-core.mjs';
-import { toScreen, toWorld, camScale, islandLabelAt } from './flat-core.mjs';
+import { toScreen, toWorld, camScale, islandLabelAt, mixColor } from './flat-core.mjs';
 import { wallSegments, yawVec, facilityRect, FACILITY_LABEL, roomKindName, charRadius, isMoving } from './plan-core.mjs';
 import { drawCards, drawRings, drawDeviceFace, BubbleLayer, fitChars } from './flat-draw.js';
 import { spawnLinks } from '../spawn-link.mjs';
@@ -40,6 +40,8 @@ import { drawStencils2D } from './vx2d-stencil.js'; // 바닥 스텐실(프로�
 import { onStencil } from '../voxel/stencil-pref.mjs';
 import { TiredBook } from '../voxel/vx-heat-core.mjs'; // 지친 직원(컨텍스트 과열)
 import { drawHeatUnder, drawHeatOver, headLean, flushSkin, heatBody } from './vx2d-heat.js';
+import { EffortTween } from '../effort-core.mjs'; // 추론 effort
+import { vxEffortState, dress, deskProps, body2D, deskToWorld, EFF_HEX } from '../voxel/vx-effort-core.mjs'; // 복셀 = 옷차림 + 자리 분위기(3D 와 같은 규칙)
 
 const MACHINE_KIND = { 'bash-bg': 'rack', monitor: 'screen', workflow: 'board' };
 const KNOWN = new Set(['main', 'subagent', 'workflow', 'workflow-agent', 'claude-p', 'bash-bg', 'monitor']);
@@ -229,6 +231,7 @@ export class Voxel2DView extends FlatView {
     if (ch) this._releaseStation(ch);
     this._removing.delete(id);
     this.chars.delete(id); this.machines.delete(id);
+    if (this._effTw) { this._effTw.forget(id + '|f'); this._effTw.forget(id + '|c'); } // 게이지 보간 장부
     if (this.vxp) this.vxp.dropNode(id);
     if (this.quips) this.quips.dropNode(id);
     super._dropNode(id);
@@ -632,6 +635,7 @@ export class Voxel2DView extends FlatView {
     level = Math.max(level, this.bubbles.level(now));
     if (this.vArt) level = Math.max(level, this.vArt.level(now)); // 작업 대상 층
     if (fading || this.pf.busy) level = 2;
+    if (this._effBusy) { this._effBusy = false; level = 2; } // effort 확정 보간(옅음 → 진함) 0.4초 중(지난 그리기에서 표시)
     if (level === 0 && this._wasLevel > 0) this.invalidate(); // 걷기·깜빡임이 막 끝난 갱신도 한 번 그린다(마지막 자리)
     this._wasLevel = level;
     return level;
@@ -1043,11 +1047,16 @@ export class Voxel2DView extends FlatView {
     if (r.leadDesk) {
       const d = r.leadDesk;
       const lead = this.chars.get(r.ownerId);
-      if (lead && lead._monK > 0.05) { ctx.fillStyle = lead._monCat === 'skill' ? this.tokens.skill : catColor(lead._monCat || 'other', L); this._rect(ctx, d.x, d.z + 0.33, 1.1, 0.09); }
+      const on = lead && lead._monK > 0.05;
+      if (on) { ctx.fillStyle = lead._monCat === 'skill' ? this.tokens.skill : catColor(lead._monCat || 'other', L); this._rect(ctx, d.x, d.z + 0.33, 1.1, 0.09); }
+      if (lead && lead.state !== 'gone') this._deskProps2D(ctx, r.ownerId, s, now, d.x, d.z, 0, 1, 1.0, { u: 0.67, v: -0.15 }, 0, r._alpha); // 자리 분위기(메인 포함)
     }
     for (const d of r.desks) {
       const ch = d.occupant && this.chars.get(d.occupant);
-      if (ch && ch.state !== 'gone' && ch.state !== 'leave' && ch._monK > 0.05) { ctx.fillStyle = ch._monCat === 'skill' ? this.tokens.skill : catColor(ch._monCat || 'other', L); this._rect(ctx, d.x, d.z + 0.23, 0.7, 0.08); }
+      if (!ch || ch.state === 'gone' || ch.state === 'leave') continue;
+      const on = ch._monK > 0.05;
+      if (on) { ctx.fillStyle = ch._monCat === 'skill' ? this.tokens.skill : catColor(ch._monCat || 'other', L); this._rect(ctx, d.x, d.z + 0.23, 0.7, 0.08); }
+      this._deskProps2D(ctx, d.occupant, s, now, d.x, d.z, 0, 1, d.aux ? 0.55 : 0.65, null, 0, r._alpha); // 자리 분위기
     }
     const act = r._act;
     if (act && s > 2.5) {
@@ -1076,6 +1085,36 @@ export class Voxel2DView extends FlatView {
     ctx.globalAlpha = 1;
   }
 
+  /** 복셀 effort 그릴 값(3D _effState 와 같은 vxEffortState — 보간 중이면 다시 그리기 요청) */
+  _effState2D(id, now) {
+    const n = id != null && this._nodeMap().get(id);
+    if (!n) return null;
+    const tw = this._effTw || (this._effTw = new EffortTween());
+    const st = vxEffortState(n, tw, now * 1000, { reduced: this.reduced, rate: this.timeScale || 1 });
+    if (st && st.busy) this._effBusy = true;
+    return st;
+  }
+  /**
+   * 2D 책상 소품(위에서 본 자리 분위기): 서류(흰 사각)·머그(흰 사각 + 커피 점)·캔·스탠드 갓 + 빛 웅덩이(색온도, 옅게).
+   * (x, z) 상판 가운데, (fx, fz) 직원이 보는 앞, hw 상판 반폭, lampAt 정적 스탠드 자리, th 회전(도, 연구소), 축척 s 가 작으면 생략.
+   */
+  _deskProps2D(ctx, id, s, now, x, z, fx, fz, hw, lampAt, th, alpha = 1) {
+    if (s < 12) return;
+    const st = this._effState2D(id, now);
+    if (!st) return;
+    const P = deskProps(st.level, { hw, lampAt });
+    if (!P.boxes) return;
+    const pal = this.pal, top = pal.deskTop, f = { x: fx, z: fz }, A = alpha ?? 1;
+    for (const it of P.items) {
+      if (it.pole) continue; // 위에서는 기둥이 갓에 가림(갓 = 색온도 빛 사각)
+      const src = it.c[0] === '#' ? it.c : pal[it.c] || pal.paper;
+      ctx.globalAlpha = A * (it.pool ? 0.38 : 1);
+      ctx.fillStyle = st.ghost > 0 ? mixColor(src, top, st.ghost) : src;
+      const w = deskToWorld(x, z, f, it.u, it.v);
+      if (th) { this._quad(ctx, w.x, w.z, it.sx, it.sz, th); ctx.fill(); } else this._rect(ctx, w.x, w.z, it.sx, it.sz);
+    }
+    ctx.globalAlpha = A;
+  }
   _drawMachine(ctx, m, v, s, now) {
     const pal = this.pal, t = this.tokens;
     const A = (m.pos && this.roomsById.get(m.pos.roomId) && this.roomsById.get(m.pos.roomId)._alpha) ?? 1;
@@ -1194,9 +1233,13 @@ export class Voxel2DView extends FlatView {
     // 복장: 3D 와 같은 외형(wardrobe, 노드 id 시드) — 위에서 본 어깨 원 = 정장 재킷·외투·캐주얼 윗옷 색(운영자는 형광 조끼),
     // 머리 = 머리색·모자색(민머리면 없음). 종류 색은 팀원 테두리(예전 셔츠 색의 뜻), 팀장 테두리는 금색 그대로
     const role = roleOf(ch.kind, ch.seat ? ch.seat.kind : null, ch.lead);
-    const ap = wardrobe.get(ch.id, role, ch.room ? ch.room.id : '');
+    const ap0 = wardrobe.get(ch.id, role, ch.room ? ch.room.id : '');
+    const es = this._effState2D(ch.id, now); // 복셀 effort 차림(3D 와 같은 dress — 위에서는 겉옷 색·헤드셋·고글만 보임)
+    const ap = es ? dress(ap0, es.level, { venue: ch.room && ch.room.type === 'lab' ? 'lab' : 'office' }) : ap0;
+    const top0 = role === 'operator' ? pal.vest : es ? body2D(ap, role) : ap.topC;
+    const topC = es && es.ghost > 0 ? mixColor(top0, t.bg, es.ghost) : top0; // 요청값만이면 옷 색을 옅게
     const hot = ch._heat && ch._heat.on ? ch._heat : null;
-    const body = doneLead ? t.stopped : hot ? heatBody(role === 'operator' ? pal.vest : ap.topC, hot, L) : role === 'operator' ? pal.vest : ap.topC; // 과열이면 옷이 단계색으로 물듦
+    const body = doneLead ? t.stopped : hot ? heatBody(topC, hot, L) : topC; // 과열이면 옷이 단계색으로 물듦
     ctx.globalAlpha = alpha;
     if (R < 2) { // 아주 작게 보여도 과열은 바닥 원·김으로 남긴다(2026-10-30)
       if (hot) drawHeatUnder(ctx, ch, x, y, R, now, this.reduced, L, alpha);
@@ -1235,6 +1278,12 @@ export class Voxel2DView extends FlatView {
       const hr = hatC ? 0.36 : st === 'curly' || st === 'curlylong' ? 0.38 : st === 'crew' || st === 'pixie' ? 0.27 : 0.3;
       ctx.beginPath(); ctx.arc(hx, hy, R * hr, 0, Math.PI * 2); ctx.fill();
       if (ap.hairAcc && !hatC && R > 4) { ctx.fillStyle = ap.hairAccC; ctx.beginPath(); ctx.arc(hx - dv.z * R * 0.2, hy + dv.x * R * 0.2, R * 0.09, 0, Math.PI * 2); ctx.fill(); }
+    }
+    if (R > 4 && (ap.headset || ap.goggle || (ap.coat === 'open'))) { // 위에서 본 차림: 헤드셋(오른쪽 귀 덮개) · 고글 끈 · 열린 실험복 앞섶(안 옷 색)
+      const px = -dv.z, pz = dv.x, hk = 0.3 + headLean(ch._heat), hx = x + dv.x * R * hk, hy = y + dv.z * R * hk;
+      if (ap.coat === 'open') { ctx.fillStyle = ap0.topC; ctx.beginPath(); ctx.arc(x + dv.x * R * 0.62, y + dv.z * R * 0.62, R * 0.26, 0, Math.PI * 2); ctx.fill(); }
+      if (ap.goggle) { ctx.strokeStyle = EFF_HEX.lens; ctx.lineWidth = Math.max(1, R * 0.14); ctx.beginPath(); ctx.moveTo(hx + px * R * 0.34, hy + pz * R * 0.34); ctx.lineTo(hx - px * R * 0.34, hy - pz * R * 0.34); ctx.stroke(); }
+      if (ap.headset) { ctx.fillStyle = EFF_HEX.headset; ctx.beginPath(); ctx.arc(hx - px * R * 0.36, hy - pz * R * 0.36, R * 0.14, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(hx - px * R * 0.18 + dv.x * R * 0.32, hy - pz * R * 0.18 + dv.z * R * 0.32, R * 0.07, 0, Math.PI * 2); ctx.fill(); }
     }
     if (ap.pack && R > 4 && role !== 'operator') { ctx.fillStyle = ap.pack; ctx.fillRect(x - dv.x * R * 0.75 - R * 0.3, y - dv.z * R * 0.75 - R * 0.3, R * 0.6, R * 0.6); }
     // 지휘·감독: 팀원 쪽으로 뻗은 오른팔(소매 선 + 손)

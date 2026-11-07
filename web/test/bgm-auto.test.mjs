@@ -137,10 +137,10 @@ test('선택값 이행: 없음·예전 기본 로파이 → 자동, 다른 곡·
   assert.equal(normalizeSel('auto', tr), 'auto');
 });
 
-test('audio.js·app.js 연결: 활동 출처·이행 키·일시정지 시 단계 시계 멈춤', () => {
+test('audio.js·app.js 연결: 활동 출처·이행(§146 loadPrefs)·일시정지 시 단계 시계 멈춤', () => {
   const a = readFileSync(new URL('../audio.js', import.meta.url), 'utf8');
   assert.match(a, /setActivitySource\(fn\)/);
-  assert.match(a, /initialSel\(lsGet\(TRACK_KEY\), lsGet\(MIG_KEY\) === '2'/);
+  assert.match(a, /loadPrefs\(lsGet, this\.tracks\)/); // 이행(예전 ccviz.bgm.track → 선곡 기준)은 bgm-list loadPrefs
   assert.match(a, /if \(\(this\.paused \|\| \(this\._isHeld && this\._isHeld\(\)\)\) && !first\) return;/);
   const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
   assert.match(app, /music\.setActivitySource\(\(\) => activity\.sample\(clockFn\(\), store\.nodes\.values\(\)\), \(\) => pauseBuf\.paused\)/);

@@ -12,7 +12,13 @@ export const MAIN_RIG = {
   C: { plate: 0.95, plateH: 0.1, shell: 0.83, colH: 1.13, spine: 0.19, band: 0.86, bandH: 0.1, bandY: [0.18, 0.55, 0.92], capH: 0.09 },
   TEX_FPS: 12,   // 띠 글 텍스처 다시 그리기 상한(바뀔 때만)
   LOD_PX: 12,    // 화면 반지름이 이보다 작으면 세부(자이로·불티·띠 글 흐름) 멈춤
+  // 깊이를 남기지 않는 부분(유리·가산 띠·선·자이로·빛무리, 가림 페이드로 깊이를 끈 몸)의 그리기 순서. 칩 깊이(0.9)·색(1)·콘솔(1.6)·네모 터미널 앞면 글(1.7) 다음,
+  // 빔(2) 전 — 순서 0 이면 칩보다 먼저 칠해져 뒤에 있는 노드(특히 메인 옆 네모 터미널)가 그 위를 덮어 앞에 있는 것처럼 보였다(2026-11-04)
+  LATE_RO: 1.8,
 };
+
+/** 메인 몸 부분의 renderOrder: 깊이를 쓰는 몸 = 0(칩보다 먼저 깊이를 남겨 뒤 노드를 가림), 깊이를 안 쓰는 부분 = LATE_RO(뒤 노드 위에 섞임) */
+export function mainPartOrder(depthWrite) { return depthWrite ? 0 : MAIN_RIG.LATE_RO; }
 
 /**
  * 상태 → 몸 연출 값(반응로·기둥 공용). st = NODE_STATE 번호, t = 초, reduced = 움직임 줄이기.

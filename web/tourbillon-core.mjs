@@ -115,3 +115,58 @@ export const ESC_ARBOR = TOURB_GEO.FOURTH_R + PINION_R;
 
 /** 2D 위에서 본 바퀴의 살·나사 각(돌린 각 a, 개수 n, 시작 위상 p) */
 export function spokeAngles(a, n, p = 0, out = []) { out.length = 0; for (let i = 0; i < n; i++) out.push(a + p + (i * TAU) / n); return out; }
+
+// ---------- 추론 effort — Planet 모양 규칙(3D planet-tourb.js·2D flat/planet-deco2d.js 가 같은 값을 쓴다) ----------
+// 시각 단계 4개(low · medium · high · xhigh·max — xhigh 와 max 는 같은 모습, effort-core EFFORT_TIER).
+// 서브에이전트 = 단일 케이지 자오선 호 수(EFFORT.ARCS: 2 · 3 · 4 · 6, 미상 = 지금 3) · 맨 위 확정 = 안쪽 케이지 고리 하나 더(반대로 째깍, 닫힘).
+// 케이지가 없는 claude -p·워크플로 에이전트 = 적도 바로 밖 가는 고리 위 보석 알 수(= 단계 1～4), 맨 위 확정 = 고리가 잉크로 밝아짐(닫힘).
+// 요청값만(응답 전) = 늘어날(또는 빠질) 호를 40% 투명 · 보석은 받침(베젤)만. 단계 표·LOD·잉크는 effort-core.mjs(EFFORT·effortLod·effortInk).
+/** 형상(서브 케이지는 TOURB_GEO.SUB_R 기준 단위, 보석 고리는 고리 반지름 = 1) */
+export const TOURB_EFF = {
+  ARC_MAX: 6,          // 케이지 지오메트리에 미리 만들어 두는 호 수(쓰지 않는 호는 셰이더가 접음)
+  ARC_BASE: 3,         // 미상·medium 의 호 수(지금 모습)
+  HOLLOW_A: 0.4,       // 요청 상태의 늘어날 호·안쪽 케이지 투명도
+  INNER_R: 1.08,       // 서브 안쪽 케이지 고리(작은 본체 1 과 바깥 테 1.2 사이 — 몸체 밖)
+  INNER_TILT: 0.5,     // 안쪽 고리 기울기(rad, 메인 TOURB_GEO.INNER_TILT 와 같은 감각)
+  INNER_TAG: 7,        // 정점 꼬리표: 0～5 = 호(팔·발 나사), 7 = 안쪽 고리, −1 = 그 밖(테·톱니·루비)
+  GLINT_LEN: 0.14,     // 맨 위 단계 반짝임: 주기(EFFORT.GLINT_MS) 가운데 이만큼 동안 안쪽 고리를 따라 한 바퀴
+  GEM_N: 4,            // 보석 자리(시각 단계 수)
+  GEM_STEP: (2 * Math.PI) / 9, // 보석 간격(40° — 네 알이면 앞쪽 120°, 흐름 눈금 간격과 같음)
+  GEM_D: 0.11,         // 보석 지름(고리 반지름 배)
+  RING_W: 0.03,        // 보석 고리 굵기(고리 반지름 배)
+  GEM_RING: { 'claude-p': 0.62, 'workflow-agent': 1.22 }, // 보석 고리 반지름(본체 반지름 배 — claude -p 는 작은 본체 둘레, 워크플로 에이전트는 팔면체 둘레)
+};
+/** 꾸밈 없음(미상·대상 아님·LOD 0) = 지금 모습 */
+export const TOURB_EFF_NONE = Object.freeze({ arcs: TOURB_EFF.ARC_BASE, lo: TOURB_EFF.ARC_MAX, inner: 0, gems: 0, hollow: 0, ring: 0 });
+/**
+ * effortGlyph 결과(g, 없으면 null) + effortLod 단계(lod 0 숨김 · 1 채운 칸만 · 2 전부) + 호 수 표(EFFORT.ARCS) → Planet 목표값(보간 전).
+ *  arcs  케이지 호 수(2～6) · lo 이 번호부터의 호는 HOLLOW_A 투명(확정 = ARC_MAX 라 없음)
+ *  inner 안쪽 케이지 불투명도(0 · 맨 위 요청 HOLLOW_A · 맨 위 확정 1) · gems 보석 수(0～4) · hollow 보석이 받침만(요청 상태)
+ *  ring  보석 고리(0 숨김 · 0.5 dim · 1 잉크 = 맨 위 닫힘)
+ * LOD 1 은 채운 칸만: 요청 상태(속 빈 칸)·안쪽 케이지·보석 고리(닫힘·빈 자리)를 빼고 확정된 호·보석만.
+ */
+export function tourbEffort(g, lod, arcsTable) {
+  if (!g || !(lod >= 1) || !(g.level >= 1)) return TOURB_EFF_NONE;
+  const n = arcsTable[g.level];
+  if (g.confirmed) return { arcs: n, lo: TOURB_EFF.ARC_MAX, inner: g.closed && lod >= 2 ? 1 : 0, gems: g.level, hollow: 0, ring: lod >= 2 ? (g.closed ? 1 : 0.5) : 0 };
+  if (lod < 2) return TOURB_EFF_NONE;
+  const base = TOURB_EFF.ARC_BASE;
+  return { arcs: Math.max(n, base), lo: Math.min(n, base), inner: g.top ? TOURB_EFF.HOLLOW_A : 0, gems: g.level, hollow: 1, ring: 0.5 };
+}
+/** 케이지 호 i 의 방위(rad, 케이지 좌표) — 호 수 c(보간 중 소수)로 고르게(360°/c). 셰이더와 같은 식 */
+export const cageArcAngle = (i, c) => (i * TAU) / Math.max(1, c);
+/** 케이지 호 i 의 불투명도: 호 수 c 안에서 차오름(소수 = 반쯤) × 요청 상태 lo 이상이면 HOLLOW_A. 셰이더와 같은 식 */
+export function cageArcAlpha(i, c, lo = TOURB_EFF.ARC_MAX) {
+  const f = Math.min(1, Math.max(0, c - i));
+  return i >= lo ? f * TOURB_EFF.HOLLOW_A : f;
+}
+/** 보석 j 의 방위(정면 = 0 기준 ±, rad) — 보석 수 c(보간 중 소수)를 가운데 맞춤. 셰이더와 같은 식 */
+export const gemAngle = (j, c) => (j - (Math.max(1, c) - 1) / 2) * TOURB_EFF.GEM_STEP;
+/** 보석 j 의 불투명도(차오름) — 요청 상태면 보석 대신 받침만(그리는 쪽이 고름) */
+export const gemAlpha = (j, c) => Math.min(1, Math.max(0, c - j));
+/** 맨 위 단계 반짝임 위상(0～1, 반짝이는 동안만) 또는 −1. nowMs·seed(0～1)·주기 ms */
+export function effortGlint(nowMs, seed, periodMs) {
+  if (!(periodMs > 0)) return -1;
+  const u = (((nowMs / periodMs + seed) % 1) + 1) % 1;
+  return u < TOURB_EFF.GLINT_LEN ? u / TOURB_EFF.GLINT_LEN : -1;
+}

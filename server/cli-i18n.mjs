@@ -293,6 +293,8 @@ const en = {
   archive list [--dir D] [--json]               list archived sessions (archive: --dir > CCVIZ_ARCHIVE > config archiveDir)
   ctl <command> [value] [--client id|name] [--temp] [--json] | ctl clients | ctl state | ctl help
                                                 control open viewers from this PC (theme, view, scope, sound, pause…)
+  interact [list] | on | off | allow <alias|id> | revoke <alias|id> | remove <alias|id> | audit
+                                                Interactive panel (off by default): turn on/off, approve devices that may message running sessions
   job add --log F [--pid N] [--pattern RE] [--end F] [--expect 2h] | job list | find | rm | prune
                                                 show a long job started outside Claude (detached process) next to its project (PID found from the log path if omitted)
   update [--check [--json] [--force]] [--yes]   check GitHub for a newer release (cached 24h) / update this git clone (fast-forward), the copied skill and the running server
@@ -562,6 +564,8 @@ const ko = {
   archive list [--dir D] [--json]               보관된 세션 목록 (보관함: --dir > CCVIZ_ARCHIVE > config archiveDir)
   ctl <명령> [값] [--client id|이름] [--temp] [--json] | ctl clients | ctl state | ctl help
                                                 열린 화면을 이 PC 에서 조작(테마·표현·범위·소리·일시정지…)
+  interact [list] | on | off | allow <별칭|id> | revoke <별칭|id> | remove <별칭|id> | audit
+                                                Interactive 패널(기본 꺼짐): 켬/끔, 떠 있는 세션에 메시지를 보낼 기기 승인
   job add --log F [--pid N] [--pattern 정규식] [--end F] [--expect 2h] | job list | find | rm | prune
                                                 Claude 밖에서 따로 띄운 오래 도는 작업을 프로젝트 옆에 표시(--pid 없으면 로그 경로로 찾음)
   update [--check [--json] [--force]] [--yes]   새 릴리스 확인(24시간 캐시) / 이 git 클론(fast-forward)·복사한 스킬·실행 중 서버 갱신

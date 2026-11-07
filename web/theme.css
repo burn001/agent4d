@@ -34,6 +34,8 @@
   --accent: #7aa2ff;
   --shadow: 0 6px 24px rgba(0, 0, 0, .35);
   --label-shadow: 0 0 4px #0b0f17, 0 0 8px #0b0f17;
+  /* 추론 effort 무늬 잉크(무채색, web/effort-core.mjs EFFORT_INK 와 같은 값) */
+  --effort-ink: rgba(230, 233, 239, .62); --effort-ink-dim: rgba(230, 233, 239, .20); --effort-glint: rgba(255, 255, 255, .85);
 }
 
 /* JS 가 data-theme 를 붙이기 전에도 OS 설정을 따른다 */
@@ -49,6 +51,7 @@
     --muted: #5b6577; --border: rgba(15, 23, 42, .12); --chip-bg: rgba(255, 255, 255, .88);
     --hover: rgba(47, 91, 211, .08); --accent: #2f5bd3; --shadow: 0 6px 24px rgba(15, 23, 42, .12);
     --label-shadow: 0 0 4px #f5f6fa, 0 0 8px #f5f6fa;
+    --effort-ink: rgba(21, 26, 35, .58); --effort-ink-dim: rgba(21, 26, 35, .16); --effort-glint: rgba(21, 26, 35, .85);
   }
 }
 :root[data-theme="light"] {
@@ -62,6 +65,7 @@
   --muted: #5b6577; --border: rgba(15, 23, 42, .12); --chip-bg: rgba(255, 255, 255, .88);
   --hover: rgba(47, 91, 211, .08); --accent: #2f5bd3; --shadow: 0 6px 24px rgba(15, 23, 42, .12);
   --label-shadow: 0 0 4px #f5f6fa, 0 0 8px #f5f6fa;
+  --effort-ink: rgba(21, 26, 35, .58); --effort-ink-dim: rgba(21, 26, 35, .16); --effort-glint: rgba(21, 26, 35, .85);
 }
 
 /* UI 글꼴 한 곳 — body·계획판(.pb)·툴팁이 이 값을 쓴다. 웹 글꼴 없음(시스템 글꼴만 — 불러오기 경합 없음) */
@@ -149,12 +153,25 @@ button, select, input { font: inherit; color: inherit; }
   #session-select { max-width: 150px; }
   #conn b { display: inline-block; white-space: nowrap; vertical-align: bottom; max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
 }
-:root { --panel-w: 360px; }
+:root {
+  /* 패널 크기: 오른쪽 배치는 너비(--panel-w), 아래 배치(휴대폰 세로)는 높이(--panel-h). *-open 은 panel-resize.js 가 저장값으로 덮는다 */
+  --panel-w-open: min(360px, 50vw); --panel-w: var(--panel-w-open);
+  --panel-h-open: 45vh; --panel-h: 0px;
+  --kb-inset: 0px; /* 가상 키보드가 가린 아래쪽(아래 배치일 때만 panel-resize.js 가 씀) */
+}
 body.panel-collapsed { --panel-w: 40px; }
+@media (max-width: 719px) and (orientation: portrait) { /* 아래 배치 — panel-size.mjs DOCK_QUERY 와 같은 글자 */
+  :root, body.panel-collapsed { --panel-w: 0px; }
+  :root { --panel-h: var(--panel-h-open); }
+  body.panel-collapsed { --panel-h: 40px; }
+}
+/* 패널 위치: 화면을 덮는 띠·무대는 --inset-r(오른쪽 패널 폭)·--inset-l(왼쪽 패널 폭)만 본다. 왼쪽 선택은 아래 배치(휴대폰 세로)에서는 무시 */
+body { --inset-r: var(--panel-w); --inset-l: 0px; }
+body { --stage-cx: calc(var(--inset-l) + (100vw - var(--inset-l) - var(--inset-r)) / 2); } /* 무대 가운데 x(가운데 띄우는 배지·안내가 패널 자리를 비킴) */
+@media not all and (max-width: 719px) and (orientation: portrait) { body.panel-left { --inset-r: 0px; --inset-l: var(--panel-w); } }
 
 /* ---------- 무대 ---------- */
-#stage { position: fixed; top: var(--topbar-h, 48px); left: 0; right: 360px; bottom: 0; transition: right .25s ease; }
-body.panel-collapsed #stage { right: 40px; }
+#stage { position: fixed; top: var(--topbar-h, 48px); left: var(--inset-l); right: var(--inset-r); bottom: var(--panel-h); transition: left .25s ease, right .25s ease, bottom .25s ease; }
 #stage canvas { display: block; width: 100%; height: 100%; outline: none; touch-action: none; }
 #labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 
@@ -205,20 +222,20 @@ body.panel-collapsed #stage { right: 40px; }
 
 /* 카메라 상태 칩 */
 #cam-chip {
-  position: fixed; top: calc(var(--topbar-h, 48px) + 10px); left: 12px; z-index: 15; padding: 4px 10px; border-radius: 999px;
+  position: fixed; top: calc(var(--topbar-h, 48px) + 10px); left: calc(var(--inset-l) + 12px); z-index: 15; padding: 4px 10px; border-radius: 999px;
   background: var(--chip-bg); border: 1px solid var(--border); color: var(--muted);
   font-size: 12px; pointer-events: none; box-shadow: var(--shadow);
 }
 #cam-chip.manual { color: var(--text); border-color: var(--skill); }
 #stats-chip {
-  position: fixed; left: 12px; bottom: 12px; z-index: 15; padding: 3px 9px; border-radius: 999px;
+  position: fixed; left: calc(var(--inset-l) + 12px); bottom: 12px; z-index: 15; padding: 3px 9px; border-radius: 999px;
   background: var(--chip-bg); border: 1px solid var(--border); color: var(--muted); font-size: 11.5px;
   pointer-events: none;
 }
 
 /* ---------- 사이드 패널 ---------- */
 #panel {
-  position: fixed; top: var(--topbar-h, 48px); right: 0; bottom: 0; width: 360px; z-index: 18;
+  position: fixed; top: var(--topbar-h, 48px); right: 0; bottom: 0; width: var(--panel-w); z-index: 18;
   display: flex; flex-direction: column;
   background: var(--panel-bg); border-left: 1px solid var(--border);
   backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
@@ -302,9 +319,30 @@ body.panel-collapsed #stream,
 body.panel-collapsed #to-latest { display: none !important; }
 body.panel-collapsed #panel-toggle svg { transform: rotate(180deg); }
 
+/* ---------- 패널 크기 손잡이 ---------- */
+#panel-resizer {
+  position: absolute; z-index: 3; left: -5px; top: 0; bottom: 0; width: 12px; cursor: ew-resize;
+  touch-action: none; -webkit-tap-highlight-color: transparent; outline: none;
+}
+#panel-resizer i { position: absolute; left: 5px; top: 50%; width: 4px; height: 36px; margin-top: -18px; border-radius: 2px; background: var(--muted); opacity: .3; transition: opacity .15s, background .15s; pointer-events: none; }
+#panel-resizer::after { content: ""; position: absolute; left: 5px; top: 0; bottom: 0; width: 2px; background: var(--accent); opacity: 0; transition: opacity .15s; pointer-events: none; }
+#panel-resizer:hover i, #panel-resizer:focus-visible i, body.panel-resizing #panel-resizer i { opacity: .9; background: var(--accent); }
+#panel-resizer:focus-visible::after, body.panel-resizing #panel-resizer::after { opacity: .6; }
+body.panel-collapsed #panel-resizer { display: none; }
+/* 왼쪽 배치: 손잡이는 오른쪽 변, 접기 화살표는 반대로, 경계선은 오른쪽 */
+@media not all and (max-width: 719px) and (orientation: portrait) {
+  body.panel-left #panel { right: auto; left: 0; border-left: none; border-right: 1px solid var(--border); }
+  body.panel-left #panel-resizer { left: auto; right: -5px; }
+  body.panel-left #panel-toggle svg { transform: rotate(180deg); }
+  body.panel-left.panel-collapsed #panel-toggle svg { transform: none; }
+}
+/* 끄는 동안: 무대·띠가 손을 따라오도록 전환을 끄고, 글자 선택·커서 바뀜을 막는다 */
+body.panel-resizing, body.panel-resizing * { transition: none !important; user-select: none; -webkit-user-select: none; }
+body.panel-resizing { cursor: ew-resize; }
+
 /* ---------- 범례 ---------- */
 #legend {
-  position: fixed; top: calc(var(--topbar-h, 48px) + 44px); left: 12px; z-index: 16; width: 250px; max-height: calc(100vh - var(--topbar-h, 48px) - 92px); overflow: auto;
+  position: fixed; top: calc(var(--topbar-h, 48px) + 44px); left: calc(var(--inset-l) + 12px); z-index: 16; width: 250px; max-height: calc(100vh - var(--topbar-h, 48px) - 92px); overflow: auto;
   padding: 10px 12px; border-radius: 10px; background: var(--panel-bg); border: 1px solid var(--border);
   box-shadow: var(--shadow); font-size: 12px;
 }
@@ -317,14 +355,14 @@ body.panel-collapsed #panel-toggle svg { transform: rotate(180deg); }
 
 /* 메시지(인증 실패 등) */
 #notice {
-  position: fixed; left: 50%; top: 40%; transform: translate(-50%, -50%); z-index: 30; display: none;
+  position: fixed; left: var(--stage-cx, 50%); top: 40%; transform: translate(-50%, -50%); z-index: 30; display: none;
   padding: 16px 20px; border-radius: 12px; background: var(--panel-bg); border: 1px solid var(--border);
   box-shadow: var(--shadow); max-width: min(420px, calc(100vw - 32px)); text-align: center;
 }
 #notice.on { display: block; }
 /* 첫 연결 로딩 표시(전체 보기는 모든 루트를 읽느라 3초 안팎) */
 #loading {
-  position: fixed; left: 50%; top: calc(var(--topbar-h, 48px) + 56px); transform: translateX(-50%); z-index: 25;
+  position: fixed; left: var(--stage-cx, 50%); top: calc(var(--topbar-h, 48px) + 56px); transform: translateX(-50%); z-index: 25;
   display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-radius: 999px;
   background: var(--panel-bg); border: 1px solid var(--border); box-shadow: var(--shadow); font-size: 13px; color: var(--muted);
   max-width: calc(100vw - 32px);
@@ -360,10 +398,12 @@ body.panel-collapsed #panel-toggle svg { transform: rotate(180deg); }
   #session-select { max-width: 88px; }
   #topbar { column-gap: 6px; padding-left: 8px; padding-right: 8px; }
   .tb { padding: 0 8px; height: 28px; font-size: 12px; }
-  #stage { top: var(--topbar-h, 48px); right: 0; bottom: 45vh; transition: bottom .25s ease; }
-  body.panel-collapsed #stage { top: var(--topbar-h, 48px); right: 0; bottom: 40px; }
+}
+/* 아래 배치(휴대폰 세로): 패널은 화면 아래 --panel-h 높이(위쪽 변 손잡이로 조절), 무대·띠는 그 위. 가상 키보드가 오르면 패널이 --kb-inset 만큼 올라탐 */
+@media (max-width: 719px) and (orientation: portrait) {
   #panel {
-    top: auto; left: 0; right: 0; bottom: 0; width: auto; height: 45vh;
+    top: auto; left: 0; right: 0; bottom: var(--kb-inset); width: auto; height: var(--panel-h);
+    max-height: calc(var(--vv-h, 100dvh) - var(--topbar-h, 48px));
     border-left: none; border-top: 1px solid var(--border); border-radius: 12px 12px 0 0;
   }
   body.panel-collapsed #panel { width: auto; height: 40px; }
@@ -371,10 +411,16 @@ body.panel-collapsed #panel-toggle svg { transform: rotate(180deg); }
   body.panel-collapsed #panel header h2 { writing-mode: horizontal-tb; letter-spacing: 0; }
   #panel-toggle svg { transform: rotate(90deg); }
   body.panel-collapsed #panel-toggle svg { transform: rotate(-90deg); }
+  #panel-resizer { left: 0; right: 0; top: -10px; bottom: auto; width: auto; height: 20px; cursor: ns-resize; }
+  #panel-resizer i { left: 50%; top: 12px; width: 40px; height: 4px; margin: 0 0 0 -20px; }
+  #panel-resizer::after { left: 0; right: 0; top: 10px; bottom: auto; width: auto; height: 2px; }
+  body.panel-resizing { cursor: ns-resize; }
   #cam-chip { top: calc(var(--topbar-h, 48px) + 8px); }
   #legend { top: calc(var(--topbar-h, 48px) + 40px); }
-  #stats-chip { bottom: calc(45vh + 8px); }
-  body.panel-collapsed #stats-chip { bottom: 48px; }
+  #stats-chip { bottom: calc(var(--panel-h) + 8px); }
+  /* 가상 키보드가 떠 있는 동안(body.kb-open, panel-resize.js syncKb): 패널이 키보드 위로 올라타 아래 띠를 덮으므로 띠를 숨긴다.
+     띠를 패널 위로 올리는 안은 키보드 + 패널로 남은 무대가 거의 없어(390×844 에서 무대 100px 안팎) 오히려 무대를 가려 택하지 않음. 키보드가 내려가면 그대로 돌아옴 */
+  body.kb-open #timeline, body.kb-open #tl-zone, body.kb-open .mt, body.kb-open #replay-bar, body.kb-open #stats-chip, body.kb-open #pov-hint { visibility: hidden !important; pointer-events: none !important; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -385,9 +431,9 @@ body.panel-collapsed #panel-toggle svg { transform: rotate(180deg); }
 :root { --tl-h: 30px; }
 .ln .msg .tag.stop { color: var(--stopped); border-color: var(--stopped); }
 #timeline {
-  position: fixed; left: 0; right: var(--panel-w, 360px); bottom: 0; height: var(--tl-h); z-index: 14;
+  position: fixed; left: var(--inset-l); right: var(--inset-r); bottom: 0; height: var(--tl-h); z-index: 14;
   background: color-mix(in srgb, var(--bg) 62%, transparent); border-top: 1px solid var(--border);
-  transition: right .25s ease;
+  transition: left .25s ease, right .25s ease;
 }
 #timeline canvas { display: block; }
 #timeline .tl-hint { position: absolute; right: 6px; top: -16px; font-size: 10.5px; color: var(--muted); pointer-events: none; opacity: .8; }
@@ -411,13 +457,10 @@ html body.replaying #stats-chip { bottom: calc(56px + var(--tl-h) + 10px); }
   html body.replaying #timeline { bottom: 92px; }
   html body.replaying #stats-chip { bottom: calc(92px + var(--tl-h) + 8px); }
 }
-@media (max-width: 400px) {
-  #timeline { right: 0; bottom: 45vh; transition: bottom .25s ease; }
-  body.panel-collapsed #timeline { bottom: 40px; }
-  html #stats-chip { bottom: calc(45vh + var(--tl-h) + 8px); }
-  html body.panel-collapsed #stats-chip { bottom: calc(40px + var(--tl-h) + 8px); }
-  html body.replaying #timeline { bottom: calc(45vh + 92px); }
-  html body.replaying.panel-collapsed #timeline { bottom: calc(40px + 92px); }
+@media (max-width: 719px) and (orientation: portrait) {
+  #timeline { right: 0; bottom: var(--panel-h); transition: bottom .25s ease; }
+  html #stats-chip { bottom: calc(var(--panel-h) + var(--tl-h) + 8px); }
+  html body.replaying #timeline { bottom: calc(var(--panel-h) + 92px); }
 }
 .ln .msg .ntitle { color: var(--muted); font-style: italic; }
 
@@ -438,3 +481,10 @@ html body.replaying #stats-chip { bottom: calc(56px + var(--tl-h) + 10px); }
 .who b.sess { color: var(--sc); }
 .who i.sess { box-shadow: 0 0 0 2px var(--sc); }
 .ln .msg .tag.conflict { color: var(--conflict); border-color: var(--conflict); }
+
+/* 추론 effort 4칸 미니 미터(web/effort-core.mjs effortMeterHtml, xhigh·max 는 같은 맨 위 칸 + 닫힘 줄) — 신호 막대형, 무채색 잉크, 간격 2px(4칸이라 넓혀 셈이 쉽게 · 폭은 예전 5칸과 같은 14px) */
+.eff-meter { display: inline-flex; align-items: flex-end; gap: 2px; height: 7px; vertical-align: baseline; margin: 0 3px; position: relative; }
+.eff-meter > i { display: block; width: 2px; border-radius: 1px; background: var(--effort-ink-dim); }
+.eff-meter > i.on { background: var(--effort-ink); }
+.eff-meter.hollow > i.on { background: repeating-linear-gradient(to top, var(--effort-ink) 0 1px, transparent 1px 2px); } /* 요청값만(응답 전): 2px 막대는 테두리로 비우면 안 보여 1px 줄무늬로 */
+.eff-meter.closed::after { content: ""; position: absolute; left: 0; right: 0; top: -2px; height: 1px; border-radius: 1px; background: var(--effort-ink); }

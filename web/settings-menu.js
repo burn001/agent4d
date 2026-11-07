@@ -1,6 +1,6 @@
 // UI 정리: 상단 바는 꼭 필요한 것만 두고 나머지 조작은 ⚙ 설정 메뉴 하나로 옮긴다.
 //  · 상단 바: 로고 · 연결 점(글자 없이, title 로 설명) · 프로젝트 선택 · 재생 · [빈칸] · 컨텍스트 알약 · 한도 게이지(작은 묶음) · 소리 · ⚙
-//  · ⚙ 메뉴: 표현(흐름·Planet·복셀 / 3D·2D) · 카메라(자동 카메라·구도) · 표시(완료 표시·배경·범례·테마) · 소리(안내 — 조작은 소리 팝업) · 실시간 일시정지 · 언어
+//  · ⚙ 메뉴: 표현(흐름·Planet·복셀 / 3D·2D) · 카메라(자동 카메라·구도) · 표시(완료 표시·배경·범례·RAM 게이지·테마) · 소리(안내 — 조작은 소리 팝업) · 실시간 일시정지 · 언어
 // 기존 버튼 DOM 을 그대로 옮긴다(id·이벤트·저장값·URL 파라미터 그대로 — 기능 삭제 없음). 메뉴는 키보드로 열고(Enter/Space)
 // Esc 로 닫으며(⚙ 로 포커스 복귀), 열면 첫 조작으로 포커스, 밖을 누르거나 포커스가 밖으로 나가면 닫힌다. 좁은 화면은 화면 폭 시트.
 // 화면 아래 타임라인(매크로·이벤트 띠)은 평소 숨기고(자리는 그대로 — 카메라 맞춤이 튀지 않게) 재생 중·마우스를 올렸을 때·포커스가 들어왔을 때만 보인다.
@@ -9,6 +9,9 @@ import { t, lang, langPref, setLangPref } from './i18n.mjs';
 import { quipsOn, setQuipsOn, onQuips } from './voxel/quip-pref.mjs'; // 복셀 생각·말풍선
 import { stencilOn, setStencilOn, onStencil } from './voxel/stencil-pref.mjs'; // 복셀 바닥 스텐실
 import { labWalkOn, setLabWalkOn, onLabWalk } from './lab/lab-pref.mjs'; // 복셀 연구소 현장 걷기
+import { dangerAlertsOn, setDangerAlertsOn, onDangerAlerts } from './danger-pref.mjs'; // 위험 동작 경고
+import { memGaugeOn, setMemGaugeOn, onMemGauge } from './sysmem-pref.mjs'; // 시스템 메모리 게이지
+import { panelSide, setPanelSide, onPanelSide } from './panel-side.mjs'; // 패널 위치
 
 const $ = (id) => document.getElementById(id);
 
@@ -57,6 +60,23 @@ function langButtons() {
   return [wrap];
 }
 
+/** 패널 위치: 오른쪽(기본) · 왼쪽 — 기기별 저장 'ccviz.panelSide' */
+function panelSideButtons() {
+  const wrap = document.createElement('div');
+  wrap.className = 'sm-lang'; wrap.id = 'sm-panel-side'; wrap.setAttribute('role', 'group'); wrap.setAttribute('aria-label', t('core.settings.row.panel'));
+  wrap.title = t('core.panel.title');
+  const btns = {};
+  for (const s of ['right', 'left']) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'tb'; b.dataset.side = s; b.textContent = t('core.panel.' + s);
+    b.addEventListener('click', () => setPanelSide(s));
+    btns[s] = b; wrap.appendChild(b);
+  }
+  const sync = () => { for (const s of ['right', 'left']) btns[s].setAttribute('aria-pressed', String(panelSide() === s)); };
+  onPanelSide(sync); sync();
+  return [wrap];
+}
+
 /** 생각·말풍선 켬/끔(복셀 전용, 저장 'ccviz.quips') — ctl quips 로 바뀌어도 글이 따라감 */
 function quipsButton() {
   const b = document.createElement('button');
@@ -76,6 +96,28 @@ function labWalkButton() {
   const sync = () => { const on = labWalkOn(); b.textContent = t(on ? 'lab.walk.on' : 'lab.walk.off'); b.setAttribute('aria-pressed', String(on)); };
   b.addEventListener('click', () => setLabWalkOn(!labWalkOn()));
   onLabWalk(sync); sync();
+  return b;
+}
+
+/** 상단 바 RAM 게이지 켬/끔(저장 'ccviz.mem', 기본 켬) */
+function memButton() {
+  const b = document.createElement('button');
+  b.id = 'btn-mem'; b.type = 'button'; b.className = 'tb';
+  b.title = t('core.mem.title');
+  const sync = () => { const on = memGaugeOn(); b.textContent = t(on ? 'core.mem.on' : 'core.mem.off'); b.setAttribute('aria-pressed', String(on)); };
+  b.addEventListener('click', () => setMemGaugeOn(!memGaugeOn()));
+  onMemGauge(sync); sync();
+  return b;
+}
+
+/** 위험 동작 경고(Force push·Force delete 등 붉은 경고) 켬/끔(저장 'ccviz.danger', 기본 끔) */
+function dangerButton() {
+  const b = document.createElement('button');
+  b.id = 'btn-danger'; b.type = 'button'; b.className = 'tb';
+  b.title = t('core.danger.title');
+  const sync = () => { const on = dangerAlertsOn(); b.textContent = t(on ? 'core.danger.on' : 'core.danger.off'); b.setAttribute('aria-pressed', String(on)); };
+  b.addEventListener('click', () => setDangerAlertsOn(!dangerAlertsOn()));
+  onDangerAlerts(sync); sync();
   return b;
 }
 
@@ -119,7 +161,8 @@ export function mountSettings() {
   const rows = [
     row(t('core.settings.row.view'), [viewNode]),
     row(t('core.settings.row.camera'), [$('btn-camera'), $('btn-cam-mode'), $('btn-follow-prompt'), $('btn-pov')]),
-    row(t('core.settings.row.display'), [$('btn-done'), $('btn-env'), $('btn-legend')]),
+    row(t('core.settings.row.display'), [$('btn-done'), $('btn-env'), $('btn-legend'), memButton(), dangerButton()]),
+    row(t('core.settings.row.panel'), panelSideButtons()),
     row(t('core.settings.row.quips'), [quipsButton(), stencilButton()]),
     row(t('core.settings.row.lab'), [labWalkButton()]), // 복셀 연구소: 작업 대상 층은 표시 줄(기본 켬) · 현장 걷기
     row(t('core.settings.row.theme'), [$('btn-theme')]),

@@ -3,6 +3,13 @@
 import { classifyStart, classifyEnd, outputProgress, IxTracker } from './interactions.mjs';
 import { toolCategory } from './parse.mjs';
 import { toolBrief } from './brief.mjs';
+import { cardOf, cardResult } from './ask-card.mjs'; // 질문·계획 카드
+
+const DEMO_Q = [
+  { question: '데모 결과를 어디에 정리할까요? 표는 `README` 에도 넣을 수 있습니다.', header: '정리 위치', multiSelect: false, options: [
+    { label: '작업 폴더 _STATUS.md (추천)', description: '다음 세션이 바로 읽는 자리' }, { label: 'CHANGELOG [Unreleased]', description: '공개판에도 보임', preview: '## [Unreleased]\n### Added\n- 데모 표' }, { label: '정리하지 않음', description: '말로만 보고' }] },
+  { question: '함께 확인할 화면을 골라 주세요(여러 개 가능).', header: '확인', multiSelect: true, options: [{ label: '다크 1440' }, { label: '라이트 390' }, { label: '2D' }] },
+];
 
 const nodeTests = (n, fail) => {
   const lines = [];
@@ -26,6 +33,8 @@ export const IX_DEMO = [
   ['Bash', { command: 'git pull --ff-only origin main', description: '최신 받기' }, { ok: true, stdout: 'Updating a..b\nFast-forward\n 5 files changed, 40 insertions(+)' }, 1500],
   ['Bash', { command: 'gh pr merge 58 --squash', description: 'PR 병합' }, { ok: true, stdout: '✓ Squashed and merged pull request #58' }, 1500],
   ['Bash', { command: 'ls src/*.js | xargs -P 6 -n1 node lint.mjs', description: '병렬 검사' }, { ok: true, stdout: '[12/12] ok' }, 3200],
+  ['AskUserQuestion', { questions: DEMO_Q }, { ok: true, stdout: 'Your questions have been answered: …', tur: { questions: DEMO_Q, answers: { [DEMO_Q[0].question]: '작업 폴더 _STATUS.md (추천)', [DEMO_Q[1].question]: '다크 1440, 2D' } } }, 12000],
+  ['ExitPlanMode', { plan: '## 계획\n\n1. 서버에 `md` 필드 추가\n2. 실황 패널 블록 렌더\n   - 높이 상한·잘림 표시\n3. 시험\n\n| 단계 | 파일 |\n|---|---|\n| 1 | `session.mjs` |\n| 2 | `panel.js` |' }, { ok: true, stdout: 'User has approved your plan. You can now start coding.' }, 9000],
 ];
 
 /** DemoRuntime 한 걸음에서 시나리오 하나를 시작한다(끝·진행은 타이머로). nodeId = 그 걸음이 고른 에이전트 */
@@ -37,11 +46,13 @@ export function ixDemoStep(rt, nodeId, k) {
   const ts = new Date().toISOString();
   const cat = toolCategory(name);
   const ix = tr.onStart(nodeId, name, Date.now(), classifyStart(name, input));
-  g.emit({ ts, type: 'tool-start', nodeId, toolUseId, tool: name, cat, skill: null, text: input.description || name, ...toolBrief(name, input), ...(ix ? { ix } : {}) });
+  const card = cardOf(name, input);
+  g.emit({ ts, type: 'tool-start', nodeId, toolUseId, tool: name, cat, skill: null, text: input.description || name, ...toolBrief(name, input), ...(ix ? { ix } : {}), ...(card ? { card } : {}) });
   const t = setTimeout(() => {
     const end = ix ? tr.onEnd(classifyEnd(ix, { ...res, bg: !!res.bg, cmd: input.command })) : null;
+    const cardRes = card ? cardResult(card, { ok: res.ok !== false, body: res.stdout || '', tur: res.tur || null }) : null;
     g.emit({ ts: new Date().toISOString(), type: 'tool-end', nodeId, toolUseId, tool: name, cat, ok: res.ok !== false || !!res.bg, durationMs: dur,
-      text: res.bg ? '백그라운드' : 'exit ' + (res.ok === false ? 1 : 0), brief: res.bg ? '백그라운드 bdemo01' : 'exit ' + (res.ok === false ? 1 : 0), ...(end ? { ix: end } : {}) });
+      text: res.bg ? '백그라운드' : 'exit ' + (res.ok === false ? 1 : 0), brief: res.bg ? '백그라운드 bdemo01' : 'exit ' + (res.ok === false ? 1 : 0), ...(end ? { ix: end } : {}), ...(cardRes ? { card, cardRes } : {}) });
     if (chunks && ix) {
       // 백그라운드 출력: 조각마다 진행 ix(ref = 띄운 호출), 마지막에 요약 줄 → 끝
       const acc = {};

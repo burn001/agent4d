@@ -12,7 +12,7 @@ export const ART_MOCK = [
   ['Edit', 'web/theme.css', [F('web/theme.css', 'modify', { sz: 1 })], [F('web/theme.css', 'modify', { sz: 2 })], 600],
   ['Bash', 'git commit && git push origin main', [{ k: 'repo', id: 'repo:viz', n: 'viz', v: 'push' }], [{ k: 'repo', id: 'repo:viz', n: 'viz', v: 'push', c: 3 }], 1700],
   ['Write', 'out/final-report.pdf', [F('out/final-report.pdf', 'write', { sz: 1, imp: 'final' })], [F('out/final-report.pdf', 'create', { sz: 1, imp: 'final' })], 800],
-  ['Bash', 'rm -rf build/cache', [F('build/cache', 'delete', { est: 1, x: 'rm' })], [F('build/cache', 'delete', { est: 1, x: 'rm' })], 500],
+  ['Bash', 'rm -rf build/old', [F('build/old', 'delete', { est: 1, x: 'rm' })], [F('build/old', 'delete', { est: 1, x: 'rm' })], 500],
   ['Write', 'docs/notes.md', [F('docs/notes.md', 'write', { sz: 1 })], [F('docs/notes.md', 'modify', { sz: 1, x: 'overwrite' })], 600],
   ['Bash', 'psql … UPDATE orders', [{ k: 'db', id: 'db:postgres/shop', n: 'shop', v: 'write', coll: ['orders'], imp: 'db' }], [{ k: 'db', id: 'db:postgres/shop', n: 'shop', v: 'write', coll: ['orders'], imp: 'db', rows: 99 }], 1100],
   ['Bash', 'npx wrangler deploy', [{ k: 'service', id: 'svc:cloudflare', n: 'Cloudflare', v: 'write' }], [{ k: 'service', id: 'svc:cloudflare', n: 'Cloudflare', v: 'write' }], 1500],

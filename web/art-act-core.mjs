@@ -31,6 +31,8 @@ export const ACT_PRI = { fail: 0, shatter: 0, stop: 1, build: 1, launch: 1, flas
 const MINOR = new Set(['carry', 'pack', 'ping', 'web', 'tether']);
 /** 쿨다운(초): 레이더 = 섬마다, 웹 = 노드마다 */
 const COOL = { radar: 6, web: 6 };
+/** 대상·구역 없이 노드 자리에서만 그리는 연출 — 노드가 화면에 없으면 그리지 않고, 노드가 빠지면(node-remove) 큐에서도 지움 */
+export const NODE_ONLY = new Set(['web']);
 /** 연출 이름 → 색 열쇠(ART_KEYS) */
 export const ACT_COLOR = {
   read: 'read', carry: 'write', build: 'new', edit: 'write', shatter: 'del', radar: 'read', ping: 'read', bubbles: 'read', pour: 'write',
@@ -142,7 +144,7 @@ export class ArtActs {
       if (this._cool.size > 256) this._cool.delete(this._cool.keys().next().value);
     }
     for (const e of this.list) {
-      if (e.a === a && e.pid === o.pid && e.id === (o.id ?? null) && (a !== 'radar' || e.node === (o.node || null)) && t0 - e.t0 < ACT.MERGE_S && t0 >= e.t0 - 0.05) {
+      if (e.a === a && e.pid === o.pid && e.id === (o.id ?? null) && ((a !== 'radar' && !NODE_ONLY.has(a)) || e.node === (o.node || null)) && t0 - e.t0 < ACT.MERGE_S && t0 >= e.t0 - 0.05) {
         if (e.n < ACT.N_MAX) e.n++;
         e.dur = Math.min(e.base * 1.6, e.dur + e.base * 0.2);
         if (o.sz) e.sz = (e.sz || 0) + o.sz;
@@ -219,6 +221,21 @@ export class ArtActs {
       this.pending.delete(tu);
       for (const r of p.refs.slice(0, 2)) if (this.add({ a: 'stop', pid: p.pid, id: r.id, node: nodeId, k: r.k, v: r.v, tu }, nowSec, speed)) n++;
     }
+    return n;
+  }
+  /**
+   * 노드가 빠짐(node-remove — 세션 끝·서브트리 정리): 그 노드 자리에서만 그리던 연출(웹 신호파)과 끝을 기다리던 짝·쿨다운을 정리.
+   * 대상(파일·DB…)에 걸린 연출은 그대로 둔다(그리기가 노드 대신 대상 위 하늘에서 시작). 반환 = 지운 연출 수
+   */
+  nodeRemoved(ids) {
+    const S = ids instanceof Set ? ids : new Set(Array.isArray(ids) ? ids : [ids]);
+    if (!S.size) return 0;
+    const n0 = this.list.length;
+    this.list = this.list.filter((e) => !(e.id == null && NODE_ONLY.has(e.a) && S.has(e.node)));
+    for (const [tu, p] of this.pending) if (S.has(p.node)) this.pending.delete(tu);
+    for (const id of S) for (const a of NODE_ONLY) this._cool.delete(a + '|' + id);
+    const n = n0 - this.list.length;
+    if (n) this.version++;
     return n;
   }
   /** 검색 도구: 시작 = 레이더(그 노드 섬 바닥), 끝(성공) = 결과 경로가 장부 대상과 맞는 것만 핑 */
@@ -357,16 +374,24 @@ export function drawActs(geo, acts, nowSec, ctx) {
     let N = null;
     if (np) { PN.x = np.x; PN.y = np.y; PN.z = np.z; N = PN; }
     const area = e.id == null ? pos.areas.get(e.pid) || null : null;
-    if (e.id == null && !area && !N) continue;
+    if (e.id == null && !N && (!area || NODE_ONLY.has(e.a))) continue; // 노드가 빠지는 중·숨음·흐려짐(웹 신호파는 노드 자리에서만)
     S = ctx.unitPx ? actScale(ctx.unitPx(e.pid)) : 1;
-    if (ctx.reduced) { reducedAct(geo, e, k, T, N, area, c, KI); drawn++; continue; }
     if (!N && T) { PN.x = T.x; PN.y = T.top + 6; PN.z = T.z; N = PN; } // 노드가 화면에 없으면 '하늘'에서
-    S = ctx.unitPx ? actScale(ctx.unitPx(e.pid)) : 1;
     const fn = DRAW[e.a];
-    if (fn) { fn(geo, th, e, k, T, N, area, c, KI); drawn++; }
+    if (!fn && !ctx.reduced) continue;
+    try { if (ctx.reduced) reducedAct(geo, e, k, T, N, area, c, KI); else fn(geo, th, e, k, T, N, area, c, KI); drawn++; }
+    catch (err) { actFault(acts, e, err); } // 연출 하나의 예외로 그리기 루프가 멈추지 않게: 그 연출만 끝냄
   }
   geo.ka = 1;
   return drawn;
+}
+/** 그리기 예외 난 연출: 바로 끝내고(다음 step 에서 빠짐) 세고, 콘솔엔 종류마다 한 번만 */
+const _faultSeen = new Set();
+function actFault(acts, e, err) {
+  e.dur = 0;
+  if (acts.stats) acts.stats.faults = (acts.stats.faults || 0) + 1;
+  if (typeof acts.version === 'number') acts.version++;
+  if (!_faultSeen.has(e.a)) { _faultSeen.add(e.a); if (typeof console !== 'undefined') console.warn('[agent4d] act draw fault', e.a, err && err.message); }
 }
 /** 움직임 줄이기: 단순 페이드(대상 둘레 고리·윤곽만 밝아졌다 사라짐) */
 function reducedAct(geo, e, k, T, N, area, c, KI) {
@@ -641,6 +666,7 @@ const DRAW = {
   },
   // 웹(대상 없음): 노드 위로 안테나 신호파 세 겹
   web(geo, th, e, k, T, N, _a, c) {
+    if (!N) return; // 노드 자리 없음(drawActs 가 먼저 거름 — 보조)
     for (let q = 0; q < 3; q++) { const kk = seg(k, q * 0.18, q * 0.18 + 0.65); if (kk <= 0 || kk >= 1) continue; const y = N.y + (0.8 + 2.2 * kk) * S, r = (0.4 + 1.4 * kk) * S;
       if (th === 'planet') geo.vring(N.x, y, N.z, r, c, 0.7 * (1 - kk), 18); else geo.ring(N.x, y, N.z, r, c, 0.7 * (1 - kk), 20, th === 'voxel'); }
     geo.line(N.x, N.y, N.z, N.x, N.y + 1.0, N.z, c, 0.5 * fade(k));

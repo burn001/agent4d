@@ -216,6 +216,8 @@ const newCnt = () => ({ read: 0, create: 0, modify: 0, delete: 0, query: 0, writ
  * 프로젝트별 대상 장부. 시각은 이벤트 ts(기록 시각)만 쓴다 → 라이브·재생·서버 재구성이 같은 답.
  * 서버 ArtifactStore 도 이 클래스로 7일 창 기록을 접어 스냅샷 items 를 만든다.
  */
+/** 항목의 파괴적 표시 지우기(경고 끔 — 항목·기록 모두) */
+function stripItemX(it) { it.x = null; it.xAt = 0; if (Array.isArray(it.log)) for (const l of it.log) if (l && l.x) l.x = null; return it; }
 export class ArtBook {
   constructor({ max = ART.MAX_ITEMS, windowMs = ART.WINDOW_MS } = {}) {
     this.max = max;
@@ -226,6 +228,7 @@ export class ArtBook {
     this.version = 0;          // 바뀔 때마다 +1(렌더러 재배치 판단)
     this.defaultProject = '_'; // 프로젝트를 모르는 이벤트(단일 세션)
     this.nodeLabels = new Map(); // 노드 id → 라벨(스냅샷 nodes, 화면에 없는 노드의 이름)
+    this.xOff = false;         // true 면 파괴적 표시(x)를 장부에 넣지 않는다(웹 '위험 동작 경고' 끔 — 서버 장부는 항상 false)
   }
   reset() { this.projects.clear(); this.seen.clear(); this._seenQ = []; this.version++; }
   _map(pid) { let m = this.projects.get(pid); if (!m) { m = new Map(); this.projects.set(pid, m); } return m; }
@@ -248,6 +251,7 @@ export class ArtBook {
     for (const it of items || []) {
       if (!it || !it.id || !ART_KINDS.includes(it.k)) continue;
       const c = { ...it, cnt: { ...newCnt(), ...(it.cnt || {}) }, who: (it.who || []).map((w) => ({ ...w })), log: (it.log || []).map((l) => ({ ...l })) };
+      if (this.xOff) stripItemX(c);
       c.tmp = isTempItem(c) ? 1 : 0; // 서버 값을 믿지 않고 다시(옛 서버는 없음)
       m.set(c.id, c);
       for (const l of c.log) if (l.tu) this._mark(l.tu + '|' + c.id);
@@ -263,11 +267,12 @@ export class ArtBook {
   apply(ev, pid = null) {
     if (!ev || !Array.isArray(ev.art) || !ev.art.length) return null;
     const p = pid || ev.projectId || this.defaultProject;
-    if (ev.type === 'tool-start') return { pid: p, start: true, changes: ev.art.map((ref) => ({ kind: 'start', item: this.get(p, ref.id), ref })) };
+    const arts = this.xOff && ev.art.some((r) => r && r.x) ? ev.art.map((r) => { if (!r || !r.x) return r; const { x, ...rest } = r; return rest; }) : ev.art;
+    if (ev.type === 'tool-start') return { pid: p, start: true, changes: arts.map((ref) => ({ kind: 'start', item: this.get(p, ref.id), ref })) };
     if (ev.type !== 'tool-end' || ev.ok === false) return null;
     const t = Date.parse(ev.ts) || 0;
     const changes = [];
-    for (const ref of ev.art) {
+    for (const ref of arts) {
       const r = this.touch(p, ref, t, ev.nodeId, ev.toolUseId);
       if (r) changes.push(r);
     }

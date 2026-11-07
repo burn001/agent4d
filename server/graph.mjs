@@ -5,6 +5,7 @@ import { BRIEF_LIMITS } from './brief.mjs';
 import { sanitizePanel } from './panel.mjs';
 import { sanitizeIx } from './interactions.mjs';
 import { sanitizeArt } from './artifacts.mjs';
+import { sanitizeCard, sanitizeCardRes } from './ask-card.mjs';
 
 // 홀로그램 패널 내용: 이 필드들은 sanitizePanel(마스킹·상한·minimal 삭제)을 지난다
 const PANEL_FIELDS = ['panel', 'parentPanel'];
@@ -154,6 +155,20 @@ export class Graph {
       if (this.privacy === 'minimal') ev.text = '';
       else ev.text = (ev.type === 'output' ? truncateTail : truncate)(redact(ev.text), lim);
     }
+    // 응답 원문 Markdown: text 와 같은 마스킹, 상한 LIMITS.md(넘으면 앞부분 + mdCut), minimal 이면 뺌
+    if (ev.md != null) {
+      if (this.privacy === 'minimal' || typeof ev.md !== 'string' || !ev.md) delete ev.md;
+      else { const m = redact(ev.md); if (m.length > LIMITS.md) { ev.md = m.slice(0, LIMITS.md); ev.mdCut = 1; } else ev.md = m; }
+    }
+    // 전체 보기 자리: 잘린 md 에만(그 밖·minimal 은 뺌), 꼴 검사
+    if (ev.mdRef != null) {
+      const r = ev.mdRef;
+      if (!ev.mdCut || this.privacy === 'minimal' || !r || typeof r.s !== 'string' || typeof r.u !== 'string' || !Number.isInteger(r.b)) delete ev.mdRef;
+      else ev.mdRef = { s: r.s.slice(0, 40), u: r.u.slice(0, 40), b: r.b };
+    }
+    // 질문·계획 카드(만들 때 redact·상한을 거침) — minimal 이면 뺌
+    if (ev.card != null) { const c = sanitizeCard(ev.card, this.privacy); if (c) ev.card = c; else delete ev.card; }
+    if (ev.cardRes != null) { const r = sanitizeCardRes(ev.cardRes, this.privacy); if (r) ev.cardRes = r; else delete ev.cardRes; }
     // 작업 요약: text 와 같은 마스킹·길이 상한, minimal 이면 비움
     for (const k of BRIEF_FIELDS) {
       if (ev[k] == null) continue;

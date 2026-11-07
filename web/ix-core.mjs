@@ -115,7 +115,7 @@ export function ixSummary(ix) {
     }
     case 'user': {
       const w = Number.isFinite(ix.waitMs) && ix.waitMs > 60000 ? ` · ${tr('cards.ix.after', { t: fmtMs(ix.waitMs) })}` : '';
-      const me = tr('cards.ix.me');
+      const me = userWho(ix, tr); // 출처: 나 · 나(Interactive 별칭) · ⇄ 다른 세션
       switch (ix.op) {
         case 'prompt': return `${me} › ${ix.text || ''}${ix.images ? ` [${tr('cards.ix.images', { n: ix.images })}]` : ''}${w}`.trim();
         case 'midturn': return `${me} › ${tr('cards.ix.midturn')} ${ix.text || ''}`.trim();
@@ -140,6 +140,14 @@ export function ixSummary(ix) {
 }
 
 const escH = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+/** 사용자 범주의 보낸 이: 터미널·원격 = '나', Interactive = '나 · <별칭>', 다른 Claude 세션 = '⇄ <세션 이름>' */
+export function userWho(ix, tr = (k) => k) {
+  if (ix && ix.src === 'ix') return `${tr('cards.ix.me')} · ${ix.who || 'Interactive'}`;
+  if (ix && ix.src === 'peer') return `⇄ ${ix.who || tr('cards.ix.peer')}`;
+  return tr('cards.ix.me');
+}
+/** 콘솔 빔 리본 앞 글리프: Interactive ◇ · 다른 세션 ⇄ · 그 밖 없음 */
+export const userGlyph = (ix) => (ix && ix.src === 'ix' ? '◇ ' : ix && ix.src === 'peer' ? '⇄ ' : '');
 /** 실황 패널 머리: 글리프 + 요약(색은 ix.css 의 .ix-c-<범주>, 실패는 .ix-fail) */
 export function ixHtml(ix) {
   if (!ix || !IX_CATS.includes(ix.cat) || (ix.cat === 'user' && ix.op === 'auto')) return '';
@@ -667,12 +675,15 @@ function drawUser(geo, f, ix, P, r, C, t, te, A, now, flow, env, model) {
     return;
   }
   // prompt·command·midturn: 콘솔에서 메인으로 내려오는 금빛 빔 + 첫 몇 단어 리본 + 메인이 깨어나는 파문
+  // 다른 Claude 세션이 보낸 것은 보낸 세션 노드가 보이면 그 노드에서 출발(안 보이면 콘솔), 리본 앞에 ⇄ / Interactive 는 ◇
+  const SF = ix.src === 'peer' && ix.from && env && env.pos ? env.pos(ix.from) : null;
+  if (SF && (SF.x !== P.x || SF.z !== P.z)) C = { x: SF.x, y: SF.y + 0.35, z: SF.z };
   if (C) {
     const beamA = A * Math.max(0, 0.55 - Math.max(0, t - 0.9) * 0.35);
     if (beamA > 0.01) beamLine(geo, C, top, 'user', beamA, 12, 0.5);
     const u = t / 0.9;
     if (u < 1) { travel(geo, C, top, ease(u), 'user', A, 0.2, 0.5); }
-    if (ix.text && t < 2.2) { const uu = ease(Math.min(1, t / 1.0)); geo.label(C.x + (top.x - C.x) * uu, C.y + (top.y - C.y) * uu + Math.sin(uu * Math.PI) * 0.5 + 0.35, C.z + (top.z - C.z) * uu, ix.text.length > 18 ? ix.text.slice(0, 17) + '…' : ix.text, 'user', A * (t < 1.6 ? 1 : 1 - (t - 1.6) / 0.6), 'ix-ribbon'); }
+    if (ix.text && t < 2.2) { const uu = ease(Math.min(1, t / 1.0)); geo.label(C.x + (top.x - C.x) * uu, C.y + (top.y - C.y) * uu + Math.sin(uu * Math.PI) * 0.5 + 0.35, C.z + (top.z - C.z) * uu, userGlyph(ix) + (ix.text.length > 18 ? ix.text.slice(0, 17) + '…' : ix.text), 'user', A * (t < 1.6 ? 1 : 1 - (t - 1.6) / 0.6), 'ix-ribbon'); }
   }
   if (ix.op === 'midturn') { // 진행 중인 메인 옆에 카드가 겹쳐 쌓였다가 흡수
     let k = 0; for (const g of model.fx.values()) if (g !== f && g.nodeId === f.nodeId && g.op === 'midturn' && g.seq < f.seq && now - g.t0 < 2.4) k++;

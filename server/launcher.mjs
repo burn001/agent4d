@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { CLAUDE_P_RE, normPath, lastCdBefore, resolveCwdGuess, detectClaudeP } from './parse.mjs';
+import { CLAUDE_P_RE, normPath, lastCdBefore, resolveCwdGuess, detectClaudeP, blankHeredocs } from './parse.mjs';
 
 /** 기동기 아래 회차(claude -p) 사이 최대 공백. 넘으면 그 기동기는 끝난 것으로 본다 */
 export const LAUNCH_GAP_MS = 6 * 3600_000;
@@ -19,7 +19,15 @@ const DETACH_RE = /(?:^|[\s;&|(])(?:nohup|setsid|disown|Start-Process|saps|Start
 // 뒤로 보내기 & — &&·2>&1·&>·|& 는 아님
 const BASH_BG_RE = /(?<![&>|<\d])&(?![&>])/;
 const SCRIPT_TOKEN_RE = /[^\s'"`;&|<>()]+\.(?:sh|bash|ps1|py|mjs|cjs|js|cmd|bat)(?![\w.])/gi;
-const PREFILTER_RE = /nohup|disown|setsid|Start-Process|saps|Start-Job|\/b\b|"run_in_background":true|&/i;
+const PREFILTER_RE = /nohup|disown|setsid|Start-Process|saps|Start-Job|\/b\b|"run_in_background":true|&|\.(?:sh|bash|ps1)\b/i;
+// 포그라운드 후보는 셸 스크립트만(파이썬·노드 프로그램은 분리 프로세스·일반 명령) · 시험 실행(--dry-run·--help)은 아님
+const FG_SCRIPT_RE = /\.(?:sh|bash|ps1|cmd|bat)$/i;
+const DRY_RE = /(?:^|\s)(?:--dry-run|--dryrun|--help|-h)(?=\s|$)/i;
+// 사슬 안·명령 구간에서 스크립트를 '점검만' 부르는 인자(읽기 전용 실행) — 그 호출로는 claude -p 가 돌지 않는다.
+// 실측 자율 루프 저장소 `autopilot-pick-axis.sh` 의 `bash scripts/autopilot.sh --check`(축 보류 확인) — 미리 보기를 기동기로 오인
+const CHECK_ARG_RE = /(?:^|\s)(?:--check|--dry-run|--dryrun|--help|-h|--preview)(?=\s|$)/i;
+/** 토큰 뒤 같은 명령의 인자(파이프·리다이렉트·&·;·괄호 앞까지)가 점검만 부르는 것인지 */
+function checkOnlyArgs(rest) { return CHECK_ARG_RE.test(String(rest).split(/[|&;<>)`]/)[0]); }
 
 /** /d/x → D:/x(Windows), ~ → 홈 */
 export function toFsPath(p) {
@@ -33,27 +41,40 @@ export function toFsPath(p) {
  * 셸 명령이 스크립트를 분리 실행하는지. 아니면 null.
  * 명령 자체에 `claude -p` 가 보이면 기동기가 아니다(그대로).
  */
-export function detectLaunch(command, { bg = false, tool = 'Bash' } = {}) {
+export function detectLaunch(command, { bg = false, tool = 'Bash', fg = false } = {}) {
   if (typeof command !== 'string' || !command) return null;
+  // heredoc 본문(`python - <<'EOF' … EOF`·`cat <<EOF > f`)의 줄은 셸 명령이 아니다 — 같은 길이 공백으로 지운 명령만 본다.
+  // 셸 인터프리터로 들어가는 본문(`bash <<EOF`·`cat <<EOF | sh`)은 명령이라 남는다
+  command = blankHeredocs(command, { tool: tool === 'PowerShell' ? 'PowerShell' : 'Bash' });
   if (detectClaudeP(command)) return null;
   // 분리 실행 표지가 있는 명령 구간(&&·||·;·줄바꿈으로 나눔)에서 "실행되는" 스크립트만 본다. 다른 구간의 grep·cat 대상은 아님
   const tokens = [];
-  let detached = false, at = -1, off = 0;
-  for (const seg of splitOutsideQuotes(command)) {
-    const segAt = off;
-    off += seg.length;
-    if (/^(?:&&|\|\||;|\n)$/.test(seg)) continue;
-    const startProc = /Start-Process|saps|Start-Job|\bstart\s+(?:"[^"]*"\s+)?\/b\b/i.test(seg);
-    const det = DETACH_RE.test(seg) || (tool !== 'PowerShell' && BASH_BG_RE.test(seg));
-    if (!det && !bg) continue;
-    for (const m of seg.matchAll(SCRIPT_TOKEN_RE)) {
-      const t = m[0].replace(/^[=]+/, '');
-      if (t.includes('$') || /^https?:/i.test(t) || t.startsWith('-')) continue;
-      const before = seg.slice(0, m.index);
-      if (!(startProc || t.startsWith('./') || INVOKE_BEFORE_RE.test(before) || /^\s*$/.test(before))) continue;
-      if (!tokens.includes(t)) { tokens.push(t); if (at < 0) at = segAt + m.index; }
-      if (det) detached = true;
+  let detached = false, at = -1, off = 0, fgOnly = false;
+  const segs = splitOutsideQuotes(command);
+  // pass 0 = 분리 표지·run_in_background 구간(예전 규칙). pass 1 = (fg 옵션, 0 에서 아무것도 없을 때만) 포그라운드로 부른 셸 스크립트 —
+  // 스크립트 안에서 다시 nohup·& 로 떼어 띄우는 재개 스크립트(`bash scripts/loop-resume.sh`). 판정은 analyzeLaunch 가 사슬 안의 분리 기동으로
+  for (let pass = 0; pass < (fg ? 2 : 1) && !tokens.length; pass++) {
+    off = 0;
+    for (const seg of segs) {
+      const segAt = off;
+      off += seg.length;
+      if (/^(?:&&|\|\||;|\n)$/.test(seg)) continue;
+      const startProc = /Start-Process|saps|Start-Job|\bstart\s+(?:"[^"]*"\s+)?\/b\b/i.test(seg);
+      const det = DETACH_RE.test(seg) || (tool !== 'PowerShell' && BASH_BG_RE.test(seg));
+      if (pass === 0 && !det && !bg) continue;
+      if (pass === 1 && (startProc || DRY_RE.test(seg))) continue;
+      for (const m of seg.matchAll(SCRIPT_TOKEN_RE)) {
+        const t = m[0].replace(/^[=]+/, '');
+        if (t.includes('$') || /^https?:/i.test(t) || t.startsWith('-')) continue;
+        if (pass === 1 && !FG_SCRIPT_RE.test(t)) continue;
+        const before = seg.slice(0, m.index);
+        if (!((pass === 0 && startProc) || t.startsWith('./') || INVOKE_BEFORE_RE.test(before) || /^\s*$/.test(before))) continue;
+        if (!startProc && checkOnlyArgs(seg.slice(m.index + m[0].length))) continue; // 점검만 부른 스크립트(`--check` 등)
+        if (!tokens.includes(t)) { tokens.push(t); if (at < 0) at = segAt + m.index; }
+        if (pass === 0 && det) detached = true;
+      }
     }
+    if (pass === 1 && tokens.length) fgOnly = true;
   }
   if (!tokens.length) return null;
   let cdGuess = lastCdBefore(command, at < 0 ? command.length : at);
@@ -63,7 +84,7 @@ export function detectLaunch(command, { bg = false, tool = 'Bash' } = {}) {
     let m;
     while ((m = re.exec(command)) && m.index < at) cdGuess = m[1] || m[2];
   }
-  return { detached, bg: !!bg, tokens, cdGuess };
+  return { detached, bg: !!bg, tokens, cdGuess, ...(fgOnly ? { fg: true } : {}) };
 }
 
 /** 따옴표 밖의 &&·||·;·줄바꿈으로 나눈다(구분자도 원소로 남겨 길이 합이 원문과 같다) */
@@ -99,6 +120,9 @@ function readScript(abs) {
   if (c && c.mtimeMs === st.mtimeMs && c.size === st.size) return c.code;
   let text;
   try { text = fs.readFileSync(abs, 'utf8'); } catch { return null; }
+  // 셸 스크립트 안의 heredoc 본문(`cat > x <<EOF … EOF`)도 실행이 아니다(셸로 넘기는 본문은 남김)
+  if (/\.(?:sh|bash)$/i.test(abs)) text = blankHeredocs(text, { tool: 'Bash' });
+  else if (/\.ps1$/i.test(abs)) text = blankHeredocs(text, { tool: 'PowerShell' });
   // 주석 줄은 빼고, 한 줄 안의 따옴표 문자열은 지운다(설명·grep 패턴·echo 문구에 적힌 `claude -p`·스크립트 경로는 실행이 아님)
   const code = text.split(/\r?\n/).filter((l) => !/^\s*(?:#|\/\/|::|REM\b|<#)/i.test(l))
     .map((l) => l.replace(/"(?:[^"\\\n]|\\.)*"|'[^'\n]*'/g, '""')).join('\n');
@@ -112,10 +136,16 @@ const INVOKE_BEFORE_RE = /(?:^|[\s;&|(`])(?:bash|sh|zsh|source|\.|pwsh|powershel
 function invokedTokens(code) {
   const out = [];
   for (const line of code.split('\n')) {
+    let det = null;
     for (const m of line.matchAll(SCRIPT_TOKEN_RE)) {
       const t = m[0];
       if (t.includes('$') || /^https?:/i.test(t)) continue;
-      if (t.startsWith('./') || INVOKE_BEFORE_RE.test(line.slice(0, m.index))) out.push(t);
+      if (!(t.startsWith('./') || INVOKE_BEFORE_RE.test(line.slice(0, m.index)))) continue;
+      // 점검만 부르는 호출(`bash scripts/autopilot.sh --check`)은 따라가지 않는다 — 그 호출로는 claude -p 가 돌지 않는다
+      if (checkOnlyArgs(line.slice(m.index + t.length))) continue;
+      // 그 줄이 떼어 띄우는가(nohup·setsid·홀로 선 & 등) — 포그라운드 재개 스크립트 판정에만 쓴다
+      if (det == null) det = DETACH_RE.test(line) || BASH_BG_RE.test(line);
+      out.push({ t, det });
     }
   }
   return out;
@@ -139,25 +169,29 @@ export function analyzeLaunch(launch, cwd) {
     for (const abs of resolveToken(tok, [cwdFs])) {
       if (!readScript(abs)) continue;
       // 이 첫 스크립트에서 사슬을 따라간다
-      const queue = [{ abs, depth: 0 }];
+      // 포그라운드로 부른 스크립트(launch.fg)는 사슬 안에서 한 번 떼어 띄운(det) 뒤의 파일에 claude -p 가 있어야 기동기다
+      // 포그라운드 셸이 곧바로 claude -p 를 돌리는 것(`bash loop.sh`)은 그 Bash 호출이 끝날 때 같이 끝나므로 기동기가 아니다(쪽)
+      const fgMode = !!launch.fg;
+      const queue = [{ abs, depth: 0, det: !fgMode }];
       const chain = [];
       while (queue.length && seen.size < SCRIPT_MAX_FILES) {
-        const { abs: f, depth } = queue.shift();
+        const { abs: f, depth, det } = queue.shift();
         const nf = normPath(f);
         if (seen.has(nf)) continue;
         seen.add(nf);
         const code = readScript(f);
         if (code == null) continue;
         chain.push(f);
-        if (CLAUDE_P_RE.test(code)) {
-          return { key: normPath(abs), script: path.basename(abs), via: chain.map((x) => normPath(x)), cwd: cwd || null };
+        if (CLAUDE_P_RE.test(code) && det) {
+          return { key: normPath(abs), script: path.basename(abs), via: chain.map((x) => normPath(x)), cwd: cwd || null,
+            ...(fgMode ? { innerDetach: true } : {}) };
         }
         if (depth >= SCRIPT_MAX_DEPTH) continue;
         const dir = path.dirname(f);
         const bases = [cwdFs, dir, path.dirname(dir), path.dirname(path.dirname(dir))];
         for (const t2 of invokedTokens(code)) {
-          for (const a2 of resolveToken(t2, bases)) {
-            try { if (fs.statSync(a2).isFile()) { queue.push({ abs: a2, depth: depth + 1 }); break; } } catch {}
+          for (const a2 of resolveToken(t2.t, bases)) {
+            try { if (fs.statSync(a2).isFile()) { queue.push({ abs: a2, depth: depth + 1, det: det || t2.det }); break; } } catch {}
           }
         }
       }
@@ -223,13 +257,14 @@ export class LauncherIndex {
         if (r.type !== 'assistant' || !Array.isArray(content)) continue;
         for (const b of content) {
           if (!b || b.type !== 'tool_use' || !SHELL.has(b.name) || typeof b.input?.command !== 'string') continue;
-          const L = detectLaunch(b.input.command, { bg: !!b.input.run_in_background, tool: b.name });
+          const L = detectLaunch(b.input.command, { bg: !!b.input.run_in_background, tool: b.name, fg: true });
           if (!L) continue;
           const cwd = resolveCwdGuess(r.cwd || null, L.cdGuess);
           const a = this.index.launchPin?.(b.id) || analyzeLaunch(L, cwd); // 보관함 고정 판정 우선
           if (!a) continue;
           c.launches.push({ sessionId: String(r.sessionId || '').toLowerCase(), agentId: r.agentId || null, toolUseId: b.id,
-            tsMs: Date.parse(r.timestamp), file, cwd: a.cwd, key: a.key, script: a.script, via: a.via, bg: L.bg, detached: L.detached });
+            tsMs: Date.parse(r.timestamp), file, cwd: a.cwd, key: a.key, script: a.script, via: a.via, bg: L.bg,
+            detached: L.detached || !!a.innerDetach, ...(a.innerDetach ? { innerDetach: true } : {}) });
         }
       }
     } catch { /* 읽기 실패는 다음에 */ } finally { if (fd != null) try { fs.closeSync(fd); } catch {} }

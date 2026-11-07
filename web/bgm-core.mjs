@@ -63,6 +63,7 @@ export function parseManifest(m) {
       stage: parseStage(t.stage, t.energy), // 자동 선곡 단계 목록(0 한가～3 매우 활발)
       views: parseViews(t.views), // 표현(테마)별 단계 {flow:[0,1], voxel:[1]} | null
       energy: Number.isFinite(t.energy) ? Math.max(0, Math.min(1, t.energy)) : null, // 0～1, 같은 단계 안 순서
+      moods: parseMoods(t.moods), // 무드 태그(MOODS 중) | null — 없으면 bgm-list trackMoods 가 energy 로 추정
     });
   }
   if (!tracks.length) return null;
@@ -85,6 +86,14 @@ export function parseStage(stage, energy) {
   if (arr.length) return [...new Set(arr)].sort((x, y) => x - y);
   if (Number.isFinite(energy)) return [Math.max(0, Math.min(3, Math.round(Math.max(0, Math.min(1, energy)) * 3)))];
   return [];
+}
+
+/** 무드 6종(순서 = 화면 순서, 잔잔 → 질주). 매니페스트 곡의 moods 는 이 중에서 */
+export const MOODS = ['calm', 'dreamy', 'warm', 'focus', 'bright', 'drive'];
+/** 매니페스트 moods 값 정리: 아는 무드만, 중복 없이, 없으면 null */
+export function parseMoods(v) {
+  const a = (Array.isArray(v) ? v : typeof v === 'string' ? [v] : []).filter((x) => MOODS.includes(x));
+  return a.length ? [...new Set(a)] : null;
 }
 
 /** 표현(테마) id — app.js 의 ccviz.view2 값 */

@@ -183,6 +183,15 @@ export function pickForLevel(level, tracks, { recent = [], cur = null, keep = fa
   const c = viewCandidates(level, tracks, view);
   if (!c.length) return null;
   if (keep && cur && c.includes(cur)) return cur;
+  return pickAmong(c, tracks, { recent, cur, rand });
+}
+
+/**
+ * 후보 id 목록 c 에서 하나(플레이리스트 기준들도 씀): 최근 avoidCount(후보 수)곡을 피해 무작위(다 피하면 하나씩 줄임),
+ * 남은 후보 중 직전 곡과 비슷한 곡은 빼도 2곡 이상 남으면 뺀다
+ */
+export function pickAmong(c, tracks, { recent = [], cur = null, rand = Math.random } = {}) {
+  if (!c || !c.length) return null;
   const last = [...recent, ...(cur && recent[recent.length - 1] !== cur ? [cur] : [])]; // cur 가 이미 최근 끝이면 두 번 세지 않음
   let pool = [];
   for (let n = avoidCount(c.length); n >= 1 && !pool.length; n--) {

@@ -13,7 +13,7 @@ export const ART_DEMO = [
   ['Edit', { file_path: 'web/theme.css', old_string: 'x', new_string: 'y' }, { ok: true, tur: { structuredPatch: [{ lines: ['-x', '+y'] }] } }, 600],
   ['Bash', { command: 'git add -A && git commit -qm "작업 대상 층" && git push origin main', description: '커밋·푸시' }, { ok: true, stdout: '[main 9f8e7d6] 작업 대상 층', stderr: 'To github.com:demo/viz.git\n   3c4d5e6..9f8e7d6  main -> main' }, 1700],
   ['Write', { file_path: 'out/최종보고서.pdf', content: '%PDF' }, { ok: true, tur: { type: 'create' } }, 800],
-  ['Bash', { command: 'rm -rf build/cache', description: '빌드 캐시 지우기' }, { ok: true, stdout: '' }, 500],
+  ['Bash', { command: 'rm -rf build/old', description: '옛 빌드 지우기' }, { ok: true, stdout: '' }, 500],
   ['Write', { file_path: 'docs/notes.md', content: '# 메모\n' }, { ok: true, tur: { type: 'update' } }, 600],
   ['Bash', { command: 'psql -d shop -c "UPDATE orders SET checked = true WHERE id < 100"', description: '응답 표시' }, { ok: true, stdout: 'UPDATE 99\n(99 rows)' }, 1100],
   ['Bash', { command: 'npx wrangler deploy', description: 'Worker 배포' }, { ok: true, stdout: 'Deployed demo-worker' }, 1500],

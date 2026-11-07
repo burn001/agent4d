@@ -6,7 +6,7 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { installPlanPunch } from '../plan-punch3d.js'; // 계획판 깊이 = 흐름·Planet 과 같은 구멍 사각형
 import { computeOffice, CAT_FACILITY, hashStr } from './layout.js';
 import { readTokens, palette } from './palette.js';
-import { BoxBatch, UNIT_BOX, buildRoomStatic, buildCorridor, drawFacilities, drawDeskEmitter, drawMachine, ring, roomFrame, endXf, DESK_TOP } from './props.js';
+import { BoxBatch, UNIT_BOX, buildRoomStatic, buildCorridor, drawFacilities, drawDeskEmitter, drawDeskProps, drawMachine, ring, roomFrame, endXf, DESK_TOP } from './props.js';
 import { xfAngle, toLocal, camQuadrant, CAM_Q0 } from './xf.mjs';
 import { Character, drawCharacter, drawCharacterFar } from './character.js';
 import { crewSpots } from './character-core.mjs';
@@ -44,8 +44,11 @@ import { VxProcs } from './vx-procs.js'; // 분리 프로세스 = 생산 라인 
 import { VxStencil } from './vx-stencil.js'; // 바닥 스텐실(프로젝트 이름)
 import { TiredBook } from './vx-heat-core.mjs'; // 지친 직원(컨텍스트 과열)
 import { VxHeat3D } from './vx-heat.js';
+import { EffortTween, effortTagText } from '../effort-core.mjs'; // 추론 effort
+import { vxEffort, vxEffortState, dress, deskProps, effKey, EFF_HEX } from './vx-effort-core.mjs'; // 복셀 = 옷차림 + 자리 분위기(메인 포함)
 
 const _HEXC = new Map(); // 옷 색 '#hex' → 공유 THREE.Color(읽기 전용)
+const LEAD_LAMP = { u: 0.67, v: -0.15 }; // 팀장 책상 정적 스탠드 갓 아래(props.js buildOfficeFurniture: x + 0.75 − 0.08, z − 0.15) — 전구만 켬
 const VX_DETAIL_DIST = 42; // 카메라 거리 이 안쪽 직원만 잔 장식
 
 const MACHINE_KIND = { 'bash-bg': 'rack', monitor: 'screen', workflow: 'board' };
@@ -361,6 +364,7 @@ export class VoxelView {
     this._removing.delete(id);
     this.nodes.delete(id); this.chars.delete(id); this.machines.delete(id); this.vis.delete(id);
     this.holo.removeNode(id); this.ix.dropNode(id); this.client.desks.delete(id); this.procs.dropNode(id); this.quips.dropNode(id);
+    if (this._effTw) { this._effTw.forget(id + '|f'); this._effTw.forget(id + '|c'); } // 게이지 보간 장부
     this.layoutDirty = true; this._kidsDirty = true;
     this._settleUntil = (this._now || 0) + 0.7;
   }
@@ -613,23 +617,42 @@ export class VoxelView {
   _staticSigExtra() { return ''; }
   /** 방 하나의 시설 애니메이션(동적 묶음 B) — act = 시설 활동도 */
   _drawRoomFacilities(r, act, t, B, dim) { drawFacilities(r, act, this.pal, this.tokens, t, B, dim); }
-  /** 방 하나의 스탠딩 데스크 발광대(팀장 책상 + 직원 책상) */
+  /** 방 하나의 스탠딩 데스크 발광대(팀장 책상 + 직원 책상) + 책상 소품(자리 분위기) */
   _drawRoomDesks(r0, B, now) {
     const G = B.glow, pal = this.pal;
     const r = roomFrame(r0, B);
+    const props = !this._farAll; // 원경(전체 보기 멀리)은 소품 생략 — 옷은 그대로
     if (r.leadDesk) {
       const lead = this.chars.get(r.ownerId);
       const n = this.nodes.get(r.ownerId);
       const st = !lead || (n && isEnded(n) && n.kind === 'claude-p') ? 'off' : this._deskState(lead, now);
       drawDeskEmitter(G, r.leadDesk, true, st, this._emitCol(lead), pal, lead ? lead._monK || 0 : 0);
+      if (props && lead && st !== 'off') this._deskPropsAt(B, r.ownerId, now, r.leadDesk.x, r.leadDesk.z, 1.0, LEAD_LAMP);
     }
     for (const d of r.desks) {
       if (!d.occupant) continue;
       const ch = this.chars.get(d.occupant);
       if (!ch || ch.state === 'gone' || ch.state === 'leave') continue;
       drawDeskEmitter(G, d, false, this._deskState(ch, now), this._emitCol(ch), pal, ch._monK || 0);
+      if (props) this._deskPropsAt(B, d.occupant, now, d.x, d.z, d.aux ? 0.55 : 0.65, null);
     }
     endXf(B);
+  }
+  /**
+   * 복셀 effort 그릴 값(옷·소품 공용): 대상 = 메인·subagent·workflow-agent·claude-p, 단계를 알 때만(아니면 null → 지금 모습).
+   * 요청값만 = 옅게(ghost), 확정 순간 0.4초 보간(동작 줄이기·재생 8배속 이상은 즉시).
+   */
+  _effState(id, now) {
+    const n = id != null && this.nodes.get(id);
+    if (!n) return null;
+    const tw = this._effTw || (this._effTw = new EffortTween());
+    return vxEffortState(n, tw, now * 1000, { reduced: this.reduced, rate: this.ts });
+  }
+  /** 책상 소품 한 자리(오피스 — 직원은 +z 를 봄). 상자 수를 돌려준다 */
+  _deskPropsAt(B, id, now, x, z, hw, lampAt, fx = 0, fz = 1, y = DESK_TOP, ry = 0) {
+    const st = this._effState(id, now);
+    if (!st) return 0;
+    return drawDeskProps(B.lit, B.glow, deskProps(st.level, { hw, lampAt }), x, z, fx, fz, y, this.pal, ry, st.ghost);
   }
   /** 초점·가리킴 기계 바닥 고리(_drawDynamic) — 하위 표현이 그리는 자리 p 를 바꿈(연구소: 반지름 보간 자리) */
   _machineRing(m, G, p = m.pos) {
@@ -893,17 +916,26 @@ export class VoxelView {
     const role = roleOf(ch.kind, ch.seat ? ch.seat.kind : null, ch.lead);
     const sc = this.sess.sessColor(ch.node);
     const sk = sc ? sc.getHexString() : '';
-    if (ch.look && ch.look.role === role && ch.look.sk === sk) return ch.look;
+    // 복셀 effort: 단계 옷(메인 포함) — 연구소면 실험복 사다리. 요청값만이면 옷 색을 배경 쪽으로 옅게(ghost)
+    const venue = ch.room && ch.room.type === 'lab' ? 'lab' : 'office';
+    const es = this._effState(ch.id, this._now || 0);
+    const ek = effKey(es, venue) + (es && es.ghost ? (this.tokens.isLight ? 'L' : 'D') : '');
+    if (ch.look && ch.look.role === role && ch.look.sk === sk && ch.look.ek === ek) return ch.look;
     const pal = this.pal;
     const kc = this.kindColor(ch.kind).clone();
-    const A = wardrobe.get(ch.id, role, ch.room ? ch.room.id : '');
+    const A0 = wardrobe.get(ch.id, role, ch.room ? ch.room.id : '');
+    const A = es ? dress(A0, es.level, { venue }) : A0;
     const H = (hex) => { if (!hex) return null; let c = _HEXC.get(hex); if (!c) { c = new THREE.Color(hex); _HEXC.set(hex, c); } return c; };
     const HM = (hex, to, k) => { const key = hex + to + k; let c = _HEXC.get(key); if (!c) { c = new THREE.Color(hex).lerp(new THREE.Color(to), k); _HEXC.set(key, c); } return c; };
     const look = {
-      role, sk, ap: A, skin: H(A.skin), hair: H(A.hair), pants: H(A.bottomC), shirt: H(A.topC), top2: H(A.top2C), shoe: H(A.shoeC),
+      role, sk, ek, ap: A, skin: H(A.skin), hair: H(A.hair), pants: H(A.bottomC), shirt: H(A.topC), top2: H(A.top2C), shoe: H(A.shoeC),
       neck: H(A.neckC), hatC: H(A.hatC), glasses: H(A.glasses), phones: H(A.phones), pack: H(A.pack), accent: kc, lens: H('#dde8f2'), lip: HM(A.skin, '#c0404a', 0.45), legC: H(A.legC), hairAcc: H(A.hairAccC),
       pants2: A.bottom === 'jeans' ? HM(A.bottomC, '#ffffff', 0.28) : A.bottom === 'joggers' ? HM(A.bottomC, '#000000', 0.35) : null,
       markKind: 'card', mark: null, badge: sc ? sc.clone() : kc.clone(), jacket: null, tie: null, vest: null, stripe: null, cap: null, hat: null, sessVest: null, shirtFront: null,
+      waist: H(A.waist), coat: A.coat || null, coatC: H(A.coatC), coatShade: A.coat ? H(EFF_HEX.coatShade) : null,
+      goggle: A.goggle || null, goggleC: A.goggle ? H(EFF_HEX.goggle) : null, goggleLens: A.goggle ? H(EFF_HEX.lens) : null,
+      glove: A.glove ? H(EFF_HEX.glove) : null, mask: A.mask ? H(EFF_HEX.mask) : null, headset: A.headset ? H(EFF_HEX.headset) : null, mic: A.headset ? H(EFF_HEX.mic) : null,
+      slideC: A.shoe === 'slide' ? H(EFF_HEX.slide) : null, neckPhones: H(A.neckPhones),
     };
     switch (role) {
       case 'lead': look.jacket = look.shirt; look.shirt = look.top2; look.accent = this.kindColor('main').clone(); look.markKind = 'badge'; break;
@@ -913,8 +945,15 @@ export class VoxelView {
       case 'wf': look.markKind = 'necklace'; look.mark = this.kindColor('workflow'); if (sc) look.sessVest = sc.clone(); break;
       default: if (sc) look.sessVest = sc.clone();
     }
+    if (A.jacket === true && !look.jacket) { look.jacket = H(A.topC); look.shirt = H(A.top2C); } // 팀원 xhigh·max: 재킷
+    else if (A.jacket === false && look.jacket) { look.jacket = null; look.shirt = H(A.topC); }  // 팀장 low·high: 재킷을 벗음
+    if (look.sessVest && (look.waist || look.coat || look.jacket)) look.sessVest = null; // 단계 겉옷 위에는 세션 조끼를 덧대지 않음(세션 색은 사원증에 남음)
     if (A.hat === 'cap' || A.hat === 'capBack') look.hatC = kc; // 캐주얼 캡 = 종류 색(예전 셔츠 색의 뜻)
-    ch.headExtra = headExtra(A);
+    if (es && es.ghost > 0) { // 요청값만(응답 전): 옷(피부·머리·종류 색·사원증 제외)을 배경 쪽으로 옅게
+      const bg = this.tokens.bg, k = es.ghost;
+      for (const key of GHOST_KEYS) if (look[key] && look[key].isColor) look[key] = look[key].clone().lerp(bg, k);
+    }
+    ch.headExtra = headExtra(A) + (A.headset && !A.phones ? 0.05 : 0);
     ch.look = look;
     this._dimLooks.delete(ch.id);
     return look;
@@ -1332,7 +1371,7 @@ export class VoxelView {
       const sub = isF || isH ? `<small>${esc((KIND_LABEL[ch.kind] || ch.kind) + ' · ' + (STATUS_LABEL[n0.status] || n0.status || ''))}</small>` : '';
       const stt = nodeSubtitle(n0); // 자동 제목 부제: 세션(팀장)·claude -p 이름표 아래 흐린 한 줄
       const stH = stt ? `<span class="ntitle">${esc(trunc(stt, 40))}</span>` : '';
-      const tags = ch.lead && !(n0.meta && n0.meta.orphanSdk) ? EMPTY : nodeTags(n0, this.nodes, this.clock());
+      const tags = ch.lead && !(n0.meta && n0.meta.orphanSdk) ? leadEffTag(n0) : nodeTags(n0, this.nodes, this.clock()); // 복셀 예외: 팀장 이름표에 effort 글 없음(옷이 말함) — 모르는 단계 이름만 글
       const tgH = tags.length ? `<span class="ntags">${tags.map((x) => `<i>${esc(x)}</i>`).join('')}</span>` : '';
       put(ch.id, name + stH + tgH + sub, (named ? 'lead' : '') + (isF ? ' focus' : ''), ch.pos.x, 0.02 + this._floorY(ch), ch.pos.z + 0.55, ch); // 연구소 브리지 위면 덱 높이
     }
@@ -1474,6 +1513,10 @@ VoxelView.prototype._signScreenRects = function (W, H) {
 };
 
 const EMPTY = Object.freeze([]);
+/** 요청값만일 때 옅게 할 옷 칸(피부·머리·종류 색·사원증·표식은 그대로) */
+const GHOST_KEYS = ['shirt', 'top2', 'jacket', 'pants', 'pants2', 'shoe', 'neck', 'waist', 'coatC', 'coatShade', 'goggleC', 'goggleLens', 'glove', 'mask', 'headset', 'mic', 'slideC', 'hatC', 'legC', 'neckPhones'];
+/** 팀장 이름표 꼬리표(복셀 예외): 단계를 알면 없음(옷차림이 말함), 모르는 단계 이름이면 그 글 하나(effortTagText 규칙) */
+function leadEffTag(n) { if (vxEffort(n)) return EMPTY; const v = effortTagText(n); return v ? [_t('cards.tag.effort', { v })] : EMPTY; }
 
 function toColor(c) {
   if (!c) return new THREE.Color(1, 1, 1);

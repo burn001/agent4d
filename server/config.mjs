@@ -5,6 +5,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { ccvizHome } from './home.mjs';
 import { t } from './cli-i18n.mjs';
+import { normSysmem } from './sysmem.mjs';
 
 export function stateDir() {
   return ccvizHome();
@@ -85,6 +86,8 @@ export function loadConfig(file = defaultConfigPath()) {
     project: cfg.project || null,
     // 3차: 사용 한도·전체 보기 루트 수. 파일에 없으면 기본값(파일에는 쓰지 않음)
     limits: normLimits(cfg.limits),
+    // 시스템 메모리 게이지 수집(이 PC RAM, 값만 SSE). false 또는 { on:false } 면 끔, pollSec 5～15(기본 10)
+    memory: normSysmem(cfg.memory),
     overviewMaxRoots: Number.isInteger(cfg.overviewMaxRoots) && cfg.overviewMaxRoots > 0 ? Math.min(cfg.overviewMaxRoots, 16) : 12,
     // 보관함 폴더(읽기 전용 재생 출처). 기본값 없음 — 값은 로그·출력에 내지 않는다
     archiveDir: typeof cfg.archiveDir === 'string' && cfg.archiveDir ? cfg.archiveDir : null,

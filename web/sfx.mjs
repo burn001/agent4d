@@ -153,7 +153,7 @@ export function eventToSound(ev, node) {
     case 'result':
       return ev.ok === false ? mk('error', 0) : mk('done', 1);
     case 'user':
-      return ev.origin === 'human' ? mk('user', 0) : null;
+      return ev.origin === 'human' || ev.origin === 'peer' ? mk('user', 0) : null;
     case 'output':
       return mk('blip', 3);
     default:

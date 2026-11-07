@@ -29,7 +29,7 @@ export function markFor(ev, node = null) {
       return null;
     }
     case 'result': return { shape: 'dot', color: ev.ok === false ? 'error' : 'ok', label: `${t('app.tl.result')} · ${ev.text || ''}` };
-    case 'user': return ev.origin === 'human' ? { shape: 'dia', color: 'text', label: `${t('app.tl.user')} · ${ev.text || ''}` } : null;
+    case 'user': return ev.origin === 'human' || ev.origin === 'peer' ? { shape: 'dia', color: 'text', label: `${t('app.tl.user')} · ${ev.text || ''}` } : null;
     case 'output': return { shape: 'tick', color: KIND_TOKEN((node && node.kind) || 'bash-bg'), label: t('app.tl.output'), small: true };
     default: return null;
   }

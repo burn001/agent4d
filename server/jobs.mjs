@@ -474,6 +474,8 @@ export class JobBook {
     // 실패 작업 퇴장 문턱: 규칙 묶음 > 설정 맨 위(규약 줄도 설정 맨 위를 따른다). 없으면 싣지 않음(웹 기본)
     const failLinger = ev.setFailLinger ?? (this.rules && this.rules.failLingerSec != null ? this.rules.failLingerSec : null);
     if (failLinger != null) job.failLingerSec = failLinger;
+    // keepEnded(주인마다 보이는 끝난 작업 수): 기본값과 다를 때만 싣는다(웹 jobFold 가 이 값을 따른다)
+    if (this.rules && Number.isInteger(this.rules.keepEnded) && this.rules.keepEnded !== JOB.KEEP_ENDED) job.keepEnded = this.rules.keepEnded;
     const revive = () => { if (isJobEnded(job.state)) { job.rc = null; job.endedAt = null; job.startedAt = at; job.progress = null; } };
     let state = ev.state || null;
     switch (ev.on) {

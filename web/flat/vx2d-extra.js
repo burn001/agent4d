@@ -4,7 +4,7 @@
 // Voxel2DView 가 하나 만든다. 캔버스 2D 만 쓴다(three 없음).
 import { FLOW, PacketPool, planFlow, easeInOut, catColor } from '../flow-core.mjs';
 import { OFFICE_FX, ixSpot, floorRoute, routeCum, routeAt, dashStarts, lineStyle, clientScreen, clientSpot, MON } from '../voxel/office-core.mjs';
-import { ClientDesk, clientOp, CLIENT } from '../voxel/client-core.mjs';
+import { ClientDesk, clientOp, CLIENT, cardLabel } from '../voxel/client-core.mjs'; // cardLabel
 import { userBook, consoleLines, hitRect } from '../user-core.mjs'; // 사용자 콘솔
 import * as IX from '../ix-core.mjs';
 
@@ -362,11 +362,33 @@ export class Vx2DExtra {
         }
       }
       if (d) {
+        // 다른 세션이 보낸 것은 보낸 세션 팀장 책상이 보이면 거기서 출발 · 리본 글(◇ Interactive · ⇄ 다른 세션 + 첫 몇 단어)
+        const from = (c) => {
+          if (c.src !== 'peer' || !c.from || c.from === r.ownerId) return sc;
+          const sv = v.vis.get(c.from);
+          if (!sv || sv.hidden || !(sv.scopeK ?? 1)) return sc;
+          const q = v.rooms.find((o) => o.ownerId === c.from && o.leadDesk && !o.external);
+          return q ? q.leadDesk : sc;
+        };
         for (const c of d.liveCards(now)) {
-          const u = (now - c.t0) / CLIENT.CARD_DUR, e = easeInOut(Math.min(1, u)), ld = r.leadDesk;
-          const x = sc.x + (ld.x - sc.x) * e, z = sc.z + (ld.z - sc.z) * e - Math.sin(e * Math.PI) * 1.2;
+          const u = (now - c.t0) / CLIENT.CARD_DUR, e = easeInOut(Math.min(1, u)), ld = r.leadDesk, a = from(c);
+          const x = a.x + (ld.x - a.x) * e, z = a.z + (ld.z - a.z) * e - Math.sin(e * Math.PI) * 1.2;
           ctx.fillStyle = c.kind === 'memo' ? mixHex(pal.paper, t.skill, 0.35) : pal.paper; ctx.strokeStyle = user; ctx.lineWidth = 1;
           ctx.fillRect(X(x) - 0.17 * s, Y(z) - 0.13 * s, 0.34 * s, 0.26 * s); ctx.strokeRect(X(x) - 0.17 * s, Y(z) - 0.13 * s, 0.34 * s, 0.26 * s);
+        }
+        if (s > 2) for (const c of d.liveTags(now)) {
+          const lab = cardLabel(c);
+          if (!lab) continue;
+          const u = (now - c.t0) / CLIENT.CARD_DUR, e = easeInOut(Math.min(1, u)), ld = r.leadDesk, a = from(c);
+          const x = X(a.x + (ld.x - a.x) * e), y = Y(a.z + (ld.z - a.z) * e - Math.sin(e * Math.PI) * 1.2) - Math.max(14, 0.5 * s);
+          const k = u <= 1 ? 1 : Math.max(0, 1 - ((now - c.t0) - CLIENT.CARD_DUR) / CLIENT.TAG_HOLD);
+          ctx.save(); ctx.globalAlpha = fa * k;
+          ctx.font = `600 10.5px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          const tw = Math.min(220, ctx.measureText(lab).width + 12);
+          ctx.fillStyle = t.isLight ? 'rgba(255,255,255,.92)' : 'rgba(20,24,34,.9)'; ctx.strokeStyle = user; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x - tw / 2, y - 8, tw, 16, 8) : ctx.rect(x - tw / 2, y - 8, tw, 16); ctx.fill(); ctx.stroke();
+          ctx.fillStyle = t.text; ctx.fillText(lab, x, y + 0.5, 210);
+          ctx.restore();
         }
         if (d.memo && s > 3) { ctx.fillStyle = mixHex(pal.paper, t.skill, 0.45); for (let i = 0; i < d.memo; i++) ctx.fillRect(X(r.leadDesk.x - 0.75) + i * 1.5, Y(r.leadDesk.z + 0.18) - i * 1.5, 0.24 * s, 0.24 * s); }
       }

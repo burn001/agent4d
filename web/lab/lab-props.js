@@ -13,6 +13,7 @@
 // │ buildLabShell(room, pal, b, o)                 정적 상자(그리기 호출 늘지 않음 — 기존 묶음에 넣기만)                         │
 // │ drawLabFacilities(room, act, pal, tok, t, B, dim)  시설 애니메이션(포털 빛·벨·커피 김…) — act = room._act(시설 활동도)        │
 // │ drawLabDeskEmitters(room, B, pal, info)        책상 발광대. info(nodeId) → {state:'off'|'dim'|'on'|'flash', color, k} | null   │
+// │                                                + p(책상 소품 = deskProps 결과|null)·ghost — 예산(LAB_PROP_BOXES) 넘으면 생략   │
 // │ drawLabRigCables(room, layout, B, pal, info)   주인 책상 앞 → 기자재 바닥 케이블. info = {t, ownerOf(id), colorOf(owner), │
 // │                                                stateOf(id) → rigState, rigAt?(id, m) → 그리는 자리}. 진행만 대시. ≤ 120 상자      │
 // │                                                pulseOf?(id, out) → 펄스 수(out[i] = {u 0..1 기자재 → 책상, k 0 출력·1 끝·2 실패·3 설치(책상 → 기자재)}) · light? │
@@ -22,7 +23,8 @@
 // 1단계 상태: 단순 상자 모양. 2단계: 실험 가운 덧옷·세미나 탁자·라운지 소품, 3단계: 원호 벽 16 조각 히스테리시스.
 import * as THREE from 'three';
 import { LAB, polar, DEG, bridgeToWorld } from './lab-const.mjs';
-import { DESK_TOP } from '../voxel/props.js';
+import { DESK_TOP, drawDeskProps } from '../voxel/props.js';
+import { labFwd, labPropsOk } from '../voxel/vx-effort-core.mjs'; // 책상 소품(자리 분위기)
 import { cableSegsInto } from './lab-marks-core.mjs';
 import { RIG_HEX, RIG_KIND_HEX } from './lab-rig-core.mjs';
 
@@ -117,19 +119,22 @@ export function drawLabFacilities(room, act, pal, tok, t, B, dim) {
   if (act && act.portal) { const pt = room.portal; B.glow.box(pt.x, 1.3, pt.z, 1.8, 2.0, 0.08, _c.copy(pal.portalCore).multiplyScalar(0.7 + 0.3 * Math.sin(t * 6)), (pt.theta != null ? pt.theta : LAB.FRONT.PORTAL) * DEG); }
 }
 
-/** 책상 발광대(책상 앞 끝 = 플랫폼 쪽 빛줄) */
+/** 책상 발광대(책상 앞 끝 = 플랫폼 쪽 빛줄) + 책상 소품(자리 분위기, 오피스와 같은 deskProps) */
 export function drawLabDeskEmitters(room, B, pal, info) {
   const G = B.glow;
+  let used = 0; // 소품 동적 상자(방마다 예산 — 넘으면 그 뒤 책상은 소품 생략, 옷은 그대로)
   const one = (x, z, y0, theta, wide, s) => {
     if (!s || s.state === 'off') return;
     const a = theta * DEG, c = s.state === 'flash' ? _c.copy(s.color).lerp(_c2.set(0xffffff), 0.5) : s.state === 'dim' ? _c.copy(pal.emitter).multiplyScalar(pal.isLight ? 0.7 : 0.45) : _c.copy(s.color);
     const off = LAB.DESK.D / 2 - 0.12, px = x - Math.sin(a) * off, pz = z - Math.cos(a) * off;
     G.box(px, y0 + DESK_TOP + 0.012, pz, wide * 0.55, 0.016, 0.05, c, a);
+    if (s.p && s.p.boxes && labPropsOk(used, s.p.boxes)) { const f = labFwd(a); used += drawDeskProps(B.lit, G, s.p, x, z, f.x, f.z, y0 + DESK_TOP, pal, a, s.ghost || 0); }
   };
   const ld = room.leadDesk;
   if (ld) one(ld.x, ld.z, ld.floorY || 0, room.lab.bridge.theta, LAB.BRIDGE.CONSOLE_W, info(room.ownerId));
   for (const d of room.desks) if (d.occupant) one(d.x, d.z, 0, d.theta, LAB.DESK.W, info(d.occupant));
 }
+
 
 /**
  * 【리드】 전체 보기 연구동 바닥판·유리 돔(비활성 = 닫힘). bd = computeLabCampus 동 {lab:{cx,cz,rWall}, dome, recent}.

@@ -23,3 +23,6 @@ export function stageInsets(el, now = performance.now()) {
   cache = { el, at: now, v };
   return v;
 }
+
+/** 패널 크기·키보드가 바뀌어 덮개 위치가 달라졌을 때 캐시를 버린다 */
+export function invalidateInsets() { cache = null; }

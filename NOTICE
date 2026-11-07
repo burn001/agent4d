@@ -6,5 +6,11 @@ This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 It loads three.js (https://threejs.org), Copyright 2010-2024 three.js authors,
 at runtime from a CDN under the MIT License. three.js is not redistributed here.
 
+It includes KaTeX 0.19.0 (https://katex.org), Copyright (c) 2013-2020 Khan
+Academy and other contributors, under the MIT License, in web/vendor/katex/
+(katex.min.js, katex.min.css and the WOFF2 fonts, unchanged from the npm
+package; license text in web/vendor/katex/LICENSE). It is loaded from this
+server only when a reply contains math.
+
 "Claude" and "Claude Code" are trademarks of Anthropic, PBC. Agent4D is an
 independent project, not made, endorsed or supported by Anthropic.

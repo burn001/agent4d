@@ -9,6 +9,8 @@ import { MECH, SUB, planetMode, approach, hatchOpen, subType, hash01, orbitPoint
 import { projOrbit, burst } from './planet-orbits2d.js';
 import { mixColor } from './flat-core.mjs';
 import { Escapement, TOURB_GEO as TG, GEAR_M, PINION_R, ESC_ARBOR, pinionAngle } from '../tourbillon-core.mjs'; // 뚜르비용(위에서 본 동심 링·톱니·진동 휠)
+import { TOURB_EFF as TE, tourbEffort, cageArcAngle, cageArcAlpha, gemAngle, gemAlpha, effortGlint } from '../tourbillon-core.mjs'; // 케이지 살 수·보석 수
+import { EFFORT, effortGlyph, effortLod, effortPhone, EffortTween, effortInstant, effortInk } from '../effort-core.mjs'; // 추론 effort
 
 const TAU = Math.PI * 2;
 
@@ -411,6 +413,45 @@ function bevelLine(ctx, pts, w, P, alpha) {
   ctx.strokeStyle = P.steel; ctx.lineWidth = w; path(); ctx.stroke();
   ctx.globalAlpha = alpha * 0.8; ctx.strokeStyle = P.steelHi; ctx.lineWidth = Math.max(0.5, w * 0.2); path(); ctx.stroke();
 }
+/** 노드 effort(2D) — 목표값(tourbEffort, LOD 반영)을 노드마다 0.4초 보간. glyphPx = 무늬 화면 반지름. 반환 v._ef2(재사용 객체) */
+function eff2D(view, v, glyphPx, now) {
+  const m = v.node.meta || {}, key = v.node.kind + '|' + m.effort + '|' + m.effortReq;
+  const S = v._ef2 || (v._ef2 = { k: null, g: null, tA: new EffortTween(), tI: new EffortTween(), tG: new EffortTween(), arcs: TE.ARC_BASE, lo: TE.ARC_MAX, inner: 0, gems: 0, hollow: 0, ring: 0, glint: -1, seed: hash01(v.id, 'eglint') });
+  if (S.k !== key) { S.k = key; S.g = effortGlyph(v.node); }
+  const el = view.container || (typeof window !== 'undefined' ? { clientWidth: window.innerWidth, clientHeight: window.innerHeight } : null);
+  const phone = el ? effortPhone(el.clientWidth || 1, el.clientHeight || 1) : false;
+  const T = tourbEffort(S.g, S.g ? effortLod(glyphPx, { phone }) : 0, EFFORT.ARCS);
+  const ms = now * 1000, tw = { instant: effortInstant({ reduced: !!view.reduced, rate: view.timeScale || 1 }) };
+  S.arcs = S.tA.value(0, T.arcs, ms, tw); S.lo = T.lo; S.inner = S.tI.value(0, T.inner, ms, tw);
+  S.gems = S.tG.value(0, T.gems, ms, tw); S.hollow = T.hollow; S.ring = T.ring;
+  S.glint = !view.reduced && T.inner >= 1 ? effortGlint(ms, S.seed, EFFORT.GLINT_MS) : -1;
+  return S;
+}
+/**
+ * claude -p·워크플로 에이전트 보석(2D): 본체 둘레 위쪽 호에 작은 점 n 개(40° 간격, 가운데 맞춤) — 확정 = 채운 점, 요청 = 빈 점(테두리).
+ * 호 = --effort-ink-dim 1px, 맨 위(xhigh·max) 확정 = --effort-ink 실선(닫힘). Rr = 보석 고리 화면 반지름(본체 × TOURB_EFF.GEM_RING)
+ */
+export function drawEffortGems2D(view, ctx, v, x, y, Rr, alpha, now) {
+  if (!(Rr >= 3)) return;
+  const S = eff2D(view, v, Rr, now);
+  if (!(S.gems > 0.004)) return;
+  const K = effortInk(!!view.tokens.isLight), up = -Math.PI / 2, span = ((TE.GEM_N - 1) / 2 + 0.5) * TE.GEM_STEP;
+  ctx.save(); ctx.lineCap = 'round';
+  if (S.ring > 0) {
+    const hi = S.ring >= 1;
+    ctx.globalAlpha = alpha; ctx.strokeStyle = hi ? K.ink.css : K.dim.css; ctx.lineWidth = hi ? 1.3 : 1;
+    ctx.beginPath(); ctx.arc(x, y, Rr, up - span, up + span); ctx.stroke();
+  }
+  const r = Math.max(1.5, Math.min(3, Rr * 0.09));
+  for (let j = 0; j < TE.GEM_N; j++) {
+    const f = gemAlpha(j, S.gems);
+    if (f < 0.01) break;
+    const a = up + gemAngle(j, S.gems), px = x + Math.cos(a) * Rr, py = y + Math.sin(a) * Rr;
+    ctx.globalAlpha = alpha * f; ctx.beginPath(); ctx.arc(px, py, r, 0, TAU);
+    if (S.hollow) { ctx.strokeStyle = K.ink.css; ctx.lineWidth = 1; ctx.stroke(); } else { ctx.fillStyle = K.ink.css; ctx.fill(); }
+  }
+  ctx.restore(); ctx.globalAlpha = alpha;
+}
 /** main = 자이로 뚜르비용(메인), 아니면 단일 케이지(서브). R = 몸체(원래 크기) 화면 반지름. 위에서 본 무브먼트:
  *  고정 4번 휠(금 톱니 테·살 5) → 케이지 테·브리지 팔 3(스틸 면취, 째깍 회전) → 피니언·이스케이프 휠(케이지에 붙어 4번 휠 위를 구름)·앵커
  *  → 안쪽 케이지(기운 고리, 반대로) → 밸런스(금 테·살·나사, 진동). 작으면 실루엣(테·톱니)만 */
@@ -421,13 +462,31 @@ export function drawTourb2D(view, ctx, v, x, y, R, alpha, now, main) {
   const pt = (a, r) => [x + Math.cos(a) * r, y - Math.sin(a) * r]; // 3D 와 같은 방위 감각(위에서 반시계)
   ctx.save();
   if (!main) {
-    const Rc = R * TG.SUB_R, fine = R >= 12;
+    // 살(브리지 팔) 수 = EFFORT.ARCS(low 2 · medium 3 · high 4 · xhigh·max 6, 미상 = 지금 3, 360°/c 로 고르게 · 요청 상태 = 늘어날 살 40%) · 맨 위(xhigh·max) 확정 = 안쪽 점선 링(반대로)
+    const Rc = R * TG.SUB_R, fine = R >= 12, ef = eff2D(view, v, Rc, now);
     teethRing(ctx, x, y, R * (TG.SUB_R + 0.11), 40, Math.max(1, R * 0.09), e.cage, P.gold, alpha * 0.85);
     bevelRing(ctx, x, y, Rc, Math.max(1, R * 0.1), P, alpha * 0.85);
-    if (fine) {
-      for (let i = 0; i < TG.SUB_ARMS; i++) { const a = e.cage + (i * TAU) / TG.SUB_ARMS, [ax, ay] = pt(a, Rc), [cx, cy] = pt(a + 0.25, Rc * 0.6), [bx, by] = pt(a, R * 0.1); bevelLine(ctx, [ax, ay, cx, cy, bx, by], Math.max(0.8, R * 0.06), P, alpha * 0.8); }
-      dot(x, y, Math.max(1.2, R * 0.06), P.ruby, 0.95);
+    if (R >= 9) {
+      for (let i = 0; i < TE.ARC_MAX; i++) {
+        const k = cageArcAlpha(i, ef.arcs, ef.lo);
+        if (k < 0.01) continue;
+        const a = e.cage + cageArcAngle(i, ef.arcs), [ax, ay] = pt(a, Rc), [cx, cy] = pt(a + 0.25, Rc * 0.6), [bx, by] = pt(a, R * 0.1);
+        bevelLine(ctx, [ax, ay, cx, cy, bx, by], Math.max(0.8, R * 0.06), P, alpha * 0.8 * k);
+      }
+      if (ef.inner > 0.01) { // 안쪽 케이지(기운 고리를 위에서 본 타원, 점선) — 바깥과 반대로
+        const ri = R * TE.INNER_R, rot = -e.cage2;
+        ctx.globalAlpha = alpha * ef.inner * 0.9; ctx.strokeStyle = P.ink || P.steelLo; ctx.lineWidth = Math.max(0.9, R * 0.05);
+        ctx.setLineDash([Math.max(1.5, R * 0.12), Math.max(1.2, R * 0.08)]);
+        ctx.beginPath(); ctx.ellipse(x, y, ri, ri * Math.cos(TE.INNER_TILT), rot, 0, TAU); ctx.stroke();
+        ctx.strokeStyle = P.steel; ctx.lineWidth = Math.max(0.6, R * 0.03); ctx.stroke(); ctx.setLineDash([]);
+        if (ef.glint >= 0) { // 맨 위 단계 반짝임(6초에 한 번, 고리를 따라 한 바퀴)
+          const K = effortInk(!!view.tokens.isLight).glint, a0 = ef.glint * TAU;
+          ctx.globalAlpha = alpha * K.a * Math.sin(Math.PI * ef.glint); ctx.strokeStyle = K.css; ctx.lineWidth = Math.max(1, R * 0.05);
+          ctx.beginPath(); ctx.ellipse(x, y, ri, ri * Math.cos(TE.INNER_TILT), rot, a0 - 0.35, a0 + 0.35); ctx.stroke();
+        }
+      }
     }
+    if (fine) dot(x, y, Math.max(1.2, R * 0.06), P.ruby, 0.95);
     ctx.restore(); ctx.globalAlpha = alpha; return;
   }
   const S = 1.12 * R; // 3D 와 같은 메인 배율

@@ -134,8 +134,9 @@ export function parseLastTsFromTail(text) {
 export const EVENT_BYTES_K = 15000;
 
 export class SessionIndex {
-  constructor({ projectsDir, sessionsDir, project = null, fixedSession = null } = {}) {
+  constructor({ projectsDir, sessionsDir, project = null, fixedSession = null, addrBook = null } = {}) {
     const home = claudeHome();
+    this.addrBook = addrBook; // 수신함 주소 장부(PeerAddrBook) — 본 세션 기록의 주소 ↔ 세션 짝을 적어 둔다(재생이 보낸 세션을 찾게)
     this.projectsDir = projectsDir || path.join(home, 'projects');
     this.sessionsDir = sessionsDir || path.join(home, 'sessions');
     this.project = project;
@@ -193,6 +194,7 @@ export class SessionIndex {
   async _refreshLive() {
     const live = new Map();
     const procs = new Map();
+    const addrs = []; // [messagingSocketPath, sessionId]
     let files = [];
     let ok = false; // 세션 폴더를 읽었는지 — 못 읽었으면 '프로세스 없음'으로 판정하지 않는다
     try { files = await fs.promises.readdir(this.sessionsDir); ok = true; } catch {}
@@ -201,13 +203,14 @@ export class SessionIndex {
       try {
         const j = JSON.parse(await fs.promises.readFile(path.join(this.sessionsDir, f), 'utf8'));
         if (j && j.sessionId) {
-          live.set(j.sessionId, { status: j.status ?? null, entrypoint: j.entrypoint ?? null, pid: j.pid });
+          live.set(j.sessionId, { status: j.status ?? null, entrypoint: j.entrypoint ?? null, pid: j.pid, waitingFor: waitingForOf(j) });
+          if (typeof j.messagingSocketPath === 'string') addrs.push([j.messagingSocketPath, j.sessionId]);
           // 3차: pid 생존으로 활성 판정. updatedAt 은 상태가 바뀔 때만 갱신되므로 쓰지 않는다
           const sid = String(j.sessionId).toLowerCase();
           const alive = pidAlive(j.pid);
           const prev = procs.get(sid);
           if (!prev || (alive && !prev.alive)) {
-            procs.set(sid, { sessionId: sid, pid: j.pid, alive, status: j.status ?? null, entrypoint: j.entrypoint ?? null,
+            procs.set(sid, { sessionId: sid, pid: j.pid, alive, status: j.status ?? null, waitingFor: waitingForOf(j), entrypoint: j.entrypoint ?? null,
               cwd: typeof j.cwd === 'string' ? j.cwd : null, startedAt: j.startedAt ?? null, kind: j.kind ?? null });
           }
         }
@@ -215,6 +218,7 @@ export class SessionIndex {
     }
     this.live = live;
     this.procs = procs;
+    if (this.addrBook && addrs.length) { try { this.addrBook.observe(addrs); } catch {} }
     this.sessionsOk = ok;
     this.procsAt = Date.now();
   }
@@ -455,6 +459,9 @@ export class SessionIndex {
 
   liveStatus(sessionId) { return this.live.get(sessionId)?.status ?? null; }
 }
+
+/** 세션 기록의 입력 대기 사유(status 'waiting' 일 때만 — 'input needed'·'dialog open'·'sandbox request' 등, 40자) */
+export const waitingForOf = (j) => (j && j.status === 'waiting' && typeof j.waitingFor === 'string' ? j.waitingFor.slice(0, 40) : null);
 
 /**
  * 출력 파일·폴더 경로의 임시 폴더 기준 상대 부분 `<인코딩 cwd>/<세션ID>/tasks[/<파일>]`(보관함 `_tasks/` 아래 같은 경로).

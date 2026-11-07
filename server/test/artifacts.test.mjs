@@ -289,3 +289,12 @@ test('ArtifactStore 상한: 임시 파일은 오래된 일반 파일보다 먼�
     assert.ok(tmp.every((x) => x.id.startsWith('.autopilot/scratch/')));
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('위험 동작 오탐(§141): 같은 줄 다른 명령의 --force 는 push 경고가 아님 · rm -f 단독·임시/스크래치 정리는 경보 아님', () => {
+  const a = one('Bash', { command: 'node scripts/export-public.mjs --out out --force && git push origin main' });
+  assert.deepEqual(a.map((x) => [x.k, x.v, x.x || '']), [['repo', 'push', '']]);
+  assert.equal(one('Bash', { command: 'git push -f origin main' })[0].x, 'force');
+  assert.deepEqual(shellDeletes('rm -f a.txt'), [{ w: 'a.txt', rec: false }]);
+  assert.deepEqual(shellDeletes('rm -rf .autopilot/scratch/q1 _a4d_ixtest_tmp'), [{ w: '.autopilot/scratch/q1', rec: false }, { w: '_a4d_ixtest_tmp', rec: false }]);
+  assert.deepEqual(shellDeletes('rm -rf build'), [{ w: 'build', rec: true }]);
+});

@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { quarter, wallHigh, windowWall } from './xf.mjs';
 import { OFFICE_FX } from './office-core.mjs';
 import { BATCH } from '../batch-core.mjs';
+import { leftAxis } from './vx-effort-core.mjs'; // 책상 소품(자리 분위기) 지역 좌표
 const DEVICE_K = BATCH.DEVICE_K; // v0.4.1 기동기 0.75배
 export { windowWall };
 
@@ -595,11 +596,33 @@ export function drawDeskEmitter(G, d, lead, state, col, pal, k = 0) {
   if (state === 'off') return;
   const wide = lead ? 2.0 : d.aux ? 1.1 : 1.3, dd = lead ? 0.9 : 0.7;
   const c = state === 'flash' ? _c.copy(col).lerp(_c2.set(0xffffff), 0.5) : state === 'dim' ? _c.copy(pal.emitter).multiplyScalar(pal.isLight ? 0.7 : 0.45) : _c.copy(col);
-  G.box(d.x, DESK_TOP + 0.012, d.z + dd / 2 - 0.12, wide * 0.55, 0.016, 0.05, c);
+  const ez = d.z + dd / 2 - 0.12;
+  G.box(d.x, DESK_TOP + 0.012, ez, wide * 0.55, 0.016, 0.05, c);
   if (k > 0.02) { // 빛기둥(얇은 판 두 장): 발광대 → 모니터 아래 끝
     const h = 0.1 * k; // DESK_MON.LIFT
-    G.box(d.x, DESK_TOP + 0.02 + h / 2, d.z + dd / 2 - 0.12, wide * 0.5 * k, h, 0.012, _c.multiplyScalar(0.55));
+    G.box(d.x, DESK_TOP + 0.02 + h / 2, ez, wide * 0.5 * k, h, 0.012, _c.multiplyScalar(0.55));
   }
+}
+
+const _cp = new THREE.Color(), _cq = new THREE.Color();
+const _propHex = new Map();
+const propHex = (h) => { let c = _propHex.get(h); if (!c) { c = new THREE.Color(h); _propHex.set(h, c); } return c; };
+/**
+ * 책상 소품(자리 분위기 — 복셀 오피스·연구소 공용). P = deskProps 결과(vx-effort-core), (x, z) = 상판 가운데, (fx, fz) = 직원이 보는 앞,
+ * y = 상판 높이, ry = 상자 회전(연구소 θ), ghost = 요청값만이면 옅게(소품 색을 상판 쪽으로). 상자 수 = P.boxes.
+ */
+export function drawDeskProps(L, G, P, x, z, fx, fz, y, pal, ry = 0, ghost = 0) {
+  if (!P || !P.boxes) return 0;
+  const lx = leftAxis(fx, fz);
+  for (const it of P.items) {
+    const src = it.c[0] === '#' ? propHex(it.c) : pal[it.c] || pal.paper;
+    let c = src;
+    if (it.pool) c = _cq.copy(pal.deskTop).lerp(src, pal.isLight ? 0.38 : 0.22); // 상판 위 옅은 빛 웅덩이(가산 아님 — 서류보다 옅게)
+    if (ghost > 0) c = (c === _cq ? c : _cp.copy(c)).lerp(pal.deskTop, ghost * (it.glow ? 1.4 : 1));
+    const px = x + lx.x * it.u + fx * it.v, pz = z + lx.z * it.u + fz * it.v;
+    (it.glow ? G : L).box(px, y + it.y, pz, it.sx, it.sy, it.sz, c, ry);
+  }
+  return P.boxes;
 }
 
 /**

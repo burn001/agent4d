@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { fnv, mainShapeBase, assignMainShapes, mainSetSig, silOf, silOutline, SIL, SIL_NAMES, SIL_DIM, reactorFills, bandWords, toolBand, ctxFrac, ctxTone, sendPhase, DESK } from '../flowview/shape-core.mjs';
-import { MAIN_RIG, mainLook, mainLinkY } from '../flowview/main-rig-core.mjs';
+import { MAIN_RIG, mainLook, mainLinkY, mainPartOrder } from '../flowview/main-rig-core.mjs';
 import { NODE_STATE } from '../flowview/flow-style.mjs';
 
 const read = (p) => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
@@ -92,6 +92,17 @@ test('메인 몸: 컨텍스트 통합(기둥 여섯·액체) · 띠 글 = 실제
   assert.equal(mainLinkY(true), -MAIN_RIG.BOTTOM); assert.equal(mainLinkY(false), MAIN_RIG.TOP);
   // 메인 칩 둘레 컨텍스트 고리는 없음(몸에 통합) — 메인은 칩 묶음에서 빠짐
   assert.match(read('../flowview/chips.js'), /if \(v\.kind === 'main' && !v\.device\) return \(v\._sil = null\)/);
+});
+
+test('메인 몸 그리기 순서: 깊이 안 쓰는 부분은 칩·네모 터미널 앞면 글 다음(뒤 노드가 앞에 그려지지 않게)', () => {
+  assert.equal(mainPartOrder(true), 0); // 깊이를 쓰는 몸은 칩 깊이 패스(0.9)보다 먼저
+  const late = mainPartOrder(false);
+  const ro = (file, re) => Number(read(file).match(re)[1]);
+  assert.ok(late > 1, '칩 색 패스(1) 다음');
+  assert.ok(late > ro('../flowview/term-faces.js', /mesh\.renderOrder = ([\d.]+)/), '네모 터미널 앞면 글 다음');
+  assert.ok(late > ro('../flowview/console3d.js', /this\.mesh\.renderOrder = ([\d.]+)/), '콘솔 몸 다음');
+  assert.ok(late < ro('../flowview/beams.js', /this\.mesh\.renderOrder = ([\d.]+)/), '빔 전');
+  assert.match(read('../flowview/main-rigs.js'), /o\.renderOrder = mainPartOrder\(o\.material\.depthWrite\)/);
 });
 
 test('홀로그램 콘솔 데스크: 보낸 직후 위상 · 글 문턱 · 흐름 3D 는 글줄 막대 대신 화면 글', () => {

@@ -239,6 +239,9 @@ export function mountPlans(h) {
     const focus = h.focusId ? h.focusId() : null;
     const opened = h.openedPlan ? h.openedPlan() : null; // 크게 보기로 연 보드는 그 카드가 대신함
     const W = innerWidth, H = innerHeight;
+    // 숨김 판정은 무대(캔버스) 사각형 기준 — 왼쪽·오른쪽 패널·상단 바 밑으로 완전히 들어간 판은 그리지 않음(화면에 걸친 판은 CSS clip-path 가 무대 밖을 자름)
+    const sr0 = view && view.renderer && view.renderer.domElement ? view.renderer.domElement.getBoundingClientRect() : null;
+    const SB = sr0 && sr0.width > 0 ? { l: sr0.left, t: sr0.top, r: sr0.right, b: sr0.bottom } : null;
     const vxBoard = !!(view && view.constructor && view.constructor.family === 'voxel');
     if (layer) layer.classList.toggle('vx', vxBoard); // 복셀: 게시판 모양
     const punch = !!(view && !view.flat && typeof view.setPlanPunch === 'function'); // 흐름·Planet 3D · 복셀 3D
@@ -253,7 +256,7 @@ export function mountPlans(h) {
       if (mid === opened) {
         const an = boardAnchor(entries, mid, nodes, (id) => shownNode(view, id));
         const pj = shownNode(view, an.id) ? boardProject(view, an.id) : null;
-        const sc = pj ? boardScreen(pj.p, pj.ppw, pj.wb, W, H) : null;
+        const sc = pj ? boardScreen(pj.p, pj.ppw, pj.wb, W, H, SB) : null;
         if (sc && !sc.hidden && sc.box) openBox = { x: sc.box.x + sc.box.w / 2, y: sc.box.y + sc.box.h / 2, r: Math.min(480, Math.max(sc.box.w, sc.box.h) / 2) };
         const ob = boards.get(mid); if (ob && !ob.el.hidden) ob.el.hidden = true;
         continue;
@@ -305,7 +308,7 @@ export function mountPlans(h) {
       const b = boardEl(c.id);
       b.aid = c.aid;
       render(b, m);
-      const sc = boardScreen(pj.p, pj.ppw, pj.wb, W, H);
+      const sc = boardScreen(pj.p, pj.ppw, pj.wb, W, H, SB);
       const bw = PLAN_UI.BASE_PX, bh = Math.round(bw * pj.wb.aspect); // 기준 크기(배율 1) — 모니터 폭 × 높이 1.5배 비율
       if (b.bw !== bw || b.bh !== bh) { b.bw = bw; b.bh = bh; b.el.style.width = bw + 'px'; b.el.style.height = bh + 'px'; }
       if (sc.lod != null && b.lod !== sc.lod) { b.lod = sc.lod; b.el.classList.toggle('lod', sc.lod); }

@@ -261,7 +261,8 @@ test('라이브: tqdm `\\r` 출력 → 자동 진행 작업(계수기) · bg 로
     assert.equal(g.get(`s:${S}`).meta.run.buffered, false, '첫 출력이 오면 false');
     // 호출이 끝나면 작업도 끝
     fs.appendFileSync(f, line({ type: 'user', timestamp: new Date().toISOString(), ...b2, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu_fgp', content: 'ok' }] }, toolUseResult: { stdout: 'ok', stderr: '' } }));
-    await rt.pollAll({ all: true });
+    // 라이브는 결국 일치(파일 끝 읽기 시점) — 무거운 전체 시험 실행에서 한 번의 poll 로는 가끔 못 읽어(확인 중 발견, 기존부터 간헐) 2초까지 다시 읽는다
+    for (let k = 0; k < 20 && g.get(fj).meta.job.state !== 'done'; k++) { await rt.pollAll({ all: true }); if (g.get(fj).meta.job.state !== 'done') await sleep(100); }
     assert.equal(g.get(fj).meta.job.state, 'done');
     assert.equal(g.get(`s:${S}`).meta.run, null);
   } finally { rt.close(); }

@@ -305,7 +305,7 @@ export class FlowView extends SceneView {
     let hy;
     if (v.device || v.procRig) hy = STAND.DEV_HY * s * 0.96;
     else if (v.kind === 'main') { o.copy(v.group.position); o.y += mainLinkY(asParent) * s; o.noLift = !!asParent; return o; }
-    else { const sil = v._sil && SIL_DIM[v._sil]; hy = (sil ? sil.h : 0.62) * 0.5 * s; }
+    else { const sil = v._sil && SIL_DIM[v._sil]; hy = (sil ? sil.h : 0.62) * 0.5 * s * (v._effH || 1); } // effort 기둥 높이 배(chips.js 가 프레임마다 적음)
     o.copy(v.group.position); o.y += asParent ? -hy : hy;
     o.noLift = !!asParent;
     return o;

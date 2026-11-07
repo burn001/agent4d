@@ -40,6 +40,7 @@ import { FieldPlanner, walkKindFor, conflictSpots, labWalksToStation } from './l
 import { labSoundFor } from './lab-audio.mjs';
 import { labWalkOn, onLabWalk } from './lab-pref.mjs';
 import { packView, camElev } from '../overview/pack-view.js';
+import { deskProps } from '../voxel/vx-effort-core.mjs'; // 책상 소품(자리 분위기)
 
 const LAB_RIG_HALF = LAB.RIG.SIZE / 2; // 기자재 길찾기 상자 반폭(lab-layout-core sq(m, SIZE / 2))
 const SUBK = new Set(['subagent', 'workflow-agent']);
@@ -289,7 +290,9 @@ export class LabView extends VoxelView {
     drawLabDeskEmitters(r0, B, this.pal, (id) => {
       const ch = this.chars.get(id);
       if (!ch || ch.state === 'gone' || ch.state === 'leave') return null;
-      return { state: this._deskState(ch, now), color: this._emitCol(ch), k: ch._monK || 0 };
+      const state = this._deskState(ch, now);
+      const es = state === 'off' || this._farAll ? null : this._effState(id, now); // 책상 소품(VoxelView._effState — 원경은 생략)
+      return { state, color: this._emitCol(ch), k: ch._monK || 0, p: es ? deskProps(es.level, { hw: (id === r0.ownerId ? LAB.BRIDGE.CONSOLE_W : LAB.DESK.W) / 2 }) : null, ghost: es ? es.ghost : 0 };
     });
   }
   /** 케이블 정보(재사용 객체): 주인 · 주인 세션 색 · 기자재 상태 */

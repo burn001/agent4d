@@ -72,6 +72,7 @@ function fileArt(abs, cwd, root, v, extra = {}) {
 // ───────────── 셸: 삭제 대상·산출물 인자·서비스 ─────────────
 const RM_PROGS = new Set(['rm', 'rmdir', 'del', 'erase', 'rd', 'remove-item', 'ri', 'unlink', 'shred']);
 /** 셸 명령 → 지우는 경로들 [{w, rec}] (rec = 재귀·강제) */
+const SCRATCH_PATH = /(^|[/._-])(tmp|temp|scratch|cache|pycache|node_modules|autopilot)([/._-]|$)/i;
 export function shellDeletes(command, shell = 'Bash') {
   if (typeof command !== 'string' || !command.trim()) return [];
   const ps = /^(powershell|ps|pwsh)$/i.test(String(shell));
@@ -88,12 +89,12 @@ export function shellDeletes(command, shell = 'Bash') {
     if (prog === 'git' && rest[0] && rest[0].w === 'rm') { prog = 'rm'; rest = rest.slice(1); }
     if (!RM_PROGS.has(prog)) continue;
     const flags = rest.filter((t) => /^-|^\//.test(t.w) && !t.q && !/^\/[A-Za-z0-9_.-]+\//.test(t.w)).map((t) => t.w.toLowerCase());
-    const rec = flags.some((f) => /^-[a-z]*[rf]/.test(f) || f === '--recursive' || f === '--force' || f.startsWith('-rec') || f.startsWith('-fo') || f === '/s' || f === '/q');
+    const rec = flags.some((f) => /^-[a-z]*r/.test(f) || f === '--recursive' || f.startsWith('-rec') || f === '/s'); // 재귀 삭제만 — -f(확인 생략)·-Force 단독은 단일 파일 정리라 경보 아님
     for (const t of rest) {
       if (t.dyn || (!t.q && /^-/.test(t.w)) || (!t.q && /^\/[sqfa]$/i.test(t.w))) continue;
       const w = t.w;
       if (!w || /[*?]/.test(w) || /^(\/dev\/|nul$)/i.test(w) || /appdata\/local\/temp|^\/tmp\//i.test(w.replace(/\\/g, '/'))) continue;
-      out.push({ w, rec: rec || prog === 'rmdir' || prog === 'rd' });
+      out.push({ w, rec: (rec || prog === 'rmdir' || prog === 'rd') && !SCRATCH_PATH.test(w.replace(/\\/g, '/')) }); // 임시·스크래치·캐시 폴더 정리는 경보 아님
       if (out.length >= 8) return out;
     }
   }
@@ -236,7 +237,7 @@ function ixArts(ix, cmd, cwd) {
   if (ix.cat === 'github') {
     const v = GH_VERB[ix.op] || 'query';
     const r = { ...repoArt(cwd, ix), v };
-    if (ix.op === 'push' && (ix.force || /\s(--force|-f|--force-with-lease)\b/.test(cmd))) r.x = 'force';
+    if (ix.op === 'push' && ix.force) r.x = 'force'; // 명령 전체 정규식은 쓰지 않음 — 같은 줄 다른 명령의 --force(예: export-public --force && git push)가 오탐이었다
     out.push(r);
   } else if (ix.cat === 'db') {
     const eng = ix.engine || 'db';

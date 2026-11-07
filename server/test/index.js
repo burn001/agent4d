@@ -40,6 +40,11 @@ import './clear-quiet-cycle.test.mjs';
 import './auto-turn.test.mjs';
 import './plan-format.test.mjs';
 import './loop-axes.test.mjs';
+import './loop-resume.test.mjs';
+import './loop-wait.test.mjs';
+import './launch-check.test.mjs';
+import './heredoc-launch.test.mjs';
+import './jobs-keep.test.mjs'; // keepEnded
 // 목록에서 빠져 있던 것(따로 돌리면 통과) — npm test 가 이 파일만 돌린다
 import './clear-launcher.test.mjs';
 // fg-output.test.mjs 는 따로 돌리면 통과하나 묶어 돌리면 시각 의존으로 1건 실패 — 여기 넣지 않음
@@ -48,3 +53,12 @@ import './session-end.test.mjs';
 import './bg-end.test.mjs';
 import './wf-agent-end.test.mjs'; // 워크플로 에이전트 끝 경합
 import './sse-burst.test.mjs';
+import './sysmem.test.mjs'; // 시스템 메모리 게이지
+import './interact.test.mjs'; // Interactive 패널
+import './md-full.test.mjs';
+import './ask-card.test.mjs'; // (빠져 있던 등록)
+import './live-md.test.mjs'; // (빠져 있던 등록)
+import './interact-feed.test.mjs'; // (빠져 있던 등록)
+import './wait.test.mjs'; // 입력 대기 배지
+import './rc-answer.test.mjs'; // (빠져 있던 등록)
+import './rc-perm.test.mjs'; // 계획 승인·권한 확인 창

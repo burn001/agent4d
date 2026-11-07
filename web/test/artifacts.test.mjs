@@ -296,3 +296,15 @@ test('라이트 대비(§92): 테마별 기본 알파·점등 상한·잉크 색
   const glit = artGeometry(book, st.lay, fx, 0.3, { ...env, isLight: true }, new ArtGeo());
   assert.ok(Math.max(...glit.LA.slice(0, glit.nl)) >= 0.85, '라이트 점등 선 ≥ 0.85');
 });
+
+test('위험 동작 경고 끔(§141): xOff 면 apply·load 가 x 를 장부에 넣지 않는다(켜면 그대로)', () => {
+  const ev = { type: 'tool-end', ok: true, ts: new Date(1e12).toISOString(), nodeId: 'a:1', toolUseId: 'tu1', art: [{ k: 'file', id: 'f:a', v: 'delete', x: 'rm' }, { k: 'repo', id: 'repo:r', v: 'push', x: 'force' }] };
+  const on = new ArtBook(); const r1 = on.apply(ev, 'p');
+  assert.equal(on.get('p', 'f:a').x, 'rm'); assert.equal(r1.changes[1].ref.x, 'force');
+  const off = new ArtBook(); off.xOff = true; const r2 = off.apply({ ...ev, toolUseId: 'tu2' }, 'p');
+  assert.equal(off.get('p', 'f:a').x, null); assert.equal(off.get('p', 'repo:r').x, null);
+  assert.ok(r2.changes.every((c) => !c.ref.x));
+  assert.equal(ev.art[0].x, 'rm', '원본 이벤트는 그대로');
+  off.load('q', [{ id: 'f:b', k: 'file', n: 'b', x: 'rm', xAt: 5, log: [{ x: 'rm', t: 1 }] }]);
+  const it = off.get('q', 'f:b'); assert.equal(it.x, null); assert.equal(it.xAt, 0); assert.equal(it.log[0].x, null);
+});

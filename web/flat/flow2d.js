@@ -22,8 +22,12 @@ import { HeatBook, CRIT_H } from '../heat-core.mjs'; // 노드별 과열 보간
 import { heatLook, heatColor, smokeColor, heatPulse, puffAt, hazeAt, emberAt, rippleAt, heatEligible, rgbCss } from '../flowview/heat-fx-core.mjs'; // 3D 와 같은 과열 표
 import { flowLegend } from '../flowview/flow-legend.js';
 import { jobOf } from '../job-core.mjs';
+import { effortGlyph, effortLod, effortPhone, effortInk, EffortTween, effortInstant, EFFORT, EFFORT_MAX } from '../effort-core.mjs'; // 추론 effort 다이얼 눈금(3D 윗면과 같은 자리·어휘)
 
 const TOP_ACTIVE = 6;
+// 2D 다이얼 눈금: 외곽 바깥 12시 쪽 −60°..+60° 네 칸(화면 y 아래). 컨텍스트 고리(1.3R)·스피너(1.12R) 바깥
+const EFF2D = { R0: 1.44, LEN: 0.14, MIN_LEN: 3, GLINT_WIN: 0.15 };
+const EFF_ANG = [-60, -20, 20, 60].map((d) => (d * Math.PI) / 180); // 네 칸(40° 간격, 3D 셰이더 effTicks 와 같은 자리)
 const CTX_TONE = ['thinking', 'tool', 'error']; // ctxTone 0·1·2 → 팔레트 키(경계 30·70%)
 /** 부드러운 연기 덩이 그림(테마별 한 장, 회색) — 프레임마다 그라디언트를 만들지 않게 */
 const _blob = new Map();
@@ -60,6 +64,7 @@ export class Flow2DView extends FlatView {
     for (const v of this.vis.values()) if (isProcVis(v)) v.procRig = true;
     this._mainShapes = new Map(); this._mainSig = '';
     this.heat = new HeatBook(); this._heatT = null; this._hot = []; this._hlook = {}; this._hp = {}; this._hrgb = [0, 0, 0];
+    this._effTw = new EffortTween(); this._effBusyUntil = 0; this._effMax = new Set(); this._effN = 0; // 단계 보간 · 보간 중 다시 그리기 · max 반짝임 대상
     flowLegend(true);
     this.applyTheme();
   }
@@ -135,6 +140,7 @@ export class Flow2DView extends FlatView {
     ls.setProperty('--flow-text', P.text); ls.setProperty('--flow-dim', P.textDim); ls.setProperty('--flow-holo', P.holo);
     ls.setProperty('--flow-tool', P.tool); ls.setProperty('--flow-bg', t.isLight ? 'rgba(255,255,255,.82)' : 'rgba(5,5,16,.72)');
     this._stateCol = [0, 1, 2, 3, 4, 5].map((s) => stateColor(s, t.isLight));
+    this._ink = effortInk(t.isLight); // theme.css --effort-ink* 와 같은 값
   }
 
   _labelPass(now) {
@@ -188,6 +194,7 @@ export class Flow2DView extends FlatView {
     level = Math.max(level, this._stepHeat(now));
     level = Math.max(level, this.bubbles.level(now));
     if (this.scope.mode === 'all' && !this.reduced) for (const c of this._clusterV.values()) if (c.busy) { level = Math.max(level, 1); break; }
+    level = Math.max(level, this._effLevel(now));
     return level;
   }
 
@@ -357,6 +364,8 @@ export class Flow2DView extends FlatView {
     if (st === NODE_STATE.stopped) lw = Math.max(1, R * 0.05);
     if (st === NODE_STATE.error && v.errorSince != null && !this.reduced) lw *= 1 + 0.5 * (0.5 + 0.5 * Math.sin(now * 6));
     if (foc) lw *= 1.5;
+    const ef = this._effOf(v, now);
+    if (ef && ef.closed) lw += 0.5; // max 닫힘: 높이 채널이 없는 2D 는 외곽선을 0.5px 두껍게
     ctx.lineWidth = lw;
     if (st === NODE_STATE.done) ctx.setLineDash([Math.max(2, R * 0.28), Math.max(2, R * 0.2)]);
     ctx.stroke();
@@ -396,6 +405,7 @@ export class Flow2DView extends FlatView {
         ctx.beginPath(); ctx.arc(x, y, R * 1.3, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2); ctx.stroke();
       }
     }
+    if (ef) this._drawEffort(ctx, v, ef, x, y, R, alpha, now); // 추론 effort 다이얼 눈금
     // 대기 중 카드 수 +N
     const q = this.holo.book.queued(v.id);
     if (q > 0 && R > 4) {
@@ -404,6 +414,93 @@ export class Flow2DView extends FlatView {
       ctx.fillText('+' + q, x + R * 0.9, y + R * 0.6);
     }
     ctx.globalAlpha = 1;
+  }
+
+  /**
+   * 노드 effort(표시 종류 v.kind 기준). 해석은 meta 값이 바뀔 때만, 단계는 0.4초 보간(움직임 줄이기·재생 8배속↑ 즉시).
+   * 반환 { lv 그릴 단계(소수 가능), hollow 요청값만, closed max 확정 } | null(무늬 없음)
+   */
+  _effOf(v, now) {
+    const m = v.node.meta || {};
+    const key = `${v.kind}|${m.effort || ''}|${m.effortReq || ''}`;
+    let e = v._effC;
+    if (!e || e.key !== key) {
+      const g = effortGlyph({ kind: v.kind, meta: m });
+      const had = !!e;
+      if (had) this._effTw.value(v.id, e.out.lv, now * 1000); // 장부가 없으면(무늬 없던 노드) 지금 그린 값에서 시작하게 — 처음 오는 단계도 차오름
+      e = v._effC = { key, lv: g ? g.level : 0, hollow: !!(g && !g.confirmed), closed: !!(g && g.closed), out: { lv: 0, hollow: false, closed: false } };
+      if (had) this._effBusyUntil = performance.now() + EFFORT.TWEEN_MS + 60; // 값이 바뀜 → 보간 동안 꽉 찬 빠르기로 다시 그림
+    }
+    if (!e.lv && !e.out.lv) return null; // 무늬가 없고 보간도 끝남(장부를 만들지 않음)
+    const lv = this._effTw.value(v.id, e.lv, now * 1000, { instant: effortInstant({ reduced: this.reduced, rate: this.timeScale || 1 }) });
+    const o = e.out;
+    o.lv = lv; o.hollow = e.hollow; o.closed = e.closed && lv > EFFORT_MAX - 0.5;
+    if (o.closed) this._effMax.add(v.id);
+    return lv > 0.01 ? o : null;
+  }
+  /** 다시 그리기 빠르기: 단계 보간 중 2 · 보이는 맨 위 단계(xhigh·max) 노드의 반짝임(6초에 한 번 0.9초) 동안 1 */
+  _effLevel(now) {
+    if (++this._effN >= 120) { this._effN = 0; const live = new Set(this.vis.keys()); this._effTw.prune(live); }
+    if (performance.now() < this._effBusyUntil) return 2;
+    if (this.reduced || !this._effMax.size) return 0;
+    for (const id of this._effMax) {
+      const v = this.vis.get(id);
+      if (!v || v.gone || !v._effC || !v._effC.closed) { this._effMax.delete(id); continue; }
+      if (!v._on) continue;
+      if (((now + v.seed * 10) / (EFFORT.GLINT_MS / 1000)) % 1 < EFF2D.GLINT_WIN + 0.03) return 1;
+    }
+    return 0;
+  }
+  /**
+   * 2D 다이얼 눈금: 외곽 바깥 위쪽 네 자리 방사 막대(채운 칸 잉크 2px · 빈 칸 흐린 잉크 1px · 요청값만 = 속 빈 막대),
+   * max 확정 = 바깥 끝을 잇는 가는 호 + 6초에 한 번 옅은 반짝임. LOD: 10px 미만 숨김 · 18px 미만 채운 칸만(휴대폰 1.3배)
+   */
+  _drawEffort(ctx, v, ef, x, y, R, alpha, now) {
+    const lod = effortLod(R, { phone: effortPhone(this.W, this.H) });
+    if (!lod) return;
+    const ink = this._ink || (this._ink = effortInk(this.tokens.isLight));
+    const r0 = R * EFF2D.R0, r1 = r0 + Math.max(R * EFF2D.LEN, EFF2D.MIN_LEN);
+    ctx.lineCap = 'round';
+    for (let i = 0; i < EFF_ANG.length; i++) {
+      const a = EFF_ANG[i], dx = Math.sin(a), dy = -Math.cos(a);
+      const ax = x + dx * r0, ay = y + dy * r0, bx = x + dx * r1, by = y + dy * r1;
+      const on = Math.min(1, Math.max(0, ef.lv - i));
+      if (on < 1 && lod === 2) { // 빈 칸(보간 중엔 차오르는 만큼 옅어짐)
+        ctx.globalAlpha = alpha * (1 - on); ctx.strokeStyle = ink.dim.css; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      }
+      if (on <= 0) continue;
+      ctx.globalAlpha = alpha * on; ctx.strokeStyle = ink.ink.css;
+      if (ef.hollow) { // 속 빈 막대: 폭 3px 테두리 1px
+        const nx = -dy * 1.5, ny = dx * 1.5;
+        ctx.lineWidth = 1; ctx.lineCap = 'butt';
+        ctx.beginPath(); ctx.moveTo(ax + nx, ay + ny); ctx.lineTo(bx + nx, by + ny); ctx.lineTo(bx - nx, by - ny); ctx.lineTo(ax - nx, ay - ny); ctx.closePath(); ctx.stroke();
+        ctx.lineCap = 'round';
+      } else {
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
+      }
+    }
+    if (ef.closed && lod === 2) {
+      ctx.globalAlpha = alpha; ctx.strokeStyle = ink.ink.css; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(x, y, r1, -Math.PI / 2 - Math.PI / 3, -Math.PI / 2 + Math.PI / 3); ctx.stroke();
+      if (!this.reduced) { // 옅은 반짝임 하나가 왼쪽 → 오른쪽으로(6초에 한 번)
+        const ph = ((now + v.seed * 10) / (EFFORT.GLINT_MS / 1000)) % 1;
+        if (ph < EFF2D.GLINT_WIN) {
+          const u = ph / EFF2D.GLINT_WIN, ga = -Math.PI / 3 + (2 * Math.PI / 3) * u, k = Math.sin(Math.PI * u);
+          ctx.strokeStyle = ink.glint.css; ctx.lineWidth = 2;
+          for (let i = 0; i < EFF_ANG.length; i++) {
+            const g = k * Math.exp(-(((EFF_ANG[i] - ga) / 0.16) ** 2));
+            if (g < 0.03) continue;
+            const a = EFF_ANG[i], dx = Math.sin(a), dy = -Math.cos(a);
+            ctx.globalAlpha = alpha * g;
+            ctx.beginPath(); ctx.moveTo(x + dx * r0, y + dy * r0); ctx.lineTo(x + dx * r1, y + dy * r1); ctx.stroke();
+          }
+        }
+      }
+    }
+    ctx.lineCap = 'butt';
+    ctx.globalAlpha = alpha;
   }
 
   _icon(ctx, k, x, y, r, col, now) {

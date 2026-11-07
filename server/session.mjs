@@ -7,7 +7,7 @@ import { toolBrief, resultBrief, textBrief } from './brief.mjs';
 import { redact } from './redact.mjs';
 import { inputPanel, resultPanel, tailPanel, sayPanel, progressPanel, sanitizePanel, LineTail, splitLines, stripAnsi, collapseCR, PANEL_LIMITS } from './panel.mjs';
 import { FileTail } from './tail.mjs';
-import { findTaskOutput, claudeTmpRoots } from './discovery.mjs';
+import { findTaskOutput, claudeTmpRoots, pidAlive } from './discovery.mjs';
 import { CtxTracker } from './ctx.mjs';
 import { baseName, guessPathFromId, isTempPath } from './projects.mjs';
 import {
@@ -16,15 +16,21 @@ import {
   resolveCwdGuess, userTextSummary, isoOr, oneLine, stripTags, inferToolUseResult, promptMatches, scratchOwnerOf,
   isEndedStatus as isEnded, isKillCommand, SIGNAL_EXIT, exitCodeOf, STOP_WINDOW_MS, STOP_LEAD_MS, stopReasonOfNotification,
 } from './parse.mjs';
-import { detectLaunch, analyzeLaunch, launcherIndexOf } from './launcher.mjs';
+import { detectLaunch, analyzeLaunch, launcherIndexOf, toFsPath } from './launcher.mjs';
 import { inheritPlan, agentMetaFromChain, agentFileIn } from './succession.mjs'; // /clear 승계
 import { toolFileRefs, msgTo } from '../web/conflict-core.mjs';
 import { createHash } from 'node:crypto';
 import { artStart, artEnd } from './artifacts.mjs'; // 작업 대상 층
 import { PlanTracker, planStart, planFromRaw } from './plans.mjs'; // 계획 보드
 import { loopAxesPlan } from './loop-axes.mjs'; // 자율 루프 판 — 축 큐 어댑터
+import { loopWaits, waitJobView, waitJobId, LOOP_WAIT } from './loop-wait.mjs'; // 분리 측정 — 대기 기록 어댑터
 import { classifyStart, classifyEnd, outputProgress, IxTracker, classifyUserMessage, USER_DENY_RE, ixSnip } from './interactions.mjs'; // 특별 상호작용
-import { JobBook, loadJobRules, jobNodeId, jobNodeStatus, jobLabel, isJobEnded, setMatchesProject } from './jobs.mjs'; // 작업 오브젝트
+import { CARD_TOOLS, cardOf, cardResult, sanitizeCard } from './ask-card.mjs';
+import { askHead } from '../web/wait-core.mjs'; // 입력 대기 머리표(화면과 같은 함수) // 선택형 질문·계획 승인 카드
+import { peerSource, XMSG_BODY_RE } from './interact-feed.mjs'; // 교차 세션 메시지 출처
+import { listPeerSessions, canonicalAddr, stripNotice } from './interact-peer.mjs';
+import { sharedPeerAddrBook } from './peer-addr.mjs'; // 재생에서 보낸 세션 찾기
+import { JobBook, JOB, loadJobRules, jobNodeId, jobNodeStatus, jobLabel, isJobEnded, setMatchesProject } from './jobs.mjs'; // 작업 오브젝트
 import { ccvizHome } from './home.mjs';
 import { sharedExtJobs, extJobView, extJobIx, EXT } from './extjobs.mjs'; // 외부 작업 등록부
 import { parseProgressLine } from './progress.mjs';
@@ -33,6 +39,26 @@ import { detectProcLaunch, commandPathRefs, isWaitCommand, scanEnd, quietEndSec,
 const SHELL = new Set(['Bash', 'PowerShell']);
 const SESSION_KINDS = new Set(['main', 'claude-p']);
 /** 서브에이전트 진행 → 부모 Agent 패널 갱신 간격(같은 패널은 이 안에서 합침) */
+// 교차 세션 답장 주소(origin.from 'uds:<파이프·소켓>') → 보낸 세션 노드 id(s:<세션>). 세션 기록(.json)만 읽음, 30초 캐시
+// book(수신함 주소 장부): 라이브는 세션 기록에 없을 때(이미 끝난 세션) 장부로, offline(재생)은 장부로만 찾는다
+let _peerAddr = { at: -Infinity, map: new Map() };
+export function peerNodeOf(from, { list = listPeerSessions, now = Date.now(), book = null, offline = false } = {}) {
+  if (typeof from !== 'string' || !from.startsWith('uds:')) return null;
+  const key = canonicalAddr(from.slice(4));
+  if (!key) return null;
+  if (offline) { const sid = book ? book.get(key) : null; return sid ? `s:${sid}` : null; }
+  if (now - _peerAddr.at > 30_000) {
+    const map = new Map();
+    const seen = [];
+    try { for (const r of list()) { const k = canonicalAddr(r.sock); if (k) { map.set(k, r.sessionId); seen.push([r.sock, r.sessionId]); } } } catch {}
+    _peerAddr = { at: now, map };
+    if (book && seen.length) { try { book.observe(seen); } catch {} }
+  }
+  const sid = _peerAddr.map.get(key) || (book ? book.get(key) : null);
+  return sid ? `s:${sid}` : null;
+}
+export const _resetPeerAddr = () => { _peerAddr = { at: -Infinity, map: new Map() }; };
+
 export const PANEL_MERGE_MS = 250;
 const IDLE_MS = 60_000;
 const EPOCH = '1970-01-01T00:00:00.000Z';
@@ -459,7 +485,8 @@ export class RootRuntime {
           const meta = await agentMetaFromChain(plan.chain, it.id);
           g.addNode({ id, parentId: owner, kind: 'subagent', label: meta?.description || it.description || it.id, sessionId: this.sessionId,
             startedAt: ts, lastActivityAt: clearIso, model: meta?.model ?? null,
-            meta: { agentType: meta?.agentType ?? it.agentType ?? null, toolUseId: it.toolUseId ?? null, background: true, fork: meta?.isFork || undefined, inheritedFrom: it.from } }, ts);
+            meta: { agentType: meta?.agentType ?? it.agentType ?? null, toolUseId: it.toolUseId ?? null, background: true, fork: meta?.isFork || undefined, inheritedFrom: it.from,
+              ...(typeof meta?.effort === 'string' && meta.effort.trim() ? { effortReq: meta.effort.trim().slice(0, 24) } : {}) } }, ts);
           this.agentToolUse.set(it.id, it.toolUseId);
           this.applyPending(id, ts);
         }
@@ -800,6 +827,14 @@ export class RootRuntime {
     return t ? t.owner : fallback;
   }
 
+  /** 요청 effort(부모 Agent input.effort · meta.json effort · claude -p --effort) → meta.effortReq(24자, 바뀔 때만). 적용값 meta.effort 와 따로 */
+  _effortReq(id, v, ts) {
+    if (typeof v !== 'string' || !v.trim()) return;
+    const val = v.trim().slice(0, 24);
+    const n = this.graph.get(id);
+    if (n && n.meta.effortReq !== val) this.graph.updateNode(id, { meta: { effortReq: val } }, ts);
+  }
+
   waitForParent(toolUseId, nodeId) {
     if (!toolUseId) return;
     if (!this.waitParent.has(toolUseId)) this.waitParent.set(toolUseId, new Set());
@@ -846,6 +881,8 @@ export class RootRuntime {
         g.updateNode(id, patch, now);
       }
       if (!parent && meta.toolUseId) this.waitForParent(meta.toolUseId, id);
+      // 요청 effort: 부모 Agent 호출 input.effort 가 먼저, 없으면 meta.json effort(명시했을 때만 있음)
+      this._effortReq(id, (meta.toolUseId && this.tools.get(meta.toolUseId)?.agentEffort) || meta.effort, now);
     }
     if (meta.finished === true) {
       const loading = this.offline || g.loading;
@@ -980,6 +1017,7 @@ export class RootRuntime {
         const at = rec.attachment;
         if (at && at.type === 'queued_command' && typeof at.prompt === 'string') {
           this.touch(ownerId, ts, backlog);
+          if (at.origin?.kind === 'peer') return this.onPeer(at.origin, at.prompt, g.get(ownerId) || node, ts, backlog, true); // 턴 도중 온 교차 세션 메시지
           if (isTaskNotification(at.prompt)) return this.onNotification(at.prompt, node, w, ts, backlog);
           const text = userTextSummary(at.prompt);
           const origin = node.kind === 'main' && !rec.isSidechain ? 'human' : 'system';
@@ -1014,6 +1052,9 @@ export class RootRuntime {
     // 컨텍스트 사용률: 마지막 응답 usage 의 입력+캐시 생성+캐시 읽기. 바뀔 때만 meta.ctx 갱신(재생에도 그대로 남음)
     const ctx = !(rec.isSidechain && SESSION_KINDS.has(node.kind)) && (this._ctx ||= new CtxTracker()).update(node.id, { ...msg, model: msg.model || rec.requestedModel });
     if (ctx) g.updateNode(node.id, { meta: { ctx } }, ts);
+    // 추론 effort: assistant 기록 최상위 effort(없으면 perTurnEffort). 마지막 값을 meta.effort 로, 값이 없으면 싣지 않음
+    const eff = rec.effort || rec.perTurnEffort;
+    if (typeof eff === 'string' && eff && !(rec.isSidechain && SESSION_KINDS.has(node.kind)) && node.meta.effort !== eff.slice(0, 24)) g.updateNode(node.id, { meta: { effort: eff.slice(0, 24) } }, ts);
     if ('attributionSkill' in rec) {
       let sk = rec.attributionSkill || null;
       // 워크플로 에이전트는 처음부터 끝까지 워크플로를 띄운 스킬 이름이 붙어 와서 금색 스킬 위성이 늘 떠 있었다.
@@ -1044,7 +1085,12 @@ export class RootRuntime {
         }
         const parentPanel = this._agentProgress(node, ts, { text: true });
         (this._lastSay || (this._lastSay = new Map())).set(node.id, text); // 턴 끝 답변 앞부분
-        g.emit({ ts, type: 'text', nodeId: node.id, role: 'assistant', text, brief: textBrief(text), ...(panel ? { panel } : {}), ...(parentPanel ? { parentPanel } : {}) });
+        // 원문 Markdown: 줄바꿈이 있는 응답만(표·목록·코드 블록 구조가 있을 수 있음) — 마스킹·상한·minimal 삭제는 graph.emit
+        const raw = g.privacy === 'minimal' ? '' : stripTags(b.text).replace(/\r\n?/g, '\n').trim();
+        const md = raw.includes('\n') ? raw : null;
+        // 잘리면 '전체 보기'가 원문을 찾을 자리(기록 uuid · 블록 번호 · 그 기록을 읽은 세션) — graph.emit 이 잘렸을 때만 남긴다
+        const mdRef = md && typeof rec.uuid === 'string' && w && w.sessionId ? { s: w.sessionId, u: rec.uuid, b: content.indexOf(b) } : null;
+        g.emit({ ts, type: 'text', nodeId: node.id, role: 'assistant', text, brief: textBrief(text), ...(md ? { md } : {}), ...(mdRef ? { mdRef } : {}), ...(panel ? { panel } : {}), ...(parentPanel ? { parentPanel } : {}) });
       } else if (b.type === 'thinking' || b.type === 'redacted_thinking') {
         g.emit({ ts, type: 'thinking', nodeId: node.id, chars: (b.thinking || '').length });
       } else if (b.type === 'tool_use') {
@@ -1081,13 +1127,16 @@ export class RootRuntime {
         ...(art ? { art } : {}),
         ...(plan ? { plan } : {}),
         ...(name === 'Agent' || name === 'Task' ? { agentTitle: String(input.description || input.subagent_type || '').slice(0, 200),
-          agentPrompt: (splitLines(input.prompt).find((l) => l.trim()) || '').slice(0, 300) } : {}) });
+          agentPrompt: (splitLines(input.prompt).find((l) => l.trim()) || '').slice(0, 300),
+          ...(typeof input.effort === 'string' && input.effort.trim() ? { agentEffort: input.effort.trim().slice(0, 24) } : {}) } : {}) }); // 요청 effort
       const waiting = this.waitParent.get(id);
       if (waiting) {
         this.waitParent.delete(id);
+        const eff = this.tools.get(id).agentEffort;
         for (const cid of waiting) {
           const c = g.get(cid);
           if (c && c.parentId !== node.id && cid !== node.id && !g.isAncestor(cid, node.id)) g.updateNode(cid, { parentId: node.id }, ts);
+          if (c && eff) this._effortReq(cid, eff, ts); // meta.json 이 먼저 와 노드가 있던 경우
         }
       }
     }
@@ -1095,7 +1144,9 @@ export class RootRuntime {
     // 스냅샷 openTools 에도 이벤트와 같은 마스킹·minimal 규칙
     const safe = (x) => (g.privacy === 'minimal' ? '' : redact(x));
     const sp = panel ? sanitizePanel(panel, g.privacy) : null;
-    node.openTools.push({ toolUseId: id, tool: name, cat, skill, startedAt: ts, text: safe(text), brief: safe(brief), ...(sp ? { panel: sp } : {}) });
+    const card = CARD_TOOLS.has(name) && g.privacy !== 'minimal' ? cardOf(name, input) : null; // 카드 · 스냅샷 openTools 에도(입력 대기 배지·머리표)
+    const ah = card ? askHead(sanitizeCard(card, g.privacy)) : null;
+    node.openTools.push({ toolUseId: id, tool: name, cat, skill, startedAt: ts, text: safe(text), brief: safe(brief), ...(sp ? { panel: sp } : {}), ...(ah ? { ask: ah } : {}) });
     if (node.openTools.length > 50) node.openTools.splice(0, node.openTools.length - 50);
     const parentPanel = this._agentProgress(node, ts, { action: `${name.startsWith('mcp__') ? 'MCP' : name} ${brief}`.trim() });
     // 같은 파일 충돌·세션 간 메시지: 파일 도구는 정규화 경로(마스킹, minimal 이면 해시만), SendMessage 는 대상
@@ -1105,7 +1156,9 @@ export class RootRuntime {
     const files = frefs.map(mask);
     const file = files[0] || null;
     const to = msgTo(name, input);
-    g.emit({ ts, type: 'tool-start', nodeId: node.id, toolUseId: id, tool: name, cat, skill, text, brief, detail, ...(file ? { file } : {}), ...(files.length > 1 ? { files } : {}), ...(to ? { to: redact(to) } : {}), ...(panel ? { panel } : {}), ...(parentPanel ? { parentPanel } : {}), ...(ix ? { ix } : {}), ...(art ? { art } : {}) });
+    // 선택형 질문(AskUserQuestion)·계획 승인(ExitPlanMode) 카드 — 끝 이벤트에도 다시 싣는다(시작을 못 본 화면도 결과 카드를 그림)
+    if (card && id && this.tools.has(id)) this.tools.get(id).card = card;
+    g.emit({ ts, type: 'tool-start', nodeId: node.id, toolUseId: id, tool: name, cat, skill, text, brief, detail, ...(file ? { file } : {}), ...(files.length > 1 ? { files } : {}), ...(to ? { to: redact(to) } : {}), ...(panel ? { panel } : {}), ...(parentPanel ? { parentPanel } : {}), ...(ix ? { ix } : {}), ...(art ? { art } : {}), ...(card ? { card } : {}) });
     if (skill && node.meta.skill !== skill) g.updateNode(node.id, { meta: { skill } }, ts);
 
     if (SHELL.has(name) && typeof input.command === 'string') {
@@ -1115,10 +1168,11 @@ export class RootRuntime {
           toolUseId: id, owner: node.id, watcher: w, tsMs: Date.parse(ts), endTsMs: null, isError: false,
           sessionIdHint: d.sessionIdHint, promptHint: d.promptHint, promptHints: d.promptHints || (d.promptHint ? [d.promptHint] : []),
           cwdGuess: resolveCwdGuess(w.cwd || node.meta.cwd, d.cdGuess), stdoutIds: [], matched: null, dead: false,
+          ...(d.effortReq ? { effortReq: d.effortReq } : {}), // --effort X
         });
       } else {
         // 기동기: 분리 실행한 스크립트 사슬 안에 claude -p 가 있으면 기동기 노드(회차들의 부모)
-        const L = detectLaunch(input.command, { bg: !!input.run_in_background, tool: name });
+        const L = detectLaunch(input.command, { bg: !!input.run_in_background, tool: name, fg: true }); // 포그라운드 재개 스크립트 포함
         // 보관함: 보관 때 정한 사슬 판정(스크립트가 없는 PC·바뀐 스크립트에서도 같은 답)이 있으면 그것
         const a = L && ((id && this.index.launchPin?.(id)) || analyzeLaunch(L, resolveCwdGuess(this._recCwd || w.cwd || node.meta.cwd, L.cdGuess)));
         if (a && id) this._addLauncher(id, node, w, ts, input, a, L);
@@ -1152,6 +1206,7 @@ export class RootRuntime {
   }
 
   onUser(rec, node, w, ts, backlog) {
+    if (rec.origin?.kind === 'peer' && !rec.isSidechain) return this.onPeer(rec.origin, rec.message?.content, node, ts, backlog, false); // (isMeta 라 예전엔 버려졌다)
     if (rec.isMeta) return;
     const g = this.graph;
     const content = rec.message?.content;
@@ -1182,6 +1237,31 @@ export class RootRuntime {
       const ixu = text ? this._userIx(node.id, humanText.replace(/ \[이미지\]/g, ''), origin, ts, { images, busy: withResult }) : null;
       if (text) g.emit({ ts, type: 'user', nodeId: node.id, origin, text, ...(ixu ? { ix: ixu } : {}) });
     }
+  }
+
+  /**
+   * 교차 세션 메시지(origin.kind 'peer') = 사용자 입력 이벤트. Interactive(from-name 'Agent4D (<별칭>)')는 사람이 다른 기기로 친 것 → origin 'human',
+   * 다른 Claude 세션은 origin 'peer'. 둘 다 user 범주 ix(prompt·midturn) + src 'ix'|'peer' · who(별칭·세션 이름) · from(보낸 세션 노드, 라이브에서 수신함 주소로 찾을 때만)
+   * 같은 msg_id 는 한 번만(대기열 attachment 와 user 줄로 두 번 올 수 있음)
+   */
+  onPeer(o, content, node, ts, backlog, queued) {
+    const g = this.graph;
+    this.touch(node.id, ts, backlog);
+    const mid = typeof o.msg_id === 'string' ? o.msg_id : null;
+    const seen = this._peerSeen || (this._peerSeen = new Set());
+    if (mid) { if (seen.has(mid)) return; seen.add(mid); if (seen.size > 500) seen.delete(seen.values().next().value); }
+    let body = typeof o.body === 'string' ? o.body : '';
+    if (!body) { const raw = typeof content === 'string' ? content : textOfContent(content); const m = XMSG_BODY_RE.exec(raw || ''); body = m ? m[1] : raw || ''; }
+    const ps = peerSource(o.name);
+    const human = ps.src === 'ix';
+    if (human) body = stripNotice(body); // 안내 줄은 이벤트·3D 요약에 넣지 않음
+    const text = userTextSummary(body);
+    if (!text) return;
+    const ixu = this._userIx(node.id, body, 'human', ts, { queued });
+    // 재생(offline)도 보낸 세션을 찾는다 — 수신함 주소 장부(라이브 서버가 본 주소 ↔ 세션 짝). 화면은 그 노드가 보일 때만 거기서 출발
+    const from = !human ? peerNodeOf(o.from, { book: this.index?.addrBook || (this.offline ? sharedPeerAddrBook() : null), offline: this.offline }) : null;
+    const ix = ixu ? { ...ixu, src: ps.src, ...((human ? ps.alias : ps.who) ? { who: human ? ps.alias : ps.who } : {}), ...(from && from !== node.id ? { from } : {}) } : null;
+    g.emit({ ts, type: 'user', nodeId: node.id, origin: human ? 'human' : 'peer', text, ...(ix ? { ix } : {}) });
   }
 
   originOf(rec, node) {
@@ -1227,8 +1307,10 @@ export class RootRuntime {
     const denied = !ok && owner.kind === 'main' && USER_DENY_RE.test(String(bodyText || '').slice(0, 400)) && !(tu && tu.ix && tu.ix.op === 'ask');
     const ixEnd = denied ? { v: 1, cat: 'user', op: 'deny', tool: name, phase: 'end', ok: false } : ixEnd0;
     const artE = tu && tu.art ? artEnd(tu.art, { ok, tur, ixEnd: ixEnd0 }) : null; // 결과로 다듬은 대상(실패면 없음)
+    const cardRes = tu && tu.card ? cardResult(tu.card, { ok, body: stripTags(bodyText), tur }) : null;
     g.emit({ ts, type: 'tool-end', nodeId: owner.id, toolUseId: tuid, tool: name, cat: toolCategory(name), ok, durationMs, text: summarizeToolResult(item.content),
-      brief: resultBrief(name, tur, stripTags(bodyText), ok), ...(panel ? { panel } : {}), ...(ixEnd ? { ix: ixEnd } : {}), ...(artE ? { art: artE } : {}) });
+      brief: resultBrief(name, tur, stripTags(bodyText), ok), ...(panel ? { panel } : {}), ...(ixEnd ? { ix: ixEnd } : {}), ...(artE ? { art: artE } : {}), ...(cardRes ? { card: tu.card, cardRes } : {}) });
+    if (tu && tu.card) tu.card = null;
     if (tu && tu.plan) { this._plans().end(tu.plan, { ok, tur, nodeId: owner.id, ts }); tu.plan = null; }
 
     if ((name === 'Agent' || name === 'Task') && tur && tur.agentId) {
@@ -1237,7 +1319,7 @@ export class RootRuntime {
       if (!g.has(aid)) {
         g.addNode({ id: aid, parentId: owner.id, kind: 'subagent', label: tur.description || tu?.input?.description || tur.agentId,
           sessionId: w.sessionId, model: tur.resolvedModel ?? null, startedAt: tu?.ts || ts, lastActivityAt: ts,
-          meta: { toolUseId: tuid, background: !!tur.isAsync } }, tu?.ts || ts);
+          meta: { toolUseId: tuid, background: !!tur.isAsync, ...(tu?.agentEffort ? { effortReq: tu.agentEffort } : {}) } }, tu?.ts || ts);
         this.applyPending(aid, ts);
       } else {
         const a = g.get(aid);
@@ -1276,7 +1358,8 @@ export class RootRuntime {
     const e = this.index.findSession?.(w.sessionId);
     // 분리 실행(nohup·setsid·disown·홀로 선 &·Start-Process)이면 띄운 셸이 바로 끝나 부모 PID 가 끊긴다 →
     // 띄운 자리(owner)와 무관하게 최상위 독립 노드(parentId null, meta.spawnedBy = 띄운 노드)
-    const detached = !!(L && L.detached);
+    // 포그라운드 재개 스크립트가 안에서 떼어 띄운 것(a.innerDetach)도 분리 — 그 Bash 호출은 곧 끝나고 루프는 남는다
+    const detached = !!((L && L.detached) || a.innerDetach);
     const rec = { nodeId: null, tsMs: Date.parse(ts), key: a.key, script: a.script, cwd: a.cwd, watcher: w, owner: node.id,
       projectDir: e?.projectDir ?? null, toolUseId, via: a.via.map((x) => x.split('/').pop()), detached };
     this.launchNodes.set(toolUseId, rec);
@@ -2519,6 +2602,11 @@ export class RootRuntime {
           title: subtitle ? sessionTitleMeta(subtitle) : null, ...(e.customTitle ? { customTitle: true } : {}),
           ...(link ? { link } : {}), ...(cycle ? { cycle } : {}) } }, startTs);
     }
+    // 요청 effort: 감지 때 읽은 --effort, 없으면(스크래치패드로 이어진 호출) 그 셸 명령이 claude -p 면 거기서
+    if (!c.launcher) {
+      const cmd = c.effortReq ? null : this.tools.get(c.toolUseId)?.input?.command;
+      this._effortReq(id, c.effortReq || (cmd ? detectClaudeP(cmd)?.effortReq : null), startTs);
+    }
     if (depth <= this.maxDepth && !this.watchers.has(sid)) {
       const w = this.addWatcher({ sessionId: sid, file: e.file, nodeId: id, kind: 'claude-p' });
       this.childTails.set(id, w.tail);
@@ -2738,7 +2826,7 @@ export class RootRuntime {
     this._sweepAgentEnd(now, off); // 주인 에이전트가 끝난 bg 작업
     this._sweepSessionEnd(now, off); // 띄운 세션이 끝난 bg 작업
     this._sweepWatches(); // 끝난 백그라운드 셸·Monitor 의 들여다보기 닫기
-    if (!off) { this._jobFiles(); this._extJobsSweep(now); this._flushAutoJobs(nowIso); this._runSweep(now); this._loopAxesSweep(now); }
+    if (!off) { this._jobFiles(); this._extJobsSweep(now); this._flushAutoJobs(nowIso); this._runSweep(now); this._loopAxesSweep(now); this._loopWaitSweep(now); }
   }
 
   // ───────────── 분리 프로세스 · 들여다보기 ─────────────
@@ -3076,10 +3164,33 @@ export class RootRuntime {
     if (rec) this._procGap(rec, Date.parse(ts), ts, backlog); // 정체 문턱을 먼저(자동 작업 staleSec 에 실림)
     // 라이브에서 주인이 이미 끝났으면(첫 적재에서 끝을 먼저 읽음) 자동 작업도 끝난 채로. 재생 4단계는 배분 뒤 jobFeedEnd 가 끝낸다
     const endAs = !this.offline && isEnded(owner.status) ? { state: owner.status === 'error' ? 'failed' : 'done', ts: owner.endedAt || ts, rc: rec ? rec.rc : null } : null;
-    const ups = this._jobBook().feed(streamId, key, text, ts, { owner, file, final, auto, autoTitle: '진행', staleSec: rec ? rec.staleSec : null, endAs });
-    for (const u of ups) this._jobEmit(owner, key, u, ts);
+    const book = this._jobBook();
+    const ups = book.feed(streamId, key, text, ts, { owner, file, final, auto, autoTitle: '진행', staleSec: rec ? rec.staleSec : null, endAs });
+    const skip = file ? this._jobFileKeep(owner, key, ups, book) : null;
+    for (const u of ups) if (!skip || !skip.has(u.jobId)) this._jobEmit(owner, key, u, ts);
     if (rec) this._procFeed(rec, text, ts);
     if (peer) this._procObserve(peer, text, ts);
+  }
+
+  /**
+   * keepEnded — 설정 files 꼬리(라이브만)에서 **노드가 아직 없는데 이미 끝난** 작업은 주인마다 끝난 시각 최근 keepEnded 개
+   * (이미 선 끝난 작업 노드 포함)에 들 때만 세운다. 덧붙여 쓰는 러너 출력 파일의 첫 꼬리(backlogKB)에는 앞 러너들의 끝난
+   * `분리 프로세스 대기` 가 여럿 들어 있어, 새 주인 아래 한꺼번에 끝난 노드로 쌓였다(실측 a3443dd5: 6개). → 건너뛸 jobId Set|null
+   */
+  _jobFileKeep(owner, key, ups, book) {
+    const keep = book.rules && Number.isInteger(book.rules.keepEnded) ? book.rules.keepEnded : JOB.KEEP_ENDED;
+    const g = this.graph;
+    const fresh = ups.filter((u) => isJobEnded(u.job.state) && !g.has(jobNodeId(key, u.jobId)));
+    if (!fresh.length) return null;
+    const endMs = (j, n) => Date.parse(j.endedAt || n?.endedAt || '') || 0;
+    const rank = [];
+    for (const n of g.nodes.values()) {
+      if (n.parentId === owner.id && n.meta?.job && isJobEnded(n.meta.job.state)) rank.push({ id: null, ms: endMs(n.meta.job, n) });
+    }
+    for (const u of fresh) rank.push({ id: u.jobId, ms: endMs(u.job) });
+    rank.sort((a, b) => b.ms - a.ms || (a.id == null ? -1 : b.id == null ? 1 : 0));
+    const skip = new Set(rank.slice(keep).filter((r) => r.id != null).map((r) => r.id));
+    return skip.size ? skip : null;
   }
 
   /** 스트림 주인 노드가 끝나면 그 자동 진행 작업도 끝(솎아 낸 마지막 레인 값 포함) */
@@ -3159,6 +3270,69 @@ export class RootRuntime {
     const raw = L && main.meta && main.meta.cwd ? loopAxesPlan(main.meta.cwd) : null;
     const plan = raw ? planFromRaw(raw, { privacy: this.privacy, at: now, key: main.meta.cwd + '|axes' }) : null;
     tr.setExternal('axes', L ? L.id : mid, plan, now);
+  }
+
+  /**
+   * 분리 측정 — 이 런타임에 끝나지 않은 기동기가 있고 그 루프 뿌리에 대기 기록(`.autopilot/WAIT-<축>`)이 있으면 축마다
+   * 작업 노드 `j:<주인>:meas-<축>`(모양, src 'loop-wait')을 낸다. 주인 = 그 기동기의 끝나지 않은 마지막 러너, 없으면 기동기.
+   * 기록이 지워지거나 사슬 PID 가 끝나면 작업을 끝으로 닫는다(웹이 퇴장시킴). 15초마다, 로그는 끝부분만. 라이브만(기록 밖 파일)
+   */
+  _loopWaitSweep(now, { pidAlive: alive = pidAlive } = {}) {
+    if (this.offline || this.closed) return;
+    if (this._waitAt && now - this._waitAt < LOOP_WAIT.POLL_MS) return;
+    this._waitAt = now;
+    const g = this.graph;
+    const main = g.get(`s:${this.sessionId}`);
+    if (!main || main.kind !== 'main') return;
+    const ended = (n) => ['done', 'error', 'stopped'].includes(n.status);
+    let L = null;
+    for (const n of g.nodes.values()) {
+      if (!n.meta?.launcher || ended(n)) continue;
+      if (!L || (n.startedAt || '') > (L.startedAt || '')) L = n;
+    }
+    const S = this._waitSent || (this._waitSent = new Map()); // 축 → {id(작업 노드), ownerId, key, sig, beatAt, at}
+    const nowIso = new Date(now).toISOString();
+    const close = (axis, rec, phase, state = 'done') => {
+      const owner = g.get(rec.ownerId);
+      const n = g.get(rec.id);
+      if (owner && n && n.meta?.job && !isEnded(n.status)) {
+        const job = { ...n.meta.job, state, endedAt: nowIso, beatAt: nowIso, phase: [phase, n.meta.job.phase].filter(Boolean).join(' · ').slice(0, LOOP_WAIT.PHASE_MAX) };
+        this._jobEmit(owner, rec.key, { jobId: job.id, job, isNew: false, beatOnly: false }, nowIso);
+      }
+      S.delete(axis);
+    };
+    const seen = new Set();
+    if (L) {
+      let owner = L;
+      for (const n of g.nodes.values()) {
+        if (n.meta?.runner?.launcher !== L.id || ended(n)) continue;
+        if (owner === L || (n.startedAt || '') > (owner.startedAt || '')) owner = n;
+      }
+      const root = this.launcherByNode.get(L.id)?.cwd || main.meta?.cwd || null;
+      let waits = [];
+      try { waits = loopWaits(root ? toFsPath(root) : null, { nowMs: now, pidAlive: alive }); } catch (e) { log('loop wait', e?.message || e); }
+      const key = this._jobOwnerKey(owner.id);
+      for (const w of waits) {
+        const id = jobNodeId(key, waitJobId(w.axis));
+        if (w.alive === false) { // 사슬 PID 끝 — 기록은 러너가 재확인 때 걷는다
+          if (S.has(w.axis)) close(w.axis, S.get(w.axis), '사슬 PID 끝남');
+          continue;
+        }
+        seen.add(w.axis);
+        // 주인이 바뀌면(새 러너가 뜸) 옛 주인 아래 것을 닫고 새 주인 아래에서 잇는다
+        if (S.has(w.axis) && S.get(w.axis).id !== id) close(w.axis, S.get(w.axis), '주인 바뀜 — 다음 주인 아래에서 이어짐');
+        const job = waitJobView(w, now, { privacy: this.privacy });
+        const { beatAt, ...rest } = job;
+        const sig = JSON.stringify(rest);
+        const prev = S.get(w.axis);
+        if (!prev || prev.sig !== sig || (beatAt !== prev.beatAt && now - (prev.at || 0) >= 60_000)) {
+          this._jobEmit(owner, key, { jobId: job.id, job, isNew: !prev, beatOnly: false }, nowIso);
+          S.set(w.axis, { id, ownerId: owner.id, key, sig, beatAt, at: now });
+        }
+      }
+    }
+    // 기록이 지워졌거나(대기 끝) 기동기가 끝남: 끝나지 않은 노드를 닫는다
+    for (const [axis, rec] of [...S]) if (!seen.has(axis)) close(axis, rec, L ? '대기 기록 지워짐' : '기동기 끝남');
   }
 
   _extJobsSweep(now) {

@@ -87,6 +87,12 @@ test('장치 표시 값: meta.batch 우선, 띠는 recent 상태(노드가 있�
   assert.equal(cycleProgress(info, c6, Date.parse(c6.startedAt) + 6 * 60000), 0.5);
   assert.deepEqual(nodeTags({ ...L, meta: { ...L.meta, adopted: { fromSession: 'x' } } }), ['이어받음']);
   assert.deepEqual(nodeTags(c6, mapOf(list)), ['회차 #6', '연결 추정']);
+  // 추론 effort 꼬리표: 무늬가 생기는 하위 노드(claude-p 등)는 글을 빼고, 메인은 medium 이 아닐 때만
+  assert.deepEqual(nodeTags({ ...c6, meta: { ...c6.meta, effort: 'xhigh' } }, mapOf(list)), ['회차 #6', '연결 추정']);
+  assert.deepEqual(nodeTags({ ...c6, meta: { ...c6.meta, effort: 'ultra' } }, mapOf(list)), ['회차 #6', '연결 추정', 'effort ultra'], '알 수 없는 단계 이름은 글로 남김');
+  assert.deepEqual(nodeTags({ id: 's:m', kind: 'main', meta: { effort: 'xhigh' } }), ['effort xhigh']);
+  assert.deepEqual(nodeTags({ id: 's:m', kind: 'main', meta: { effort: 'medium' } }), []);
+  assert.deepEqual(nodeTags({ id: 's:m', kind: 'main', meta: {} }), []);
   assert.ok(isGuessLink(c6) && !isGuessLink(list.find((n) => n.id === 's:c5')));
 });
 

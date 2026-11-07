@@ -127,7 +127,7 @@ export class OverviewHub {
       } else {
         if (r.live) R.leftAt = null;
         else if (R.meta.live) R.leftAt = now;
-        this._setMeta(R, { live: !!r.live, liveStatus: r.liveStatus ?? null, tier: r.live ? 'live' : 'recent',
+        this._setMeta(R, { live: !!r.live, liveStatus: r.liveStatus ?? null, liveWait: r.liveWait ?? null, tier: r.live ? 'live' : 'recent',
           ...(R.orphanSdk ? { likelyMain: r.likelyMain ?? null, unlinkedReason: r.unlinkedReason ?? null } : {}) });
         this._setVisible(R, this._visibleOf(R, now));
       }
@@ -135,7 +135,7 @@ export class OverviewHub {
     for (const R of [...this.roots.values()]) {
       if (wantMap.has(R.sid)) continue;
       // live 에서 빠짐: 바로 지우지 않고 recent 로 표시 → 10분 뒤에도 아니면 서브트리 제거
-      if (R.meta.live) { R.leftAt = now; this._setMeta(R, { live: false, liveStatus: null, tier: 'recent' }); }
+      if (R.meta.live) { R.leftAt = now; this._setMeta(R, { live: false, liveStatus: null, liveWait: null, tier: 'recent' }); }
       if ((R.leftAt == null || now - R.leftAt > this.graceMs) && !this._hasLiveHandoff(R)) this._removeRoot(R); // 넘긴 기동기가 살아 있으면 둔다
       else this._setVisible(R, this._visibleOf(R, now));
     }
@@ -171,7 +171,7 @@ export class OverviewHub {
     const R = {
       sid, projectId: r.projectId, rt, rootNodeId: g.rootId || `s:${sid}`, ids: new Set(), unsub: null,
       orphanSdk: !!r.orphanSdk, leftAt: null, visible: true,
-      meta: { live: !!r.live, liveStatus: r.liveStatus ?? null, tier: r.live ? 'live' : 'recent',
+      meta: { live: !!r.live, liveStatus: r.liveStatus ?? null, liveWait: r.liveWait ?? null, tier: r.live ? 'live' : 'recent',
         ...(r.orphanSdk ? { orphanSdk: true, likelyMain: r.likelyMain ?? null, unlinkedReason: r.unlinkedReason ?? null } : {}) },
     };
     R.visible = this._visibleOf(R, this.now());
@@ -466,7 +466,7 @@ export class OverviewHub {
 
   rootsPayload(inactive = false) {
     return this._rootsFor(inactive).map((R) => ({ sessionId: R.sid, projectId: R.projectId, nodeId: R.rootNodeId,
-      live: R.meta.live, liveStatus: R.meta.liveStatus, tier: R.meta.tier, ...(R.orphanSdk ? { orphanSdk: true } : {}) }));
+      live: R.meta.live, liveStatus: R.meta.liveStatus, ...(R.meta.liveWait ? { liveWait: R.meta.liveWait } : {}), tier: R.meta.tier, ...(R.orphanSdk ? { orphanSdk: true } : {}) }));
   }
 
   /** /state?scope=all 형식 */
@@ -549,7 +549,7 @@ export function createRealSource({ manager, index, maxRoots = 12, maxWithInactiv
         const h = await index.ensureHead(e);
         const ep = p.entrypoint || h.entrypoint;
         const act = await cachedActivity(index, e);
-        const r = { sessionId: p.sessionId, projectId: e.projectDir, live: true, liveStatus: p.status ?? null, tier: 'live',
+        const r = { sessionId: p.sessionId, projectId: e.projectDir, live: true, liveStatus: p.status ?? null, liveWait: p.waitingFor ?? null, tier: 'live', // 입력 대기 사유
           entrypoint: ep, orphanSdk: ep === 'sdk-cli', activityMs: act };
         (ep === 'sdk-cli' ? sdk : mains).push(r);
       }

@@ -1,0 +1,46 @@
+/* 시스템 메모리 게이지. 모양·색 토큰은 컨텍스트·한도 게이지와 같다(--k-main · --warn · --error), 경계는 80/90%. */
+.memg { position: relative; display: inline-flex; align-items: center; flex: none; margin-left: 2px; font-variant-numeric: tabular-nums; }
+.memg[hidden] { display: none !important; }
+.memg-pill {
+  --m-ok: var(--k-main); --m-warn: var(--warn, #f59e0b); --m-danger: var(--error);
+  position: relative; display: inline-flex; align-items: baseline; gap: 5px; height: 30px; padding: 0 9px 0 8px;
+  border-radius: 999px; border: 1px solid var(--border); background: var(--chip-bg); white-space: nowrap;
+  font-size: 12px; line-height: 28px; overflow: hidden; cursor: pointer; color: var(--text); font-family: inherit;
+}
+:root[data-theme="light"] .memg-pill { --m-warn: var(--warn, #b45309); }
+.memg-pill:hover { background: var(--hover); }
+.memg-name { color: var(--muted); font-size: 11px; font-weight: 500; }
+.memg-pct { font-weight: 700; }
+.memg-bar { position: absolute; left: 8px; right: 8px; bottom: 4px; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--text) 12%, transparent); overflow: hidden; }
+.memg-bar i, .memg-cbar i { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--m-ok, var(--k-main)); transition: width .4s ease; }
+.memg-pill.lv-warn { border-color: color-mix(in srgb, var(--m-warn) 55%, transparent); }
+.memg-pill.lv-warn .memg-pct { color: var(--m-warn); }
+.memg-pill.lv-warn .memg-bar i { background: var(--m-warn); }
+.memg-pill.lv-danger { border-color: var(--m-danger); background: color-mix(in srgb, var(--m-danger) 12%, var(--chip-bg)); }
+.memg-pill.lv-danger .memg-pct { color: var(--m-danger); }
+.memg-pill.lv-danger .memg-bar i { background: var(--m-danger); }
+.memg-pill.stale { opacity: .62; }
+.memg-pill.stale .memg-bar i { filter: saturate(.4); }
+
+.memg-card {
+  --m-ok: var(--k-main); --m-warn: var(--warn, #f59e0b); --m-danger: var(--error);
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 40; width: 240px; padding: 10px 12px 8px;
+  border-radius: 10px; background: var(--panel-bg); border: 1px solid var(--border); box-shadow: var(--shadow);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); font-size: 12px; white-space: normal;
+}
+:root[data-theme="light"] .memg-card { --m-warn: var(--warn, #b45309); }
+.memg-card[hidden] { display: none; }
+.memg-card h4 { margin: 0 0 6px; font-size: 12px; font-weight: 650; }
+.memg-ch { font-weight: 600; }
+.memg-ch.lv-warn { color: var(--m-warn); }
+.memg-ch.lv-danger { color: var(--m-danger); }
+.memg-cbar { display: block; height: 6px; margin: 4px 0; border-radius: 3px; background: color-mix(in srgb, var(--text) 12%, transparent); overflow: hidden; }
+.memg-cbar.lv-warn i { background: var(--m-warn); }
+.memg-cbar.lv-danger i { background: var(--m-danger); }
+.memg-cm { margin: 0; color: var(--muted); font-size: 11.5px; }
+.memg-src { margin: 6px 0 0; padding-top: 6px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; }
+
+@media (max-width: 1599px) { .memg-pill { padding: 0 8px 0 7px; } }
+@media (max-width: 719px) {
+  .memg-card { position: fixed; top: calc(var(--topbar-h, 88px) + 6px); left: 12px; right: 12px; width: auto; }
+}

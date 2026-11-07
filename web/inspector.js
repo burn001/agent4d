@@ -17,6 +17,7 @@ import { escapeHtml as esc } from './html-util.mjs';
 import { artInspectModel, ART } from './artifact-core.mjs'; // 작업 대상 팝업
 import { userCardModel } from './user-core.mjs'; // 나 · 사용자 카드
 import { t as tr, fmtTime } from './i18n.mjs';
+import { effortOf, effortGlyph, effortDrawnKind, effortTip, effortMeterHtml } from './effort-core.mjs'; // 머리 줄 미니 미터 + 본문 한 줄
 
 let ixSum = null; // 특별 상호작용 요약(ix-core 가 있으면 그 문구, 없으면 느슨한 요약)
 let ixGlyph = { github: '⎇', db: '⛁', remote: '⇄', batch: '▦', tests: '✔' };
@@ -32,6 +33,26 @@ function ensureCss() {
   const href = new URL('./inspector.css', import.meta.url).href;
   if (document.querySelector(`link[href="${href}"]`)) return;
   const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = href; document.head.appendChild(l);
+}
+
+/**
+ * 머리 줄 끝 effort: 무늬가 그려지는 하위 노드는 5칸 미니 미터 + 단계 이름, 메인·알 수 없는 단계 이름은 'effort X' 글.
+ * 툴팁 = 요청값·적용값(effortTip). effort 가 없으면 ''
+ */
+function effHeadHtml(n) {
+  const e = effortOf(n);
+  if (!e) return '';
+  const g = effortGlyph(n);
+  const tip = effortTip(n) || tr('cards.ins.effort');
+  const body = g ? `${effortMeterHtml(n, { title: false })}<b>${esc(e.name)}</b>` : esc(tr('cards.tag.effort', { v: e.name }));
+  return ` <span class="ins-eff${g ? ' m' : ''}${e.confirmed ? '' : ' req'}" title="${esc(tip)}">${body}</span>`;
+}
+/** 본문 한 줄: '추론 effort high — 요청 high · 적용 high' · 하위 노드인데 값이 없으면 '마지막 응답의 추론 effort: 알 수 없음' */
+function effBodyHtml(n) {
+  const tip = effortTip(n);
+  if (tip) return `<section class="ins-sec ins-effs"><p class="ins-dim">${esc(tip)}</p></section>`;
+  if (n && effortDrawnKind(n.kind)) return `<section class="ins-sec ins-effs"><p class="ins-dim">${esc(tr('cards.ins.effort'))}: ${esc(tr('cards.eff.unknown'))}</p></section>`;
+  return '';
 }
 
 /** 화면 좌표의 객체 원 {x, y, r}(px, 뷰포트 기준). 못 구하면 null */
@@ -61,18 +82,21 @@ export function anchorOf(view, t) {
 /** 무대 안쪽(패널·상단 바·하단 띠 제외) */
 function stageBounds() {
   const W = innerWidth, H = innerHeight;
-  let top = 0, right = W, bottom = H;
+  let left = 0, top = 0, right = W, bottom = H;
   const tb = document.getElementById('topbar');
   if (tb) top = tb.getBoundingClientRect().bottom;
   const pn = document.getElementById('panel');
-  if (pn && !sheetMode(W)) { const r = pn.getBoundingClientRect(); if (r.width > 0 && r.left > W * 0.4) right = r.left; }
+  if (pn && !sheetMode(W)) { // 패널이 오른쪽이면 그 왼쪽 변까지, 왼쪽이면 그 오른쪽 변부터
+    const r = pn.getBoundingClientRect();
+    if (r.width > 0) { if (r.left > W * 0.4) right = r.left; else if (r.right < W * 0.6) left = r.right; }
+  }
   for (const id of ['timeline', 'macro-tl', 'replay-bar']) {
     const o = document.getElementById(id);
     if (!o || o.hidden) continue;
     const r = o.getBoundingClientRect();
     if (r.height > 0 && r.top > H * 0.5) bottom = Math.min(bottom, r.top);
   }
-  return { left: 0, top, right, bottom };
+  return { left, top, right, bottom };
 }
 
 /**
@@ -386,7 +410,8 @@ export function mountInspector(h) {
     const si = h.sessIdx ? h.sessIdx(n) : null, br = n.kind === 'main' ? branchOf(n) : null;
     const sess = $('.ins-sess');
     sess.className = 'ins-sess' + (Number.isInteger(si) ? ' s' + si : '');
-    sess.innerHTML = (Number.isInteger(si) ? `<i aria-hidden="true"></i>${esc(tr('cards.ins.sessColor'))} ` : '') + (br ? `<span class="ins-br" title="${esc(tr('cards.ins.branch'))}">⎇ ${esc(String(br).slice(0, 28))}</span>` : '');
+    sess.innerHTML = (Number.isInteger(si) ? `<i aria-hidden="true"></i>${esc(tr('cards.ins.sessColor'))} ` : '') + (br ? `<span class="ins-br" title="${esc(tr('cards.ins.branch'))}">⎇ ${esc(String(br).slice(0, 28))}</span>` : '')
+      + effHeadHtml(n);
 
     const parts = [];
     // 지금 하는 일
@@ -409,6 +434,9 @@ export function mountInspector(h) {
       const lv = gaugeLevel(ctx.pct);
       parts.push(`<section class="ins-sec"><h4>${esc(tr('cards.ins.h.ctx'))}</h4><div class="ins-gauge lv-${lv}" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(ctx.pct)}" aria-label="${esc(tr('cards.ins.ctxUse'))}"><i style="width:${Math.min(100, Math.max(0, ctx.pct)).toFixed(1)}%"></i></div><p class="ins-dim">${esc(tr('cards.ins.tokens', { n: ctxShort(ctx) }))}${ctx.estimated ? ' ' + esc(tr('cards.ins.ctxEst')) : ''}</p></section>`);
     }
+    // 추론 effort 한 줄(요청값·적용값). 메인도 글로(무늬 없음), 하위 노드인데 값이 없으면 '알 수 없음'
+    const efl = effBodyHtml(n);
+    if (efl) parts.push(efl);
     // 계획 항목(계획 보드가 켜졌을 때)
     const ph = h.planHtml ? h.planHtml(n, nowMs) : '';
     if (ph) parts.push(ph);

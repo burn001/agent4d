@@ -753,7 +753,7 @@ export class IxTracker {
 
 // ───────────────────────── 마스킹 (graph.emit) ─────────────────────────
 const IX_ENUM = new Set(['cat', 'op', 'phase', 'engine', 'runner', 'transfer', 'rw', 'unit', 'sub', 'src', 'st']);
-const IX_STR = new Set(['remote', 'branch', 'repo', 'db', 'host', 'tag', 'tool', 'text', 'answer', 'cmd']);
+const IX_STR = new Set(['remote', 'branch', 'repo', 'db', 'host', 'tag', 'tool', 'text', 'answer', 'cmd', 'who']); // who: 교차 세션 보낸 이(Interactive 별칭·세션 이름)
 /** 이벤트의 ix 필드 정리: 문자열은 redact·48자, 수는 유한·정수, 알 수 없는 키 버림. minimal 이면 이름(문자열) 버림 */
 export function sanitizeIx(ix, privacy = 'summary') {
   if (!ix || typeof ix !== 'object' || !IX_CATS.includes(ix.cat)) return null;

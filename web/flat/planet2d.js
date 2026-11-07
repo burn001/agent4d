@@ -15,9 +15,9 @@ import { BATCH, isLauncher } from '../batch-core.mjs';
 import { toScreen, camScale, planetShape, planetColor, mixColor } from './flat-core.mjs';
 import { drawCards, drawRings, drawDeviceFace, drawIslands } from './flat-draw.js';
 import { drawPlanetIslands } from './planet-islands2d.js'; // 섬 = 원형 궤도계
-import { drawMechPlanet, drawSubPlanet, drawTourb2D } from './planet-deco2d.js';
+import { drawMechPlanet, drawSubPlanet, drawTourb2D, drawEffortGems2D } from './planet-deco2d.js'; // effort 보석(claude -p·워크플로 에이전트)
 import { drawVariant2D, drawVariantCore } from './planet-variants2d.js'; // 서브·claude -p 시안 궤도계 // 행성 연출 · 뚜르비용
-import { TOURB_GEO } from '../tourbillon-core.mjs'; // 코어 축소 몫
+import { TOURB_GEO, TOURB_EFF } from '../tourbillon-core.mjs'; // 코어 축소 몫 · 보석 고리 반지름
 import { stepOrbits, drawOrbits, drawBursts, emitTool, nearestSat, orbitExtent, ELEV } from './planet-orbits2d.js'; // 궤도계
 import { bodyK, VARIANT_CORE } from '../planet-core.mjs';
 import { runVis, runVisStatus } from '../run-core.mjs'; // 실행 중 셸
@@ -356,6 +356,7 @@ export class Planet2DView extends FlatView {
     if (vn) { // 시안: 뒤쪽 → 작은 본체 → 앞쪽(3D 와 같은 시안·상태)
       drawVariant2D(this, ctx, v, vn, x, y, R, alpha, now, colO, 0);
       drawVariantCore(this, ctx, v, vn, x, y, R, alpha, now, col, edge);
+      if (v.kind === 'subagent') drawTourb2D(this, ctx, v, x, y, R * (VARIANT_CORE[vn] || 0.4), alpha, now, false); // 서브 단일 케이지 = 작은 본체 둘레(3D 와 같게) · 살 수 = effort
       drawVariant2D(this, ctx, v, vn, x, y, R, alpha, now, colO, 1);
     }
     const sub = shape === 'sphere';
@@ -417,6 +418,7 @@ export class Planet2DView extends FlatView {
       drawDeviceFace(this, ctx, v, x, y, w, h, R, alpha, now);
     }
     if (!vn) drawOrbits(this, ctx, v, x, y, R, alpha, now, colO, 1, oOpt); // 궤도계 앞 반쪽
+    if (!v.device && TOURB_EFF.GEM_RING[v.node.kind]) drawEffortGems2D(this, ctx, v, x, y, R * TOURB_EFF.GEM_RING[v.node.kind], alpha, now); // claude -p·워크플로 에이전트 effort 보석
     if (v.device || v.kind === 'monitor') this._deckRing(ctx, v, x, y, R, alpha, now); // G3 회차 고리 · G4 재무장 눈금
     if (hot) this.heat2d.drawOver(ctx, v, x, y, hRb, alpha, now, this._heatAway(v), hRs);
     if (active && v.icons && v.icons.size) emitTool(this, v, R, this._emitTarget(v), col);

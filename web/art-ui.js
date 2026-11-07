@@ -1,5 +1,6 @@
 // 작업 대상 층 — 앱 쪽 연결: ⚙ 메뉴 켬/끔(표현마다 저장·URL 강제), 장부·연출 큐, 기본 장부 불러오기(artifacts),
 // 이벤트 반영, 실황 패널 고정 줄(파괴적 작업), mock 드라이버. 끄면 아무것도 하지 않는다(이벤트도 안 봄·요청 없음·표현 객체 없음).
+import { dangerAlertsOn, onDangerAlerts } from './danger-pref.mjs'; // 위험 동작 경고 켬/끔(기본 끔)
 import { ArtBook, ArtFx, ART_VIEWS_READY, ART_STYLE_DEFAULT, artStoreKey, artInitial, artAlarmText, ensureArtCss, ART_KIND_LABEL } from './artifact-core.mjs';
 import { t } from './i18n.mjs';
 import { localizeArtifacts } from './i18n-server.mjs'; // 서버 문구('산출물' 등)
@@ -16,6 +17,7 @@ const PIN_MAX = 3, PIN_TTL = 10 * 60_000;
 export function mountArtifacts(h) {
   ensureArtCss();
   const book = new ArtBook();
+  book.xOff = !dangerAlertsOn();
   const fx = new ArtFx();
   let on = false;
   let mode = h.viewMode();
@@ -207,6 +209,15 @@ export function mountArtifacts(h) {
 
   mountRow();
   mountLegend();
+  // 경고 켬/끔이 바뀌면 장부를 다시 받아 x 를 넣거나 뺀다. 범례의 경고 줄도 같이
+  const legendX = () => { const li = document.querySelector('.art-legend .al-x'); if (li && li.parentElement) li.parentElement.hidden = !dangerAlertsOn(); };
+  legendX();
+  onDangerAlerts((v) => {
+    book.xOff = !v; legendX();
+    if (!on) return;
+    book.reset(); loaded.clear(); if (!v) clearPins();
+    ensureBase(true); applyView();
+  });
   on = false;
   label();
   // 처음: 이 표현의 저장값·URL
@@ -234,6 +245,11 @@ export function mountArtifacts(h) {
       if (!quiet) { fx.note(res, ev.nodeId, performance.now() / 1000, speed, ev.toolUseId || null); actSounds(speed); }
       const v = h.getView(); if (v && v.invalidate) v.invalidate();
       if (ev.type === 'tool-end' && !quiet) for (const ch of res.changes) if (ch.ref.x && ch.ref.x !== 'overwrite') pin(artAlarmText(ch.ref, h.nodeLabel(ev.nodeId)), `${ev.toolUseId}|${ch.ref.id}`);
+    },
+    /** 노드가 빠짐(node-remove — 앱 onEvent 는 이 이벤트를 art.event 로 넘기지 않고 먼저 돌아감): 그 노드 자리 연출·짝 정리 */
+    nodeRemoved(ids) {
+      if (!on || !ids) return;
+      if (fx.acts.nodeRemoved(ids)) { const v = h.getView(); if (v && v.invalidate) v.invalidate(); }
     },
     /** 스냅샷(재연결·범위 바뀜·재생 시크): 장부를 비우고 그 시점 기본 장부를 다시 */
     snapshot() {

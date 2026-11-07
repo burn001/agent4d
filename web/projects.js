@@ -8,8 +8,21 @@
 
 import { t as tr } from './i18n.mjs';
 import { projVisible, sessVisible, toggleProject, toggleSession, showAll, showOnly } from './overview/visible.mjs';
+import { effortCounts } from './effort-core.mjs'; // 세션 줄 툴팁 effort 집계
 
 export const RECENT_MS = 2 * 3600 * 1000;
+
+/**
+ * 세션 줄 툴팁 한 줄(순수): 그 세션(rootSessionId 또는 sessionId)에 딸린 살아 있는 하위 노드
+ * (subagent·workflow-agent·claude-p)의 effort 이름별 수 — 'effort high 2 · xhigh 1'. 없으면 ''
+ */
+export function sessionEffortLine(nodes, sessionId) {
+  if (!nodes || !sessionId) return '';
+  const mine = [];
+  for (const n of nodes) if (n && (n.rootSessionId === sessionId || n.sessionId === sessionId)) mine.push(n);
+  const c = effortCounts(mine);
+  return c ? tr('cards.tag.effort', { v: c }) : '';
+}
 const LS_KEY = 'ccviz.projlist';
 
 const tsOf = (iso) => { const t = Date.parse(iso || ''); return Number.isFinite(t) ? t : 0; };
@@ -177,8 +190,13 @@ export function archiveGroupHtml(archive, sel) {
   return h + '</div>';
 }
 
-export function mountProjectList({ el, onSelect = () => {}, getNodeCount = null, now = () => Date.now(), sessions = true, visibility = null } = {}) {
+export function mountProjectList({ el, onSelect = () => {}, getNodeCount = null, now = () => Date.now(), sessions = true, visibility = null, getNodes = null } = {}) {
   ensureCss();
+  // 세션 줄 툴팁 effort 집계용 노드 목록(iterable). 주지 않으면 앱 핸들(window.__ccviz.store)에서 읽고, 그것도 없으면 줄 없음
+  const nodesNow = () => {
+    try { if (getNodes) return getNodes(); const st = globalThis.__ccviz && globalThis.__ccviz.store; return st && st.nodes ? st.nodes.values() : null; } catch { return null; }
+  };
+  const effLine = (sid) => { const l = sessionEffortLine(nodesNow(), sid); return l ? '\n' + l : ''; };
   // visibility = { get: 모델, set(모델) } — 있으면 프로젝트 줄 앞 체크박스·세션 체크(펼침)·모두/하나만
   const visExp = new Set(); // 세션 체크 목록을 펼친 프로젝트
   let projects = [], sel = { scope: 'all' }, disabled = false, collapsed = false, archive = null;
@@ -293,8 +311,9 @@ export function mountProjectList({ el, onSelect = () => {}, getNodeCount = null,
     return '<div class="pl-vsess" role="group">' + list.map((s) => {
       const on = sessVisible(vm, s.sessionId);
       const label = (s.title || s.sessionId.slice(0, 8));
+      const ef = s.live ? effLine(s.sessionId) : ''; // 세션 줄 툴팁 effort 집계(live 만)
       return `<div class="pl-vrow sub${on && pon ? '' : ' off'}"><button type="button" class="pl-vis" role="checkbox" aria-checked="${on}" data-act="vsess" data-sid="${esc(s.sessionId)}" title="${esc(tr(on ? 'app.proj.vis.hide' : 'app.proj.vis.show', { name: label }))}"${pon ? '' : ' disabled'}><i aria-hidden="true"></i></button>
-        <span class="pl-vst"><i class="pl-dot sm ${s.live ? (s.liveStatus === 'busy' ? 'busy' : 'idle') : 'off'}" aria-hidden="true"></i>${esc(trunc(label, 36))}<span class="pl-meta"> · ${esc(s.live ? tr('app.proj.vis.live') : tr('app.proj.st.past'))}</span></span></div>`;
+        <span class="pl-vst"${ef ? ` title="${esc(label + ef)}"` : ''}><i class="pl-dot sm ${s.live ? (s.liveStatus === 'busy' ? 'busy' : 'idle') : 'off'}" aria-hidden="true"></i>${esc(trunc(label, 36))}<span class="pl-meta"> · ${esc(s.live ? tr('app.proj.vis.live') : tr('app.proj.st.past'))}</span></span></div>`;
     }).join('') + '</div>';
   }
   function sessionsHtml(p, nowMs) {
@@ -305,7 +324,7 @@ export function mountProjectList({ el, onSelect = () => {}, getNodeCount = null,
       const st = s.live ? (STATUS[s.liveStatus] || tr('app.proj.st.open')) : tr('app.proj.st.past');
       const cls = s.live ? (s.liveStatus === 'busy' ? 'busy' : 'idle') : 'off';
       const extra = s.live && s.inOverview === false ? ' · ' + tr('app.proj.outOfOverview') : s.entrypoint === 'sdk-cli' ? ' · claude -p' : '';
-      return `<button type="button" class="pl-srow${on ? ' on' : ''}" role="option" aria-selected="${on}" data-act="sess" data-pid="${esc(p.projectId)}" data-sid="${esc(s.sessionId)}" title="${esc((s.title || '') + '\n' + s.sessionId)}">
+      return `<button type="button" class="pl-srow${on ? ' on' : ''}" role="option" aria-selected="${on}" data-act="sess" data-pid="${esc(p.projectId)}" data-sid="${esc(s.sessionId)}" title="${esc((s.title || '') + '\n' + s.sessionId + (s.live ? effLine(s.sessionId) : ''))}">
         <i class="pl-dot sm ${cls}" aria-hidden="true"></i><span class="pl-st">${esc(trunc(s.title || s.sessionId.slice(0, 8), 40))}</span>
         <span class="pl-meta">${esc(st)}${esc(extra)}${s.activityAt ? ' · ' + esc(relTime(s.activityAt, nowMs)) : ''}</span></button>`;
     }).join('') + '</div>';

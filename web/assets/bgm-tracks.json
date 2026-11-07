@@ -67,6 +67,10 @@
         ]
       },
       "energy": 0.1,
+      "moods": [
+        "calm",
+        "dreamy"
+      ],
       "source": "자체 작곡(music/compose.py)"
     },
     {
@@ -95,6 +99,9 @@
         ]
       },
       "energy": 0.35,
+      "moods": [
+        "focus"
+      ],
       "source": "작성자의 이전 프로젝트 곡(deep) 편곡"
     },
     {
@@ -119,6 +126,9 @@
         ]
       },
       "energy": 0.45,
+      "moods": [
+        "warm"
+      ],
       "source": "작성자의 이전 프로젝트 곡(cafe) 편곡"
     },
     {
@@ -146,6 +156,9 @@
         ]
       },
       "energy": 0.7,
+      "moods": [
+        "bright"
+      ],
       "source": "작성자의 이전 프로젝트 곡(city) 편곡"
     },
     {
@@ -170,6 +183,10 @@
         ]
       },
       "energy": 0.4,
+      "moods": [
+        "warm",
+        "focus"
+      ],
       "source": "자체 작곡(music/compose_chillhop.py)"
     },
     {
@@ -194,6 +211,10 @@
         ]
       },
       "energy": 0.15,
+      "moods": [
+        "calm",
+        "warm"
+      ],
       "source": "자체 작곡"
     },
     {
@@ -218,6 +239,10 @@
         ]
       },
       "energy": 0.12,
+      "moods": [
+        "dreamy",
+        "calm"
+      ],
       "source": "자체 작곡"
     },
     {
@@ -245,6 +270,10 @@
         ]
       },
       "energy": 0.65,
+      "moods": [
+        "drive",
+        "dreamy"
+      ],
       "source": "자체 작곡"
     },
     {
@@ -270,6 +299,10 @@
         ]
       },
       "energy": 0.62,
+      "moods": [
+        "focus",
+        "drive"
+      ],
       "source": "자체 작곡"
     },
     {
@@ -295,6 +328,9 @@
         ]
       },
       "energy": 0.72,
+      "moods": [
+        "bright"
+      ],
       "source": "자체 작곡"
     },
     {
@@ -319,6 +355,10 @@
         ]
       },
       "energy": 0.85,
+      "moods": [
+        "drive",
+        "dreamy"
+      ],
       "source": "자체 작곡"
     },
     {
@@ -346,6 +386,10 @@
         ]
       },
       "energy": 0.85,
+      "moods": [
+        "drive",
+        "bright"
+      ],
       "source": "자체 작곡"
     },
     {
@@ -370,6 +414,9 @@
         ]
       },
       "energy": 0.22,
+      "moods": [
+        "focus"
+      ],
       "source": "자체 작곡(music/compose_pulse.py)"
     },
     {
@@ -394,6 +441,9 @@
         ]
       },
       "energy": 0.45,
+      "moods": [
+        "focus"
+      ],
       "source": "자체 작곡(music/compose_circuit.py)"
     },
     {
@@ -418,6 +468,9 @@
         ]
       },
       "energy": 0.92,
+      "moods": [
+        "drive"
+      ],
       "source": "자체 작곡(music/compose_overclock.py)"
     },
     {
@@ -442,6 +495,10 @@
         ]
       },
       "energy": 0.3,
+      "moods": [
+        "dreamy",
+        "calm"
+      ],
       "source": "자체 작곡(music/compose_stardust.py)"
     },
     {
@@ -466,6 +523,9 @@
         ]
       },
       "energy": 0.42,
+      "moods": [
+        "dreamy"
+      ],
       "source": "자체 작곡(music/compose_nebula.py)"
     },
     {
@@ -490,6 +550,10 @@
         ]
       },
       "energy": 0.6,
+      "moods": [
+        "dreamy",
+        "focus"
+      ],
       "source": "자체 작곡(music/compose_pulsar.py)"
     },
     {
@@ -514,6 +578,10 @@
         ]
       },
       "energy": 0.85,
+      "moods": [
+        "drive",
+        "dreamy"
+      ],
       "source": "자체 작곡(music/compose_warp.py)"
     },
     {
@@ -538,6 +606,9 @@
         ]
       },
       "energy": 0.2,
+      "moods": [
+        "warm"
+      ],
       "source": "자체 작곡(music/compose_bossa.py)"
     },
     {
@@ -562,6 +633,9 @@
         ]
       },
       "energy": 0.9,
+      "moods": [
+        "bright"
+      ],
       "source": "자체 작곡(music/compose_swing.py)"
     },
     {
@@ -587,6 +661,9 @@
         ]
       },
       "energy": 0.88,
+      "moods": [
+        "bright"
+      ],
       "source": "자체 작곡(music/compose_caper.py)"
     },
     {
@@ -611,6 +688,10 @@
         ]
       },
       "energy": 0.18,
+      "moods": [
+        "calm",
+        "focus"
+      ],
       "source": "자체 작곡(music/compose_glacier.py)"
     },
     {
@@ -635,6 +716,10 @@
         ]
       },
       "energy": 0.25,
+      "moods": [
+        "calm",
+        "focus"
+      ],
       "source": "자체 작곡(music/compose_cursor.py)"
     },
     {
@@ -659,6 +744,9 @@
         ]
       },
       "energy": 0.38,
+      "moods": [
+        "focus"
+      ],
       "source": "자체 작곡(music/compose_refactor.py)"
     },
     {
@@ -684,6 +772,9 @@
         ]
       },
       "energy": 0.48,
+      "moods": [
+        "focus"
+      ],
       "source": "자체 작곡(music/compose_queue.py)"
     },
     {
@@ -708,6 +799,10 @@
         ]
       },
       "energy": 0.62,
+      "moods": [
+        "drive",
+        "focus"
+      ],
       "source": "자체 작곡(music/compose_stack.py)"
     },
     {
@@ -732,6 +827,10 @@
         ]
       },
       "energy": 0.68,
+      "moods": [
+        "drive",
+        "bright"
+      ],
       "source": "자체 작곡(music/compose_sprint.py)"
     },
     {
@@ -756,6 +855,9 @@
         ]
       },
       "energy": 0.9,
+      "moods": [
+        "drive"
+      ],
       "source": "자체 작곡(music/compose_hotfix.py)"
     },
     {
@@ -780,6 +882,9 @@
         ]
       },
       "energy": 0.95,
+      "moods": [
+        "drive"
+      ],
       "source": "자체 작곡(music/compose_deadline.py)"
     },
     {
@@ -804,6 +909,10 @@
         ]
       },
       "energy": 0.08,
+      "moods": [
+        "calm",
+        "dreamy"
+      ],
       "source": "자체 작곡(music/compose_aurora.py)"
     },
     {
@@ -829,6 +938,10 @@
         ]
       },
       "energy": 0.14,
+      "moods": [
+        "calm",
+        "dreamy"
+      ],
       "source": "자체 작곡(music/compose_deepfield.py)"
     },
     {
@@ -853,6 +966,9 @@
         ]
       },
       "energy": 0.36,
+      "moods": [
+        "dreamy"
+      ],
       "source": "자체 작곡(music/compose_comet.py)"
     },
     {
@@ -877,6 +993,10 @@
         ]
       },
       "energy": 0.45,
+      "moods": [
+        "dreamy",
+        "focus"
+      ],
       "source": "자체 작곡(music/compose_satellite.py)"
     },
     {
@@ -901,6 +1021,10 @@
         ]
       },
       "energy": 0.6,
+      "moods": [
+        "drive",
+        "dreamy"
+      ],
       "source": "자체 작곡(music/compose_ionstorm.py)"
     },
     {
@@ -925,6 +1049,9 @@
         ]
       },
       "energy": 0.66,
+      "moods": [
+        "drive"
+      ],
       "source": "자체 작곡(music/compose_gravity.py)"
     },
     {
@@ -949,6 +1076,9 @@
         ]
       },
       "energy": 0.88,
+      "moods": [
+        "drive"
+      ],
       "source": "자체 작곡(music/compose_supernova.py)"
     },
     {
@@ -973,6 +1103,9 @@
         ]
       },
       "energy": 0.93,
+      "moods": [
+        "drive"
+      ],
       "source": "자체 작곡(music/compose_hyperspace.py)"
     },
     {
@@ -997,6 +1130,10 @@
         ]
       },
       "energy": 0.1,
+      "moods": [
+        "calm",
+        "warm"
+      ],
       "source": "자체 작곡(music/compose_rainwindow.py)"
     },
     {
@@ -1022,6 +1159,10 @@
         ]
       },
       "energy": 0.2,
+      "moods": [
+        "warm",
+        "calm"
+      ],
       "source": "자체 작곡(music/compose_teatime.py)"
     },
     {
@@ -1046,6 +1187,10 @@
         ]
       },
       "energy": 0.4,
+      "moods": [
+        "warm",
+        "bright"
+      ],
       "source": "자체 작곡(music/compose_typewriter.py)"
     },
     {
@@ -1070,6 +1215,9 @@
         ]
       },
       "energy": 0.45,
+      "moods": [
+        "warm"
+      ],
       "source": "자체 작곡(music/compose_espresso.py)"
     },
     {
@@ -1094,6 +1242,9 @@
         ]
       },
       "energy": 0.68,
+      "moods": [
+        "bright"
+      ],
       "source": "자체 작곡(music/compose_meeting.py)"
     },
     {
@@ -1118,6 +1269,9 @@
         ]
       },
       "energy": 0.72,
+      "moods": [
+        "bright"
+      ],
       "source": "자체 작곡(music/compose_copier.py)"
     },
     {
@@ -1142,6 +1296,9 @@
         ]
       },
       "energy": 0.9,
+      "moods": [
+        "bright"
+      ],
       "source": "자체 작곡(music/compose_pantry.py)"
     },
     {
@@ -1166,6 +1323,9 @@
         ]
       },
       "energy": 0.94,
+      "moods": [
+        "bright"
+      ],
       "source": "자체 작곡(music/compose_mambo.py)"
     },
     {
@@ -1190,6 +1350,9 @@
         ]
       },
       "energy": 0.12,
+      "moods": [
+        "calm"
+      ],
       "source": "자체 작곡(music/compose_cleanroom.py)"
     },
     {
@@ -1214,6 +1377,9 @@
         ]
       },
       "energy": 0.2,
+      "moods": [
+        "calm"
+      ],
       "source": "자체 작곡(music/compose_petri.py)"
     },
     {
@@ -1238,6 +1404,9 @@
         ]
       },
       "energy": 0.38,
+      "moods": [
+        "focus"
+      ],
       "source": "자체 작곡(music/compose_titration.py)"
     },
     {
@@ -1262,6 +1431,9 @@
         ]
       },
       "energy": 0.48,
+      "moods": [
+        "focus"
+      ],
       "source": "자체 작곡(music/compose_oscillo.py)"
     },
     {
@@ -1286,6 +1458,9 @@
         ]
       },
       "energy": 0.66,
+      "moods": [
+        "drive"
+      ],
       "source": "자체 작곡(music/compose_centrifuge.py)"
     },
     {
@@ -1310,6 +1485,10 @@
         ]
       },
       "energy": 0.6,
+      "moods": [
+        "focus",
+        "drive"
+      ],
       "source": "자체 작곡(music/compose_spectro.py)"
     },
     {
@@ -1334,6 +1513,9 @@
         ]
       },
       "energy": 0.86,
+      "moods": [
+        "drive"
+      ],
       "source": "자체 작곡(music/compose_reactor.py)"
     },
     {
@@ -1358,6 +1540,9 @@
         ]
       },
       "energy": 0.93,
+      "moods": [
+        "drive"
+      ],
       "source": "자체 작곡(music/compose_collider.py)"
     },
     {
@@ -1386,6 +1571,10 @@
         ]
       },
       "energy": 0.4,
+      "moods": [
+        "focus",
+        "dreamy"
+      ],
       "source": "자체 작곡(music/compose_tidelock.py)"
     },
     {
@@ -1414,6 +1603,9 @@
         ]
       },
       "energy": 0.44,
+      "moods": [
+        "focus"
+      ],
       "source": "자체 작곡(music/compose_pentameter.py)"
     },
     {
@@ -1441,6 +1633,10 @@
         ]
       },
       "energy": 0.38,
+      "moods": [
+        "calm",
+        "focus"
+      ],
       "source": "자체 작곡(music/compose_dubroom.py)"
     },
     {
@@ -1466,6 +1662,9 @@
         ]
       },
       "energy": 0.42,
+      "moods": [
+        "warm"
+      ],
       "source": "자체 작곡(music/compose_parkbench.py)"
     },
     {
@@ -1490,6 +1689,10 @@
         ]
       },
       "energy": 0.36,
+      "moods": [
+        "warm",
+        "bright"
+      ],
       "source": "자체 작곡(music/compose_sunlitdesk.py)"
     },
     {
@@ -1515,6 +1718,9 @@
         ]
       },
       "energy": 0.46,
+      "moods": [
+        "warm"
+      ],
       "source": "자체 작곡(music/compose_filingwaltz.py)"
     },
     {
@@ -1540,6 +1746,10 @@
         ]
       },
       "energy": 0.34,
+      "moods": [
+        "focus",
+        "warm"
+      ],
       "source": "자체 작곡(music/compose_microscope.py)"
     },
     {
@@ -1564,6 +1774,9 @@
         ]
       },
       "energy": 0.42,
+      "moods": [
+        "focus"
+      ],
       "source": "자체 작곡(music/compose_datalog.py)"
     },
     {
@@ -1589,6 +1802,9 @@
         ]
       },
       "energy": 0.4,
+      "moods": [
+        "focus"
+      ],
       "source": "자체 작곡(music/compose_fivetubes.py)"
     },
     {
@@ -1614,6 +1830,9 @@
         ]
       },
       "energy": 0.3,
+      "moods": [
+        "calm"
+      ],
       "source": "자체 작곡(music/compose_coolant.py)"
     },
     {
@@ -1638,6 +1857,9 @@
         ]
       },
       "energy": 0.62,
+      "moods": [
+        "drive"
+      ],
       "source": "자체 작곡(music/compose_gelrun.py)"
     }
   ]

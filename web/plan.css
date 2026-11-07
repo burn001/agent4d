@@ -4,6 +4,8 @@
 #plan-boards.under { z-index: -1; } /* 흐름·Planet 3D: 캔버스 아래 — WebGL 구멍 사각형으로만 비쳐 보임(앞 노드·선이 판을 가림) */
 #plan-boards.under .pb { box-shadow: none; }
 #plan-links { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 0; pointer-events: none; overflow: visible; }
+/* 판·선은 무대 안에서만 보임: 왼쪽·오른쪽 패널(--inset-l/r)·상단 바·아래 배치 패널(--panel-h) 자리를 비켜 준다(같은 변수) */
+#plan-boards, #plan-links { clip-path: inset(var(--topbar-h, 48px) var(--inset-r, 0px) var(--panel-h, 0px) var(--inset-l, 0px)); }
 .pb {
   --pb-ok: var(--ok); --pb-run: var(--warn); --pb-hold: #a78bfa; --pbk: 1;
   position: absolute; left: 0; top: 0; box-sizing: border-box; padding: calc(7px * var(--pbk)) calc(9px * var(--pbk)) calc(7px * var(--pbk));

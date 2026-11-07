@@ -46,6 +46,13 @@
 .ins-pill.st-stopped { color: var(--stopped); }
 .ins-sess { display: inline-flex; align-items: center; gap: 6px; }
 .ins-sess i { width: 9px; height: 9px; border-radius: 50%; background: var(--sc, var(--accent)); }
+.ins-eff { display: inline-flex; align-items: center; gap: 1px; }
+.ins-eff b { font-weight: 600; color: var(--text); opacity: .85; }
+.ins-eff.req b { font-weight: 500; opacity: .65; }
+/* 미니 미터: 위 세션 점 규칙(.ins-sess i)이 막대까지 덮지 않게 되돌림(높이는 막대마다 인라인) */
+.ins-sess .eff-meter > i { width: 2px; border-radius: 1px; background: var(--effort-ink-dim); }
+.ins-sess .eff-meter > i.on { background: var(--effort-ink); }
+.ins-sess .eff-meter.hollow > i.on { background: repeating-linear-gradient(to top, var(--effort-ink) 0 1px, transparent 1px 2px); }
 .ins-br { color: var(--text); opacity: .8; }
 
 .ins-body { overflow: auto; padding: 0 14px 6px; overscroll-behavior: contain; }

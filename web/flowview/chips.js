@@ -16,6 +16,7 @@ import { SIL, SIL_NAMES, SIL_DIM, silOf, silOutline } from './shape-core.mjs'; /
 import { MAIN_RIG } from './main-rig-core.mjs'; // 메인 몸 높이
 import { HEAT, HOT_H, CRIT_H } from '../heat-core.mjs'; // 과열 경계(셰이더에 숫자로 박음)
 import { warmTintGlsl, warmGlowGlsl } from './heat-fx-core.mjs'; // 데움 곡선(heatLook tint·glow 와 같은 식)
+import { effortGlyph, effortHeightK, effortLod, effortPhone, effortInk, EffortTween, effortInstant } from '../effort-core.mjs'; // 추론 effort 다이얼 눈금·기둥 높이
 
 const QUAD = 1.9; // 노드 반지름 대비 사각형 반폭(글로우·고리 여백)
 
@@ -93,6 +94,7 @@ void main() {
 const FS = `
 uniform float uTime; uniform float uLight; uniform vec3 uInterior; uniform vec3 uHolo; uniform vec3 uWarn; uniform vec3 uErr; uniform vec3 uOk; uniform vec3 uStop;
 uniform vec3 uFog; uniform float uFogMax; uniform float uStill;
+uniform vec4 uEffInk; uniform vec4 uEffDim; uniform vec4 uEffGlint; // §147 무채색 잉크(effort-core effortInk: rgb + 알파)
 // §127.6 과열 색(heat-fx-core heatColor 와 같은 표): 호박 → 주황 → 빨강
 vec3 heatC(float h, bool light) {
   vec3 a = light ? vec3(0.86, 0.50, 0.06) : vec3(1.0, 0.72, 0.30), b = light ? vec3(0.85, 0.32, 0.04) : vec3(1.0, 0.46, 0.16), c = light ? vec3(0.78, 0.12, 0.06) : vec3(1.0, 0.20, 0.12);
@@ -194,6 +196,54 @@ vec4 jobTop(vec2 p, float d, float l, vec3 C, float T, bool light, float foc, fl
     col = mix(col, lit > 0.5 ? hiC : C, tick); al = max(al, tick * (lit > 0.5 ? 0.9 : (light ? 0.3 : 0.22)));
   }
   return vec4(col, al);
+}
+// §147 추론 effort 다이얼 눈금(보통 노드 윗면, 그림 위 = +y = 12시): −60°·−20°·+20°·+60° 네 자리(40° 간격)의 짧은 방사 막대(끝 둥글게),
+// 컨텍스트 고리(1.55)보다 0.1R 바깥. lv = 그릴 단계(보간 중엔 소수 — 칸이 차오르거나 빠짐), ez = 확정 1 / 요청 0.5 (+2 = LOD 1: 빈 칸·닫힘 호 생략),
+// px = 노드 화면 반지름(막대 폭·길이 최소 화소). 왼쪽부터 채운 칸 = 잉크, 나머지 = 흐린 잉크, 요청값만 = 속 빈 칸,
+// 맨 위 단계(xhigh·max) 확정 = 바깥 끝을 잇는 가는 호(닫힘) + 6초에 한 번 무늬를 따라 흐르는 옅은 반짝임(움직임 줄이기면 없음). 반환 = (색, 덮음)
+vec4 effTicks(vec2 p, float lv, float ez, float px, float T) {
+  bool lo = ez > 1.75;
+  float conf = lo ? ez - 2.0 : ez;
+  bool hol = conf < 0.75;
+  float pk = 1.0 / max(px, 1.0);           // 화면 1px 의 그림 단위
+  float l = length(p);
+  float r0 = 1.66, r1 = r0 + clamp(3.0 * pk, 0.18, 0.19); // 길이 0.18R(작으면 3px, 윗면 사각 1.9 안) — 0.14R 은 중간 거리에서 칸 수가 잘 안 읽혀 늘림
+  if (l < r0 - 0.1 || l > r1 + 0.1) return vec4(0.0);
+  float th = atan(p.x, p.y);                // 12시 = 0, 시계 방향 +
+  if (abs(th) > 1.25) return vec4(0.0);
+  float hw = max(0.0225, min(0.65 * pk, 0.045)), aa = pk; // 폭 0.045R(작으면 1.3px 까지)
+  // 가장 가까운 칸 하나만(칸 사이가 막대 폭보다 훨씬 넓다)
+  float k = clamp(floor((th + 1.3962634) / 0.6981317), 0.0, 3.0);
+  float a = -1.0471976 + 0.6981317 * k;
+  vec2 dir = vec2(sin(a), cos(a));
+  float d = length(p - dir * clamp(dot(p, dir), r0, r1));
+  float on = clamp(lv - k, 0.0, 1.0);
+  float solid = smoothstep(hw + aa * 0.5, hw - aa * 0.5, d);
+  float hwo = hw + 0.5 * pk, st = max(0.012, 0.9 * pk);
+  float hollow = smoothstep(hwo + aa * 0.5, hwo - aa * 0.5, d) * smoothstep(hwo - st - aa * 0.5, hwo - st + aa * 0.5, d);
+  float fA = (hol ? hollow : solid) * on * uEffInk.a;
+  float eA = lo ? 0.0 : solid * (1.0 - on) * uEffDim.a;
+  float A = fA + eA * (1.0 - fA);
+  vec3 C = A > 0.0001 ? (uEffInk.rgb * fA + uEffDim.rgb * eA * (1.0 - fA)) / A : uEffInk.rgb;
+  float lit = (hol ? hollow : solid) * on;  // 반짝임이 지나갈 잉크 자리
+  // 맨 위 단계 닫힘: 네 막대 바깥 끝을 잇는 가는 호
+  if (!hol && !lo && lv > 3.0) {
+    float aw = max(0.01, 0.4 * pk);
+    float arc = smoothstep(aw + aa * 0.5, aw - aa * 0.5, abs(l - r1)) * step(abs(th), 1.0471976) * clamp(lv - 3.0, 0.0, 1.0);
+    float aA = arc * uEffInk.a;
+    C = mix(C, uEffInk.rgb, aA / max(0.0001, aA + A * (1.0 - aA)));
+    A = aA + A * (1.0 - aA);
+    lit = max(lit, arc);
+    if (uStill < 0.5 && lv > 3.5) {
+      float ph = fract(T / 6.0), u = ph / 0.15;
+      float gq = (th - (-1.0471976 + 2.0943951 * u)) / 0.16; // pow 는 음수 밑이 정의되지 않으므로 제곱을 곱으로
+      float gk = step(ph, 0.15) * sin(3.1415927 * min(u, 1.0)) * exp(-gq * gq);
+      float gA = lit * gk * uEffGlint.a;
+      C = mix(C, uEffGlint.rgb, gA / max(0.0001, gA + A * (1.0 - gA)));
+      A = gA + A * (1.0 - gA);
+    }
+  }
+  return vec4(C, A);
 }
 float icon(vec2 p, float k) {
   float r = 0.0;
@@ -393,6 +443,15 @@ void main() {
     col = mix(col, uHolo, track * 0.12 * (1.0 - fill)); al = max(al, track * 0.12);
     col = mix(col, cc, fill); al = max(al, fill * 0.9 * pul);
   }
+  // §147 추론 effort 다이얼 눈금(보통 노드만 — iC.y 단계 · iC.z 확정/요청(+LOD) · iC.w 화면 반지름 px). 보통 섞기로 위에 얹는다(글로우와 섞이지 않게)
+  if (flag < 0.5 && vC.y > 0.01) {
+    vec4 ek = effTicks(p, vC.y, vC.z, vC.w, T);
+    if (ek.a > 0.0005) {
+      float oa = ek.a + al * (1.0 - ek.a);
+      col = (ek.rgb * ek.a + col * al * (1.0 - ek.a)) / max(0.0001, oa);
+      al = oa;
+    }
+  }
   gl_FragColor = finish(col, al);
 }`;
 
@@ -547,7 +606,9 @@ export class NodeChips {
     this.view = view;
     this.cap = cap;
     this.uniforms = { uTime: { value: 0 }, uLight: { value: 0 }, uInterior: { value: new THREE.Color() }, uHolo: { value: new THREE.Color() }, uWarn: { value: new THREE.Color() }, uErr: { value: new THREE.Color() }, uOk: { value: new THREE.Color() }, uStop: { value: new THREE.Color() },
-      uFog: { value: new THREE.Color() }, uFogNear: { value: 80 }, uFogFar: { value: 300 }, uFogMax: { value: 0.5 }, uStemW: { value: 0.08 }, uStill: { value: 0 } };
+      uFog: { value: new THREE.Color() }, uFogNear: { value: 80 }, uFogFar: { value: 300 }, uFogMax: { value: 0.5 }, uStemW: { value: 0.08 }, uStill: { value: 0 },
+      uEffInk: { value: new THREE.Vector4() }, uEffDim: { value: new THREE.Vector4() }, uEffGlint: { value: new THREE.Vector4() } };
+    this._effL = new EffortTween(); this._effH = new EffortTween(); this._effN = 0; // 단계·높이 배 0.4초 보간(노드 id 별)
     // 재질 둘(색·깊이)을 모든 실루엣 묶음과 그림자가 나눠 쓴다(같은 셰이더 = 프로그램 하나)
     this.mat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: VS, fragmentShader: FS, transparent: true, depthWrite: false, side: THREE.DoubleSide });
     this.dmat = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader: VS, fragmentShader: FS_DEPTH, transparent: true, depthWrite: true, colorWrite: false, side: THREE.DoubleSide });
@@ -569,6 +630,9 @@ export class NodeChips {
     this.uniforms.uInterior.value.set(P.interior);
     this.uniforms.uHolo.value.set(P.holo); this.uniforms.uWarn.value.set(P.tool); this.uniforms.uErr.value.set(P.error);
     this.uniforms.uOk.value.set(P.done); this.uniforms.uStop.value.set(P.stopped);
+    // 잉크(theme.css --effort-ink* 와 같은 값). 셰이더가 rgb 를 화면 값 그대로 섞는다(상태색 uniform 과 같은 다룸)
+    const ink = effortInk(this.isLight);
+    for (const [u, k] of [['uEffInk', 'ink'], ['uEffDim', 'dim'], ['uEffGlint', 'glint']]) { const c = this._c.set(ink[k].hex); this.uniforms[u].value.set(c.r, c.g, c.b, ink[k].a); }
     this._colCache.clear();
     this._jobCol.length = 0;
   }
@@ -590,6 +654,24 @@ export class NodeChips {
     else m.col.set(m.code === 1 ? P.jobStale : m.code === 2 ? P.done : m.code === 3 ? P.error : P.stopped);
     void nowMs;
     return m;
+  }
+  /**
+   * 노드 effort(표시 종류 v.kind 기준 — 독립 claude -p 루트도 claude-p). 해석은 meta 값이 바뀔 때만, 보간은 매 프레임 산술만.
+   * 반환 { lv 그릴 단계(보간, 0 = 무늬 없음), conf 확정 1 / 요청 0.5, hk 기둥 높이 배(보간) }
+   */
+  _effort(v, env) {
+    const m = v.node.meta || {};
+    const key = `${v.kind}|${m.effort || ''}|${m.effortReq || ''}`;
+    let e = v._effC;
+    if (!e || e.key !== key) {
+      const n = { kind: v.kind, meta: m }, g = effortGlyph(n);
+      e = v._effC = { key, lv: g ? g.level : 0, conf: g ? (g.confirmed ? 1 : 0.5) : 0, hk: effortHeightK(n), out: { lv: 0, conf: 0, hk: 1 } };
+    }
+    const o = e.out;
+    o.lv = this._effL.value(v.id, e.lv, env.ms, { instant: env.instant });
+    o.hk = this._effH.value(v.id, e.hk, env.ms, { instant: env.instant });
+    o.conf = e.conf || (o.lv > 0.01 ? 1 : 0); // 무늬가 빠지는 보간(단계 → 없음) 동안은 채운 칸으로
+    return o;
   }
   _col(state) {
     let c = this._colCache.get(state);
@@ -627,6 +709,11 @@ export class NodeChips {
     this.uniforms.uFogNear.value = camDist * 0.8; this.uniforms.uFogFar.value = camDist * 2.6;
     this.uniforms.uStemW.value = Math.max(0.05, camDist / 900);
     const floorY = view.tierFloor ?? 0;
+    // effort: 화면 반지름(px) = 배율 × 초점 거리 / 거리(_labelPass 와 같은 식) · 휴대폰 LOD 배율 · 보간 생략(움직임 줄이기·재생 8배속↑)
+    const cw = view.container ? view.container.clientWidth || 1 : 1, chh = view.container ? view.container.clientHeight || 1 : 1;
+    const fPx = chh / (2 * Math.tan(((cam.fov || 50) * Math.PI) / 360));
+    const effEnv = { phone: effortPhone(cw, chh), instant: effortInstant({ reduced: !!view.reduced, rate: view.timeScale || 1 }), ms: now * 1000 };
+    if (++this._effN >= 300) { this._effN = 0; const live = new Set(view.vis.keys()); this._effL.prune(live); this._effH.prune(live); }
     for (const k in this.buckets) this.buckets[k].n = 0;
     this.shadow.n = 0;
     let n = 0;
@@ -666,9 +753,17 @@ export class NodeChips {
         D[0] = 1; D[1] = v._bandCode ?? (v._bandCode = bandCode(info.band)); D[2] = info.band.length;
         D[3] = info.running > 0 ? (pr == null ? 1 : pr) : -1;
       } else { D[0] = 0; D[1] = 0; D[2] = 0; D[3] = -1; }
-      // 바닥 높이 · 아래층 어둡게 · 기둥 두께(실루엣별, 메인은 그림자 기둥줄이 몸 밑에서 시작하게 MAIN_RIG.BOTTOM)
+      // 추론 effort(보통 실루엣 노드만 — 메인·배치 장치·작업 칩·분리 프로세스는 제외): 다이얼 눈금(iC.y·iC.z·iC.w) + 기둥 높이 배
+      const ef = sil && !jm && !rg && !v.device ? this._effort(v, effEnv) : null;
+      if (ef && ef.lv > 0.01) {
+        const pd = Math.max(0.01, Math.hypot(v.group.position.x - cp.x, v.group.position.y - cp.y, v.group.position.z - cp.z));
+        const px = (s * fPx) / pd, lod = effortLod(px, { phone: effEnv.phone });
+        if (lod > 0) { D[1] = ef.lv; D[2] = ef.conf + (lod === 1 ? 2 : 0); D[3] = px; }
+      }
+      v._effH = ef ? ef.hk : 1; // FlowView.linkEnd 빔 끝점도 같은 배
+      // 바닥 높이 · 아래층 어둡게 · 기둥 두께(실루엣별, 메인은 그림자 기둥줄이 몸 밑에서 시작하게 MAIN_RIG.BOTTOM) · effort 높이 배
       E[0] = floorY; E[1] = v.tierDim || 0;
-      E[2] = v.device ? THICK.device : rg ? RIG.THICK : jm ? JOB_CHIP.THICK : sil ? SIL_DIM[sil].h : MAIN_RIG.BOTTOM * 2;
+      E[2] = v.device ? THICK.device : rg ? RIG.THICK : jm ? JOB_CHIP.THICK : sil ? SIL_DIM[sil].h * v._effH : MAIN_RIG.BOTTOM * 2;
       // 세운 배치 장치 · 네모 터미널: 앞면 방위(카메라 쪽, 크게 벗어날 때만 돎). FlowView 가 집기 상자도 같은 방위로 돌린다
       E[3] = v.device || rg || sil === 'term' ? standYawStep(v._stand || (v._stand = {}), yawToward(v.group.position.x, v.group.position.z, cp.x, cp.z) + STAND.OFFSET, dt, !!view.reduced) : 0;
       v._yaw = E[3]; v._sz = s;

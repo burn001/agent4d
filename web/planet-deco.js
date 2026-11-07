@@ -13,7 +13,9 @@ import { MECH, SUB, ORBIT, planetMode, approach, pxRadius, planetLod, orbitLod, 
 import { OrbitSystem, OrbitSparks } from './planet-orbits.js';
 import { injectSubType, mkSubU, buildSubType, stepSubType, setSubTypeColors, disposeSubType } from './planet-sub.js';
 import { Escapement, tourbLod, TOURB_LOD, TOURB_GEO } from './tourbillon-core.mjs'; // 뚜르비용
-import { TourbMain, SubCages } from './planet-tourb.js';
+import { TourbMain, SubCages, EffortGems } from './planet-tourb.js';
+import { EFFORT, effortGlyph, effortLod, effortPhone, EffortTween, effortInstant } from './effort-core.mjs'; // 추론 effort
+import { TOURB_EFF, tourbEffort, effortGlint } from './tourbillon-core.mjs'; // 케이지 호 수·보석 수 규칙
 import { isJob, jobOf, jobCode, jobProgress, isProc, jobStale } from './job-core.mjs'; // 작업 노드
 import { jobLook, jobRingFill, jobBlink, jobLod, jobTether, ringAt, JOB_RING_GEO, JOB_BODY_K } from './planet-core.mjs';
 import { JOB_GLYPH, jobWeightK, TRACK, trackSlots, trackRadius, trackModel, trackGates, trackLabels } from './planet-core.mjs'; // 글리프·무게·항로
@@ -731,7 +733,9 @@ export class PlanetDeco {
     this.map = new Map(); // id → deco
     this.stats = { main: 0, sub: 0, job: 0, lod: [0, 0, 0], olod: [0, 0, 0, 0], ms: 0 };
     this.sparks = new OrbitSparks(view.scene);
-    this.cages = new SubCages(view.scene, 256, view.renderer); // 서브 단일 케이지(장면 전체 인스턴싱)
+    this.cages = new SubCages(view.scene, 256, view.renderer); // 서브 단일 케이지(장면 전체 인스턴싱) · 호 수 = effort
+    this.gems = new EffortGems(view.scene, 256, view.renderer); // claude -p·워크플로 에이전트 보석 고리(장면 전체 인스턴싱, 그리기 호출 +1)
+    this._ec = { ms: 0, phone: false, tw: { instant: false }, glint: true, cam: null }; // 프레임마다 한 번 정하는 값
     this.proc = new ProcFx(view, this.sparks);
     this.gates = new GateField(view.world); // 항로 관문(장면 공용 인스턴싱)
     this.vf = new VariantField(view.scene); // 시안 부품(장면 공용 인스턴싱)
@@ -869,6 +873,7 @@ export class PlanetDeco {
     }
     if (this.sparks) this.sparks.setLight(L);
     if (this.cages) this.cages.theme(L);
+    if (this.gems) this.gems.theme(L);
     if (this.vf) this.vf.setLight(L);
   }
 
@@ -885,6 +890,9 @@ export class PlanetDeco {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const pxK = H / (2 * Math.tan((fov * Math.PI) / 360)); // 세계 1 이 거리 1 에서 몇 px
     this.cages.begin();
+    this.gems.begin();
+    const ec = this._ec; // 보간 시계·휴대폰 문턱·즉시(동작 줄이기·재생 8배속 이상)·반짝임
+    ec.ms = now * 1000; ec.phone = effortPhone(view.container.clientWidth || 1, H); ec.tw.instant = effortInstant({ reduced, rate: view.timeScale || 1 }); ec.glint = !reduced; ec.cam = cam;
     this.vf.begin(cam, pxK, dpr); st.var = 0;
     const pctx = { L, reduced, clockMs, cam, pxK, W: view.container.clientWidth || 1, H };
     // 항로: 자리(주인마다 끝나지 않은 작업 TRACK.PER_OWNER 개)는 0.5초마다, 관문은 장면 공용 인스턴싱
@@ -966,16 +974,17 @@ export class PlanetDeco {
         }
         if (lod >= 1 && d.atmoMat) d.atmoMat.uniforms.uOpacity.value = op * (L ? 0.3 : 0.42) * (0.55 + 0.6 * c.glow) * (d.subType === 'comet' ? 1.4 : d.subType === 'lava' ? 0.6 : 1);
         stepSubType(d.x, v, T, dt, c, d.act, s, op, lod, L, d.orbits, this._away(v, _dir), this.sparks, reduced);
-        if (px >= TOURB_LOD.SUB_PX) this.cages.put(_wp, s, d.tbx, d.tbz, d.esc.cage, op, v.mat.color); // 단일 케이지
+        if (px >= TOURB_LOD.SUB_PX) this.cages.put(_wp, s, d.tbx, d.tbz, d.esc.cage, op, v.mat.color, this._effCage(v, d, px * TOURB_GEO.SUB_R)); // 단일 케이지 · 호 수
         // 용암: 도구 때 표면 분출
         if (d.subType === 'lava' && d.act > 0.3 && olod >= 2 && !reduced && Math.random() < dt * 10 * d.act) {
           _dir.set(Math.random() - 0.5, Math.random() * 0.8 + 0.2, Math.random() - 0.5).normalize();
           _p2.copy(_wp).addScaledVector(_dir, s * 1.02);
           this.sparks.emit(_p2, _dir, s * 2.2, 0.25, 0.9, _c.copy(v.mat.color).lerp(_c2.set(0xffd9a0), 0.5), 2.2);
         }
-      }
+      } else if (!v.device && v.node.kind === 'workflow-agent') this._effGems(v, d, _wp, s, px, op); // 워크플로 에이전트(팔면체) 보석 고리
     }
     this.cages.end();
+    this.gems.end();
     this.gates.end();
     this.vf.end();
     this.proc.update(now, dt, pctx);
@@ -1014,8 +1023,37 @@ export class PlanetDeco {
     if (d.esc) {
       d.esc.step(dt, pm, { reduced });
       const k = VARIANT_CORE[d.var.name];
-      if (px * k >= TOURB_LOD.SUB_PX) this.cages.put(wp, s * k, d.tbx, d.tbz, d.esc.cage, op, v.mat.color); // 단일 케이지 = 작은 본체 둘레
-    }
+      if (px * k >= TOURB_LOD.SUB_PX) this.cages.put(wp, s * k, d.tbx, d.tbz, d.esc.cage, op, v.mat.color, this._effCage(v, d, px * k * TOURB_GEO.SUB_R)); // 단일 케이지 = 작은 본체 둘레 · 호 수
+    } else if (d.fam === 'cp') this._effGems(v, d, wp, s, px, op); // claude -p 보석 고리(케이지 없음)
+  }
+
+  /** 노드 effort 목표값(tourbEffort — LOD 반영). 글리프(effortGlyph)는 kind·meta.effort·effortReq 가 바뀔 때만 다시. glyphPx = 무늬 화면 반지름 */
+  _effTarget(v, d, glyphPx) {
+    const m = v.node.meta || {}, key = v.node.kind + '|' + m.effort + '|' + m.effortReq;
+    if (d._effK !== key) { d._effK = key; d._effG = effortGlyph(v.node); }
+    return tourbEffort(d._effG, d._effG ? effortLod(glyphPx, { phone: this._ec.phone }) : 0, EFFORT.ARCS);
+  }
+  /** 서브 케이지 put 값: 호 수·안쪽 케이지를 0.4초 보간(EffortTween, 노드마다), 안쪽 각 = 이스케이프먼트 cage2, 맨 위 단계(xhigh·max) 반짝임 위상 */
+  _effCage(v, d, glyphPx) {
+    const T = this._effTarget(v, d, glyphPx), ec = this._ec;
+    if (!d.eff) { d.etA = new EffortTween(); d.etI = new EffortTween(); d.eff = { arcs: TOURB_EFF.ARC_BASE, lo: TOURB_EFF.ARC_MAX, inner: 0, cage2: 0, glint: -1 }; d.gSeed = hash01(v.id, 'eglint'); }
+    const e = d.eff;
+    e.arcs = d.etA.value(0, T.arcs, ec.ms, ec.tw); e.lo = T.lo; e.inner = d.etI.value(0, T.inner, ec.ms, ec.tw);
+    e.cage2 = d.esc ? d.esc.cage2 : 0;
+    e.glint = ec.glint && T.inner >= 1 ? effortGlint(ec.ms, d.gSeed, EFFORT.GLINT_MS) : -1;
+    return e;
+  }
+  /** 보석 고리(claude -p·워크플로 에이전트): 본체 적도 바로 밖, 정면(카메라 쪽) 가운데로 보석 n 개(0.4초 보간) */
+  _effGems(v, d, wp, s, px, op) {
+    const ringK = TOURB_EFF.GEM_RING[v.node.kind];
+    if (!ringK) return;
+    const T = this._effTarget(v, d, px * ringK), ec = this._ec;
+    if (!d.etG) { d.etG = new EffortTween(); d.gemE = { gems: 0, hollow: 0, ring: 0 }; }
+    const n = d.etG.value(0, T.gems, ec.ms, ec.tw);
+    if (!(n > 0.004)) return;
+    const e = d.gemE; e.gems = n; e.hollow = T.hollow; e.ring = T.ring;
+    const cp = ec.cam.position;
+    this.gems.put(wp, s * ringK, Math.atan2(-(cp.z - wp.z), cp.x - wp.x), op, e);
   }
 
   /** 항로 자리: 보이는 작업 노드(탐사선·외부 작업 플랫폼·계기) → trackSlots */
@@ -1056,5 +1094,5 @@ export class PlanetDeco {
     this.sparks.emit(_p2, _dir, reach * 1.6, 0.12, 0.85, _c.copy(v.mat.color).lerp(_c2.set(0xffffff), 0.45), 1.6);
   }
 
-  dispose() { for (const id of [...this.map.keys()]) { const v = this.view.vis.get(id); if (v) this.detach(v); } this.map.clear(); if (this.vf) { this.vf.dispose(); this.vf = null; } if (this.sparks) { this.sparks.dispose(); this.sparks = null; } if (this.cages) { this.cages.dispose(); this.cages = null; } if (this.proc) { this.proc.dispose(); this.proc = null; } if (this.gates) { this.gates.dispose(); this.gates = null; } if (this.heat) { this.heat.dispose(); this.heat = null; } }
+  dispose() { for (const id of [...this.map.keys()]) { const v = this.view.vis.get(id); if (v) this.detach(v); } this.map.clear(); if (this.vf) { this.vf.dispose(); this.vf = null; } if (this.sparks) { this.sparks.dispose(); this.sparks = null; } if (this.cages) { this.cages.dispose(); this.cages = null; } if (this.gems) { this.gems.dispose(); this.gems = null; } if (this.proc) { this.proc.dispose(); this.proc = null; } if (this.gates) { this.gates.dispose(); this.gates = null; } if (this.heat) { this.heat.dispose(); this.heat = null; } }
 }

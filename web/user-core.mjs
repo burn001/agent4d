@@ -43,7 +43,7 @@ export class UserBook {
     const at = tsOf(ev.ts) || fallbackNow || 0;
     if (!ix || ix.cat !== 'user') {
       // 서버 user 범주가 없는 연결(옛 서버): 사람 입력의 시각만(글은 쓰지 않음)
-      if (ev.type === 'user' && ev.origin === 'human' && ev.nodeId && !ix) {
+      if (ev.type === 'user' && (ev.origin === 'human' || ev.origin === 'peer') && ev.nodeId && !ix) {
         const e = this._e(ev.nodeId); e.ixLess = true;
         e.msgs.push({ op: 'prompt', text: null, at }); if (e.msgs.length > USERC.MSGS * 2) e.msgs.shift();
         e.promptAt = at; e.lastUserAt = at; e.n++; this.ver++;

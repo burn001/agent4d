@@ -17,6 +17,7 @@ import { handleEvents, handleOverviewEvents } from './sse.mjs';
 import { OverviewHub, createRealSource } from './overview.mjs';
 import { buildProjects } from './projects.mjs';
 import { LimitsCollector } from './limits.mjs';
+import { SysMemCollector } from './sysmem.mjs'; // 시스템 메모리 게이지
 import zlib from 'node:zlib';
 import crypto from 'node:crypto';
 import { timelineOf, pageOf, snapshotAt, PAGE_DEFAULT, PAGE_MAX } from './replay.mjs';
@@ -26,6 +27,9 @@ import { t } from './cli-i18n.mjs'; // 콘솔 문구(영어 기본, 한국어 �
 import { ControlHub, handleControlAdmin, readBody } from './control.mjs'; // 화면 원격 조작
 import { sseHeaders } from './sse.mjs';
 import { configureExtJobs } from './extjobs.mjs'; // 외부 작업 등록부(상시 서버만 끝난 서술 파일 정리)
+import { InteractHub, handleInteractAdmin } from './interact.mjs'; // Interactive 패널(기본 꺼짐, 승인 기기만)
+import { sharedPeerAddrBook } from './peer-addr.mjs';
+import { liveFull } from './md-full.mjs'; // 잘린 응답 전체 보기 // 수신함 주소 장부(재생이 보낸 세션 노드를 찾게)
 
 export const VERSION = readVersion(); // package.json 이 근거
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -262,9 +266,14 @@ function serveStatic(req, res, url, webRoot, headers) {
 
 const LIMITS_DISABLED = { ok: true, source: null, five_hour: null, seven_day: null, disabled: true };
 
-/** 3차 라우트: /projects, /limits. 처리했으면 true */
-async function handleV3(req, res, url, manager, limits, headers) {
+/** 3차 라우트: /projects, /limits · /mem. 처리했으면 true */
+async function handleV3(req, res, url, manager, limits, headers, mem = null) {
   const p = url.pathname;
+  if (p === '/mem') {
+    const cur = mem ? mem.current() : null;
+    sendJson(res, 200, cur ? { ok: true, ...cur } : { ok: true, disabled: true }, headers);
+    return true;
+  }
   if (p === '/limits') {
     const cur = limits ? await limits.get() : LIMITS_DISABLED;
     sendJson(res, 200, cur, headers);
@@ -286,7 +295,7 @@ function scopeOf(url) {
   return s === 'all' ? 'all' : 'bad';
 }
 
-export function createServer({ token, manager, webRoot = WEB_ROOT, project = null, limits = null, update = null, adminSecret = null, errorLingerSec = null }) {
+export function createServer({ token, manager, webRoot = WEB_ROOT, project = null, limits = null, mem = null, update = null, adminSecret = null, errorLingerSec = null }) {
   const SEC = { 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
   const control = new ControlHub({ manager }); // 화면 등록·명령 전달·ack
   const srv = http.createServer(async (req, res) => {
@@ -303,13 +312,15 @@ export function createServer({ token, manager, webRoot = WEB_ROOT, project = nul
       }
       // 명령 보내기·화면 목록: 로컬 관리자만(루프백 + 프록시 표지 없음 + adminSecret). 보기 토큰과 무관하게 먼저 판정
       if (p === '/control' || p === '/control/clients') { await handleControlAdmin(req, res, url, control, { adminSecret, sendJson, SEC }); return; }
-      if (req.method !== 'GET' && req.method !== 'HEAD' && !(req.method === 'POST' && p === '/control/ack')) { res.writeHead(405, SEC); res.end(); return; }
+      // Interactive 관리(승인·취소·켬/끔): 로컬 관리자만 — /control 과 같은 문지기
+      if (p === '/interact/admin') { await handleInteractAdmin(req, res, url, ixHub(), { adminSecret, sendJson, SEC }); return; }
+      if (req.method !== 'GET' && req.method !== 'HEAD' && !(req.method === 'POST' && (p === '/control/ack' || p.startsWith('/interact/')))) { res.writeHead(405, SEC); res.end(); return; }
 
       const auth = checkAuth(req, url, token);
       if (!auth.ok) {
         const wantsHtml = p === '/' || p.endsWith('.html') || String(req.headers.accept || '').includes('text/html');
         if (wantsHtml && !p.startsWith('/state') && !p.startsWith('/events') && !p.startsWith('/sessions')
-          && !p.startsWith('/timeline') && !p.startsWith('/replay/') && p !== '/projects' && p !== '/limits' && p !== '/archive') {
+          && !p.startsWith('/timeline') && !p.startsWith('/replay/') && p !== '/projects' && p !== '/limits' && p !== '/mem' && p !== '/archive') {
           res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8', ...SEC });
           res.end(unauthorizedHtml(req.headers['accept-language']));
         } else sendJson(res, 401, { error: 'unauthorized' }, SEC);
@@ -334,6 +345,22 @@ export function createServer({ token, manager, webRoot = WEB_ROOT, project = nul
         const ping = setInterval(() => { if (!res.writableEnded) res.write(': ping\n\n'); }, 15_000);
         req.on('close', () => { clearInterval(ping); off(); });
         return;
+      }
+
+      // Interactive(보기 토큰 + 승인 기기 서명). 기능이 꺼져 있으면 status 말고는 403
+      if (p.startsWith('/interact/') && await ixHub().handle(req, res, url, { sendJson, headers })) return;
+
+      // 잘린 실황 응답 전체 보기(보기 토큰 뒤, 누를 때만): mdRef {s,u,b} → 원문. minimal 이면 403, config.project 밖이면 404
+      if (p === '/md/full') {
+        if ((manager.privacy || 'summary') === 'minimal') return sendJson(res, 403, { error: 'minimal' }, headers);
+        const s = String(url.searchParams.get('s') || '').toLowerCase();
+        if (!/^[0-9a-f-]{36}$/.test(s)) return sendJson(res, 400, { error: 'bad_ref' }, headers);
+        let entry = manager.index?.findSession?.(s) || null, arc = false;
+        if (!entry && manager.archive?.index) { entry = manager.archive.index.findSession(s); arc = !!entry; }
+        if (!entry || (project && entry.projectDir !== project)) return sendJson(res, 404, { error: 'not_found' }, headers);
+        const r = liveFull({ entry, uuid: String(url.searchParams.get('u') || '').toLowerCase(), block: url.searchParams.get('b') });
+        if (r.error) return sendJson(res, r.status || 404, { error: r.error }, headers);
+        return sendJsonZ(req, res, 200, { ok: true, md: r.md, ...(r.cut ? { cut: 1 } : {}), ...(arc ? { archive: true } : {}) }, { ...headers, 'Cache-Control': 'no-store' });
       }
 
       if (p === '/sessions') {
@@ -369,12 +396,12 @@ export function createServer({ token, manager, webRoot = WEB_ROOT, project = nul
       if ((p === '/state' || p === '/events') && isArchiveId(url.searchParams.get('session') || '')) return sendJson(res, 404, { error: 'not_found' }, headers);
       if (await handleReplay(req, res, url, manager, project, headers)) return;
       if (p === '/artifacts') return await handleArtifacts(req, res, url, manager, project, headers);
-      if (await handleV3(req, res, url, manager, limits, headers)) return;
+      if (await handleV3(req, res, url, manager, limits, headers, mem)) return;
       if ((p === '/state' || p === '/events') && scopeOf(url)) {
         const sc = scopeOf(url);
         if (sc === 'bad' || !manager.overview) return sendJson(res, sc === 'bad' ? 400 : 404, { error: sc === 'bad' ? 'bad_scope' : 'not_found' }, headers);
         const hub = manager.overview();
-        if (p === '/events') { await handleOverviewEvents(req, res, url, hub, { headers, limits, external: isExternalReq(req) }); control.attach(req, res, url); return; }
+        if (p === '/events') { await handleOverviewEvents(req, res, url, hub, { headers, limits, mem, external: isExternalReq(req) }); control.attach(req, res, url); return; }
         await hub.wake();
         const hs = hub.snapshot();
         return sendJsonZ(req, res, 200, isExternalReq(req) ? externalSnap(hs) : hs, headers);
@@ -392,7 +419,7 @@ export function createServer({ token, manager, webRoot = WEB_ROOT, project = nul
           const sid = await manager.resolve(url.searchParams.get('session') || 'auto');
           if (!sid || !(await inProject(manager, project, sid))) return sendJson(res, 404, { error: 'not_found' }, headers);
         }
-        await handleEvents(req, res, url, manager, { headers, limits, external: isExternalReq(req) });
+        await handleEvents(req, res, url, manager, { headers, limits, mem, external: isExternalReq(req) });
         control.attach(req, res, url); // client= 가 있으면 이 SSE 로 명령도 받는다(SSE 가 열렸을 때만)
         return;
       }
@@ -404,13 +431,15 @@ export function createServer({ token, manager, webRoot = WEB_ROOT, project = nul
     }
   });
   srv.control = control;
+  // Interactive 허브: 처음 쓸 때 만든다(시험은 srv.interact 에 미리 넣어 상태 폴더·세션 폴더를 바꾼다)
+  function ixHub() { return srv.interact || (srv.interact = new InteractHub({ index: manager.index || null, project, privacy: manager.privacy || 'summary' })); }
   return srv;
 }
 
 /** 실제 파일 기반 매니저(list 포함) */
 export function createRealManager({ project = null, session = null, privacy = 'summary', projectsDir, sessionsDir,
   overviewMaxRoots = 12, hubOptions = {}, archiveDir = null } = {}) {
-  const index = new SessionIndex({ project, fixedSession: session ? session.toLowerCase() : null, projectsDir, sessionsDir });
+  const index = new SessionIndex({ project, fixedSession: session ? session.toLowerCase() : null, projectsDir, sessionsDir, addrBook: sessionsDir ? null : sharedPeerAddrBook() }); // (세션 폴더를 따로 준 시험·도구는 상태 폴더 장부를 쓰지 않음)
   const mgr = new RootManager({ index, privacy });
   // 보관함: 읽기 전용 두 번째 출처. 실시간 감시·autoPick·전체 보기 허브와 무관(재생·목록만)
   if (archiveDir) mgr.archive = new ArchiveSource({ dir: archiveDir, privacy });
@@ -455,10 +484,12 @@ async function main() {
   }
   // 3차: 사용 한도 수집기. --demo 는 실제 파일·네트워크를 쓰지 않는 고정 값
   const limits = new LimitsCollector({ ...cfg.limits, demo: !!args.demo, version: VERSION }).start();
+  // 시스템 메모리(이 PC RAM): os.totalmem/freemem 을 pollSec(기본 10초)마다. --demo 는 고정 값
+  const mem = new SysMemCollector({ ...cfg.memory, demo: !!args.demo }).start();
   // 업데이트 확인: 기동 시 + 1시간마다 캐시를 보고 24시간 지났을 때만 네트워크, 꺼짐이면 네트워크 0. --demo 는 AGENT4D_FAKE_UPDATE 가짜 값만
   const update = new UpdateChecker({ home: path.dirname(args.config || defaultConfigPath()), current: VERSION, slug: repoSlugOf(),
     cfg: { updateCheck: cfg.updateCheck }, offline: !!args.demo }).start();
-  const server = createServer({ token: cfg.viewToken, manager, webRoot: args.webRoot || WEB_ROOT, project, limits, update, adminSecret: cfg.adminSecret,
+  const server = createServer({ token: cfg.viewToken, manager, webRoot: args.webRoot || WEB_ROOT, project, limits, mem, update, adminSecret: cfg.adminSecret,
     errorLingerSec: cfg.errorLingerSec != null && Number.isFinite(+cfg.errorLingerSec) && +cfg.errorLingerSec >= 0 ? +cfg.errorLingerSec : null });
   server.keepAliveTimeout = 65_000;
   server.headersTimeout = 70_000;
@@ -468,7 +499,7 @@ async function main() {
     process.stdout.write(`CCVIZ_READY ${JSON.stringify({ port: server.address().port, pid: process.pid })}\n`);
     if (cfg.created) console.error('[ccviz] ' + t('server.configCreated', { file: cfg.file }));
   });
-  const shutdown = () => { try { manager.stop?.(); } catch {} try { limits.stop(); } catch {} try { update.stop(); } catch {} server.close(); setTimeout(() => process.exit(0), 300).unref(); };
+  const shutdown = () => { try { manager.stop?.(); } catch {} try { limits.stop(); } catch {} try { mem.stop(); } catch {} try { update.stop(); } catch {} try { sharedPeerAddrBook().close(); } catch {} server.close(); setTimeout(() => process.exit(0), 300).unref(); };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
   // 색인 스캔 → 자동 감시 시작 → 자동 선택 대상 미리 적재(첫 접속 지연 줄이기)

@@ -139,7 +139,9 @@ export function jobFold(nodes, { keepEnded = JOBW.KEEP_ENDED } = {}) {
   for (const [p, arr] of groups) {
     const ended = arr.filter((n) => isJobEndedState(jobOf(n).state));
     ended.sort((a, b) => (tsOf(b.endedAt || jobOf(b).endedAt) || 0) - (tsOf(a.endedAt || jobOf(a).endedAt) || 0) || (a.id < b.id ? -1 : 1));
-    ended.slice(keepEnded).forEach((n) => hidden.add(n.id));
+    // 설정 jobs.json keepEnded(서버가 기본값과 다를 때만 meta.job.keepEnded 로 실음)가 있으면 그 값
+    const own = arr.map((n) => jobOf(n).keepEnded).find((k) => Number.isInteger(k) && k >= 0);
+    ended.slice(own ?? keepEnded).forEach((n) => hidden.add(n.id));
     const vis = arr.filter((n) => !hidden.has(n.id));
     vis.sort((a, b) => (tsOf(a.startedAt) || 0) - (tsOf(b.startedAt) || 0) || (a.id < b.id ? -1 : 1));
     byOwner.set(p, vis.map((n) => n.id));

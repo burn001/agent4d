@@ -8,7 +8,7 @@
 import path from 'node:path';
 import os from 'node:os';
 import { redact } from './redact.mjs';
-import { normPath, truncate } from './parse.mjs';
+import { normPath, truncate, blankHeredocs } from './parse.mjs';
 
 export const PROC = {
   STALE_DEFAULT_SEC: 300, // 줄 간격을 아직 모를 때 정체 문턱
@@ -255,7 +255,8 @@ export function detectProcLaunch(command, { tool = 'Bash', cwd = null } = {}) {
   if (typeof command !== 'string' || !command.trim()) return [];
   const ps = tool === 'PowerShell';
   const out = [];
-  walk(command, { ps, cwd, inherit: null, outer: null }, out);
+  // heredoc·here-string 본문 줄은 명령이 아니다(셸로 넘기는 본문만 남음)
+  walk(blankHeredocs(command, { tool: ps ? 'PowerShell' : 'Bash' }), { ps, cwd, inherit: null, outer: null }, out);
   return out.slice(0, PROC.MAX_PER_CALL);
 }
 
@@ -405,7 +406,7 @@ export function commandPathRefs(command, { tool = 'Bash', cwd = null } = {}) {
       }
     }
   };
-  visit(command, cwd, 0);
+  visit(blankHeredocs(command, { tool: ps ? 'PowerShell' : 'Bash' }), cwd, 0);
   return [...refs];
 }
 
@@ -632,7 +633,7 @@ export function redirectLogs(command, { tool = 'Bash', cwd = null } = {}) {
     }
     return cur;
   };
-  visit(command, cwd, 0);
+  visit(blankHeredocs(command, { tool: ps ? 'PowerShell' : 'Bash' }), cwd, 0);
   return out.slice(0, 2);
 }
 

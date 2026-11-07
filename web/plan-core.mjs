@@ -229,7 +229,7 @@ export function boardWorld(worldR, mode = 'flow', holo = null) {
  * 화면 그리기 값: 보드 왼쪽 아래 모서리의 화면 투영 p {x, y}·월드 1 단위의 화면 px(ppw) → 원근 배율 s(= 월드 폭 × ppw / BASE_PX),
  * 활동 모니터와 같은 최소 크기 키움(BOOST), 숨김(카메라 뒤·HIDE_PX 미만·판 전체가 화면 밖), 간략(lod: LOD_PX 미만). **화면 안으로 끌어오지 않는다**(가장자리 밀어 넣기 없음).
  */
-export function boardScreen(p, ppw, wb, vw, vh) {
+export function boardScreen(p, ppw, wb, vw, vh, bounds = null) { // bounds {l,t,r,b}: 무대 사각형(패널·상단 바 자리 빼고) — 없으면 화면 전체
   if (!p || p.behind || !(ppw > 0)) return { hidden: true };
   let s0 = (wb.w * ppw) / PLAN_UI.BASE_PX;
   // 활동 노드 모니터처럼 멀리서도 모니터 높이가 최소 px 는 되게 키움(배율 상한까지) — 같은 거리의 모니터와 같은 크기 규칙
@@ -239,7 +239,8 @@ export function boardScreen(p, ppw, wb, vw, vh) {
   const s = Math.min(PLAN_UI.S_MAX, s0);
   const w = PLAN_UI.BASE_PX * s, h = w * wb.aspect;
   const box = { x: p.x, y: p.y - h, w, h };
-  const off = box.x > vw || box.y > vh || box.x + w < 0 || box.y + h < 0;
+  const B = bounds || { l: 0, t: 0, r: vw, b: vh };
+  const off = box.x > B.r || box.y > B.b || box.x + w < B.l || box.y + h < B.t;
   return { hidden: off, s, box, lod: w < PLAN_UI.LOD_PX };
 }
 
