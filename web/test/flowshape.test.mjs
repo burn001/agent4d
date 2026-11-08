@@ -110,7 +110,7 @@ test('홀로그램 콘솔 데스크: 보낸 직후 위상 · 글 문턱 · 흐�
   assert.ok(Math.abs(sendPhase(DESK.SEND_S / 2) - 0.5) < 1e-9);
   assert.ok(DESK.BADGE_PX < DESK.TEXT_PX && DESK.FPS <= 12);
   const ix = read('../ix-core.mjs');
-  assert.match(ix, /if \(!B\) \{ \/\/ §113/);
+  assert.match(ix, /if \(!B\) \{ \/\/ (?:§113 )?흐름 3D 홀로그램 콘솔/); // 공개판은 주석 속 §N 을 지움(export-public)
   assert.match(read('../ix-fx.js'), /IxLayer\.BADGE/);
   assert.match(read('../flat/ix2d.js'), /_drawDesks/);
 });

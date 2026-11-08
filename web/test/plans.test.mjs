@@ -264,7 +264,7 @@ test('§115 판 DOM 은 3D 구멍 모드에서 캔버스 아래(.under, z -1)', 
   const sc = readFileSync(new URL('../scene.js', import.meta.url), 'utf8'), pp = readFileSync(new URL('../plan-punch3d.js', import.meta.url), 'utf8'); // 구멍 코드는 plan-punch3d.js 공용
   assert.match(sc, /alpha: true/);
   assert.match(pp, /blendSrc: THREE\.ZeroFactor, blendDst: THREE\.OneMinusSrcAlphaFactor/);
-  assert.match(sc, /this\.planPunchAfterRender\(\); \/\/ §115\.3/, '렌더 뒤 판 뒤 라벨 잘라내기');
+  assert.match(sc, /this\.planPunchAfterRender\(\); \/\/ (?:§115\.3 )?판 뒤 DOM 라벨 잘라내기/, '렌더 뒤 판 뒤 라벨 잘라내기'); // 공개판은 주석 속 §N 을 지움
   assert.match(pp, /planPunchAfterRender\(\) \{ if \(this\._punchBoards \|\| \(this\._cutEls && this\._cutEls\.size\)\) this\._cutLabels\(\); \}/);
 });
 

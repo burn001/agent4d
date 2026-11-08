@@ -9,7 +9,7 @@
 //   남기는 것 = 노드 구조(id·부모·kind·상태·시각·깊이·수), 이벤트 종류·도구 범주(cat)·내장 도구 이름·성공 여부·시간,
 //   그 밖 문자열은 허용 키 + 형식 검사(식별자·열거형·ISO 시각)를 통과한 것만. 모르는 키·모르는 객체는 버린다.
 //   경로·명령·도구 입력·결과·말·프롬프트·제목·설명·홀로그램 패널·작업 대상·계획판·이름은 남지 않는다.
-//   노드 이름표는 kind 별 일반 이름, 프로젝트는 별칭 id 와 공유 표시 이름(기본 '프로젝트')으로 바꾼다.
+//   노드 이름표는 kind 별 일반 이름, 프로젝트는 별칭 id 와 공유 표시 이름(기본 'Project', 한국어 '프로젝트')으로 바꾼다.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -42,11 +42,18 @@ export function readShares(file) {
  */
 export const SHARE_LEVELS = ['full', 'details'];
 export const shareLevel = (sh) => (sh && sh.redact === 'details' ? 'details' : 'full');
-/** 공유 범위 폴더의 표시 이름(cwd 마지막 조각, 없으면 프로젝트 폴더 이름) — details 등급의 섬 이름·목록 */
-export function shareProjectName(sh) {
+/** 공유 표시 이름(full 등급): --name 으로 준 이름, 없으면 보는 사람 언어의 기본 이름. 예전 CLI 가 저장한 기본값('프로젝트'·'Project')도 이름 없음으로 본다 */
+const DEFAULT_SHARE_NAMES = new Set(['프로젝트', 'Project']);
+export function shareDisplayName(sh, lang = 'en') {
+  const n = typeof sh?.name === 'string' ? sh.name.trim() : '';
+  if (n && !DEFAULT_SHARE_NAMES.has(n)) return n;
+  return lang === 'ko' ? '프로젝트' : 'Project';
+}
+/** 공유 범위 폴더의 표시 이름(cwd 마지막 조각, 없으면 공유 표시 이름) — details 등급의 섬 이름·목록 */
+export function shareProjectName(sh, lang = 'en') {
   const base = String(sh?.cwd || '').split(/[\\/]+/).filter(Boolean).pop() || '';
   const v = scrubDesc(base, { max: 40, keep: [base] });
-  return v || sh?.name || '프로젝트';
+  return v || shareDisplayName(sh, lang);
 }
 
 /** 필터가 지우지 않을 낱말(공유 범위 프로젝트 이름 — project_acme 는 snake_case 지만 보여 준다) */
@@ -260,7 +267,7 @@ function cleanVal(v, k, ctx, depth) {
     // 노드: 이름표를 kind 별 일반 이름으로(details 면 정리한 실제 이름표, 남는 낱말이 없을 때만 일반 이름)
     if (typeof v.kind === 'string' && typeof v.id === 'string' && 'label' in v) out.label = (det && out.label) || genericLabel(v.kind, ctx.lang);
     // 프로젝트 항목: 공유 표시 이름(details 면 범위 폴더 이름)
-    if (out.projectId && ('name' in v || 'path' in v)) out.name = det ? shareProjectName(ctx.share) : ctx.share.name || (ctx.lang === 'en' ? 'Project' : '프로젝트');
+    if (out.projectId && ('name' in v || 'path' in v)) out.name = det ? shareProjectName(ctx.share, ctx.lang) : shareDisplayName(ctx.share, ctx.lang);
     // 도구 기록(tool-start·tool-end 이벤트, 스냅샷 openTools): 원문 대신 도구별 일반 동작 한 줄. 패널은 빼고(웹이 도구 이름 + 이 줄로 패널을 그림)
     if (det && k !== 'ix' && typeof v.tool === 'string' && (typeof v.toolUseId === 'string' || v.type === 'tool-start' || v.type === 'tool-end')) {
       if (v.type === 'tool-end') { out.brief = toolEndText(v.ok, ctx.lang); out.text = ''; }

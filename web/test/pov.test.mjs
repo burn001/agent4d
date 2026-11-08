@@ -154,7 +154,7 @@ test('연결(소스): 카메라 위임·몸 숨김·⚙ 줄·카드 버튼·?cam
   assert.match(cam, /if \(this\.pov && this\.pov\.active\) \{/);
   assert.match(cam, /this\.pov\.update\(dt, now, this\) === 'lost'/);
   const off = src('../voxel/office.js');
-  assert.match(off, /if \(ch\.id === this\.povId\) continue; \/\/ §72\.14 1인칭: 자기 몸/);
+  assert.match(off, /if \(ch\.id === this\.povId\) continue; \/\/ (?:§72\.14 )?1인칭: 자기 몸/); // 공개판은 주석 속 §N 을 지움
   assert.match(off, /if \(id === this\.povId\) return null;/);
   assert.match(src('../settings-menu.js'), /\$\('btn-follow-prompt'\), \$\('btn-pov'\)\]/);
   const ins = src('../inspector.js');

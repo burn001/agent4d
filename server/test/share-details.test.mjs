@@ -158,8 +158,13 @@ test('CLI 잠금 등급: --redact 값 읽기·목록 표기', () => {
   assert.equal(parseLevel('FULL'), 'full');
   assert.equal(parseLevel('none'), null);
   const sh = mkShare();
-  assert.match(lockText(sh), /설명 공개/);
-  assert.match(lockText({ ...sh, redact: true }), /텍스트 제거/);
-  const md = mdOf([sh]);
+  assert.match(lockText(sh, 'ko'), /설명 공개/);
+  assert.match(lockText({ ...sh, redact: true }, 'ko'), /텍스트 제거/);
+  const md = mdOf([sh], Date.now(), 'ko');
   assert.ok(md.includes('설명 공개') && !md.includes(sh.token));
+  // 영어 기본(로캘이 한국어가 아니면): 한글 없음
+  assert.match(lockText(sh, 'en'), /^Details lock/);
+  assert.match(lockText({ ...sh, redact: true }, 'en'), /^Data lock \(text removed\)/);
+  const mdEn = mdOf([sh], Date.now(), 'en');
+  assert.ok(mdEn.startsWith('# Agent4D shared links') && mdEn.includes('| valid |') && !/[가-힣]/.test(mdEn.replace(sh.cwd, '')));
 });

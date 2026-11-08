@@ -22,6 +22,7 @@ All notable changes to this project are documented here. The format follows [Kee
 - Replay bar: the time and the status line (now including "Paused") sit in two lines of fixed width, so the timeline no longer changes width — and moves the spot you were about to click — whenever the status text appears or disappears. The project picker label shows ⏸ instead of ▶ while the replay is paused.
 
 ### Changed
+- `agent4d share` prints its messages, table and `shares.md` in English by default, like the other commands (Korean under a Korean locale or with `--lang ko`); `share list --json` reports `status` as `valid`, `expired` or `revoked`. Without `--name` no display name is stored, so the project shows as "Project" (in Korean for viewers whose browser prefers Korean).
 - README (English and Korean) now opens with a 17-second demo GIF (`docs/media/demo.gif`, cut from the v0.7.5 intro video: Flow, Planet, Voxel Office, Voxel Lab, a prompt close-up, light theme) that links to the intro video; it replaces the Planet loop that sat under the intro paragraph (the Planet loop stays in the Views section).
 
 ## [0.7.6] - 2026-11-07

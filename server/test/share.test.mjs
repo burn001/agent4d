@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { shareClean, safeId, ShareStore, checkShare, shareKeepHubEvent, shareFilterHubSnap, shareFilterProjects, shareBlockedPath,
-  sha256hex, newShareToken, encodeCwd, markShareHtml, shareReplayOf } from '../share.mjs';
+  sha256hex, newShareToken, encodeCwd, markShareHtml, shareReplayOf, shareDisplayName } from '../share.mjs';
 import { parseKstTime, replayText, mdOf } from '../../bin/share.mjs';
 import { parseShareReplay } from '../../web/replay/share-replay.mjs';
 import { warmShareReplays } from '../index.mjs';
@@ -51,6 +51,15 @@ test('safeId: 무작위 id 는 그대로, 이름이 든 id 는 접두를 두고 
   const h = safeId('j:adr-0042-migration');
   assert.match(h, /^j:x[0-9a-f]{12}$/);
   assert.equal(h, safeId('j:adr-0042-migration'));
+});
+
+test('공유 표시 이름: --name 이 없으면 보는 사람 언어의 기본 이름(예전 기본값 프로젝트도 같음)', () => {
+  assert.equal(shareDisplayName({ name: null }, 'en'), 'Project');
+  assert.equal(shareDisplayName({ name: null }, 'ko'), '프로젝트');
+  assert.equal(shareDisplayName({ name: '프로젝트' }, 'en'), 'Project');
+  assert.equal(shareDisplayName({ name: 'Demo' }, 'ko'), 'Demo');
+  const out = shareClean({ projects: [{ projectId: P, name: 'secret_proj', path: 'D:/secret' }] }, { share: mkShare(60, { name: null }), lang: 'en' });
+  assert.equal(out.projects[0].name, 'Project');
 });
 
 test('허브 거르기: 다른 프로젝트 노드·이벤트·프로젝트·루트는 빠진다', () => {
@@ -118,9 +127,11 @@ test('§151 기본 리플레이: 정리·html 표지·CLI 시각·목록 한 칸
   assert.equal(parseKstTime('07:58:10', Date.parse(from)), Date.parse(until));
   assert.ok(Number.isNaN(parseKstTime('07:58')));
   // 목록 한 칸: 세션 앞 8자 · KST 시각 · 배속 · 반복 (전체 id·토큰 없음)
-  assert.equal(replayText(sh), 'a3443dd5 @ 2026-11-05 07:49～07:58 · 4× · 반복');
+  assert.equal(replayText(sh, 'ko'), 'a3443dd5 @ 2026-11-05 07:49～07:58 · 4× · 반복');
+  assert.equal(replayText(sh, 'en'), 'a3443dd5 @ 2026-11-05 07:49～07:58 · 4× · loop');
   assert.equal(replayText(mkShare()), '-');
-  const md = mdOf([sh]);
+  const md = mdOf([sh], Date.now(), 'ko');
+  assert.match(mdOf([sh], Date.now(), 'en'), /\| Default replay \|/);
   assert.match(md, /\| 기본 리플레이 \|/);
   assert.ok(md.includes('a3443dd5 @ 2026-11-05 07:49～07:58'));
   assert.ok(!md.includes(SID) && !md.includes(sh.token));
