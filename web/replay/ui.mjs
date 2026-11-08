@@ -66,6 +66,14 @@ export function projectLabel(cwd, projectDir) {
   if (parts.length === 1) return parts[0];
   return projectDir || t('replay.unknownProject');
 }
+/** 재생 단추가 '일시정지'(재생 중)로 보여야 하나: 재생 중, 이어서 재생할 버퍼링, 정지를 누르지 않은 여는 중 */
+export function playIntent(s) {
+  if (!s) return false;
+  if (s.status === 'playing') return true;
+  if (s.status === 'buffering') return s.playingLike !== undefined ? !!s.playingLike : true;
+  if (s.status === 'loading') return !s.pauseOnOpen;
+  return false;
+}
 export function speedLabel(s) { return (s === 0.5 ? '0.5' : String(s)) + '×'; }
 
 /** /sessions 응답 → [{projectDir, label, lastMtime, items:[…]}] (최근순).
@@ -174,7 +182,7 @@ export function mountReplayUI({ bar, picker = null, api, onPick = () => {}, onLi
   const liveBtn = $b('.rp-live'), pickBtn = $b('.rp-pick');
   const tl = $b('.rp-tl');
 
-  playBtn.addEventListener('click', () => { if (eng) { if (eng.status === 'ended') eng.play(); else eng.toggle(); } playBtn.blur(); });
+  playBtn.addEventListener('click', () => { if (eng) eng.toggle(); playBtn.blur(); }); // toggle: 끝났으면 처음부터, 받는 중이면 '이어서 재생' 뜻만 바꿈
   speedSel.addEventListener('change', () => { if (eng) eng.setSpeed(Number(speedSel.value)); prefs.speed = Number(speedSel.value); savePrefs(prefs); speedSel.blur(); if (onSpeed) onSpeed(Number(speedSel.value)); });
   const autoBtn = $b('.rp-auto');
   autoBtn.addEventListener('click', () => { autoBtn.blur(); if (onAutoSpeed) onAutoSpeed(); });
@@ -185,7 +193,8 @@ export function mountReplayUI({ bar, picker = null, api, onPick = () => {}, onLi
     autoBtn.textContent = t(auto ? 'replay.auto' : 'replay.manual');
     autoBtn.title = t(auto ? 'replay.auto.titleOn' : 'replay.auto.titleOff');
   }
-  idleChk.addEventListener('change', () => { if (eng) eng.setCompressIdle(idleChk.checked); prefs.compressIdle = idleChk.checked; savePrefs(prefs); });
+  // 누른 뒤 포커스를 놓는다: 체크상자에 포커스가 남으면 Space 가 재생/일시정지 대신 유휴 압축을 껐다 켰다 한다
+  idleChk.addEventListener('change', () => { if (eng) eng.setCompressIdle(idleChk.checked); prefs.compressIdle = idleChk.checked; savePrefs(prefs); idleChk.blur(); });
   liveBtn.addEventListener('click', () => { liveBtn.blur(); onLive(); });
   pickBtn.addEventListener('click', () => { pickBtn.blur(); if (onPickList) onPickList(); else openPicker(); });
 
@@ -372,10 +381,12 @@ export function mountReplayUI({ bar, picker = null, api, onPick = () => {}, onLi
   }
   let lastTl = null;
   function onState(s) {
-    const playing = s.status === 'playing' || s.status === 'buffering';
-    playBtn.innerHTML = s.status === 'ended' ? ICON.replay : playing ? ICON.pause : ICON.play;
+    const playing = playIntent(s);
+    const icon = s.status === 'ended' ? 'replay' : playing ? 'pause' : 'play';
+    if (playBtn.dataset.icon !== icon) { playBtn.innerHTML = ICON[icon]; playBtn.dataset.icon = icon; } // 같은 아이콘이면 DOM 을 갈지 않는다(누르는 중 대상이 바뀌지 않게)
     playBtn.setAttribute('aria-label', t(s.status === 'ended' ? 'replay.restart' : playing ? 'replay.pause' : 'replay.play'));
-    playBtn.disabled = s.status === 'loading' || s.status === 'error';
+    playBtn.setAttribute('aria-pressed', String(playing));
+    playBtn.disabled = s.status === 'error'; // 여는 중에도 누를 수 있다(정지를 누르면 열린 뒤 멈춘 채로)
     if (Number(speedSel.value) !== s.speed) speedSel.value = String(s.speed);
     idleChk.checked = s.compressIdle;
     let p = '';
@@ -388,6 +399,7 @@ export function mountReplayUI({ bar, picker = null, api, onPick = () => {}, onLi
     else if (s.status === 'ended') p = t(s.complete ? 'replay.st.ended' : 'replay.st.endedLive');
     else if (s.total && s.contig < s.total) p = t('replay.st.loadedPct', { p: Math.floor((s.contig / s.total) * 100) });
     else if (!s.complete) p = t('replay.st.partial');
+    if (s.status === 'paused') p = t('replay.st.paused') + (p ? ' · ' + p : ''); // 멈춘 것이 글로도 보이게(단추 모양만으로는 놓치기 쉬움)
     progEl.textContent = p;
     progEl.classList.toggle('err', s.status === 'error');
     liveBtn.classList.toggle('hot', s.status === 'ended' && !s.complete);
@@ -405,7 +417,7 @@ export function mountReplayUI({ bar, picker = null, api, onPick = () => {}, onLi
     if (tg && tg.closest && tg.closest('input, select, textarea, [contenteditable=""], [contenteditable="true"]')) return;
     const k = e.key;
     let handled = true;
-    if (k === ' ' || e.code === 'Space') { if (eng.status === 'ended') eng.play(); else eng.toggle(); }
+    if (k === ' ' || e.code === 'Space') { if (!e.repeat) eng.toggle(); } // 누르고 있으면(자동 반복) 한 번만
     else if (k === ',') eng.seek(eng.vt - 10000);
     else if (k === '.') eng.seek(eng.vt + 10000);
     else if (k === '<') eng.seek(eng.vt - 60000);
@@ -592,6 +604,7 @@ export function mountReplayUI({ bar, picker = null, api, onPick = () => {}, onLi
     refreshSessions: () => loadSessions(true),
     get prefs() { return { ...prefs }; },
     get engine() { return eng; },
+    get scrubbing() { return dragging; }, // 타임라인을 끄는 중(놓을 때 마지막 seek)
     destroy() {
       unbind(); ro.disconnect(); mo.disconnect();
       window.removeEventListener('keydown', onKey, true);

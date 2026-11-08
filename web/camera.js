@@ -483,6 +483,19 @@ export class CameraDirector {
     else this._startTransition();
   }
 
+  /** 재생 일시정지 중 시점 이동 뒤 한 번 다시 잡기: 실시간 새 장면 규칙(overview — 맞춤이면 전체 맞춤, 따라가기면 조망)을
+   *  dur 초에 걸쳐 부드럽게 날아가고 그 자리에 멈춘다(자동 카메라는 꺼진 채 — 투어 재개 아님). 손 끌기·상세 팝업·1인칭 중이면 안 함(false) */
+  settle(dur = 1.0) {
+    if (this.dragging || this.hold || (this.pov && this.pov.active) || !this.camera) return false;
+    const s = { type: this.camMode === 'fit' ? 'fit' : 'overview' };
+    this.fit.reset(); if (this.shotFit) this.shotFit.reset();
+    this._setShot(s, performance.now() / 1000, true);
+    if (s.type === 'fit') this._pose();
+    if (this.trans) this.trans.dur = dur;
+    this.focusFly = true; // 꺼진(얼린) 상태에서도 이 비행만은 끝까지(focusNode 와 같은 경로) — 손이 닿으면 _manual 이 끊음
+    return true;
+  }
+
   // ---------- 선택 ----------
   _score(id, now) { // 지금 일하는 노드만 점수(쉬는 노드는 0 — 짧은 알림 턴이 끝난 섬이 20초 창 동안 뽑히지 않게)
     return workScore(this.view.vis.get(id), this.activity.get(id), this.added.get(id), this._lastAt(id), now, this._clk());

@@ -14,6 +14,7 @@
 //   update [--check [--json] [--force]] [--yes]    새 릴리스 확인·클론 fast-forward·스킬 사본·서버 재시작(bin/update.mjs)
 //   ctl <명령> [값] [--client X] [--temp] [--json] | ctl clients | ctl state   열린 화면 원격 조작(bin/ctl.mjs)
 //   interact [list] | on | off | allow|revoke|remove <별칭|id> | audit      Interactive 패널 켬/끔·기기 승인(bin/interact.mjs)
+//   share create --alias A --project P [--days 7] | list | revoke <별칭|id> | url <별칭|id>   범위 제한 공유 링크(bin/share.mjs)
 //   job add|list|find|rm|prune …                    세션 밖에서 따로 띄운 작업 등록·표시(bin/job.mjs)
 //   help | --help                                  도움말(사전 server/cli-i18n.mjs 'help')
 // 콘솔 문구는 server/cli-i18n.mjs t() — 영어 기본, 한국어 로케일이면 한국어. --lang en|ko 는 CCVIZ_LANG 으로 옮겨 자식 프로세스도 같은 언어
@@ -951,6 +952,12 @@ async function main() {
     case "jobs": {
       // 세션 밖에서 따로 띄운 작업 등록(서술 파일 <상태 폴더>/jobs/*.json)
       const m = await import("./job.mjs");
+      process.exitCode = await m.main(argv.slice(1));
+      return;
+    }
+    case "share": {
+      // 범위 제한 공유 링크(한 프로젝트·기한·데이터 잠금) 발급·목록·폐기
+      const m = await import("./share.mjs");
       process.exitCode = await m.main(argv.slice(1));
       return;
     }

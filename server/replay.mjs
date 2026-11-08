@@ -191,6 +191,10 @@ export async function normalize(rt, { now = Date.now() } = {}) {
         const tu2 = tuid ? rt.tools.get(tuid) : null;
         if (tu2 && inRange(tu2.tsMs)) cand = tu2.tsMs;
       }
+      // 러너·기동기: 제 기록이 없어 첫 이벤트가 끝(다음 러너로 넘어감)일 수 있다 — 그 시각에 띄우면 인과 순서(3단계)가
+      // 그 아래 회차·서브에이전트 전체를 끝 시각으로 끌어와 30분 회차가 한순간에 몰려 나왔다(11.07. ACME 회차 57, 서브에이전트 482개).
+      // 노드의 시작 시각(라이브가 회차 기록으로 정함)을 쓰고, 세션 시작보다 앞이면(입양한 기동기) 세션 시작으로
+      if (!Number.isFinite(cand) && (node.meta?.runner || node.meta?.launcher)) { const s0 = Date.parse(node.startedAt); if (Number.isFinite(s0)) cand = Math.min(Math.max(s0, lo), hi); }
       const f = firstT.get(id);
       if (Number.isFinite(cand)) t = Number.isFinite(f) ? Math.min(cand, f) : cand;
       else if (Number.isFinite(f)) t = f;

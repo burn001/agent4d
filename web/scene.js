@@ -958,7 +958,9 @@ export class SceneView {
     this.pf.setFocus(this.scope.focusProject, [...this._clusterV.keys()], { instant: !this._clusterV.size || prevMode !== mode }); this.pf.setHidden(mode === 'all' ? scope.fadeHide : null, { instant: !this._clusterV.size || prevMode !== mode });
     if (this.islands) { this.islands.pf = this.pf; this.islands.setFocus(this.scope.focusProject); }
     this.layoutDirty = true;
-    if (prevMode !== mode) this._relayout(); else this._applyScope();
+    // 모드가 바뀌면 바로 배치 — 퇴장 판정을 먼저(layoutNow): 스냅샷의 끝난 노드(수백 개일 수 있음)까지 넣은 채 첫 배치를 하면
+    // 섬이 그 크기로 멀리 놓이고 새 노드가 그 자리에서 시작해, 새로고침 직후 무리가 멀리 퍼졌다가 모였다
+    if (prevMode !== mode) this.layoutNow(); else this._applyScope();
     this.lastLabelPass = 0;
   }
 

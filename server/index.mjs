@@ -29,6 +29,7 @@ import { sseHeaders } from './sse.mjs';
 import { configureExtJobs } from './extjobs.mjs'; // 외부 작업 등록부(상시 서버만 끝난 서술 파일 정리)
 import { InteractHub, handleInteractAdmin } from './interact.mjs'; // Interactive 패널(기본 꺼짐, 승인 기기만)
 import { sharedPeerAddrBook } from './peer-addr.mjs';
+import { ShareStore, checkShare, shareLevel, expiredHtml, shareBlockedPath, shareClean, shareKeepHubEvent, shareFilterHubSnap, shareFilterProjects, shareLang, markShareHtml, shareFilePath, shareReplayOf } from './share.mjs'; // 범위 제한 공유 링크
 import { liveFull } from './md-full.mjs'; // 잘린 응답 전체 보기 // 수신함 주소 장부(재생이 보낸 세션 노드를 찾게)
 
 export const VERSION = readVersion(); // package.json 이 근거
@@ -120,7 +121,8 @@ async function encodeJson(req, obj) {
 }
 
 /** 재생 라우트. 처리했으면 true */
-async function handleReplay(req, res, url, manager, project, headers) {
+async function handleReplay(req, res, url, manager, project, headers, sx = null) {
+  const C = sx ? sx.clean : (x) => x; // 공유 링크면 데이터 잠금
   const p = url.pathname;
   if (p !== '/timeline' && p !== '/replay/events' && p !== '/replay/snapshot') return false;
   if (!manager.replay) { sendJson(res, 404, { error: 'not_found' }, headers); return true; }
@@ -128,6 +130,7 @@ async function handleReplay(req, res, url, manager, project, headers) {
   if (!sid) { sendJson(res, 404, { error: 'not_found' }, headers); return true; }
   // 보관함 세션('arc:<uuid>'): 보관함 출처의 재생 캐시로. 원본과 캐시·빌드가 따로라 같은 세션이 양쪽에 있어도 섞이지 않는다
   const arc = isArchiveId(sid);
+  if (arc && sx) { sendJson(res, 404, { error: 'not_found' }, headers); return true; } // 공유 링크는 보관함 재생 불가
   if (arc && !manager.archive) { sendJson(res, 404, { error: 'not_found' }, headers); return true; }
   const src = arc ? manager.archive : manager;
   // config.project 가 있으면 그 밖 세션은 404 (재생 API 가 목록 제한을 우회하지 못하게)
@@ -145,7 +148,7 @@ async function handleReplay(req, res, url, manager, project, headers) {
     }
     if (r && r.building) { sendJson(res, 202, { building: true, progress: r.progress }, headers); return true; }
     const tl = timelineOf(r, url.searchParams.get('buckets') ?? 240);
-    await sendJsonZ(req, res, 200, r.stale ? { ...tl, stale: true } : tl, headers);
+    await sendJsonZ(req, res, 200, C(r.stale ? { ...tl, stale: true } : tl), headers);
     return true;
   }
   const data = src.replayPeek ? src.replayPeek(sid) : null;
@@ -155,12 +158,12 @@ async function handleReplay(req, res, url, manager, project, headers) {
       limit: clampInt(url.searchParams.get('limit'), 1, PAGE_MAX, PAGE_DEFAULT) };
     const wantGz = /gzip/.test(String(req.headers['accept-encoding'] || ''));
     const ext = isExternalReq(req); // 외부 고정 링크면 작업 대상 경로를 접은 쪽
-    const key = `${q.from ?? ''}|${q.fromT ?? ''}|${q.limit}|${wantGz ? 'z' : ''}|${ext ? 'x' : ''}`;
+    const key = `${q.from ?? ''}|${q.fromT ?? ''}|${q.limit}|${wantGz ? 'z' : ''}|${ext ? 'x' : ''}|${sx ? 's' + sx.key : ''}`;
     let bufs = pageBufs.get(data);
     if (!bufs) { bufs = new Map(); pageBufs.set(data, bufs); }
     let enc = bufs.get(key);
     if (!enc) {
-      enc = await withPageSlot(async () => bufs.get(key) || encodeJson(req, ext ? extPage(pageOf(data, q)) : pageOf(data, q)));
+      enc = await withPageSlot(async () => bufs.get(key) || encodeJson(req, C(ext ? extPage(pageOf(data, q)) : pageOf(data, q))));
       if (!enc) { sendJson(res, 429, { error: 'busy' }, { ...headers, 'Retry-After': '1' }); return true; }
       bufs.set(key, enc);
       while (bufs.size > 64) bufs.delete(bufs.keys().next().value);
@@ -172,7 +175,7 @@ async function handleReplay(req, res, url, manager, project, headers) {
   }
   const at = url.searchParams.get('at');
   const snap = snapshotAt(data, at == null || at === '' ? NaN : Number(at));
-  await sendJsonZ(req, res, 200, isExternalReq(req) ? externalSnap(snap) : snap, headers);
+  await sendJsonZ(req, res, 200, C(isExternalReq(req) ? externalSnap(snap) : snap), headers);
   return true;
 }
 
@@ -212,7 +215,7 @@ export function versionMatches(v, file, st) {
   return !!hex && hex.startsWith(v.toLowerCase());
 }
 
-function serveStatic(req, res, url, webRoot, headers) {
+function serveStatic(req, res, url, webRoot, headers, sx = null) {
   let rel;
   try { rel = decodeURIComponent(url.pathname); } catch { res.writeHead(400, headers); res.end('bad path'); return; }
   if (rel === '/' || rel === '') rel = '/index.html';
@@ -227,6 +230,16 @@ function serveStatic(req, res, url, webRoot, headers) {
     return;
   }
   const type = MIME[path.extname(file).toLowerCase()] || 'application/octet-stream';
+  if (sx && path.extname(file).toLowerCase() === '.html') {
+    // 공유 링크: 화면에 공유 표지(data-share)를 넣어 보낸다(조건부 요청·캐시 없음)
+    let html;
+    try { html = markShareHtml(fs.readFileSync(file, 'utf8'), sx.share); } catch { res.writeHead(404, headers); res.end(); return; }
+    if (sx.warm) sx.warm(); // 기본 리플레이: 화면이 모듈을 받는 동안 재생 빌드를 먼저 시작
+    const b = Buffer.from(html);
+    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store', 'Content-Length': b.length, ...headers });
+    res.end(req.method === 'HEAD' ? undefined : b);
+    return;
+  }
   const etag = `W/"${st.size.toString(36)}-${Math.round(st.mtimeMs).toString(36)}"`;
   const base = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Last-Modified': st.mtime.toUTCString(), ETag: etag,
     'Cache-Control': url.searchParams.has('v') && versionMatches(url.searchParams.get('v'), file, st) ? IMMUTABLE_CC
@@ -295,7 +308,76 @@ function scopeOf(url) {
   return s === 'all' ? 'all' : 'bad';
 }
 
-export function createServer({ token, manager, webRoot = WEB_ROOT, project = null, limits = null, mem = null, update = null, adminSecret = null, errorLingerSec = null }) {
+/** 공유 링크 기본 리플레이 미리 만들기: 캐시에 없을 때만 뒤에서 빌드(있으면 LRU 순서도 건드리지 않음) */
+export function warmShareReplays(manager, sids) {
+  if (!manager || !manager.replay) return 0;
+  let n = 0;
+  for (const sid of sids || []) {
+    if (!sid || (manager.replays && manager.replays.has(sid))) continue;
+    n++;
+    Promise.resolve().then(() => manager.replay(sid, { wait: false })).catch(() => {});
+  }
+  return n;
+}
+
+/**
+ * 공유 링크 요청 처리 — 한 프로젝트·데이터 잠금. 막힌 경로(Interactive·실황 원문·화면 조작·작업 대상·보관함)는 403,
+ * 한도·메모리·보관함 요약은 '꺼짐' 응답. 나머지는 원래 처리 + shareClean.
+ */
+async function handleShare(req, res, url, sx, { manager, headers, webRoot }) {
+  const p = url.pathname;
+  const sh = sx.share, C = sx.clean, project = sh.project;
+  if (shareBlockedPath(p, url)) return sendJson(res, 403, { error: 'share_blocked' }, headers);
+  if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method' }, headers);
+  if (p === '/limits') return sendJson(res, 200, LIMITS_DISABLED, headers);
+  if (p === '/mem') return sendJson(res, 200, { ok: true, disabled: true }, headers);
+  if (p === '/archive') return sendJson(res, 200, { enabled: false, count: 0, projects: [], sessions: [] }, headers);
+  const guard = () => !!sx.store && sx.store.stillValid(sh);
+  if (p === '/sessions') {
+    const limit = clampInt(url.searchParams.get('limit'), 1, 500, 30);
+    const kindQ = url.searchParams.get('kind');
+    const sinceQ = url.searchParams.get('since');
+    const sinceMs = sinceQ == null || sinceQ === '' ? null : (/^\d+$/.test(sinceQ) ? Number(sinceQ) : Date.parse(sinceQ));
+    const opts = { project, kind: kindQ === 'main' ? 'main' : 'all', sort: url.searchParams.get('sort') === 'start' ? 'start' : 'recent',
+      since: Number.isFinite(sinceMs) ? sinceMs : null, extended: true };
+    const sessions = manager.list ? await manager.list(limit, opts) : [];
+    const projects = manager.projects ? (await manager.projects()).filter((x) => x && (x.projectDir === project || x.projectId === project)) : [];
+    return sendJsonZ(req, res, 200, C({ sessions, auto: null, projects }), headers);
+  }
+  if (p === '/projects') {
+    if (!manager.projectList) return sendJson(res, 404, { error: 'not_found' }, headers);
+    const out = await manager.projectList({ inactive: false, temp: false });
+    return sendJsonZ(req, res, 200, C(shareFilterProjects(out, sh)), headers);
+  }
+  if (await handleReplay(req, res, url, manager, project, headers, sx)) return;
+  if ((p === '/state' || p === '/events') && scopeOf(url)) {
+    const sc = scopeOf(url);
+    if (sc === 'bad' || !manager.overview) return sendJson(res, sc === 'bad' ? 400 : 404, { error: sc === 'bad' ? 'bad_scope' : 'not_found' }, headers);
+    const hub = manager.overview();
+    if (p === '/events') {
+      await handleOverviewEvents(req, res, url, hub, { headers, limits: null, mem: null, external: true, clean: C, guard,
+        keep: (e) => shareKeepHubEvent(e, sh), snapFilter: (s) => shareFilterHubSnap(s, sh), projFilter: (x) => shareFilterProjects(x, sh) });
+      return;
+    }
+    await hub.wake();
+    return sendJsonZ(req, res, 200, C(externalSnap(shareFilterHubSnap(hub.snapshot(), sh))), headers);
+  }
+  if (p === '/state' || p === '/events') {
+    const sid = await manager.resolve(url.searchParams.get('session') || 'auto');
+    if (!sid || isArchiveId(sid) || !(await inProject(manager, project, sid))) return sendJson(res, 404, { error: 'not_found' }, headers);
+    if (p === '/events') {
+      url.searchParams.set('session', sid); // 'auto' 가 다른 프로젝트 세션으로 넘어가지 않게 고정
+      await handleEvents(req, res, url, manager, { headers, limits: null, mem: null, external: true, clean: C, guard });
+      return;
+    }
+    let rt;
+    try { rt = await manager.peek(sid); } catch { return sendJson(res, 404, { error: 'not_found' }, headers); }
+    return sendJson(res, 200, C(externalSnap(rt.graph.snapshot())), headers);
+  }
+  return serveStatic(req, res, url, path.resolve(webRoot), headers, sx);
+}
+
+export function createServer({ token, manager, webRoot = WEB_ROOT, project = null, limits = null, mem = null, update = null, adminSecret = null, errorLingerSec = null, shares = null }) {
   const SEC = { 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
   const control = new ControlHub({ manager }); // 화면 등록·명령 전달·ack
   const srv = http.createServer(async (req, res) => {
@@ -316,7 +398,22 @@ export function createServer({ token, manager, webRoot = WEB_ROOT, project = nul
       if (p === '/interact/admin') { await handleInteractAdmin(req, res, url, ixHub(), { adminSecret, sendJson, SEC }); return; }
       if (req.method !== 'GET' && req.method !== 'HEAD' && !(req.method === 'POST' && (p === '/control/ack' || p.startsWith('/interact/')))) { res.writeHead(405, SEC); res.end(); return; }
 
-      const auth = checkAuth(req, url, token);
+      let auth = checkAuth(req, url, token);
+      let sx = null; // 공유 링크 문맥 {share, clean, key, store}
+      if (!auth.ok) {
+        const sa = checkShare(req, url, shares);
+        if (sa && sa.ok) {
+          const ctx = { share: sa.share, lang: shareLang(req), level: shareLevel(sa.share) }; // 잠금 등급
+          sx = { share: sa.share, clean: (o) => shareClean(o, ctx), key: sa.share.id + ctx.lang + ctx.level, store: shares,
+            warm: () => warmShareReplays(manager, [shareReplayOf(sa.share)?.session]) };
+          auth = { ok: true, via: 'share', setCookie: sa.setCookie, redirect: sa.redirect };
+        } else if (sa && sa.expired) {
+          const wantsHtml = p === '/' || p.endsWith('.html') || String(req.headers.accept || '').includes('text/html');
+          if (wantsHtml) { res.writeHead(410, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...SEC }); res.end(expiredHtml(req.headers['accept-language'])); }
+          else sendJson(res, 410, { error: 'expired' }, SEC);
+          return;
+        }
+      }
       if (!auth.ok) {
         const wantsHtml = p === '/' || p.endsWith('.html') || String(req.headers.accept || '').includes('text/html');
         if (wantsHtml && !p.startsWith('/state') && !p.startsWith('/events') && !p.startsWith('/sessions')
@@ -329,6 +426,7 @@ export function createServer({ token, manager, webRoot = WEB_ROOT, project = nul
       const headers = { ...SEC };
       if (auth.setCookie) headers['Set-Cookie'] = auth.setCookie;
       if (auth.redirect) { res.writeHead(302, { ...headers, Location: auth.redirect, 'Cache-Control': 'no-store' }); res.end(); return; }
+      if (sx) return await handleShare(req, res, url, sx, { manager, headers, webRoot });
       // 화면 쪽(보기 토큰): 명령 적용 결과·상태 알림, 데이터 SSE 가 없을 때(재생 중 등)의 명령 전용 SSE
       if (p === '/control/ack') {
         if (req.method !== 'POST') return sendJson(res, 405, { error: 'method' }, headers);
@@ -489,7 +587,8 @@ async function main() {
   // 업데이트 확인: 기동 시 + 1시간마다 캐시를 보고 24시간 지났을 때만 네트워크, 꺼짐이면 네트워크 0. --demo 는 AGENT4D_FAKE_UPDATE 가짜 값만
   const update = new UpdateChecker({ home: path.dirname(args.config || defaultConfigPath()), current: VERSION, slug: repoSlugOf(),
     cfg: { updateCheck: cfg.updateCheck }, offline: !!args.demo }).start();
-  const server = createServer({ token: cfg.viewToken, manager, webRoot: args.webRoot || WEB_ROOT, project, limits, mem, update, adminSecret: cfg.adminSecret,
+  const shares = new ShareStore({ file: shareFilePath(path.dirname(args.config || defaultConfigPath())) });
+  const server = createServer({ token: cfg.viewToken, manager, webRoot: args.webRoot || WEB_ROOT, project, limits, mem, update, adminSecret: cfg.adminSecret, shares,
     errorLingerSec: cfg.errorLingerSec != null && Number.isFinite(+cfg.errorLingerSec) && +cfg.errorLingerSec >= 0 ? +cfg.errorLingerSec : null });
   server.keepAliveTimeout = 65_000;
   server.headersTimeout = 70_000;
@@ -511,6 +610,10 @@ async function main() {
       .finally(() => {
         manager.startAutoWatch(5000);
         manager.resolve('auto').then((sid) => sid && manager.peek(sid)).catch(() => {});
+        // 공유 링크 기본 리플레이: 발표 중 첫 화면이 빌드(큰 세션 ～20초)를 기다리지 않게 미리 만들고, 밀려나면 10분 안에 다시
+        const warm = () => warmShareReplays(manager, shares.replaySessions());
+        setTimeout(warm, 20_000).unref();
+        setInterval(warm, 600_000).unref();
       });
   }
   // 예기치 못한 예외로 서버 전체가 내려가지 않도록 로그만 남긴다(감시는 ccviz watch 가 맡음)

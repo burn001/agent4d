@@ -106,7 +106,7 @@ The server tails the transcripts that Claude Code already writes under `~/.claud
 - **All projects, or just one.** The start screen shows every active Claude Code session on this machine, one island (or building) per project, with an automatic camera tour. Narrow it to one project or one session from the side panel.
 - **You, in the scene.** Each main agent has a small **user console** (Flow: a terminal above the island; Planet: a ground station; Voxel Office: the client screen on the office wall). It always shows the first words of your last message and where things stand ("Main working · 2m", "Answered 5m ago", "Question for you · 3 options"). A gold beam carries each message to the main agent and the answer flies back. Hover it for a summary, click it for a card with your recent messages, a pending question and the last final answer. When you send a prompt, the camera moves to the main agent that receives it (⚙ **Follow my prompts**, on by default; skipped while you steer the camera).
 - **Live tool activity.** Panels next to each node show the current tool (shell, read, edit, search, web, agent, skill…) and a one-line summary. A collapsible side panel shows a live text feed.
-- **Replay.** Play past or running sessions from the start at 0.5×–32×, with idle gaps compressed, a scrubbable timeline, highlight markers and continuous playback. An optional read-only **archive** folder keeps transcripts around for replay after the originals are gone (`agent4d archive add`).
+- **Replay.** Play past or running sessions from the start at 0.5×–32×, with idle gaps compressed, a scrubbable timeline, highlight markers and continuous playback. Hold Alt to see the keyboard shortcuts next to the controls. An optional read-only **archive** folder keeps transcripts around for replay after the originals are gone (`agent4d archive add`).
 - **Gauges.** A per-session **context usage** gauge — and every agent (main, subagent, `claude -p`) visibly heats up as its own context window fills (warming at 30%, overheating at 70%, critical at 90%; cools down after a compact) — and an opt-in **usage-limit** gauge for the 5-hour and 7-day windows.
 - **Sound** (off until you turn it on). 65 background tracks synthesized from code, plus sound effects synthesized live in the browser. The ♪ panel is a playlist (per view or all tracks) with selection rules: by work status (default), shuffle, loop, a fixed mood or mood by time of day.
 - **Languages.** The web UI and the CLI are in English by default and switch to Korean on a Korean locale. Both can be forced (see [FAQ](#faq-and-troubleshooting)).
@@ -244,6 +244,24 @@ browser ─▶ https://cc-agent-viz.<your-subdomain>.workers.dev/?t=<token>   (s
 
 Useful options: `start --project <encoded-project-dir>` limits what the link can see to one project; `start --session <id>` pins the link to one session.
 
+### Scoped shared links
+
+To show someone else how the agents work on one project for a limited time, issue a separate shared link instead of handing out the view token. It needs the remote setup above (a deployed Worker and a running tunnel); the link stops working when the PC or the server is off.
+
+```bash
+node bin/agent4d.mjs share create --alias demo-week --project /path/to/project --days 7   # also --hours, --minutes, --name
+node bin/agent4d.mjs share list                 # alias, scope, issue/expiry time, lock, status
+node bin/agent4d.mjs share url <alias|id>       # print a valid link again
+node bin/agent4d.mjs share revoke <alias|id>    # refused at once by the server and removed from the Worker
+node bin/agent4d.mjs share set <alias|id> --replay <session>@<time> [--until <time>] [--speed 4] [--loop]   # open on a replay (--replay off = live)
+node bin/agent4d.mjs share set <alias|id> --redact details   # or full (default)
+```
+
+- Each link has its own token and expiry, checked by both the Worker and the local server; open streams are cut when it expires or is revoked.
+- The link sees only that project's sessions. The server strips content before anything leaves it: with the default `full` lock there are no paths, commands, tool input or output, prompts, replies, titles or panel text, only the motion (nodes, status, timing, tool kinds). The `details` lock also shows project and session titles, subagent descriptions, skill names and a generic line per tool call, with paths, commands, code, commit hashes, names and emails in them replaced by placeholders.
+- The live feed, Interactive, usage limits, memory gauge, archive and remote control are refused for shared links.
+- `--replay` makes the link play a chosen part of a session (optionally looping); viewers can still switch to live.
+
 ## Usage-limit gauge (opt-in)
 
 The 5-hour / 7-day gauge is filled by a small collector that reads the Claude Code OAuth access token from `~/.claude/.credentials.json` and calls `https://api.anthropic.com/api/oauth/usage`. **This endpoint is undocumented and unofficial** and may change or stop working at any time.
@@ -272,6 +290,7 @@ Read this before you share any link.
 
 - **The viewer shows your session content.** Prompts, assistant messages, file paths, shell commands and their output appear on screen. They are summarized and truncated, but they are real. Anyone with a valid link can see them.
 - **The token is the only lock.** Every request needs the view token (query `t`, cookie, or `X-CCVIZ-Token` header). There is no localhost exemption. Treat a link with `?t=` like a password: keep it out of chats, tickets and screenshots. If it leaks, run `rotate-token`.
+- **Shared links show less.** A [scoped shared link](#scoped-shared-links) sees one project, expires on its own and has its content stripped on the server, so use it rather than the view token for other people.
 - **All projects are visible by default.** Unless `project` is set (or `start --project`), a token holder can browse every Claude Code session on the machine. Limit it to one project before giving a link to anyone else.
 - **Local only by default.** The server binds to `127.0.0.1`. It is reachable from the internet only through the optional tunnel and Worker, which you turn on yourself (`--tunnel`, `"remote": true`, or a deployed Worker).
 - **Read-only, unless you turn on Interactive.** The server only reads transcripts and task output. The optional [Interactive panel](#interactive-panel-opt-in-off-by-default) is the one exception: when you turn it on, approved devices can send messages into running sessions and, for sessions connected with Remote Control, answer their question boxes, plan approvals and permission prompts (see above). The archive feature writes only to the archive folder you choose, and only when you run `agent4d archive add`.

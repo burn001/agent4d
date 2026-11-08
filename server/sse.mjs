@@ -54,7 +54,7 @@ export async function handleEvents(req, res, url, manager, opts = {}) {
 
   let closed = false;
   let unsub = null;
-  const X = opts.external ? externalEv : (e) => e, XS = opts.external ? externalSnap : (s) => s;
+  const X = wrapX(opts.external ? externalEv : (e) => e, opts.clean), XS = wrapX(opts.external ? externalSnap : (s) => s, opts.clean);
   const snapOf = (g) => formatEvent('snapshot', XS(g.snapshot()), g.lastSeq);
   const out = new SseOut(res, { format: (e) => formatEvent('ev', X(e), e.seq), formatBatch: batchOf(url, X), resync: () => snapOf(rt.graph), ...(opts.sseOut || {}) });
   const write = (s) => { if (!closed) out.raw(s); };
@@ -87,10 +87,12 @@ export async function handleEvents(req, res, url, manager, opts = {}) {
   }
 
   const ping = setInterval(() => write(': ping\n\n'), PING_MS);
+  const guardOff = attachGuard(res, opts.guard, () => cleanup());
   const cleanup = () => {
     if (closed) return;
     closed = true;
     clearInterval(ping);
+    guardOff();
     out.close();
     unsub?.();
     autoUnsub?.();
@@ -100,6 +102,21 @@ export async function handleEvents(req, res, url, manager, opts = {}) {
   };
   req.on('close', cleanup);
   res.on('error', cleanup);
+}
+
+/** 정리 함수를 X 뒤에 붙인다(없으면 X 그대로) */
+function wrapX(X, clean) { return clean ? (e) => clean(X(e)) : X; }
+
+/** 공유 링크 연결 감시: guard 가 거짓(폐기·만료)이 되면 스트림을 닫는다. 5초마다 확인 */
+function attachGuard(res, guard, onEnd) {
+  if (typeof guard !== 'function') return () => {};
+  const iv = setInterval(() => {
+    let ok = false;
+    try { ok = !!guard(); } catch { ok = false; }
+    if (!ok) { clearInterval(iv); try { res.end(); } catch {} onEnd(); }
+  }, 5000);
+  iv.unref?.();
+  return () => clearInterval(iv);
 }
 
 /** 3차: 연결 직후 limits 한 번 + 값이 바뀔 때. id 없음. 보는 사람 수에 넣는다 */
@@ -133,28 +150,34 @@ export async function handleOverviewEvents(req, res, url, hub, opts = {}) {
   res.writeHead(200, sseHeaders(opts.headers));
   res.write('retry: 3000\n\n');
   let closed = false;
-  const X = opts.external ? externalEv : (e) => e, XS = opts.external ? externalSnap : (s) => s;
+  // 공유 링크: keep(허브 이벤트 거르기, 원본으로 판정)·snapFilter·projFilter(범위 거르기) 뒤 clean(데이터 잠금)
+  const keep = opts.keep || (() => true);
+  const SF = opts.snapFilter || ((s) => s), PF = opts.projFilter || ((p) => p), C = opts.clean || ((x) => x);
+  const X = wrapX(opts.external ? externalEv : (e) => e, opts.clean), XS0 = opts.external ? externalSnap : (s) => s;
+  const XS = (s) => C(XS0(SF(s)));
   const out = new SseOut(res, { format: (e) => formatEvent('ev', X(e), e.seq), formatBatch: batchOf(url, X), resync: () => formatEvent('snapshot', XS(hub.snapshot()), hub.hseq), ...(opts.sseOut || {}) });
   const write = (s) => { if (!closed) out.raw(s); };
-  const send = (e) => { if (!closed) out.event(e); };
+  const send = (e) => { if (!closed && keep(e)) out.event(e); };
   const sub = {
     inactive: false,
     onEvent: send,
-    onProjects: (p) => write(formatEvent('projects', p)),
+    onProjects: (p) => write(formatEvent('projects', C(PF(p)))),
   };
   // 스냅샷과 구독을 같은 틱에 해서 사이 이벤트를 놓치지 않는다
   const evs = hub.eventsSince(since);
   if (evs) for (const e of evs) send(e);
   else write(formatEvent('snapshot', XS(hub.snapshot()), hub.hseq));
   const unsub = hub.subscribe(sub);
-  if (evs) write(formatEvent('projects', { projects: hub.projectsState.projects, roots: hub.rootsPayload() }));
+  if (evs) write(formatEvent('projects', C(PF({ projects: hub.projectsState.projects, roots: hub.rootsPayload() }))));
   const limitsOff = attachLimits(write, opts.limits);
   const memOff = attachMem(write, opts.mem);
   const ping = setInterval(() => write(': ping\n\n'), PING_MS);
+  const guardOff = attachGuard(res, opts.guard, () => cleanup());
   const cleanup = () => {
     if (closed) return;
     closed = true;
     clearInterval(ping);
+    guardOff();
     out.close();
     unsub();
     limitsOff();

@@ -209,12 +209,13 @@ export class ReplayEngine {
     this._lastWall = 0;
     this._resumeAfterBuffer = false;
     this._autoPaused = false;
+    this._pauseOnOpen = false;
     this._seekToken = 0;
     this._loaderKick = null;
 
     this._onVis = () => {
       if (!this._doc) return;
-      if (this._doc.hidden) { if (this.status === 'playing' || this.status === 'buffering') { this._autoPaused = true; this.pause(); } }
+      if (this._doc.hidden) { if (this.playingLike) { this.pause(); this._autoPaused = true; } }
       else if (this._autoPaused) { this._autoPaused = false; this.play(); }
     };
     if (this._doc && this._doc.addEventListener) this._doc.addEventListener('visibilitychange', this._onVis);
@@ -227,6 +228,7 @@ export class ReplayEngine {
       status: this.status, vt: this.vt, startTs: this.startT, endTs: this.endT, speed: this.speed, compressIdle: this.compressIdle,
       loaded: this.loaded, total: this.total, contig: this.contig, skippedIdleMs: this.skippedIdleMs, progress: this.progress,
       complete: this.complete, error: this.error, sessionId: this.sessionId, title: this.title,
+      playingLike: this.playingLike, pauseOnOpen: this._pauseOnOpen,
     };
   }
   _emit() {
@@ -401,7 +403,11 @@ export class ReplayEngine {
 
   // ---------- 조작 ----------
   play() {
-    if (this._closed || this.status === 'loading' || this.status === 'error') return;
+    if (this._closed || this.status === 'error') return;
+    if (this.status === 'loading') { this._pauseOnOpen = false; return; }
+    this._pauseOnOpen = false;
+    // 원격 이동(서버 스냅샷)·앞쪽 받기를 기다리는 중: 받으면 이어서 재생하도록 표시만(지금 프레임을 돌리면 이동 결과와 엇갈림)
+    if (this.status === 'buffering') { if (!this._resumeAfterBuffer) { this._resumeAfterBuffer = true; this._emit(); } return; }
     if (this.status === 'ended' || (this.ptr >= this.total && this.vt >= this.endT)) this.seek(this.startT);
     this._autoPaused = false;
     if (this.ptr < this.total && this.ev[this.ptr] === undefined) {
@@ -412,13 +418,25 @@ export class ReplayEngine {
     this._schedule();
   }
   pause() {
-    if (this.status === 'playing' || this.status === 'buffering' || this.status === 'ready') {
+    if (this.status === 'loading') { this._pauseOnOpen = true; this._autoPaused = false; return; } // 여는 중에 누른 정지는 열린 뒤 autoplay 를 막는다
+    this._autoPaused = false;
+    // 받는 중(원격 이동·앞쪽 페이지): 상태는 그대로 두고 '받은 뒤 이어서 재생'만 끈다 → 받으면 paused 로 멈춘다
+    if (this.status === 'buffering') { if (this._resumeAfterBuffer) { this._resumeAfterBuffer = false; this._emit(); } return; }
+    if (this.status === 'playing' || this.status === 'ready') {
       this._resumeAfterBuffer = false;
       this._cancel();
       this._setStatus('paused');
     }
   }
-  toggle() { if (this.status === 'playing' || this.status === 'buffering') this.pause(); else this.play(); }
+  toggle() {
+    if (this.status === 'loading') { if (this._pauseOnOpen) this.play(); else this.pause(); return; }
+    // 버퍼링은 '재생하려는 중'일 때만 재생으로 본다(정지 뒤 이동으로 받는 중이면 누르면 재생)
+    if (this.playingLike) this.pause(); else this.play();
+  }
+  /** 열기가 끝난 뒤 앱의 자동 재생: 여는 중에 사용자가 정지를 눌렀으면 재생하지 않는다 */
+  autoplay() { if (this._pauseOnOpen) { this._pauseOnOpen = false; if (this.status === 'ready') this._setStatus('paused'); return false; } this.play(); return true; }
+  /** 버튼·표시용: 지금 '재생 중'으로 보여야 하는가(버퍼링은 이어서 재생할 때만) */
+  get playingLike() { return this.status === 'playing' || (this.status === 'buffering' && this._resumeAfterBuffer); }
   setSpeed(x) { this.speed = clampSpeed(x); this._emit(); }
   setCompressIdle(on) { this.compressIdle = !!on; this._emit(); }
 
@@ -454,7 +472,7 @@ export class ReplayEngine {
       catch (e) { r = { status: 0 }; }
       if (token !== this._seekToken || this._closed) return false;
       if (r.status === 409) { const tl = await this._fetchTimeline(); if (!tl || token !== this._seekToken) return false; return this.seek(target); }
-      if (r.status !== 200 || !r.body) { this._setStatus('paused'); return false; }
+      if (r.status !== 200 || !r.body) { this._resumeAfterBuffer = false; this._setStatus('paused'); return false; }
       const b = localizeSnapshot(r.body);
       const st = stateFromSnapshot({ root: b.root || this.root, sessionId: this.sessionId, seq: b.rseq ?? b.seq ?? 0, nodes: b.nodes });
       this.st = st;
@@ -467,7 +485,8 @@ export class ReplayEngine {
       this._want = this.ptr;
       this._runLoader();
       if (this.ptr < this.total && this.ev[this.ptr] === undefined) { this._emit(); this._clock(); return true; }
-      this._afterSeek(wasPlaying);
+      // 기다리는 사이 사용자가 정지·재생을 눌렀을 수 있다: 시작 때 값(wasPlaying)이 아니라 지금 뜻(_resumeAfterBuffer)을 따른다
+      this._afterSeek(this._resumeAfterBuffer);
       return true;
     })();
   }

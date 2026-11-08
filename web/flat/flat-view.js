@@ -695,7 +695,7 @@ export class FlatView {
     if (mode === 'session') { this._clusters = []; this._clusterV.clear(); this._ov = null; this._syncIslandEls(); }
     this.pf.setFocus(this.scope.focusProject, [...this._clusterV.keys()], { instant: !this._clusterV.size || prevMode !== mode }); this.pf.setHidden(mode === 'all' ? scope.fadeHide : null, { instant: !this._clusterV.size || prevMode !== mode }); // //
     this.layoutDirty = true;
-    if (prevMode !== mode) this._relayout(); else this._applyScope();
+    if (prevMode !== mode) this.layoutNow(); else this._applyScope(); // 퇴장 판정 먼저(scene.js setScope 와 같은 이유)
     this.lastLabelPass = 0;
     this.invalidate();
   }

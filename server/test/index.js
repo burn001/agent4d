@@ -62,3 +62,9 @@ import './interact-feed.test.mjs'; // (빠져 있던 등록)
 import './wait.test.mjs'; // 입력 대기 배지
 import './rc-answer.test.mjs'; // (빠져 있던 등록)
 import './rc-perm.test.mjs'; // 계획 승인·권한 확인 창
+import './effort-req.test.mjs'; // (빠져 있던 등록)
+import './orphan-agents.test.mjs'; // 강제 종료 회차의 고아 서브에이전트
+import './replay-runner-spawn.test.mjs'; // 재생: 러너 시작 시각
+import './launcher-fg-timeout.test.mjs'; // 시간 한도로 넘어간 대기가 둘째 기동기로
+import './share.test.mjs'; // 범위 제한 공유 링크
+import './share-details.test.mjs'; // 잠금 등급 details

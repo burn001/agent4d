@@ -56,6 +56,9 @@ import { mountPov } from './pov-ui.js'; // 메인 1인칭 시점(복셀 3D)
 import { PovCam } from './pov.js';
 import { askHead } from './wait-core.mjs'; // 입력 대기 배지: 열린 질문·계획 카드 머리표를 openTools 에
 import { effortSnap } from './effort-core.mjs'; // 스냅샷(스크럽) 경계 = effort 보간 없이 즉시
+import { KEY_HINTS, legendLine } from './keyhints-core.mjs'; // Alt 단축키 안내·범례 키 줄(한 출처)
+import { mountKeyHints } from './keyhints.js';
+import { parseShareReplay, pickShareReplay, loopStep } from './replay/share-replay.mjs'; // 공유 링크 기본 리플레이·반복 구간
 
 // index.html 정적 문구(data-i18n*)·문서 제목을 지금 언어로 — 가능한 한 일찍
 applyDom();
@@ -376,7 +379,8 @@ legend.innerHTML =
   `<h3>${tr('app.leg.h.holo')}</h3><ul>` + legNote('app.leg.holo') + CATS.map((c) => `<li><i style="background:${c === 'skill' ? 'var(--skill)' : 'var(--muted)'}"></i>${CAT_LABEL[c]} <span>${HOLO_KIND[c].desc}</span></li>`).join('') + '</ul>' +
   `<h3>${tr('app.renderer.voxel')}</h3><ul>` + ['app.leg.vox1', 'app.leg.vox2', 'app.leg.vox3', 'app.leg.vox4'].map(legPlain).join('') + '</ul>' +
   `<h3>${tr('app.renderer.lab')}</h3><ul id="leg-lab">` + ['app.leg.lab1', 'app.leg.lab2', 'app.leg.lab3', 'app.leg.lab4', 'app.leg.lab5', 'app.leg.lab6'].map(legPlain).join('') + '</ul>' + // 복셀 연구소 절(플랫폼·기자재 상태 6색·말굽 책상·앞쪽·다중 세션/캠퍼스·현장 걷기)
-  `<h3>${tr('app.leg.h.controls')}</h3><ul>` + ['app.leg.ctl1', 'app.leg.ctl2', 'app.leg.ctl3', 'app.leg.ctl4', 'app.leg.ctl5', 'app.leg.ctl6', 'app.leg.ctl7'].map(legPlain).join('') + '</ul>';
+  `<h3>${tr('app.leg.h.controls')}</h3><ul>` + legPlain('app.leg.ctl1') + `<li>${legendLine(KEY_HINTS.camera.slice(0, 2), tr)}</li>` + ['app.leg.ctl3', 'app.leg.ctl4', 'app.leg.ctl5', 'app.leg.ctl6'].map(legPlain).join('') +
+  `<li>${tr('app.leg.liveKeys')} ${legendLine(KEY_HINTS.live, tr)}</li><li>${tr('app.leg.replayKeys')} ${legendLine(KEY_HINTS.replay, tr)}</li>` + legPlain('app.leg.altKeys') + '</ul>'; // 키 줄은 Alt 단축키 안내와 한 출처(keyhints-core)
 $('btn-legend').addEventListener('click', () => {
   legend.hidden = !legend.hidden;
   $('btn-legend').setAttribute('aria-pressed', String(!legend.hidden));
@@ -594,7 +598,7 @@ async function switchView(next, nextDim = dim) {
   hookFrame(nv);
   if (!nv.flat) ensureWeather();
   env.attach(nv, next); hookEnv(nv);
-  if (pauseBuf.paused) freezeView(nv, true); // 정지 중 표현을 바꿔도 얼린 채로
+  if (pauseBuf.paused || replayFrozen) freezeView(nv, true); // 정지 중 표현을 바꿔도 얼린 채로(재생 일시정지 포함)
   if (focusId && nv.has(focusId)) nv.setFocus(focusId);
   try { old.dispose(); } catch (e) { console.warn('이전 장면 정리 실패', e); }
   viewMode = next;
@@ -911,8 +915,15 @@ function selectScope(next, { fly = true } = {}) {
 
 function refreshScopeUi() {
   if ($('btn-pause')) $('btn-pause').hidden = replaying;
-  if (pl) pl.setLabel(replaying && eng ? (isArc(eng.sessionId) ? '▶ 📦 ' + (archiveName(replayProject) || tr('app.proj.archive')) : '▶ ' + (projectName(replayProject) || tr('app.btn.replay'))) : null);
+  replayLabel();
   updateMacro();
+}
+/** 프로젝트 선택기 글: 재생 중이면 ▶(멈췄으면 ⏸) + 재생 중인 프로젝트 */
+function replayLabel() {
+  if (!pl) return;
+  if (!(replaying && eng)) { pl.setLabel(null); return; }
+  const mark = eng.status === 'paused' ? '⏸ ' : '▶ ';
+  pl.setLabel(isArc(eng.sessionId) ? mark + '📦 ' + (archiveName(replayProject) || tr('app.proj.archive')) : mark + (projectName(replayProject) || tr('app.btn.replay')));
 }
 
 // ---------------- 매크로 타임라인: 프로젝트 세션들을 시간축 막대로, 누르면 재생 ----------------
@@ -1194,9 +1205,10 @@ function setReplayUrl(sid) {
   history.replaceState(null, '', u);
 }
 
-async function startReplay(sid, { at = null, speed = null, autoplay = true } = {}) {
+async function startReplay(sid, { at = null, speed = null, autoplay = true, loop = null } = {}) {
   if (!sid) return;
   if (eng) { eng.close(); eng = null; }
+  setReplayFrozen(false);
   if (pauseBuf.paused) setPaused(false, { drop: true });
   replaying = true;
   disconnect();
@@ -1212,21 +1224,40 @@ async function startReplay(sid, { at = null, speed = null, autoplay = true } = {
   if (isArc(sid)) arcCard.show(archiveSession(sid) || { sessionId: sid }); else arcCard.hide();
   const e = (eng = new ReplayEngine({
     api: replayApi, sessionId: sid,
-    sink: { onSnapshot: (s) => { if (eng === e) onSnapshot(s); }, onEvent: (ev, o) => { if (eng === e) onEvent(ev, o || {}); } },
+    sink: { onSnapshot: (s) => { if (eng === e) { onSnapshot(s, replayFrozen ? { keepCamera: true } : {}); thawReplayBriefly(); settleReplaySoon(); } }, onEvent: (ev, o) => { if (eng === e) onEvent(ev, o || {}); } },
   }));
   ui.bind(e);
   refreshScopeUi(); // 매크로 타임라인: 재생 세션의 프로젝트
   if (speed) e.setSpeed(speed);
   ui.setVisible(true);
+  keyHints.tipOnce(); // 첫 재생 때 한 번만 'Alt 를 누르면 단축키 안내'
   setClock(() => e.vt);
   setTimeScale(e.speed);
   e.on('state', (s) => {
     if (eng !== e) return;
     if (s.speed !== timeScale) setTimeScale(s.speed);
+    setReplayFrozen(s.status === 'paused'); // 재생 일시정지 = 장면·자동 카메라·소리도 멈춤(실시간 정지와 같은 방식)
+    if (s.status !== e._lastSt) { e._lastSt = s.status; replayLabel(); }
     replayConn();
     // 연속 재생: 끝나면 잠깐 쉬고 다음 세션
     if (demoOn && s.status === 'ended' && !e._demoNext) { e._demoNext = true; setTimeout(() => { if (eng === e && demoOn) demoNext(e.sessionId); }, DEMO.NEXT_DELAY_MS); }
   });
+  // 반복 구간(공유 링크 기본 리플레이): 끝 시각을 넘거나 세션이 끝나면 시작 시각으로 돌아가 이어 재생
+  if (loop) {
+    let prevVt = NaN, busy = false;
+    const check = () => {
+      if (eng !== e || busy || !e.timeline) return;
+      const vt = e.vt, st = e.status;
+      const go = loopStep(loop, prevVt, vt, st);
+      prevVt = vt;
+      if (go !== 'restart') return;
+      busy = true;
+      prevVt = NaN;
+      Promise.resolve(e.seek(loop.from)).finally(() => { busy = false; if (eng === e && e.status !== 'playing' && !e.playingLike) e.play(); });
+    };
+    e.on('clock', check);
+    e.on('state', (s) => { if (s.status === 'ended') check(); });
+  }
   e.on('clock', () => { if (eng !== e) return; const t = performance.now(); if (t - lastClockConn > 250) { lastClockConn = t; replayConn(); if (macro) macro.setPlayhead(sid, e.vt); } });
   setReplayUrl(sid);
   replayConn();
@@ -1240,12 +1271,13 @@ async function startReplay(sid, { at = null, speed = null, autoplay = true } = {
     const target = at <= 1 ? e.startT + at * (e.endT - e.startT) : at < 1e11 ? e.startT + at : at;
     await e.seek(Math.max(e.startT, Math.min(e.endT, target)));
   }
-  if (eng === e && autoplay) e.play();
+  if (eng === e && autoplay) e.autoplay(); // 여는 중에 정지를 눌렀으면 멈춘 채로
   if (eng === e && macro) macro.setPlayhead(sid, e.vt);
 }
 
 function stopReplay({ reconnect = true } = {}) {
   if (eng) { eng.close(); eng = null; }
+  setReplayFrozen(false);
   arcCard.hide();
   if (demoOn) setDemo(false);
   ui.unbind();
@@ -1378,6 +1410,16 @@ const pauseBadge = document.createElement('button');
 pauseBadge.id = 'pause-badge'; pauseBadge.type = 'button'; pauseBadge.hidden = true;
 pauseBadge.title = tr('app.pause.badgeTitle');
 document.body.appendChild(pauseBadge);
+// Alt 를 누르고 있는 동안 단축키 안내 풍선(재생 막대 단추·타임라인 / 실시간 정지 단추·현재로 배지 옆)
+const keyHints = mountKeyHints({
+  isReplaying: () => replaying,
+  anchors: {
+    play: () => document.querySelector('.rp-bar .rp-play'),
+    speed: () => document.querySelector('.rp-bar .rp-speed'),
+    timeline: () => document.querySelector('.rp-bar .rp-tl canvas'),
+    pause: () => (!pauseBadge.hidden ? pauseBadge : pauseBtn),
+  },
+});
 pauseBadge.addEventListener('click', () => { pauseBadge.blur(); setPaused(false); });
 function freezeAll(on) {
   frozenPerf = on ? performance.now() : null;
@@ -1386,6 +1428,43 @@ function freezeAll(on) {
   if (on) { director.trans = null; director.focusFly = false; } // 날아가던 카메라도 그 자리에
   freezeView(view, on);
   pauseBadge.hidden = !on;
+}
+// 재생 일시정지: 예전엔 재생 시계만 멈추고 자동 카메라·장면 움직임·음악은 그대로라 "일시정지가 안 먹는다"로 보였다.
+// 실시간 정지와 같은 방식으로 얼리되 정지 배지는 띄우지 않는다(재생 막대가 상태를 보여 줌). 정지 중 이동(스크럽·, . < >)은
+// 새 장면이 자리 잡도록 장면 갱신만 잠깐 풀었다가 다시 얼린다(카메라·소리는 계속 멈춤).
+let replayFrozen = false, replayThawTimer = 0;
+function setReplayFrozen(on) {
+  on = !!on && replaying;
+  if (on === replayFrozen) return;
+  replayFrozen = on;
+  clearTimeout(replayThawTimer); replayThawTimer = 0;
+  clearTimeout(replaySettleTimer); replaySettleTimer = 0;
+  frozenPerf = on ? performance.now() : null;
+  sound.setHold(on);
+  director.setEnabled(on ? false : autoCam);
+  if (on) { director.trans = null; director.focusFly = false; }
+  freezeView(view, on);
+}
+function thawReplayBriefly() {
+  if (!replayFrozen) return;
+  freezeView(view, false);
+  clearTimeout(replayThawTimer);
+  replayThawTimer = setTimeout(() => { replayThawTimer = 0; if (replayFrozen) freezeView(view, true); }, REPLAY_THAW_MS);
+}
+const REPLAY_THAW_MS = 1500;
+// 정지 중 시점 이동 뒤 카메라 다시 잡기: 이동(스냅샷)이 REPLAY_SETTLE_MS 동안 멎으면 새 장면에 맞는 자동 구도(실시간 새 장면 규칙 =
+// director.overview 와 같은 샷)로 REPLAY_SETTLE_FLY 초 부드럽게 날아가 그 자리에 멈춘다(투어 재개 아님). 타임라인을 끄는 중이면
+// 놓을 때의 마지막 이동이 다시 부르므로 건너뛴다. 연속 키(, . < >)는 마지막 키 뒤 한 번
+let replaySettleTimer = 0;
+const REPLAY_SETTLE_MS = 350, REPLAY_SETTLE_FLY = 1.0;
+function settleReplaySoon() {
+  if (!replayFrozen) return;
+  clearTimeout(replaySettleTimer);
+  replaySettleTimer = setTimeout(() => {
+    replaySettleTimer = 0;
+    if (!replayFrozen || !autoCam || (ui && ui.scrubbing)) return; // 자동 카메라를 꺼 두었으면 그대로(재생 중 이동 규칙은 따로)
+    if (director.settle) director.settle(REPLAY_SETTLE_FLY);
+  }, REPLAY_SETTLE_MS);
 }
 let resuming = false;
 async function setPaused(on, { drop = false } = {}) {
@@ -1705,7 +1784,11 @@ if (MODE === 'live') {
   }
 } else { lg.set(demoLimitsFor()); mg.set({ used: Math.round(26.2 * 2 ** 30), total: 32 * 2 ** 30, pct: 81.9 }); } // mock·demo: 고정 값(주의 색)
 const replayParam = params.get('replay');
-if (replayParam) {
+// 공유 링크 기본 리플레이: 서버가 넣은 data-share-replay 가 있으면 그 세션을 그 시각부터(배속·반복 구간) 재생. ?live 면 실시간
+const shareReplay = MODE === 'live' ? pickShareReplay(parseShareReplay(document.documentElement.getAttribute('data-share-replay')), params) : null;
+if (shareReplay) {
+  startReplay(shareReplay.session, { at: shareReplay.from, speed: shareReplay.speed, loop: shareReplay.loop ? { from: shareReplay.from, until: shareReplay.until } : null });
+} else if (replayParam) {
   const at = params.has('at') ? Number(params.get('at')) : null;
   const sp = params.has('speed') ? Number(params.get('speed')) : null;
   startReplay(replayParam === 'auto' && MODE !== 'live' ? (MODE === 'demo' ? 'demo-replay' : 'mock-replay') : replayParam, { at, speed: sp });

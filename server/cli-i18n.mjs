@@ -284,6 +284,7 @@ const en = {
   autostart on|off|status                       start --watch at logon (Windows Task Scheduler)
   deploy                                        deploy the Worker, KV and secrets
   rotate-token                                  reissue the view token
+  share create --alias A --project P [--days 7] one-project, time-limited, text-free shared link (list · revoke <alias|id> · url)
   limits [--once] [--force] [--text] | --watch  run the token limits (5h/7d) collector alone (same JSON as the server's /limits)
   statusline install [--mode limits|blank] [--yes]
                                                 (not recommended) install a statusLine wrapper that records usage limits — the default source is the standalone collector
@@ -556,6 +557,7 @@ const ko = {
   autostart on|off|status                       로그온 시 start --watch (Windows 작업 스케줄러)
   deploy                                        Worker·KV·시크릿 배포
   rotate-token                                  보기 토큰 재발급
+  share create --alias A --project P [--days 7] 한 프로젝트·기한·텍스트 없는 공유 링크 (list · revoke <별칭|id> · url)
   limits [--once] [--force] [--text] | --watch  토큰 한도(5h/7d) 독립 수집기 단독 실행(서버 /limits 와 같은 JSON)
   statusline install [--mode limits|blank] [--yes]
                                                 (비권장) 사용 한도 기록용 statusLine 래퍼 설치 — 기본 출처는 독립 수집기

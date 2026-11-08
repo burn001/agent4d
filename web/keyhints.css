@@ -1,0 +1,39 @@
+/* 단축키 안내(Alt 누르는 동안) — keyhints.js */
+#key-hints { position: fixed; inset: 0; z-index: 60; pointer-events: none; }
+#key-hints kbd, .kh-once kbd {
+  display: inline-block; min-width: 1.4em; padding: 0 6px; border-radius: 5px; text-align: center;
+  font: 600 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: nowrap;
+  color: var(--text); background: var(--chip-bg); border: 1px solid var(--border); box-shadow: 0 1px 0 var(--border);
+}
+#key-hints .kh-card {
+  position: absolute; top: 64px; left: 50%; transform: translateX(-50%); max-width: min(92vw, 440px);
+  padding: 10px 14px; border-radius: 10px; background: var(--panel-bg); color: var(--text);
+  border: 1px solid var(--border); box-shadow: var(--shadow); font-size: 13px;
+}
+#key-hints .kh-card h4 { margin: 0 0 6px; font-size: 13px; }
+#key-hints .kh-card ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: center; }
+#key-hints .kh-card li { display: contents; }
+#key-hints .kh-card li kbd { justify-self: start; }
+#key-hints .kh-card p { margin: 6px 0 0; color: var(--muted); font-size: 11.5px; }
+#key-hints .kh-tip {
+  position: absolute; transform: translate(-50%, -100%); padding: 5px 8px; border-radius: 8px;
+  background: var(--panel-bg); color: var(--text); border: 1px solid var(--accent); box-shadow: var(--shadow);
+  font-size: 12px; line-height: 1.7; white-space: nowrap;
+}
+#key-hints .kh-tip.down { transform: translate(-50%, 0); }
+#key-hints .kh-tip::after {
+  content: ''; position: absolute; left: var(--ax, 50%); width: 8px; height: 8px; background: inherit;
+  border: 1px solid var(--accent); transform: translateX(-50%) rotate(45deg);
+}
+#key-hints .kh-tip.up::after { bottom: -5px; border-top: 0; border-left: 0; }
+#key-hints .kh-tip.down::after { top: -5px; border-bottom: 0; border-right: 0; }
+#key-hints .kh-tip.stack::after { display: none; } /* 앞 풍선 위로 쌓인 풍선은 꼬리 없음(키 글로 알 수 있음) */
+.kh-once {
+  position: fixed; left: 50%; top: 64px; z-index: 55; transform: translate(-50%, 8px); opacity: 0;
+  padding: 6px 12px; border-radius: 8px; font-size: 12.5px; pointer-events: none;
+  color: var(--text); background: var(--panel-bg); border: 1px solid var(--border); box-shadow: var(--shadow);
+  transition: opacity .3s, transform .3s;
+}
+.kh-once.on { opacity: 1; transform: translate(-50%, 0); }
+@media (prefers-reduced-motion: reduce) { .kh-once { transition: none; } }
+@media (hover: none) and (pointer: coarse) { #key-hints, .kh-once { display: none; } }

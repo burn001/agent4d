@@ -79,6 +79,7 @@ export const RUN_EMIT_MS = 5000;
 export const SESSION_END = { GRACE_MS: 30_000, PROC_GONE_MS: 10_000, ENTRYPOINTS: new Set(['cli', 'sdk-cli']) };
 /** 추정 끝(세션 종료·주인 에이전트 끝으로 끊김) — 뒤에 온 진짜 끝 표지·알림·출력이 이긴다 */
 const CUT_REASONS = new Set(['session-end', 'agent-end']);
+const AGENT_KINDS_END = new Set(['subagent', 'workflow', 'workflow-agent']); // 세션이 끝나면 같이 끝나는 것(_sweepOrphanAgents)
 /** 새 Claude Code 가 서브에이전트의 bg 작업에 붙이는 안내(최종 응답 때 작업을 끄고 알림도 없음) */
 const AGENT_BOUND_RE = /terminated when you give your final response/i;
 /** 포그라운드 셸이 열려 있는 동안 대기 금지의 상한 = 호출 timeout(없으면 Bash 최대 10분) + 여유 1분(결과 없이 버려진 호출 대비) */
@@ -1382,8 +1383,11 @@ export class RootRuntime {
     const g = this.graph;
     const cmd = tu?.input?.command || '';
     if (this.offline && !this.spawnHints.has(id)) this.spawnHints.set(id, tu?.ts || ts);
-    const lr = tu?.id ? this.launchNodes.get(tu.id) : null; // run_in_background 기동기
+    let lr = tu?.id ? this.launchNodes.get(tu.id) : null; // run_in_background 기동기
     if (lr && !lr.nodeId) { lr.nodeId = id; this.launcherByNode.set(id, lr); }
+    // 포그라운드 명령이 nohup·& 로 기동기를 떼어 띄우고(_addLauncher 가 b:<toolUseId> 를 이미 만듦) 남은 대기 부분(until grep …)이
+    // 시간 한도로 백그라운드로 넘어간 것: 이 작업은 기동기가 아니라 보통 bg — 예전엔 같은 호출로 기동기가 둘(11.07. ACME relaunch.sh)
+    if (lr && lr.nodeId !== id) lr = null;
     // 시작 = 원래 tool_use 시각(포그라운드로 돌다 넘어간 작업은 결과 기록이 한참 뒤)
     const since = tu?.ts && tu.ts < ts ? tu.ts : ts;
     const run = !lr ? this._runBgStart(id, Date.parse(since), cmd, tu?._fgRun || null, null, tu?.name || 'Bash') : null;
@@ -2041,6 +2045,41 @@ export class RootRuntime {
       const end = maxIso(agentEnd, o ? this._fileEndIso(o, n) : maxIso(n.startedAt, n.lastActivityAt));
       this.stop(id, end, 'agent-end');
     }
+  }
+
+  /**
+   * 띄운 세션이 끝났는데(회차 claude -p 를 강제로 끈 경우 등) 결과 기록 없이 남은 서브에이전트·워크플로 → '중지됨'(session-end).
+   * 예전엔 열린 도구를 든 채 영원히 대기로 남아, 끝난 회차·러너·기동기까지 퇴장하지 못하고 기동기가 둘로 보였다.
+   * 끝 = 그 에이전트 마지막 기록. 라이브는 세션 끝·마지막 기록 뒤 GRACE_MS 기다린다(결과가 늦게 쓰일 수 있음).
+   */
+  _sweepOrphanAgents(now, off) {
+    const g = this.graph;
+    const wall = off ? Date.now() : now;
+    let orphans = null;
+    for (const n of g.nodes.values()) {
+      if (!AGENT_KINDS_END.has(n.kind) || isEnded(n.status)) continue;
+      const s = this._endedSessionOf(n);
+      if (!s) continue;
+      const last = maxIso(n.startedAt, n.lastActivityAt);
+      if (!off && wall - Math.max(Date.parse(s.endedAt) || 0, Date.parse(last) || 0) < SESSION_END.GRACE_MS) continue;
+      (orphans || (orphans = [])).push([n.id, last]);
+    }
+    if (!orphans) return;
+    // 그 사이 대기 전환이 마지막 기록보다 뒤 시각으로 이미 나갔으면(열린 셸 상한 등) 끝을 그 뒤로 — 재생은 시각순이라 앞 시각의 끝 뒤에 대기가 와 되살아난다
+    const ring = g.ring || [], want = new Map(orphans);
+    for (let i = ring.length - 1, k = 0; i >= 0 && k < 50_000; i--, k++) {
+      const e = ring[i];
+      if (want.has(e.nodeId) && e.type === 'node-update' && e.patch && 'status' in e.patch && e.ts > want.get(e.nodeId)) want.set(e.nodeId, e.ts);
+    }
+    for (const [id, ts] of want) this.stop(id, ts, 'session-end');
+  }
+
+  /** 서브에이전트·워크플로를 띄운 세션 노드(main·claude-p)가 끝났으면 그 노드, 아니면 null */
+  _endedSessionOf(n) {
+    const g = this.graph;
+    let s = n.parentId ? g.get(n.parentId) : null;
+    for (let i = 0; s && !SESSION_KINDS.has(s.kind) && i < 8; i++) s = s.parentId ? g.get(s.parentId) : null;
+    return s && isEnded(s.status) && s.endedAt ? s : null;
   }
 
   _runStaleMs(s) { return s.proc ? Math.max(PROC.STALE_MIN_SEC, s.proc.staleSec || PROC.STALE_DEFAULT_SEC) * 1000 : s.staleMs; }
@@ -2802,6 +2841,7 @@ export class RootRuntime {
         continue;
       }
       if (n.status !== 'active') continue;
+      if (AGENT_KINDS_END.has(n.kind) && this._endedSessionOf(n)) continue; // 띄운 세션이 끝남 → 대기 대신 _sweepOrphanAgents 가 닫는다
       const last = Date.parse(n.lastActivityAt) || 0;
       // 열린 포그라운드 셸이 있으면(상한 = timeout + 1분) 대기로 떨어뜨리지 않는다
       const hold = this._fgHold(n);
@@ -2825,6 +2865,7 @@ export class RootRuntime {
     pass(runners, true);
     this._sweepAgentEnd(now, off); // 주인 에이전트가 끝난 bg 작업
     this._sweepSessionEnd(now, off); // 띄운 세션이 끝난 bg 작업
+    this._sweepOrphanAgents(now, off); // 세션(claude -p 회차)이 끝났는데 결과 없이 남은 서브에이전트
     this._sweepWatches(); // 끝난 백그라운드 셸·Monitor 의 들여다보기 닫기
     if (!off) { this._jobFiles(); this._extJobsSweep(now); this._flushAutoJobs(nowIso); this._runSweep(now); this._loopAxesSweep(now); this._loopWaitSweep(now); }
   }

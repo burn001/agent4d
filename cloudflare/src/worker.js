@@ -7,12 +7,18 @@
 // 엔드포인트
 //   POST /_register  Authorization: Bearer <ADMIN_SECRET>, {"origin":"https://….trycloudflare.com","host":"…"}
 //   GET  /_health    인증 없음, origin 주소는 노출하지 않음
+//   POST /_share     Authorization: Bearer <ADMIN_SECRET>, {"op":"put","hash":"<sha256 hex>","id":"…","exp":<ms>} | {"op":"delete","hash":"…"}
+// 범위 제한 공유 링크 — KV "share:<hash>" (토큰 원문은 받지 않음)
 //   그 밖            토큰(쿼리 t → 쿠키 ccviz_t → 헤더 X-CCVIZ-Token) 확인 후 스트리밍 프록시
+//                    보기 토큰이 아니고 sh_ 로 시작하면 공유 토큰: KV 에서 해시로 찾아 기한을 보고, 막힌 경로를 거른 뒤 프록시
+//                    (로컬 서버가 같은 토큰을 shares.json 으로 다시 검사하고 데이터를 잠근다 — 이중 거부)
 
 const ORIGIN_RE = /^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/;
 const COOKIE = "ccviz_t";
 const COOKIE_MAX_AGE = 2592000; // 30일
 const MEM_TTL_MS = 10_000;
+const SHARE_PREFIX = "sh_";
+const HASH_RE = /^[0-9a-f]{64}$/;
 
 let memCache = null; // { value, at }
 
@@ -102,8 +108,87 @@ function offline(request) {
   return json(503, { error: "origin-offline" }, { "Retry-After": "30" });
 }
 
-function cookieHeader(token) {
-  return `${COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${COOKIE_MAX_AGE}`;
+function cookieHeader(token, maxAge = COOKIE_MAX_AGE) {
+  return `${COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
+}
+
+// ───────────── 공유 토큰 ─────────────
+async function sha256hex(s) {
+  const d = await crypto.subtle.digest("SHA-256", enc.encode(s));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+/** 공유 토큰 → {exp, id} | {expired:true} | null (KV share:<hash>, 엣지 캐시 60초) */
+async function shareOf(env, tok) {
+  if (typeof tok !== "string" || !tok.startsWith(SHARE_PREFIX) || tok.length < 20 || tok.length > 200) return null;
+  let v = null;
+  try {
+    v = await env.CCVIZ.get("share:" + (await sha256hex(tok)), { type: "json", cacheTtl: 60 });
+  } catch {
+    v = null;
+  }
+  if (!v || typeof v.exp !== "number") return null;
+  if (v.exp <= Date.now()) return { expired: true };
+  return { exp: v.exp, id: v.id };
+}
+/** 공유 토큰으로 못 여는 경로(로컬 서버 shareBlockedPath 와 같은 목록) */
+function shareBlocked(url) {
+  let p;
+  try {
+    p = decodeURIComponent(url.pathname).toLowerCase().replace(/\/+$/, "") || "/";
+  } catch {
+    return true;
+  }
+  if (p === "/control" || p.startsWith("/control/") || p === "/interact" || p.startsWith("/interact/")) return true;
+  if (p === "/md/full" || p === "/artifacts") return true;
+  if (/^arc:/i.test(url.searchParams.get("session") || "") || url.searchParams.get("source") === "archive") return true;
+  return false;
+}
+function expiredPage(request) {
+  if (wantsHtml(request)) return htmlPage(410, "링크 기한이 지났습니다", "<p>이 공유 링크는 기한이 지나 더 이상 열 수 없습니다.</p>");
+  return json(410, { error: "expired" });
+}
+async function handleShareAdmin(request, env) {
+  if (request.method !== "POST") return json(405, { error: "method-not-allowed" }, { Allow: "POST" });
+  const auth = request.headers.get("Authorization") || "";
+  const m = /^Bearer\s+(.+)$/.exec(auth);
+  if (!env.ADMIN_SECRET || !m || !(await safeEqual(m[1].trim(), env.ADMIN_SECRET))) return json(401, { error: "unauthorized" });
+  let b;
+  try {
+    b = await request.json();
+  } catch {
+    return json(400, { error: "bad-json" });
+  }
+  if (!b || !HASH_RE.test(String(b.hash || ""))) return json(400, { error: "bad-hash" });
+  const key = "share:" + b.hash;
+  if (b.op === "delete") {
+    await env.CCVIZ.delete(key);
+    return json(200, { ok: true });
+  }
+  if (b.op !== "put" || typeof b.exp !== "number" || !Number.isFinite(b.exp) || b.exp <= Date.now()) return json(400, { error: "bad-share" });
+  const id = typeof b.id === "string" ? b.id.slice(0, 32) : null;
+  // KV 자동 삭제는 기한 하루 뒤(그동안은 '기한 지남' 안내), 최소 120초 뒤
+  const expiration = Math.max(Math.ceil(Date.now() / 1000) + 120, Math.ceil(b.exp / 1000) + 86400);
+  await env.CCVIZ.put(key, JSON.stringify({ id, exp: b.exp }), { expiration });
+  return json(200, { ok: true });
+}
+/** 공유 토큰 요청: 막힌 경로 거르기 → 한도·메모리는 '꺼짐' → 프록시(SSE 는 기한에 끊음) */
+async function proxyShare(request, env, url, tok, s) {
+  if (shareBlocked(url)) return json(403, { error: "share_blocked" });
+  if (url.pathname === "/limits") return json(200, { ok: true, source: null, five_hour: null, seven_day: null, disabled: true });
+  if (url.pathname === "/mem") return json(200, { ok: true, disabled: true });
+  if (!["GET", "HEAD"].includes(request.method)) return json(405, { error: "method-not-allowed" });
+  const res = await proxy(request, env, url, tok);
+  if ((res.headers.get("Content-Type") || "").includes("text/event-stream") && res.body) {
+    const left = s.exp - Date.now();
+    if (left < 2_147_000_000) {
+      const ac = new AbortController();
+      const { readable, writable } = new TransformStream();
+      const timer = setTimeout(() => ac.abort(), Math.max(0, left));
+      res.body.pipeTo(writable, { signal: ac.signal }).catch(() => {}).finally(() => clearTimeout(timer));
+      return new Response(readable, { status: res.status, headers: res.headers });
+    }
+  }
+  return res;
 }
 
 async function handleRegister(request, env) {
@@ -182,6 +267,13 @@ async function proxy(request, env, url, token) {
   for (const h of HOP_HEADERS) headers.delete(h);
   headers.delete("x-ccviz-token");
   headers.set("X-CCVIZ-Token", token);
+  // 브라우저 쿠키의 ccviz_t 는 origin 으로 보내지 않는다(판정은 Worker 가 고른 X-CCVIZ-Token 하나로)
+  const ck = headers.get("Cookie");
+  if (ck) {
+    const rest = ck.split(";").filter((x) => x.split("=")[0].trim() !== COOKIE).join(";").trim();
+    if (rest) headers.set("Cookie", rest);
+    else headers.delete("Cookie");
+  }
   headers.set("X-Forwarded-Proto", "https");
   headers.set("X-Forwarded-Host", url.host);
   const isUpgrade = (request.headers.get("Upgrade") || "").toLowerCase() === "websocket";
@@ -243,6 +335,7 @@ export default {
       return handleHealth(env);
     }
     if (url.pathname === "/_stream-test") return streamTest(request, env);
+    if (url.pathname === "/_share") return handleShareAdmin(request, env);
     // 화면 원격 조작: 명령 보내기(control)·화면 목록 등 관리용 경로는 프록시하지 않는다. 원격 화면은 받기만(control/events·/control/ack)
     if (isControlAdminPath(url.pathname)) return json(404, { error: "not_found" });
     if (url.pathname === "/favicon.ico"&& !readCookie(request, COOKIE)) return new Response(null, { status: 204 });
@@ -251,8 +344,26 @@ export default {
     if (!token) return json(500, { error: "worker-not-configured" });
 
     const qt = url.searchParams.get("t");
+    if (qt !== null && !(await safeEqual(qt, token))) {
+      // 공유 토큰(쿼리)
+      const s = await shareOf(env, qt);
+      if (!s) return unauthorized(request);
+      if (s.expired) return expiredPage(request);
+      const maxAge = Math.max(1, Math.floor((s.exp - Date.now()) / 1000));
+      if (wantsHtml(request)) {
+        const clean = new URL(url);
+        clean.searchParams.delete("t");
+        return new Response(null, {
+          status: 302,
+          headers: { Location: clean.pathname + clean.search, "Set-Cookie": cookieHeader(qt, maxAge), "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" },
+        });
+      }
+      const res = await proxyShare(request, env, url, qt, s);
+      const r2 = new Response(res.body, res);
+      r2.headers.append("Set-Cookie", cookieHeader(qt, maxAge));
+      return r2;
+    }
     if (qt !== null) {
-      if (!(await safeEqual(qt, token))) return unauthorized(request);
       if (wantsHtml(request)) {
         // 쿠키 발급 후 t 를 뺀 주소로 302
         const clean = new URL(url);
@@ -271,7 +382,14 @@ export default {
 
     const ct = readCookie(request, COOKIE);
     const ht = request.headers.get("X-CCVIZ-Token");
-    if (!((await safeEqual(ct, token)) || (await safeEqual(ht, token)))) return unauthorized(request);
-    return proxy(request, env, url, token);
+    if ((await safeEqual(ct, token)) || (await safeEqual(ht, token))) return proxy(request, env, url, token);
+    // 공유 토큰(쿠키 → 헤더)
+    for (const tok of [ct, ht]) {
+      const s = await shareOf(env, tok);
+      if (!s) continue;
+      if (s.expired) return expiredPage(request);
+      return proxyShare(request, env, url, tok, s);
+    }
+    return unauthorized(request);
   },
 };

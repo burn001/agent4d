@@ -319,6 +319,84 @@ test('조작: 일시정지 중 진행 없음, 끝에서 play 는 처음부터, �
   eng.close();
 });
 
+test('조작(11-07 점검): 원격 이동을 기다리는 중 누른 정지는 이동이 끝나도 정지, 기다리는 중 재생은 이어서 재생', async () => {
+  const raw = genEvents(300, 5);
+  const api = createLocalReplayApi(raw, { sessionId: 'rs', delayMs: 5 });
+  const clk = fakeClock(); const sink = recordingSink();
+  const eng = new ReplayEngine({ api, sessionId: 'rs', sink, raf: clk.raf, caf: clk.caf, now: clk.now, doc: null, pageLimit: 200 });
+  await eng.open();
+  eng.play(); await clk.drive(200);
+  assert.equal(eng.status, 'playing');
+  const target = api.events[api.events.length - 50].t;
+  const p = eng.seek(target);              // 적재 범위 밖 → 서버 스냅샷을 기다림
+  assert.equal(eng.status, 'buffering');
+  assert.equal(eng.playingLike, true);
+  eng.toggle();                            // 기다리는 중 정지(단추·Space 는 toggle)
+  assert.equal(eng.playingLike, false);
+  await p;
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(eng.status, 'paused', 'seek 이 끝나도 사용자가 누른 정지가 이긴다');
+  const vt = eng.vt; await clk.drive(500);
+  assert.equal(eng.vt, vt, '정지 중 시계 멈춤');
+  // 정지 상태에서 다시 먼 곳으로 이동 → 기다리는 중 재생 → 이동 끝나면 재생
+  const p2 = eng.seek(api.events[Math.floor(api.events.length * 0.6)].t);
+  eng.toggle();
+  assert.equal(eng.playingLike, true);
+  await p2; await new Promise((r) => setTimeout(r, 40)); await clk.drive(100);
+  assert.ok(eng.status === 'playing' || (eng.status === 'buffering' && eng.playingLike), `재생으로 이어짐: ${eng.status}`);
+  assert.deepEqual(sink.violations, []);
+  eng.close();
+});
+
+test('조작(11-07 점검): 여는 중 정지 → autoplay 가 재생하지 않음, 숨긴 탭에서 직접 정지하면 돌아와도 정지', async () => {
+  const api = createLocalReplayApi(DEMO.slice(0, 200), { delayMs: 5 });
+  const clk = fakeClock();
+  const doc = { hidden: false, _l: null, addEventListener(_, f) { this._l = f; }, removeEventListener() {} };
+  const eng = new ReplayEngine({ api, sessionId: 'demo-replay', sink: {}, raf: clk.raf, caf: clk.caf, now: clk.now, doc });
+  const opening = eng.open();
+  assert.equal(eng.status, 'loading');
+  eng.toggle();                            // 여는 중 Space
+  assert.equal(eng.state.pauseOnOpen, true);
+  await opening;
+  assert.equal(eng.autoplay(), false);
+  assert.equal(eng.status, 'paused');
+  assert.equal(eng.autoplay(), true, '한 번만 막는다');
+  assert.equal(eng.status, 'playing');
+  // 숨김 → 자동 정지 → (숨긴 채) 사용자가 정지(ctl pause 등) → 돌아와도 정지 유지
+  doc.hidden = true; doc._l(); assert.equal(eng.status, 'paused');
+  eng.pause();
+  doc.hidden = false; doc._l(); assert.equal(eng.status, 'paused');
+  // 숨김 자동 정지만이면 돌아올 때 재생
+  eng.play(); doc.hidden = true; doc._l(); doc.hidden = false; doc._l();
+  assert.equal(eng.status, 'playing');
+  eng.close();
+});
+
+test('재생 단추 표시(playIntent): 재생·이어서 재생할 버퍼링·정지 안 누른 여는 중만 ⏸', async () => {
+  const { playIntent } = await import('../replay/ui.mjs');
+  assert.equal(playIntent({ status: 'playing' }), true);
+  assert.equal(playIntent({ status: 'paused' }), false);
+  assert.equal(playIntent({ status: 'buffering', playingLike: true }), true);
+  assert.equal(playIntent({ status: 'buffering', playingLike: false }), false);
+  assert.equal(playIntent({ status: 'loading', pauseOnOpen: false }), true);
+  assert.equal(playIntent({ status: 'loading', pauseOnOpen: true }), false);
+  assert.equal(playIntent({ status: 'ended' }), false);
+});
+
+test('재생 조작 배선(11-07 점검): 정지 = 장면 얼림, Space 자동 반복 무시, 체크상자 포커스 해제, autoplay', () => {
+  const app = readFileSync(join(here, '..', 'app.js'), 'utf8');
+  const ui = readFileSync(join(here, '..', 'replay', 'ui.mjs'), 'utf8');
+  assert.match(app, /setReplayFrozen\(s\.status === 'paused'\)/, '엔진 상태가 paused 면 장면·카메라·소리를 얼린다');
+  assert.match(app, /function setReplayFrozen[\s\S]{0,600}director\.setEnabled\(on \? false : autoCam\)[\s\S]{0,200}freezeView\(view, on\)/);
+  assert.match(app, /onSnapshot\(s, replayFrozen \? \{ keepCamera: true \} : \{\}\); thawReplayBriefly\(\);/, '정지 중 이동은 카메라는 그대로, 장면만 잠깐 풀어 새 위치를 보인다');
+  assert.match(app, /pauseBuf\.paused \|\| replayFrozen\) freezeView\(nv, true\)/, '표현을 바꿔도 얼린 채로');
+  assert.match(app, /function stopReplay[\s\S]{0,120}setReplayFrozen\(false\)/, '실시간 복귀 때 풀기');
+  assert.match(app, /e\.autoplay\(\)/);
+  assert.match(ui, /if \(!e\.repeat\) eng\.toggle\(\)/, 'Space 를 누르고 있어도 한 번만');
+  assert.match(ui, /savePrefs\(prefs\); idleChk\.blur\(\);/, '유휴 압축 체크상자에 포커스가 남지 않게');
+  assert.match(ui, /playBtn\.disabled = s\.status === 'error'/, '여는 중에도 정지를 누를 수 있다');
+});
+
 test('빌드 교체: 여러 페이지를 받는 사이 서버가 다시 만들면(builtAt 변경) 버퍼를 비우고 새 빌드로 이어 받아 끝 상태 = 새 빌드', async () => {
   const raw = genEvents(420, 13);
   const cut = Math.floor(raw.length * 0.8);

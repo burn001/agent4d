@@ -488,3 +488,9 @@ html body.replaying #stats-chip { bottom: calc(56px + var(--tl-h) + 10px); }
 .eff-meter > i.on { background: var(--effort-ink); }
 .eff-meter.hollow > i.on { background: repeating-linear-gradient(to top, var(--effort-ink) 0 1px, transparent 1px 2px); } /* 요청값만(응답 전): 2px 막대는 테두리로 비우면 안 보여 1px 줄무늬로 */
 .eff-meter.closed::after { content: ""; position: absolute; left: 0; right: 0; top: -2px; height: 1px; border-radius: 1px; background: var(--effort-ink); }
+
+/* 범위 제한 공유 링크(html[data-share], 서버가 index.html 에 넣음): 실황·Interactive·한도·메모리 게이지·패널 위치 설정을 숨긴다.
+   데이터 잠금은 서버가 따로 한다(이 규칙은 화면 정리일 뿐) */
+html[data-share] #panel, html[data-share] #limits, html[data-share] #mem-gauge, html[data-share] #btn-mem,
+html[data-share] #sm-panel-side, html[data-share] .ix-tab, html[data-share] .ix-wrap { display: none !important; }
+html[data-share] body, html[data-share] body.panel-collapsed, html[data-share] body.panel-left { --panel-w: 0px; --panel-h: 0px; --inset-r: 0px; --inset-l: 0px; }

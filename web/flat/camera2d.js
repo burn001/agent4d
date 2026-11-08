@@ -264,6 +264,17 @@ export class Director2D {
     else this._startTransition();
   }
 
+  /** 재생 일시정지 중 시점 이동 뒤 한 번 다시 잡기(3D camera.js settle 과 같은 규칙): 새 장면 맞춤으로 dur 초 비행 후 그 자리에 멈춤 */
+  settle(dur = 1.0) {
+    if (!this.view || this.dragging || this.hold) return false;
+    this.shot = { type: this.camMode === 'fit' ? 'fit' : 'overview' };
+    this.fit.reset(); this.shotFit.reset();
+    this._startTransition(dur);
+    this.focusFly = true;
+    this.view.invalidate();
+    return true;
+  }
+
   // ---------- 고르기·구도 ----------
   _clusterOf(id) { const v = this.view; if (v.nodeCluster) { const p = v.nodeCluster(id); if (p) return p; } const n = this.getNode(id); return n ? n.projectId || null : null; }
   _lastAt(id) { const a = this.activity.get(id); return a && a.length ? a[a.length - 1] : null; }

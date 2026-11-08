@@ -575,6 +575,7 @@ const WHY = new Set(['headless', 'unverified', 'gone', 'busy', 'no_key', 'protoc
 const PERM_POLL_MS = 10_000; // 열린 계획·권한 창 다시 읽기 간격
 
 function boot() {
+  if (document.documentElement.hasAttribute('data-share')) return; // 공유 링크: Interactive·입력 대기 배지 없음(서버도 /interact/* 403)
   if (!document.getElementById('panel') || !document.getElementById('stream')) return;
   window.__ccvizInteract = new Interact();
   try { window.__ccvizWaits = mountWaits(window.__ccvizInteract); } catch (e) { console.error('[wait]', e); }

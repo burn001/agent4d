@@ -63,11 +63,15 @@
 }
 .rp-toast.on { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+/* 시각(위)·상태 글(아래) 두 줄, 폭 고정: 상태 글('일시정지'·'불러오는 중…'·'적재 n%')이 생기고 사라질 때마다
+   타임라인 폭이 바뀌어 누르려던 자리가 밀리던 문제(11-07 점검) */
+.rp-info { flex-direction: column; align-items: flex-start; justify-content: center; gap: 1px; width: 232px; overflow: hidden; }
 .rp-time { white-space: nowrap; font-size: 12.5px; }
 .rp-time b { font-weight: 650; }
 .rp-time .rp-end { color: var(--muted); }
 .rp-time small { color: var(--muted); font-size: 11.5px; }
-.rp-prog { color: var(--muted); font-size: 11.5px; white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.rp-prog { color: var(--muted); font-size: 11px; line-height: 1.2; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.rp-bar[data-status="paused"] .rp-prog { color: var(--k-main); font-weight: 600; }
 .rp-prog:empty { display: none; }
 .rp-prog.err { color: var(--error); }
 .rp-bar[data-status="loading"] .rp-prog, .rp-bar[data-status="buffering"] .rp-prog { color: var(--skill); }
@@ -82,6 +86,7 @@ body.replaying #stats-chip { bottom: calc(var(--rp-h, 56px) + 12px); }
 /* 중간 폭: 정보 줄이기 */
 @media (max-width: 1100px) {
   .rp-time small, .rp-pick span { display: none; }
+  .rp-info { width: 150px; }
   .rp-pick { padding: 0 8px; }
 }
 
@@ -94,7 +99,7 @@ body.replaying #stats-chip { bottom: calc(var(--rp-h, 56px) + 12px); }
     transition: bottom .25s ease;
   }
   .rp-ctl { grid-area: ctl; gap: 6px; }
-  .rp-info { grid-area: info; justify-content: center; flex-direction: column; gap: 0; }
+  .rp-info { grid-area: info; justify-content: center; align-items: center; flex-direction: column; gap: 0; width: auto; }
   .rp-end-ctl { grid-area: end; gap: 6px; }
   .rp-tl { grid-area: tl; height: 34px; }
   .rp-idle span { display: none; }
