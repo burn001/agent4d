@@ -244,18 +244,21 @@ python music/tracks.py copy lofi --from <tmp>             # mp3 + json 을 web/a
 다른 사람에게 한 프로젝트에서 에이전트가 일하는 모습을 정해진 기간 동안만 보여 주려면, 보기 토큰을 건네지 말고 공유 링크를 따로 발급하십시오. 위의 원격 구성(배포된 Worker 와 떠 있는 터널)이 있어야 하며, PC 나 서버가 꺼지면 링크도 열리지 않습니다.
 
 ```bash
-node bin/agent4d.mjs share create --alias demo-week --project /path/to/project --days 7   # --hours·--minutes·--name 도 가능
+node bin/agent4d.mjs share create --alias demo-week --project /path/to/project --days 7   # --hours·--minutes·--expires <시각>·--name·--embed <출처> 도 가능
 node bin/agent4d.mjs share list                 # 별칭·범위·발급/만료 시각·잠금·상태
 node bin/agent4d.mjs share url <별칭|id>         # 유효한 링크 다시 출력
 node bin/agent4d.mjs share revoke <별칭|id>      # 서버가 바로 거부하고 Worker 에서도 지움
 node bin/agent4d.mjs share set <별칭|id> --replay <세션>@<시각> [--until <시각>] [--speed 4] [--loop]   # 열면 재생(--replay off = 실시간)
 node bin/agent4d.mjs share set <별칭|id> --redact details   # 또는 full(기본)
+node bin/agent4d.mjs share set <별칭|id> --embed https://you.github.io,file:   # 이 사이트들이 iframe 으로 띄울 수 있게(--embed off = 없음)
 ```
 
 - 링크마다 토큰과 기한이 따로 있고, Worker 와 로컬 서버가 둘 다 기한을 확인합니다. 기한이 지나거나 폐기하면 열린 스트림도 끊깁니다.
 - 링크로는 그 프로젝트의 세션만 보입니다. 서버가 내보내기 전에 내용을 뺍니다. 기본 잠금 `full` 은 경로·명령·도구 입출력·프롬프트·답변·제목·패널 글 없이 움직임(노드·상태·시각·도구 종류)만 보여 주고, `details` 잠금은 프로젝트·세션 제목, 서브에이전트 설명, 스킬 이름, 도구 호출마다 일반 문장 한 줄을 더 보여 주되 그 안의 경로·명령·코드·커밋 해시·이름·이메일은 자리표시로 바꿉니다.
 - 실황·Interactive·사용 한도·메모리 게이지·보관함·원격 조작은 공유 링크에서 거부됩니다.
 - `--replay` 를 주면 링크를 열었을 때 세션의 정해 둔 구간을 재생합니다(반복 가능). 보는 사람은 실시간 보기로 바꿀 수 있습니다.
+- `--expires <시각>` 은 `--days`/`--hours`/`--minutes` 대신 만료 시각을 정확히 정합니다(ISO, 오프셋이 없으면 KST 로 읽음).
+- `--embed <출처>` 를 주면 적어 둔 사이트가 링크를 `<iframe>`(예: 슬라이드)으로 띄울 수 있습니다. Worker 와 서버가 그 링크에 `Content-Security-Policy: frame-ancestors` 를 보내고(`*` 하나만은 거부), 다른 사이트의 iframe 안에서는 토큰을 분할(partitioned) 쿠키에 둡니다. 이 옵션이 없는 링크는 여전히 iframe 에 넣을 수 없습니다. 업그레이드 뒤 `agent4d deploy` 를 한 번 돌려 Worker 를 갱신하십시오. URL 에 `&theme=dark`·`light`·`auto` 를 붙이면 그 접속에서만 테마를 고릅니다(iframe 의 저장소는 브라우저와 따로입니다).
 
 ## 사용 한도 게이지(옵트인)
 

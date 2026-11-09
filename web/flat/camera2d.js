@@ -7,6 +7,7 @@ import { t } from '../i18n.mjs';
 import { promptCamPlan } from '../camera-core.mjs'; // 입력 때 메인으로(Follow my prompts)
 import { GitHold, gitHoldPick, gitHoldLabel, GIT_HOLD } from '../camera-core.mjs'; // git 동작 붙잡기
 import { camVisible } from '../camera-core.mjs'; // 카메라 대상 = 지금 보이는 노드만(범위·표시 고르기)
+import { boardFitPt } from '../plan-core.mjs'; // 앵커 위(화면 위 = −z) 계획판도 맞춤에
 import { FLAT, toWorld, zoomAt, panBy, boxCenterXZ, fitNeed, refineFit2D, fitMinD, flyPose, dampTo, clampD } from './flat-core.mjs';
 const HAS = (view, id) => { const v = view && view.vis && view.vis.get(id); return !!(v && !v.gone && !v.hidden); };
 
@@ -327,6 +328,7 @@ export class Director2D {
       if (c) { memo.put(id, now, c.b); anc.set(id, { dx: c.dx, dz: c.dz }); }
       if (v._lfit) { const r = v._lfit; lmemo.put(id, now, { x0: r[0], y0: r[1], x1: r[2], y1: r[3] }); } // 보드를 뺀 맞춤용 라벨 상자
       pts.push({ p: v.target, r: nr * FIT.NODE_K + FIT.NODE_PAD, e: pxToE(lmemo.get(id, now), unit) });
+      { const bp = boardFitPt(id, (view.planHome && view.planHome(id)) || v.target, true); if (bp) pts.push(bp); } // 판(앵커 위)
       const b = memo.get(id, now), a = b && anc.get(id);
       if (b && a) pts.push({ p: { x: v.target.x + a.dx, y: 0, z: v.target.z + a.dz }, r: 0, e: pxToE(b, unit), panel: true, aux: true });
     }
@@ -381,6 +383,7 @@ export class Director2D {
     const at = (k) => (view.shotTarget && view.shotTarget(k)) || view.vis.get(k).target; // 복셀 캐릭터는 가는 자리
     const pts = [{ p: at(id), r: v.r * FLAT.FIT_PAD_K + FLAT.FIT_PAD }];
     if (git) for (const q of this._ixPts(id)) pts.push({ p: { x: q.x, y: 0, z: q.z }, r: q.r }); // + 포털·발송대(자식은 담지 않음)
+    if (!git) { const bp = boardFitPt(id, (view.planHome && view.planHome(id)) || pts[0].p, true); if (bp) pts.push({ p: bp.p, r: bp.r }); } // 기동기 샷: 그 위 계획판도
     let kids = git ? [] : view.children(id).filter((k) => view.vis.get(k) && this._shown(k));
     if (!wide) kids = nearestKids(kids, at, pts[0].p, ZOOM.NODE_KIDS); // 가까운 자식 몇 개만
     for (const kid of kids) { const k = view.vis.get(kid); pts.push({ p: at(kid), r: k.r + 1.2 }); }

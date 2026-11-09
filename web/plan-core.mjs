@@ -17,8 +17,8 @@ export const PLAN_UI = {
   VX_MON_H: 1.0,      // 복셀 모니터(voxel/office-core MON.H·ASP — 시험이 같은지 확인)
   VX_MON_ASP: 1.62,
   BOOST: { flow: [30, 10], voxel: [64, 1.9] }, // 활동 노드 모니터와 같은 최소 크기 키움 [모니터 최소 높이 px, 배율 상한] (holo-core HOLO.MIN_PX_ACTIVE·BOOST_MAX, office-core MON.MIN_PX·BOOST)
-  GAP_W: 0.8,         // 앵커 원 바깥 ~ 보드 왼쪽 변(월드 단위, 원 반지름 × 1.3 바깥에서)
-  DROP_K: 0.5,        // 보드 아래 변 = 앵커 중심보다 반지름 × 이만큼 아래(3D 는 y, 2D 는 화면 아래 = +z)
+  TOP_K: 1.0,         // 앵커 위 끝 높이(표현이 view.planTop 을 내지 않으면 = 반지름 × 이만큼)
+  GAP_UP: 0.8,        // 앵커 위 끝 ~ 보드 아래 변 틈(월드). 보드는 앵커 **위 가운데**(3D 는 +y, 2D 는 화면 위 = −z) — 옆(x)에 두면 카메라 방위에 따라 앵커와 겹쳤다
   HIDE_PX: 14,        // 화면 폭이 이보다 작으면 숨김(아주 먼 전체 보기 — 홀로그램 LOD 와 같은 뜻)
   LOD_PX: 96,         // 화면 폭이 이보다 작으면 간략(출처 글리프·완료/전체·막대·칸만)
   S_MAX: 8,           // 원근 배율 상한(아주 가까울 때 — 자리는 그대로, 크기만). 크기 2배에 맞춰 4 → 8
@@ -29,7 +29,7 @@ export const PLAN_UI = {
   OCC_MAX: 24,        // 보드 한 장에 뚫는 가림 구멍 상한
   CORNER: 9,          // 판 모서리 반지름(CSS .pb border-radius px) — 구멍 사각형 둥근 모서리
   VX_CORNER: 4,       // 복셀 게시판 모서리(#plan-boards.vx .pb border-radius px)
-  VX_BOTTOM: 2.45,   // 복셀 3D 판 아래 변 최소 높이(월드) — 바닥(앵커 y 1 − r 2 × DROP_K = 0)에 두면 책상·기동기·대시보드(위 끝 2.27)·설비가 판 아래쪽을 가려 바닥에 묻혀 보였다
+  VX_BOTTOM: 3.3,    // 복셀 3D 판 아래 변 최소 높이(월드) — 기동기 대시보드(위 끝 2.27) 위 이름표(2.47 ～ 약 3.2)보다 위. 예전 2.45(옆 자리)는 대시보드·서가 위만 넘으면 됐다
 };
 
 /**
@@ -208,9 +208,10 @@ export function gatherPlans(nodes, { isRunner = (n) => !!(n && n.meta && (n.meta
 /**
  * 보드 월드 크기·자리(앵커 기준 고정 오프셋, 월드 단위). 크기 = 그 앵커의 **일반 홀로그램 모니터 기준**: 폭은 모니터와 같고
  * 높이는 모니터 높이 × HOLO_H_K(1.5). 모니터 = 흐름·Planet 높이 1.25 + 0.3·r · 폭 × 1.5, 복셀(MON) 높이 1.0 · 폭 × 1.62.
- * holo = 표현이 따로 낸 모니터 크기 {w, h}(view.holoSize — 있으면 그것이 우선). 자리 = 앵커 오른쪽(x 월드) — 왼쪽 변이 앵커 원(반지름 × 1.3)
- * 바깥 GAP_W, 아래 변이 중심보다 r × DROP_K 아래. 카메라·화면과 무관(되먹임 없음).
- * 반환 {w, h, aspect(h/w), holo:{w, h}, off(앵커 중심 → 왼쪽 변 x), drop(앵커 중심 → 아래 변, 아래로), bottom(3D 아래 변 최소 월드 y — 복셀만)}
+ * holo = 표현이 따로 낸 모니터 크기 {w, h}(view.holoSize — 있으면 그것이 우선).
+ * 자리 = 앵커 **위 가운데**: 아래 변 가운데가 앵커 위 끝(top — view.planTop, 없으면 r × TOP_K) + GAP_UP 위(3D +y, 2D 화면 위 = −z).
+ * 카메라·화면과 무관(되먹임 없음).
+ * 반환 {w, h, aspect(h/w), holo:{w, h}, up(앵커 중심 → 아래 변, 위로), bottom(3D 아래 변 최소 월드 y — 복셀만)}
  */
 export function holoMonitor(worldR, mode = 'flow') {
   const r = Math.max(0.1, worldR || 1);
@@ -218,15 +219,16 @@ export function holoMonitor(worldR, mode = 'flow') {
   const h = 1.25 + 0.3 * r;
   return { w: h * 1.5, h };
 }
-export function boardWorld(worldR, mode = 'flow', holo = null) {
+export function boardWorld(worldR, mode = 'flow', holo = null, top = null) {
   const r = Math.max(0.1, worldR || 1);
+  const tp = top > 0 ? top : r * PLAN_UI.TOP_K;
   const m = holo && holo.w > 0 && holo.h > 0 ? holo : holoMonitor(r, mode);
   const w = m.w * PLAN_UI.SIZE_K, h = m.h * PLAN_UI.HOLO_H_K * PLAN_UI.SIZE_K; // 크기 2배(비율은 그대로)
-  return { w, h, aspect: h / w, holo: { w: m.w, h: m.h }, boost: PLAN_UI.BOOST[mode === 'voxel' ? 'voxel' : 'flow'], off: r * 1.3 + PLAN_UI.GAP_W, drop: r * PLAN_UI.DROP_K, bottom: mode === 'voxel' ? PLAN_UI.VX_BOTTOM : null };
+  return { w, h, aspect: h / w, holo: { w: m.w, h: m.h }, boost: PLAN_UI.BOOST[mode === 'voxel' ? 'voxel' : 'flow'], up: tp + PLAN_UI.GAP_UP, bottom: mode === 'voxel' ? PLAN_UI.VX_BOTTOM : null };
 }
 
 /**
- * 화면 그리기 값: 보드 왼쪽 아래 모서리의 화면 투영 p {x, y}·월드 1 단위의 화면 px(ppw) → 원근 배율 s(= 월드 폭 × ppw / BASE_PX),
+ * 화면 그리기 값: 보드 아래 변 가운데의 화면 투영 p {x, y}·월드 1 단위의 화면 px(ppw) → 원근 배율 s(= 월드 폭 × ppw / BASE_PX),
  * 활동 모니터와 같은 최소 크기 키움(BOOST), 숨김(카메라 뒤·HIDE_PX 미만·판 전체가 화면 밖), 간략(lod: LOD_PX 미만). **화면 안으로 끌어오지 않는다**(가장자리 밀어 넣기 없음).
  */
 export function boardScreen(p, ppw, wb, vw, vh, bounds = null) { // bounds {l,t,r,b}: 무대 사각형(패널·상단 바 자리 빼고) — 없으면 화면 전체
@@ -238,7 +240,7 @@ export function boardScreen(p, ppw, wb, vw, vh, bounds = null) { // bounds {l,t,
   if (s0 * PLAN_UI.BASE_PX < PLAN_UI.HIDE_PX) return { hidden: true, s: s0 };
   const s = Math.min(PLAN_UI.S_MAX, s0);
   const w = PLAN_UI.BASE_PX * s, h = w * wb.aspect;
-  const box = { x: p.x, y: p.y - h, w, h };
+  const box = { x: p.x - w / 2, y: p.y - h, w, h }; // p = 아래 변 가운데
   const B = bounds || { l: 0, t: 0, r: vw, b: vh };
   const off = box.x > B.r || box.y > B.b || box.x + w < B.l || box.y + h < B.t;
   return { hidden: off, s, box, lod: w < PLAN_UI.LOD_PX };
@@ -421,7 +423,15 @@ function runSummary(runs, steps, { nowMs, labelOf, nodes, open = false }) {
  * 라벨이 피할 보드 화면 상자(지금 표현 캔버스 좌표 [x0, y0, x1, y1]) — 보드는 고정 장애물, 라벨이 비킨다.
  * plan-ui 가 매 프레임 채우고 세 표현의 라벨 배치(scene·flat-view·voxel bubbles)가 장애물 사각형에 더한다. 자동 카메라는 보드를 모른다.
  */
-export const PLAN_CAM = { rects: [] };
+export const PLAN_CAM = { rects: [], fit: new Map() }; // fit: 앵커 id → {up, h, r} — 자동 맞춤이 판(앵커 위)을 담는 월드 몫(카메라와 무관)
+/** 자동 맞춤 보조 점: 앵커 제자리 p(3D 월드 {x,y,z}) 위 판 가운데 · 반지름(판 반대각) | null. flat 이면 2D 지도(화면 위 = −z) */
+export function boardFitPt(id, p, flat = false) {
+  const f = PLAN_CAM.fit.get(id);
+  if (!f || !p) return null;
+  if (flat) return { p: { x: p.x, y: 0, z: p.z - f.up - f.h / 2 }, r: f.r, aux: true };
+  const y0 = f.bottom != null ? Math.max(p.y + f.up, f.bottom) : p.y + f.up;
+  return { p: { x: p.x, y: y0 + f.h / 2, z: p.z }, r: f.r, aux: true };
+}
 export function planLabelRects(rects) { for (const r of PLAN_CAM.rects) rects.push(r); return rects; }
 
 /** 회차 노드 찾기: 그 노드가 회차(claude-p · meta.cycle)면 그대로, 회차의 하위면 그 회차, 아니면 null */

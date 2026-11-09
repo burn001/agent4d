@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.8] - 2026-11-10
+
+### Added
+- **A shared link can be embedded in a slide deck or web page.** `agent4d share create … --embed <origins>` (or `share set <alias|id> --embed <origins>|off` on an existing link) lists the sites allowed to show the link in an `<iframe>`, for example `https://you.github.io,http://localhost:*,file:`. Both the Worker and the local server then send `Content-Security-Policy: frame-ancestors 'self' <origins>` on every response for that link (a bare `*` is refused; links without the option keep sending no frame header, as before). Inside a cross-site iframe the Worker stores the share token in a separate partitioned cookie (`SameSite=None; Secure; Partitioned`), because the browser drops the normal `SameSite=Lax` cookie there; top-level visits are unchanged. Run `agent4d deploy` once to update the Worker.
+- **`?theme=dark|light|auto` in the viewer URL** picks the theme for that visit only (the saved choice is not overwritten), like `?sound=` and `?dim=` — handy when the page sits in a slide iframe whose storage is separate.
+- **`share create --expires <time>`** sets the expiry to an exact time (ISO; without an offset it is read as KST) instead of `--days`/`--hours`/`--minutes`.
+
+### Changed
+- README (English and Korean): the scoped shared links section now covers `--embed`, `--expires` and `?theme=`.
+
+### Fixed
+- **The loop board now sits above its launcher instead of beside it.** The board was placed at a fixed world offset to the launcher's right (+x), starting at the launcher's height, so whenever the camera looked along the x axis (the automatic orbit or a manual turn) the offset vanished on screen and the board covered the launcher. It is now centered above the launcher, its bottom edge a small gap above the launcher's top (the standing device in Flow, the planet in Planet, the dashboard and its name tag in the voxel views), so it never shares the launcher's height from any camera angle, and other launchers on the same level stay below it. Flow, Planet, Voxel Office and Voxel Lab, in 3D and 2D, live and replay. The automatic camera (overall fit and a launcher close-up) now keeps the board in frame; the board itself still never moves toward the camera.
+
 ## [0.7.7] - 2026-11-09
 
 ### Added

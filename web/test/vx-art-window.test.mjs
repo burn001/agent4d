@@ -36,7 +36,7 @@ test('계획판(복셀 3D) 아래 변은 기동기 대시보드·설비 위 — 
   const dash = launcherDash({ x: 0, z: 0 }, 0.75);
   assert.ok(PLAN_UI.VX_BOTTOM > dash.top, '대시보드 위 끝보다 높게');
   assert.ok(PLAN_UI.VX_BOTTOM > 2.2 + 0.1 && PLAN_UI.VX_BOTTOM >= VXA.BAY_H, '높은 벽(2.2)·서가(2.45)보다 낮지 않게');
-  assert.ok(1 - 2 * PLAN_UI.DROP_K < PLAN_UI.VX_BOTTOM, '예전 자리(앵커 y 1 − r 2 × DROP_K = 바닥)는 끌어올림');
+  assert.ok(PLAN_UI.VX_BOTTOM > dash.label.y + 0.6, '§153 판이 기동기 바로 위라 대시보드 위 이름표(label.y ～ 몇 줄)보다도 위');
   const ui = src('../plan-ui.js');
   assert.match(ui, /if \(wb\.bottom != null && w\.y < wb\.bottom\) w\.y = wb\.bottom;/);
 });

@@ -111,6 +111,14 @@ export class ShareStore {
   }
 }
 
+// iframe 허용 출처(shares.json frameAncestors) — Worker(cloudflare/src/worker.js FA_RE)와 같은 모양만, * 단독 불가
+export const FRAME_ORIGIN_RE = /^(?:'self'|file:|https?:\/\/(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*(?::(?:\d{1,5}|\*))?)$/i;
+/** 공유의 iframe 허용 출처 → CSP frame-ancestors 값(없으면 null — 헤더를 붙이지 않는 예전 동작) */
+export function shareFrameCsp(sh) {
+  const fa = Array.isArray(sh?.frameAncestors) ? sh.frameAncestors.filter((x) => typeof x === 'string' && FRAME_ORIGIN_RE.test(x) && x !== "'self'") : [];
+  return fa.length ? `frame-ancestors 'self' ${fa.join(' ')}` : null;
+}
+
 /** 요청에서 공유 토큰 찾기(쿼리 t → 쿠키 → X-CCVIZ-Token). 보기 토큰 검사(checkAuth)가 실패한 뒤에만 부른다 */
 export function checkShare(req, url, store) {
   if (!store) return null;

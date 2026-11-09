@@ -1,11 +1,14 @@
 // 범위 제한 공유 링크 CLI — agent4d share create|list|revoke|url
 //   create --alias <별칭> --project <cwd 경로|프로젝트 폴더 이름> [--days N | --hours N | --minutes N] [--name <표시 이름>] [--redact [full|details]]
+//          [--expires <시각>]  만료 시각을 직접(ISO, 오프셋 없으면 KST — 예 2026-11-17T23:59), --days 등 대신
+//          [--embed <출처,…>]  이 링크를 iframe 으로 넣을 수 있는 사이트(CSP frame-ancestors, 예 https://a.github.io,http://localhost:*,file:). * 단독 불가
 //   list [--json] [--all]        별칭·범위·발급/만료(KST)·잠금·상태 표(만료·폐기도 기록에 남김)
 //   revoke <별칭|id>              로컬 기록 폐기 표시(서버가 곧바로 거부) + Worker KV 삭제
 //   url <별칭|id>                 전체 링크 다시 출력(유효한 것만)
 //   set <별칭|id> --replay <세션id(앞부분 가능)>@<시각> [--until <시각>] [--speed 4] [--loop] | --replay off
 //                                 기본 리플레이(링크를 열면 그 세션을 그 시각부터 자동 재생, --loop 면 끝 시각에서 처음으로).
 //                                 시각은 ISO(오프셋 없으면 KST)·'HH:mm[:ss]'(--until 만, 시작 날짜 기준). 토큰·URL·만료·잠금은 바꾸지 않는다
+//   set <별칭|id> --embed <출처,…>|off   iframe 허용 출처 바꾸기(Worker KV 다시 올림, 토큰·URL·만료 그대로)
 //   set <별칭|id> --redact full|details 잠금 등급(full = 글 모두 뺌, details = 설명 공개·경로/명령/코드/문서 번호/커밋/이름 가림). 토큰·URL·만료는 그대로
 // 원본: <상태 폴더>/shares.json(토큰·전체 URL 포함, 현재 사용자만). 사람용 목록: <상태 폴더>/shares.md(토큰은 앞 8자만).
 // Worker KV: share:<sha256(토큰)> → {id, exp} — 토큰 원문은 Worker 에 가지 않는다.
@@ -18,6 +21,18 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ccvizHome } from '../server/home.mjs';
 import { cliLang } from '../server/cli-i18n.mjs';
+import { FRAME_ORIGIN_RE } from '../server/share.mjs';
+
+/** --embed 값 → 출처 배열 | [] (off) | null (잘못됨) */
+function parseEmbed(v) {
+  if (v == null || v === true) return null;
+  const s = String(v).trim();
+  if (/^(off|none|no|0)$/i.test(s)) return [];
+  const list = [...new Set(s.split(/[\s,]+/).map((x) => x.trim().replace(/\/+$/, '')).filter(Boolean))];
+  if (!list.length || list.length > 16 || list.some((x) => !FRAME_ORIGIN_RE.test(x))) return null;
+  return list;
+}
+const embedText = (sh) => (Array.isArray(sh.frameAncestors) && sh.frameAncestors.length ? sh.frameAncestors.join(' ') : '-');
 import { readShares, shareValid, sha256hex, newShareToken, newShareId, encodeCwd, SHARE_FILE, shareReplayOf, shareLevel, SHARE_LEVELS } from '../server/share.mjs';
 
 const HOME = ccvizHome();
@@ -208,7 +223,7 @@ export function stateOf(sh, now = Date.now()) {
 }
 /** 상태 표기(그 언어) */
 export const statusOf = (sh, now = Date.now(), lang) => tt(stateOf(sh, now), {}, lang);
-export const lockText = (sh, lang) => (sh.redact === false ? '-' : `${tt(shareLevel(sh) === 'details' ? 'lockDetails' : 'lockFull', {}, lang)}·${tt('lockTail', {}, lang)}`);
+export const lockText = (sh, lang) => (sh.redact === false ? '-' : `${tt(shareLevel(sh) === 'details' ? 'lockDetails' : 'lockFull', {}, lang)}·${tt('lockTail', {}, lang)}${Array.isArray(sh.frameAncestors) && sh.frameAncestors.length ? ` · iframe: ${sh.frameAncestors.join(' ')}` : ''}`);
 /** --redact 값 → 'full'|'details'|null(틀림). 값 없이 --redact 만 주면 full */
 export function parseLevel(v) {
   if (v === true || v == null) return 'full';
@@ -292,7 +307,10 @@ async function cmdCreate(o) {
   const pr = resolveProject(o.project);
   if (!pr) { warn(tt('needProject')); return 2; }
   if (!pr.exists) warn(tt('noProjectDir', { project: pr.project }));
-  const mins = o.minutes != null ? Number(o.minutes) : o.hours != null ? Number(o.hours) * 60 : (o.days != null ? Number(o.days) : 7) * 1440;
+  let mins = o.minutes != null ? Number(o.minutes) : o.hours != null ? Number(o.hours) * 60 : (o.days != null ? Number(o.days) : 7) * 1440;
+  if (o.expires != null) mins = (parseKstTime(o.expires) - Date.now()) / 60_000;
+  const embed = o.embed != null ? parseEmbed(o.embed) : [];
+  if (embed == null) { warn(`--embed: ${String(o.embed)} — https://host[:port], http://localhost:*, file: (comma separated, no bare *)`); return 2; }
   if (!Number.isFinite(mins) || mins < 1 || mins > 90 * 1440) { warn(tt('badPeriod')); return 2; }
   if (o.redact === 'false' || o['no-redact']) { warn(tt('noUnlock')); return 2; }
   const level = parseLevel(o.redact);
@@ -307,7 +325,8 @@ async function cmdCreate(o) {
     name: typeof o.name === 'string' && o.name.trim() ? o.name.trim().slice(0, 40) : null,
     createdAt: new Date(now).toISOString(), expiresAt: new Date(now + mins * 60_000).toISOString(), redact: levelValue(level), kv: false,
   };
-  const w = await workerShare(cfg, { op: 'put', hash: sh.hash, id: sh.id, exp: Date.parse(sh.expiresAt) });
+  if (embed.length) sh.frameAncestors = embed;
+  const w = await workerShare(cfg, { op: 'put', hash: sh.hash, id: sh.id, exp: Date.parse(sh.expiresAt), ...(embed.length ? { fa: embed } : {}) });
   if (!w.ok) { warn(tt('workerFail', { why: w.why })); return 1; }
   sh.kv = true;
   sh.url = linkOf(cfg, sh);
@@ -388,6 +407,18 @@ async function cmdSet(o) {
   const list = load();
   const sh = findShare(list, key);
   if (!sh) { warn(tt('notFound', { key: key || '' })); return 2; }
+  if (o.embed != null) {
+    // iframe 허용 출처: shares.json(로컬 서버)·Worker KV(fa) 둘 다 — 토큰·URL·만료 그대로
+    const embed = parseEmbed(o.embed);
+    if (embed == null) { warn(`--embed: ${String(o.embed)} — https://host[:port], http://localhost:*, file: (comma separated, no bare *) | off`); return 2; }
+    if (stateOf(sh) !== 'valid') { warn(tt('urlState', { state: statusOf(sh) })); return 1; }
+    if (embed.length) sh.frameAncestors = embed; else delete sh.frameAncestors;
+    const w = await workerShare(readJson(CONFIG) || {}, { op: 'put', hash: sh.hash, id: sh.id, exp: Date.parse(sh.expiresAt), ...(embed.length ? { fa: embed } : {}) });
+    if (!w.ok) { warn(tt('workerFail', { why: w.why })); return 1; }
+    save(list);
+    log(`${sh.alias || '-'}: iframe ${embedText(sh)}`);
+    if (o.redact == null && o.replay == null) return 0;
+  }
   if (o.redact != null) {
     // 잠금 등급 바꾸기(토큰·URL·만료·Worker KV 그대로 — 서버가 2초 안에 새 등급으로 응답, 열린 화면은 새로고침하면 반영)
     const level = parseLevel(o.redact);

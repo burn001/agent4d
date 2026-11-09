@@ -15,6 +15,11 @@
 
 const ORIGIN_RE = /^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/;
 const COOKIE = "ccviz_t";
+// 공유 링크를 다른 사이트의 iframe 에 넣을 때(발표 슬라이드 등): 교차 사이트 iframe 에선 SameSite=Lax 쿠키가 저장·전송되지 않으므로
+// 그 응답에만 분할(CHIPS) 쿠키 ccviz_s 를 따로 준다(SameSite=None; Secure; Partitioned — 보기 토큰 쿠키 ccviz_t 와 섞이지 않게 이름을 나눔, 공유 토큰만 받음)
+const FRAME_COOKIE = "ccviz_s";
+// 공유별 iframe 허용 출처(KV share 값 fa) — CSP frame-ancestors 로만 쓰므로 모양을 엄격히 거른다(* 단독 불가)
+const FA_RE = /^(?:'self'|file:|https?:\/\/(?:\*\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*(?::(?:\d{1,5}|\*))?)$/i;
 const COOKIE_MAX_AGE = 2592000; // 30일
 const MEM_TTL_MS = 10_000;
 const SHARE_PREFIX = "sh_";
@@ -111,6 +116,31 @@ function offline(request) {
 function cookieHeader(token, maxAge = COOKIE_MAX_AGE) {
   return `${COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
 }
+function frameCookieHeader(token, maxAge) {
+  return `${FRAME_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=None; Partitioned; Path=/; Max-Age=${maxAge}`;
+}
+/** iframe 안 문서 요청인가(Sec-Fetch-Dest) */
+function inFrame(request) {
+  const d = (request.headers.get("Sec-Fetch-Dest") || "").toLowerCase();
+  return d === "iframe" || d === "frame";
+}
+/** 공유 토큰용 쿠키: iframe 이면 분할 쿠키, 아니면 예전 그대로 */
+function shareCookie(request, tok, maxAge) {
+  return inFrame(request) ? frameCookieHeader(tok, maxAge) : cookieHeader(tok, maxAge);
+}
+/** 공유별 iframe 허용 출처 → CSP 값(없으면 null = 헤더 안 붙임, 예전 동작) */
+function frameCsp(s) {
+  const fa = Array.isArray(s?.fa) ? s.fa.filter((x) => typeof x === "string" && FA_RE.test(x)) : [];
+  return fa.length ? `frame-ancestors 'self' ${fa.filter((x) => x !== "'self'").join(" ")}`.trim() : null;
+}
+function withFrameCsp(res, s) {
+  const csp = frameCsp(s);
+  if (!csp) return res;
+  const r = new Response(res.body, res);
+  r.headers.set("Content-Security-Policy", csp);
+  r.headers.delete("X-Frame-Options");
+  return r;
+}
 
 // ───────────── 공유 토큰 ─────────────
 async function sha256hex(s) {
@@ -128,7 +158,7 @@ async function shareOf(env, tok) {
   }
   if (!v || typeof v.exp !== "number") return null;
   if (v.exp <= Date.now()) return { expired: true };
-  return { exp: v.exp, id: v.id };
+  return { exp: v.exp, id: v.id, fa: Array.isArray(v.fa) ? v.fa : null };
 }
 /** 공유 토큰으로 못 여는 경로(로컬 서버 shareBlockedPath 와 같은 목록) */
 function shareBlocked(url) {
@@ -166,9 +196,10 @@ async function handleShareAdmin(request, env) {
   }
   if (b.op !== "put" || typeof b.exp !== "number" || !Number.isFinite(b.exp) || b.exp <= Date.now()) return json(400, { error: "bad-share" });
   const id = typeof b.id === "string" ? b.id.slice(0, 32) : null;
+  const fa = Array.isArray(b.fa) ? b.fa.filter((x) => typeof x === "string" && FA_RE.test(x)).slice(0, 16) : null;
   // KV 자동 삭제는 기한 하루 뒤(그동안은 '기한 지남' 안내), 최소 120초 뒤
   const expiration = Math.max(Math.ceil(Date.now() / 1000) + 120, Math.ceil(b.exp / 1000) + 86400);
-  await env.CCVIZ.put(key, JSON.stringify({ id, exp: b.exp }), { expiration });
+  await env.CCVIZ.put(key, JSON.stringify(fa && fa.length ? { id, exp: b.exp, fa } : { id, exp: b.exp }), { expiration });
   return json(200, { ok: true });
 }
 /** 공유 토큰 요청: 막힌 경로 거르기 → 한도·메모리는 '꺼짐' → 프록시(SSE 는 기한에 끊음) */
@@ -270,7 +301,7 @@ async function proxy(request, env, url, token) {
   // 브라우저 쿠키의 ccviz_t 는 origin 으로 보내지 않는다(판정은 Worker 가 고른 X-CCVIZ-Token 하나로)
   const ck = headers.get("Cookie");
   if (ck) {
-    const rest = ck.split(";").filter((x) => x.split("=")[0].trim() !== COOKIE).join(";").trim();
+    const rest = ck.split(";").filter((x) => ![COOKIE, FRAME_COOKIE].includes(x.split("=")[0].trim())).join(";").trim();
     if (rest) headers.set("Cookie", rest);
     else headers.delete("Cookie");
   }
@@ -353,15 +384,15 @@ export default {
       if (wantsHtml(request)) {
         const clean = new URL(url);
         clean.searchParams.delete("t");
-        return new Response(null, {
+        return withFrameCsp(new Response(null, {
           status: 302,
-          headers: { Location: clean.pathname + clean.search, "Set-Cookie": cookieHeader(qt, maxAge), "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" },
-        });
+          headers: { Location: clean.pathname + clean.search, "Set-Cookie": shareCookie(request, qt, maxAge), "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" },
+        }), s);
       }
       const res = await proxyShare(request, env, url, qt, s);
       const r2 = new Response(res.body, res);
-      r2.headers.append("Set-Cookie", cookieHeader(qt, maxAge));
-      return r2;
+      r2.headers.append("Set-Cookie", shareCookie(request, qt, maxAge));
+      return withFrameCsp(r2, s);
     }
     if (qt !== null) {
       if (wantsHtml(request)) {
@@ -383,12 +414,12 @@ export default {
     const ct = readCookie(request, COOKIE);
     const ht = request.headers.get("X-CCVIZ-Token");
     if ((await safeEqual(ct, token)) || (await safeEqual(ht, token))) return proxy(request, env, url, token);
-    // 공유 토큰(쿠키 → 헤더)
-    for (const tok of [ct, ht]) {
+    // 공유 토큰(쿠키 → iframe 분할 쿠키 → 헤더)
+    for (const tok of [ct, readCookie(request, FRAME_COOKIE), ht]) {
       const s = await shareOf(env, tok);
       if (!s) continue;
       if (s.expired) return expiredPage(request);
-      return proxyShare(request, env, url, tok, s);
+      return withFrameCsp(await proxyShare(request, env, url, tok, s), s);
     }
     return unauthorized(request);
   },

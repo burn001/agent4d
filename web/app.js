@@ -102,7 +102,9 @@ let pendingSnap = null;             // 정지 중 도착한 스냅샷(mock 재�
 let frozenPerf = null;              // 정지한 순간의 performance.now (타임라인 시계를 멈춤)
 
 // ---------------- 테마 ----------------
-let themePref = lsGet('ccviz.theme', 'auto');
+// ?theme=dark|light|auto 는 이 접속에서만 우선(저장값은 덮지 않음 — 슬라이드 iframe 등 발표용, ?sound=·?dim= 과 같은 방식)
+const URL_THEME = ['auto', 'dark', 'light'].includes(params.get('theme')) ? params.get('theme') : null;
+let themePref = URL_THEME || lsGet('ccviz.theme', 'auto');
 const mql = window.matchMedia ? matchMedia('(prefers-color-scheme: light)') : null;
 const resolveTheme = () => (themePref === 'auto' ? (mql && mql.matches ? 'light' : 'dark') : themePref);
 let view = null;

@@ -294,6 +294,15 @@ export class FlowView extends SceneView {
   /** 홀로그램 패널 거리 기준 반지름(holo.js): 분리 프로세스 장치는 넓은 상자(반폭 1.45 × 칩 배율)라 패널이 계기판을 덮지 않게 더 띄움 */
   /** 메인 모양('reactor'|'column') — 상세 팝업·시험 */
   mainShapeOf(id) { if (this.mainRigs) { this.mainRigs._assign(); return this.mainRigs.shapeOf(id); } return null; }
+  /** 계획판 자리: 앵커 중심 → 위 끝(세계). 세운 배치 장치·분리 프로세스 = 상자 반높이, 메인 = 몸 윗면, 그 밖 칩 = 실루엣 반높이 — 크기 맥동(v.size)·effort 기둥은 빼고 v.r 기준(판이 출렁이지 않게) */
+  planTop(id) {
+    const v = this.vis.get(id);
+    if (!v) return null;
+    if (v.device || v.procRig) return STAND.DEV_HY * v.r;
+    if (v.kind === 'main') return mainLinkY(false) * v.r;
+    const sil = v._sil && SIL_DIM[v._sil];
+    return (sil ? sil.h : 0.62) * 0.5 * v.r;
+  }
   holoR(v) { return v.r * v.size * (v.procRig ? 1.5 : v.kind === 'main' && !v.device ? MAIN_RIG.HOLO_K : 1); } // 메인 몸은 자이로 고리·띠가 반지름 밖으로 조금
 
   /** 빔·패킷 끝점: 세운 배치 장치는 아래 변에서 나가고(떠오름 없이 곧장 내려감) 위 변으로 들어온다. 그 밖 노드는 중심 */

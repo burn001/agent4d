@@ -36,26 +36,26 @@ const projA = (view, id) => { const v = view && view.vis && view.vis.get(id); re
 const f1 = (v) => v.toFixed(1);
 
 /**
- * 보드 왼쪽 아래 모서리의 월드 점 → 화면 투영. home = 앵커의 제자리(view.planHome — 복셀 캐릭터는 걸어 다녀도 자기 책상 자리, 없으면 nodePos = 노드 월드 자리).
+ * 보드 아래 변 가운데(앵커 위 끝 + 틈 위)의 월드 점 → 화면 투영. home = 앵커의 제자리(view.planHome — 복셀 캐릭터는 걸어 다녀도 자기 책상 자리, 없으면 nodePos = 노드 월드 자리).
  * 반환 {wp(월드 점), p(화면 px — 뷰포트), ppw(그 점에서 월드 1 단위 px), wb} 또는 null
  */
 function boardProject(view, aid) {
   const home = view.planHome ? view.planHome(aid) : view.nodePos ? view.nodePos(aid) : null; // 노드와 함께 미끄러짐(재배치 때 앞질러 튀지 않게)
   if (!home) return null;
   const mode = view.constructor && (view.constructor.family === 'voxel' ? 'voxel' : view.constructor.modeId); // 복셀 연구소 = 복셀 판
-  const wb = boardWorld(view.nodeRadius ? view.nodeRadius(aid) : 1, mode, view.holoSize ? view.holoSize(aid) : null); // 표현이 낸 모니터 크기가 있으면 그것
+  const wb = boardWorld(view.nodeRadius ? view.nodeRadius(aid) : 1, mode, view.holoSize ? view.holoSize(aid) : null, view.planTop ? view.planTop(aid) : null); // 표현이 낸 모니터 크기·앵커 위 끝 높이가 있으면 그것
   const dom = view.renderer && view.renderer.domElement;
   const rect = dom ? dom.getBoundingClientRect() : { left: 0, top: 0, width: innerWidth, height: innerHeight };
   if (view.flat) {
     if (!view.cam) return null;
-    const wx = home.x + wb.off, wz = home.z + wb.drop; // 2D: 화면 아래 = +z
+    const wx = home.x, wz = home.z - wb.up; // 2D: 화면 위 = −z
     const q = toScreen(view.cam, view.W, view.H, wx, wz, {});
     return { home: { x: home.x, y: 0, z: home.z }, wp: { x: wx, y: 0, z: wz }, p: { x: rect.left + q.x, y: rect.top + q.y }, ppw: camScale(view.cam, view.H), wb };
   }
   const cam = view.camera;
   if (!cam || !home.clone) return null;
-  const w = home.clone(); w.x += wb.off; w.y -= wb.drop;
-  if (wb.bottom != null && w.y < wb.bottom) w.y = wb.bottom; // 복셀 3D: 판 아래 변을 기동기 대시보드·설비 위로(구멍 평면이 바닥·낮은 물체에 묻히지 않게)
+  const w = home.clone(); w.y += wb.up; // 앵커 위 가운데(옆 +x 는 카메라 방위에 따라 앵커와 겹쳤다)
+  if (wb.bottom != null && w.y < wb.bottom) w.y = wb.bottom; // 복셀 3D: 판 아래 변을 기동기 대시보드·이름표 위로
   const wp = { x: w.x, y: w.y, z: w.z };
   const d = cam.position.distanceTo(w) || 1;
   const v = w.project(cam);
@@ -136,7 +136,7 @@ export function mountPlans(h) {
   function dropLayer() {
     if (layer) layer.remove();
     if (svg) svg.remove();
-    layer = null; svg = null; boards.clear(); links.length = 0; PLAN_CAM.rects = [];
+    layer = null; svg = null; boards.clear(); links.length = 0; PLAN_CAM.rects = []; PLAN_CAM.fit = new Map();
   }
 
   function setOn(v, { save = false } = {}) {
@@ -250,6 +250,8 @@ export function mountPlans(h) {
     const punches = [];
     hitBoxes.length = 0;
     const cands = [];
+    const fit = new Map(); // 앵커 id → 판 월드 몫(자동 맞춤 보조 점)
+    const fitOf = (aid, wb) => fit.set(aid, { up: wb.up, h: wb.h, r: Math.hypot(wb.w, wb.h) / 2, bottom: wb.bottom });
     openBox = null;
     if (view) for (const [mid, entries] of groups) {
       // 크게 보기로 연 보드: 판은 숨기고(카드가 대신함) 그 월드 자리의 화면 상자만 잰다 — 카드가 그 자리 곁에 뜸(카메라는 안 움직임)
@@ -257,6 +259,7 @@ export function mountPlans(h) {
         const an = boardAnchor(entries, mid, nodes, (id) => shownNode(view, id));
         const pj = shownNode(view, an.id) ? boardProject(view, an.id) : null;
         const sc = pj ? boardScreen(pj.p, pj.ppw, pj.wb, W, H, SB) : null;
+        if (pj) fitOf(an.id, pj.wb); // 크게 보기를 열어도 맞춤 구도는 그대로
         if (sc && !sc.hidden && sc.box) openBox = { x: sc.box.x + sc.box.w / 2, y: sc.box.y + sc.box.h / 2, r: Math.min(480, Math.max(sc.box.w, sc.box.h) / 2) };
         const ob = boards.get(mid); if (ob && !ob.el.hidden) ob.el.hidden = true;
         continue;
@@ -305,6 +308,7 @@ export function mountPlans(h) {
       const m = boardCard(mg.entries, { nowMs: wall, fx: lowMotion ? null : fx, labelOf, mainId: c.id, liveCy: liveCycleOf(mg.entries[0].plan, nodes) ?? mg.liveCy });
       if (!m) continue;
       keep.add(c.id);
+      fitOf(c.aid, pj.wb); // 자동 맞춤이 앵커 위 판을 담게(화면 안팎과 무관 — 되먹임 없음)
       const b = boardEl(c.id);
       b.aid = c.aid;
       render(b, m);
@@ -322,20 +326,20 @@ export function mountPlans(h) {
       b.el.hidden = false;
       let clip = '';
       if (punch && pj.wp) { // 판 기준 월드 점 + 화면 상자 → 판 평면 네 모서리 구멍(모서리 반지름 = CSS 9px × 배율)
-        punches.push({ wx: pj.wp.x, wy: pj.wp.y, wz: pj.wp.z, box: sc.box, r: (vxBoard ? PLAN_UI.VX_CORNER : PLAN_UI.CORNER) * sc.s, a: curA }); // 판 기준점 = 판 DOM 이 자리·배율을 잡는 월드 점(왼쪽 아래)
+        punches.push({ wx: pj.wp.x, wy: pj.wp.y, wz: pj.wp.z, box: sc.box, r: (vxBoard ? PLAN_UI.VX_CORNER : PLAN_UI.CORNER) * sc.s, a: curA }); // 판 기준점 = 판 DOM 이 자리·배율을 잡는 월드 점(아래 변 가운데)
         hitBoxes.push({ id: c.id, x0: bx, y0: by, x1: bx + sc.box.w, y1: by + sc.box.h });
       } else if (occ3d && pj.wp) {
-        const cp = view.camera.position, wc = { x: pj.wp.x + pj.wb.w / 2 - cp.x, y: pj.wp.y + pj.wb.h / 2 - cp.y, z: pj.wp.z - cp.z };
+        const cp = view.camera.position, wc = { x: pj.wp.x - cp.x, y: pj.wp.y + pj.wb.h / 2 - cp.y, z: pj.wp.z - cp.z }; // 판 가운데 = 아래 변 가운데 + 반높이
         const all = occluders().filter((o) => o.id !== c.aid);
         clip = holesMask(boardHoles(sc.box, sc.s, all, Math.hypot(wc.x, wc.y, wc.z)));
       }
       if (clip !== (b.clip || '')) { b.clip = clip; b.el.style.maskImage = clip; b.el.style.webkitMaskImage = clip; b.el.classList.toggle('occ', !!clip); }
       rects.push([bx - cr.left, by - cr.top, bx + sc.box.w - cr.left, by + sc.box.h - cr.top]); // 라벨이 피할 고정 장애물(캔버스 좌표)
       if (!svg) continue;
-      // 선 하나: 앵커 원 가장자리 → 보드 왼쪽 변(앵커 높이에 가장 가까운 점). 양 끝 모두 이번 프레임 투영
+      // 선 하나: 앵커 원 가장자리 → 보드 아래 변(앵커 x 에 가장 가까운 점). 양 끝 모두 이번 프레임 투영
       const a = anchorOf(view, { type: 'node', id: c.aid });
       if (!a || !(a.r > 0)) continue;
-      const ex = bx, ey = Math.max(by + 8 * sc.s, Math.min(by + sc.box.h - 8 * sc.s, a.y));
+      const ex = Math.max(bx + 8 * sc.s, Math.min(bx + sc.box.w - 8 * sc.s, a.x)), ey = by + sc.box.h;
       const dx = ex - a.x, dy = ey - a.y, dl = Math.hypot(dx, dy) || 1;
       if (dl < 4) continue;
       const st = Math.min(a.r * 0.9, dl * 0.5); // 보드 변이 앵커 원 안쪽에 걸쳐도(가까이서 비스듬히) 선은 남김
@@ -344,6 +348,7 @@ export function mountPlans(h) {
       path.setAttribute('class', 'pl-lead');
     }
     PLAN_CAM.rects = rects;
+    PLAN_CAM.fit = fit;
     curA = 1;
     if (punch) { view.setPlanPunch(punches); punchView = view; }
     for (let i = li; i < links.length; i++) { const w = links[i].__w; if (w.d) { w.d = ''; w.el.setAttribute('d', ''); } }
@@ -365,7 +370,7 @@ export function mountPlans(h) {
     if (ch.length) fx.note(ev.nodeId, ch, performance.now());
     kick();
   }
-  function reset() { fx.clear(); dirty = true; if (layer) { for (const b of boards.values()) b.el.remove(); boards.clear(); } PLAN_CAM.rects = []; kick(); }
+  function reset() { fx.clear(); dirty = true; if (layer) { for (const b of boards.values()) b.el.remove(); boards.clear(); } PLAN_CAM.rects = []; PLAN_CAM.fit = new Map(); kick(); }
 
   /** 상세 팝업 노드 절 HTML(켜졌을 때만, 없으면 '') */
   function inspectHtml(node, nowMs) {

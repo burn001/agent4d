@@ -11,6 +11,7 @@ import { promptCamPlan } from './camera-core.mjs'; // 입력 때 메인으로(Fo
 import { GitHold, gitHoldPick, gitHoldLabel, GIT_HOLD } from './camera-core.mjs'; // git 동작 붙잡기
 import { azRanged, spinStep, shotYawStep } from './camera-core.mjs'; // 복셀 방위 풀기
 import { camVisible } from './camera-core.mjs'; // 카메라 대상 = 지금 보이는 노드만(범위·표시 고르기)
+import { boardFitPt } from './plan-core.mjs'; // 앵커 위 계획판도 맞춤에(보조 점 — 무게중심엔 안 넣음)
 const HAS = (view, id) => { const v = view && view.vis && view.vis.get(id); return !!(v && !v.gone && !v.hidden); };
 const SWITCH_EVERY = 8;      // 초
 const RESUME_AFTER = 10;     // 초
@@ -537,6 +538,7 @@ export class CameraDirector {
     if (!shot.wide) kids = nearestKids(kids, at, pts[0].p || { x: 0, y: 0, z: 0 }, ZOOM.NODE_KIDS); // 가까운 자식 몇 개만
     if (shot.prompt || shot.git) kids = []; // 입력 받은 메인 · git 붙잡기: 그 노드 자체를 크게(자식·하위 활동 노드 훑기 없음)
     if (shot.git) for (const q of this._ixPts(id)) pts.push({ p: { x: q.x, y: q.y, z: q.z }, r: q.r, must: true }); // + 포털(Planet 위성 궤도·복셀 발송대)
+    if (!shot.prompt && !shot.git && pts[0].p) { const bp = boardFitPt(id, (view.planHome && view.planHome(id)) || pts[0].p); if (bp) pts.push(bp); } // 기동기 샷: 그 위 계획판도
     const lim = kids.length;
     for (let i = 0; i < lim; i++) { seen.add(kids[i]); pts.push({ p: at(kids[i]), r: view.nodeRadius(kids[i]) + 1.2, must: this._liveId(kids[i], now) }); }
     // 하위의 하위에서 일하는 노드(서브에이전트의 서브에이전트·claude -p 자식 등)도 들어오게
@@ -599,6 +601,7 @@ export class CameraDirector {
       if (!p) continue;
       const nr = view.fitNodeR ? view.fitNodeR(id) : view.nodeRadius ? view.nodeRadius(id) : 1;
       pts.push({ p, r: nr * FIT.NODE_K + FIT.NODE_PAD });
+      { const bp = boardFitPt(id, (view.planHome && view.planHome(id)) || p); if (bp) pts.push(bp); } // 판(앵커 위)
       // 라벨·이름표·말풍선(DOM, 화면 크기 고정): 세계 기준점 + 기준점 기준 px 상자 → 화면 고정 몫 e(LABEL_KEEP 초 기억)
       const o = (view.nodePos && view.nodePos(id)) || p;
       const ls = labs && labs.get(id);

@@ -152,3 +152,11 @@ test('§151 기본 리플레이 미리 만들기: 유효한 공유만·캐시에
   assert.equal(warmShareReplays(mgr, [SID, null, undefined]), 0);
   assert.equal(warmShareReplays(null, [SID]), 0);
 });
+
+test('공유 iframe 허용 출처: frameAncestors → CSP frame-ancestors, 모양이 틀린 값·* 단독은 버림', async () => {
+  const { shareFrameCsp, FRAME_ORIGIN_RE } = await import('../share.mjs');
+  assert.equal(shareFrameCsp(mkShare()), null); // 없으면 헤더 없음(예전 동작)
+  const sh = mkShare(60, { frameAncestors: ['https://a.github.io', 'http://localhost:*', 'file:', '*', 'javascript:x'] });
+  assert.equal(shareFrameCsp(sh), "frame-ancestors 'self' https://a.github.io http://localhost:* file:");
+  for (const bad of ['*', 'https://*', 'https://a.com/p', 'data:']) assert.equal(FRAME_ORIGIN_RE.test(bad), false, bad);
+});

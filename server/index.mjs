@@ -29,7 +29,7 @@ import { sseHeaders } from './sse.mjs';
 import { configureExtJobs } from './extjobs.mjs'; // 외부 작업 등록부(상시 서버만 끝난 서술 파일 정리)
 import { InteractHub, handleInteractAdmin } from './interact.mjs'; // Interactive 패널(기본 꺼짐, 승인 기기만)
 import { sharedPeerAddrBook } from './peer-addr.mjs';
-import { ShareStore, checkShare, shareLevel, expiredHtml, shareBlockedPath, shareClean, shareKeepHubEvent, shareFilterHubSnap, shareFilterProjects, shareLang, markShareHtml, shareFilePath, shareReplayOf } from './share.mjs'; // 범위 제한 공유 링크
+import { ShareStore, checkShare, shareLevel, expiredHtml, shareBlockedPath, shareClean, shareKeepHubEvent, shareFilterHubSnap, shareFilterProjects, shareLang, markShareHtml, shareFilePath, shareReplayOf, shareFrameCsp } from './share.mjs'; // 범위 제한 공유 링크
 import { liveFull } from './md-full.mjs'; // 잘린 응답 전체 보기 // 수신함 주소 장부(재생이 보낸 세션 노드를 찾게)
 
 export const VERSION = readVersion(); // package.json 이 근거
@@ -425,6 +425,7 @@ export function createServer({ token, manager, webRoot = WEB_ROOT, project = nul
       }
       const headers = { ...SEC };
       if (auth.setCookie) headers['Set-Cookie'] = auth.setCookie;
+      if (sx) { const csp = shareFrameCsp(sx.share); if (csp) headers['Content-Security-Policy'] = csp; } // 공유별 iframe 허용 출처
       if (auth.redirect) { res.writeHead(302, { ...headers, Location: auth.redirect, 'Cache-Control': 'no-store' }); res.end(); return; }
       if (sx) return await handleShare(req, res, url, sx, { manager, headers, webRoot });
       // 화면 쪽(보기 토큰): 명령 적용 결과·상태 알림, 데이터 SSE 가 없을 때(재생 중 등)의 명령 전용 SSE

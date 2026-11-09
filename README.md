@@ -249,18 +249,21 @@ Useful options: `start --project <encoded-project-dir>` limits what the link can
 To show someone else how the agents work on one project for a limited time, issue a separate shared link instead of handing out the view token. It needs the remote setup above (a deployed Worker and a running tunnel); the link stops working when the PC or the server is off.
 
 ```bash
-node bin/agent4d.mjs share create --alias demo-week --project /path/to/project --days 7   # also --hours, --minutes, --name
+node bin/agent4d.mjs share create --alias demo-week --project /path/to/project --days 7   # also --hours, --minutes, --expires <time>, --name, --embed <origins>
 node bin/agent4d.mjs share list                 # alias, scope, issue/expiry time, lock, status
 node bin/agent4d.mjs share url <alias|id>       # print a valid link again
 node bin/agent4d.mjs share revoke <alias|id>    # refused at once by the server and removed from the Worker
 node bin/agent4d.mjs share set <alias|id> --replay <session>@<time> [--until <time>] [--speed 4] [--loop]   # open on a replay (--replay off = live)
 node bin/agent4d.mjs share set <alias|id> --redact details   # or full (default)
+node bin/agent4d.mjs share set <alias|id> --embed https://you.github.io,file:   # allow these sites to embed it (--embed off = none)
 ```
 
 - Each link has its own token and expiry, checked by both the Worker and the local server; open streams are cut when it expires or is revoked.
 - The link sees only that project's sessions. The server strips content before anything leaves it: with the default `full` lock there are no paths, commands, tool input or output, prompts, replies, titles or panel text, only the motion (nodes, status, timing, tool kinds). The `details` lock also shows project and session titles, subagent descriptions, skill names and a generic line per tool call, with paths, commands, code, commit hashes, names and emails in them replaced by placeholders.
 - The live feed, Interactive, usage limits, memory gauge, archive and remote control are refused for shared links.
 - `--replay` makes the link play a chosen part of a session (optionally looping); viewers can still switch to live.
+- `--expires <time>` sets an exact expiry (ISO; without an offset it is read as KST) instead of `--days`/`--hours`/`--minutes`.
+- `--embed <origins>` lets the listed sites show the link in an `<iframe>` (for example a slide deck): the Worker and the server send `Content-Security-Policy: frame-ancestors` for that link (a bare `*` is refused), and inside a cross-site iframe the token is kept in a partitioned cookie. Links without it still cannot be framed. Run `agent4d deploy` once after upgrading so the Worker knows the option. Add `&theme=dark`, `light` or `auto` to the URL to pick the theme for that visit only (the iframe's storage is separate from your browser's).
 
 ## Usage-limit gauge (opt-in)
 

@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  PLAN_UI, planInitial, plansOf, planProgress, diffPlans, PlanFx, mainOf, gatherPlans, boardWorld, holoMonitor, boardScreen, boardCard, sheetInspectModel, PLAN_CAM, planLabelRects,
+  PLAN_UI, planInitial, plansOf, planProgress, diffPlans, PlanFx, mainOf, gatherPlans, boardWorld, holoMonitor, boardScreen, boardCard, sheetInspectModel, PLAN_CAM, planLabelRects, boardFitPt,
   cycleNodeOf, planInspectModel, boardAnchor, liveCycleOf, PLAN_ST_LABEL,
 } from '../plan-core.mjs';
 import { _setLangForTest } from '../i18n.mjs';
@@ -92,24 +92,27 @@ test('§83.9 보드 크기 = 홀로그램 모니터 폭 × 높이 1.5배, 앵커
   assert.ok(Math.abs(far.box.w - w.w * 10 * (30 / (w.holo.h * 10))) < 1e-6);
   const own = boardWorld(2, 'planet', { w: 3, h: 2 });
   assert.equal(own.w, 3 * K); assert.equal(own.h, 3 * K, '표현이 낸 모니터 크기(view.holoSize)가 우선');
-  assert.ok(Math.abs(w.off - (2 * 1.3 + PLAN_UI.GAP_W)) < 1e-9, '원 바깥 오른쪽');
+  assert.ok(Math.abs(w.up - (2 * PLAN_UI.TOP_K + PLAN_UI.GAP_UP)) < 1e-9, '§153 앵커 위 끝(r × TOP_K) + 틈 위');
+  assert.equal(w.off, undefined, '§153 옆(+x) 오프셋 없음 — 앵커 위 가운데');
+  assert.ok(Math.abs(boardWorld(2, 'flow', null, 0.7).up - (0.7 + PLAN_UI.GAP_UP)) < 1e-9, '표현이 낸 위 끝(view.planTop)이 우선');
   assert.deepEqual(boardWorld(2), w, '결정적 — 화면·카메라 입력이 없다');
-  // 화면 투영: 배율 = 월드 폭 × px/월드 / 기준 폭, 왼쪽 아래 모서리 = 투영 점, 높이 = 폭 × 비율
+  // 화면 투영: 배율 = 월드 폭 × px/월드 / 기준 폭, 아래 변 가운데 = 투영 점, 높이 = 폭 × 비율
   const sc = boardScreen({ x: 500, y: 400 }, 60, w, 1440, 900);
   assert.ok(!sc.hidden && Math.abs(sc.s - (w.w * 60) / PLAN_UI.BASE_PX) < 1e-9);
-  assert.equal(sc.box.x, 500); assert.ok(Math.abs(sc.box.y + sc.box.h - 400) < 1e-9, '아래 변 = 투영 점');
+  assert.ok(Math.abs(sc.box.x + sc.box.w / 2 - 500) < 1e-9, '가로 가운데 = 투영 점'); assert.ok(Math.abs(sc.box.y + sc.box.h - 400) < 1e-9, '아래 변 = 투영 점');
+  assert.ok(sc.box.y + sc.box.h <= 400, '판 전체가 투영 점(앵커 위) 위쪽 — 앵커와 같은 높이로 내려오지 않음');
   assert.ok(Math.abs(sc.box.h / sc.box.w - w.aspect) < 1e-9); assert.equal(sc.lod, false);
   assert.equal(boardScreen({ x: 500, y: 400 }, 10, w, 1440, 900).lod, true, '작으면 간략');
   assert.equal(boardScreen({ x: 500, y: 400 }, 20, w, 1440, 900).lod, false, '§106 2배라 같은 거리에서 간략이 덜 됨');
   // 화면 가장자리 너머: 안으로 밀어 넣지 않고 그 자리(일부만 보임) 또는 숨김
   const edge = boardScreen({ x: 1400, y: 400 }, 60, w, 1440, 900);
-  assert.equal(edge.hidden, false); assert.equal(edge.box.x, 1400, '오른쪽 끝 너머로 나가도 x 그대로');
-  assert.equal(boardScreen({ x: 1500, y: 400 }, 60, w, 1440, 900).hidden, true, '판 전체가 화면 밖이면 숨김(끌어오지 않음)');
+  assert.equal(edge.hidden, false); assert.ok(Math.abs(edge.box.x + edge.box.w / 2 - 1400) < 1e-9, '오른쪽 끝 너머로 나가도 x 그대로');
+  assert.equal(boardScreen({ x: 1440 + edge.box.w / 2 + 5, y: 400 }, 60, w, 1440, 900).hidden, true, '판 전체가 화면 밖이면 숨김(끌어오지 않음)');
   assert.equal(boardScreen({ x: -2000, y: 400 }, 60, w, 1440, 900).hidden, true);
   assert.equal(boardScreen({ behind: true }, 0, w, 1440, 900).hidden, true, '카메라 뒤');
   assert.equal(boardScreen({ x: 500, y: 400 }, 0.2, w, 1440, 900).hidden, true, '너무 멀면(키움 상한 뒤에도 HIDE_PX 미만) 숨김');
   assert.equal(boardScreen({ x: 500, y: 400 }, 1000, w, 1440, 900).s, PLAN_UI.S_MAX, '아주 가까우면 크기만 상한(자리 그대로)');
-  assert.equal(boardScreen({ x: 500, y: 400 }, 1000, w, 1440, 900).box.x, 500);
+  { const b = boardScreen({ x: 500, y: 400 }, 1000, w, 1440, 900).box; assert.ok(Math.abs(b.x + b.w / 2 - 500) < 1e-9); }
 });
 
 test('§83 보드 모델: 가장 앞 계획 — 완료/전체·칸(상태·외부 대기·회차)·지금 줄(진행 중 ≤2, 없으면 다음 대기)·다른 계획 수·연출', () => {
@@ -498,4 +501,31 @@ test('§132 축 번호 칸: 크게 보기 모델은 큐 순서 그대로 + 고�
   const bd = readFileSync(new URL('../i18n/boards.mjs', import.meta.url), 'utf8');
   assert.equal((bd.match(/'boards\.plan\.axisNo':/g) || []).length, 2, '한영 모두');
   assert.equal((bd.match(/'boards\.plan\.axisNoNone':/g) || []).length, 2);
+});
+
+test('§153 계획판은 앵커(기동기) 위 가운데 — 같은 높이에서 겹치지 않음 · 자동 맞춤 보조 점 · 표현별 위 끝', async () => {
+  const fs = await import('node:fs');
+  const rd = (p) => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
+  // 흐름 3D 기동기: 세운 상자 반높이 0.82 × r → 판 아래 변이 그보다 GAP_UP 위
+  const { STAND } = await import('../flowview/tier-core.mjs');
+  const r = 1.3, top = STAND.DEV_HY * r;
+  const wb = boardWorld(r, 'flow', null, top);
+  assert.ok(wb.up > top && Math.abs(wb.up - top - PLAN_UI.GAP_UP) < 1e-9, '판 아래 변 > 기동기 위 끝');
+  // 같은 층의 다른 기동기(같은 y)도 판 아래 변보다 낮다 — 어느 카메라 방위에서도 판과 같은 높이에 서지 않음
+  assert.ok(0 + top < 0 + wb.up);
+  // 자동 맞춤 보조 점: 앵커 위 판 가운데, 무게중심엔 안 넣음(aux)
+  PLAN_CAM.fit = new Map([['L', { up: wb.up, h: wb.h, r: Math.hypot(wb.w, wb.h) / 2, bottom: null }]]);
+  const fp = boardFitPt('L', { x: 4, y: 2, z: -1 });
+  assert.deepEqual(fp.p, { x: 4, y: 2 + wb.up + wb.h / 2, z: -1 }); assert.equal(fp.aux, true);
+  assert.deepEqual(boardFitPt('L', { x: 4, y: 0, z: -1 }, true).p, { x: 4, y: 0, z: -1 - wb.up - wb.h / 2 }, '2D: 화면 위 = −z');
+  PLAN_CAM.fit = new Map([['V', { up: 1, h: 3, r: 2, bottom: PLAN_UI.VX_BOTTOM }]]);
+  assert.equal(boardFitPt('V', { x: 0, y: 1, z: 0 }).p.y, PLAN_UI.VX_BOTTOM + 1.5, '복셀: 아래 변 최소 높이 반영');
+  assert.equal(boardFitPt('없음', { x: 0, y: 0, z: 0 }), null);
+  PLAN_CAM.fit = new Map();
+  // 배선: 투영(위 가운데)·표현 위 끝 훅·두 카메라 맞춤
+  const ui = rd('../plan-ui.js');
+  assert.match(ui, /w\.y \+= wb\.up;/); assert.match(ui, /wz = home\.z - wb\.up/); assert.match(ui, /view\.planTop \? view\.planTop\(aid\)/);
+  assert.doesNotMatch(ui, /wb\.off|wb\.drop/);
+  assert.match(rd('../flowview/flow-view.js'), /planTop\(id\) \{[\s\S]*STAND\.DEV_HY \* v\.r/);
+  assert.match(rd('../camera.js'), /boardFitPt\(id, /); assert.match(rd('../flat/camera2d.js'), /boardFitPt\(id, .*v\.target, true\)/);
 });
