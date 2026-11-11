@@ -319,3 +319,19 @@ test('부분 토글(§85): 효과음만 끄면 효과음 끔·음악 유지, 마
   assert.deepEqual(f.log, []);
   assert.equal(storage.getItem(PARTS_KEY), j({ music: true, sfx: true }));
 });
+
+test('공유 링크 화면: 따로 저장(ccviz.sound.share)·처음엔 켬, 평소 저장값과 섞이지 않음', async () => {
+  const { SHARE_KEY } = await import('../sound.mjs');
+  const st = mem({ [KEY]: j({ on: false }) });
+  assert.equal(loadSoundOn(st, SHARE_KEY, true), true, '공유 키가 없으면 기본 켬');
+  assert.equal(loadSoundOn(st, SHARE_KEY, false), false);
+  assert.equal(loadSoundOn(mem({ [SHARE_KEY]: j({ on: false }) }), SHARE_KEY, true), false, '공유 화면에서 끈 값은 지킴');
+  assert.equal(loadSoundOn(mem({ 'ccviz.music': j({ on: true }) }), SHARE_KEY, false), false, '이행은 기본 키만');
+  const f = fakes();
+  const s = new Sound({ ...f, storage: st, search: '', storageKey: SHARE_KEY, defaultOn: true });
+  assert.equal(s.on, true);
+  assert.equal(st.getItem(SHARE_KEY), null, '기본값은 저장하지 않음');
+  s.setOn(false);
+  assert.deepEqual(JSON.parse(st.getItem(SHARE_KEY)), { on: false });
+  assert.deepEqual(JSON.parse(st.getItem(KEY)), { on: false }, '평소 키는 그대로');
+});

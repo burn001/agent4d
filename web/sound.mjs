@@ -12,19 +12,22 @@
 import { soundStatus, restorePlan, soundLabel, GESTURE_EVENTS } from './sound-gate.mjs';
 
 export const KEY = 'ccviz.sound';
+// 공유 링크 화면은 따로 저장 — 발표용 기본 리플레이는 소리 켬이 기본이고, 주인 브라우저의 평소 선택(꺼짐)에 묶이지 않게
+export const SHARE_KEY = 'ccviz.sound.share';
 const OLD_KEYS = ['ccviz.music', 'ccviz.sfx'];
 
 const readJson = (storage, k) => { try { return JSON.parse((storage && storage.getItem(k)) || 'null'); } catch (e) { return null; } };
 
-/** 저장된 소리 켜짐 여부(+이행). 저장소 접근 실패는 꺼짐 */
-export function loadSoundOn(storage) {
-  const s = readJson(storage, KEY);
+/** 저장된 소리 켜짐 여부(+이행). 저장소 접근 실패는 꺼짐. key 가 기본 키가 아니면 이행 없이 그 키만, 없으면 dflt */
+export function loadSoundOn(storage, key = KEY, dflt = false) {
+  const s = readJson(storage, key);
   if (s && typeof s.on === 'boolean') return s.on;
+  if (key !== KEY) return !!dflt;
   return OLD_KEYS.some((k) => { const o = readJson(storage, k); return !!(o && o.on); });
 }
 
-export function saveSoundOn(storage, on) {
-  try { storage && storage.setItem(KEY, JSON.stringify({ on: !!on })); } catch (e) { /* 저장 불가: 이번 접속만 */ }
+export function saveSoundOn(storage, on, key = KEY) {
+  try { storage && storage.setItem(key, JSON.stringify({ on: !!on })); } catch (e) { /* 저장 불가: 이번 접속만 */ }
 }
 
 export const PARTS_KEY = 'ccviz.sound.parts';
@@ -63,7 +66,7 @@ export class Sound {
   /**
    * @param {{music?: object, sfx?: object, button?: HTMLElement, sfxSlider?: HTMLInputElement, storage?: Storage|null, search?: string, win?: EventTarget, doc?: Document, nav?: Navigator}} o
    */
-  constructor({ music = null, sfx = null, button = null, sfxSlider = null, storage, search, win, doc, nav } = {}) {
+  constructor({ music = null, sfx = null, button = null, sfxSlider = null, storage, search, win, doc, nav, storageKey = KEY, defaultOn = false } = {}) {
     this.music = music;
     this.sfx = sfx;
     this.button = button;
@@ -72,9 +75,10 @@ export class Sound {
     this._doc = doc !== undefined ? doc : (typeof document !== 'undefined' ? document : null);
     this._nav = nav !== undefined ? nav : (typeof navigator !== 'undefined' ? navigator : null);
     const override = urlSoundOverride(search !== undefined ? search : (typeof location !== 'undefined' ? location.search : ''));
-    this.on = override != null ? override : loadSoundOn(this._storage);
-    // 이행: 새 키가 없으면 한 번 써 둔다(URL 로 정한 값은 저장하지 않음)
-    if (override == null && !(readJson(this._storage, KEY) || {}).hasOwnProperty('on')) saveSoundOn(this._storage, this.on);
+    this._key = storageKey;
+    this.on = override != null ? override : loadSoundOn(this._storage, storageKey, defaultOn);
+    // 이행: 새 키가 없으면 한 번 써 둔다(URL 로 정한 값·공유 화면의 기본값은 저장하지 않음)
+    if (override == null && storageKey === KEY && !(readJson(this._storage, KEY) || {}).hasOwnProperty('on')) saveSoundOn(this._storage, this.on);
     const parts = loadSoundParts(this._storage);
     this.musicOn = parts.music; // 팝업 '음악' 토글(마스터가 켜져 있을 때만 의미)
     this.sfxOn = parts.sfx;     // 팝업 '효과음' 토글
@@ -196,7 +200,7 @@ export class Sound {
   setOn(on) {
     this.on = !!on;
     this.musicBlocked = false;
-    saveSoundOn(this._storage, this.on);
+    saveSoundOn(this._storage, this.on, this._key);
     // 직접 고른 값이 생겼으니 URL 의 일회성 sound= 는 지운다(새로고침해도 저장값을 따르게)
     try {
       if (typeof location !== 'undefined' && typeof history !== 'undefined') {

@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.7.9] - 2026-11-11
+
+### Fixed
+
+- **Background music no longer stutters over the fixed link or a shared link.** Through the Worker and the quick tunnel the `<audio>` element streamed each 4.8 MB track progressively while the replay data and the event stream shared the same connection, and whenever the stream fell below the track's bitrate the music kept stopping and restarting (`waiting`/`stalled` every few seconds, reproduced in a headless browser on the shared replay link). When the viewer is not on localhost, each track is now downloaded completely first (resuming with a Range request if the connection drops, retrying after 20 s without data, up to four tries) and played from memory, so once it starts it cannot stall. The first track shows "loading" until it has arrived; a track change keeps the current track playing until the next one is fully downloaded, the next track is fetched 90 s before the current one ends, and a download that is no longer needed (the automatic pick changed) is cancelled so it does not share the connection. If a track cannot be downloaded the player falls back to streaming as before. Tracks are cached by the browser (one-year immutable), so the next visit and every loop of a shared replay start at once. `?bgmfetch=0|1` forces the old or the new behaviour for testing.
+- Shared-link replay was silent on a fresh browser: sound started off and needed the sound button. Share pages with a default replay now start with sound on (saved separately as `ccviz.sound.share`, so the owner's usual choice is untouched); if the browser blocks autoplay the button shows "waiting" and the first click or key press anywhere starts music and effects.
+
 ## [0.7.8] - 2026-11-10
 
 ### Added

@@ -5,7 +5,7 @@ import { Music } from './audio.js';
 import { ActivityMeter } from './bgm-auto.mjs';
 import { mountViewSelector } from './viewsel.mjs';
 import { Sfx } from './sfx.mjs';
-import { Sound } from './sound.mjs';
+import { Sound, SHARE_KEY as SOUND_SHARE_KEY } from './sound.mjs';
 import { createMockSource } from './mock.js';
 import { KINDS, KIND_LABEL, KIND_SHAPE } from './layout.js';
 import { CATS, CAT_LABEL } from './icons.js';
@@ -220,7 +220,9 @@ const music = new Music();
 const sfx = new Sfx({ getMusicTime: () => (music.on ? music.harmonyTime() : null) });
 // 소리 토글 하나로 배경음악·효과음을 함께(저장 'ccviz.sound', URL ?sound=1|0 은 이번 접속만)
 //   마스터 아래 음악·효과음 부분 토글은 소리 팝업(저장 'ccviz.sound.parts')
-const sound = new Sound({ music, sfx, button: $('btn-sound'), sfxSlider: $('sfx-vol') });
+//   공유 링크 기본 리플레이(발표용)는 따로 저장('ccviz.sound.share')하고 처음엔 켬 — 자동재생이 막히면 '소리 대기'로 첫 동작에서 남
+const SHARE_REPLAY_PAGE = document.documentElement.hasAttribute('data-share-replay');
+const sound = new Sound({ music, sfx, button: $('btn-sound'), sfxSlider: $('sfx-vol'), ...(SHARE_REPLAY_PAGE ? { storageKey: SOUND_SHARE_KEY, defaultOn: true } : {}) });
 // 배경음악 자동 선곡: 최근 활동(재생 중이면 재생 시계 기준) → 단계 → 곡
 const activity = new ActivityMeter();
 music.setActivitySource(() => activity.sample(clockFn(), store.nodes.values()), () => pauseBuf.paused); // 일시정지 중엔 단계 시계도 멈춤

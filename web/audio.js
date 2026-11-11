@@ -20,11 +20,14 @@ import { LAST_KEY, MIG_KEY, FALLBACK_TRACKS, parseManifest, optionList, modeLabe
 import { AutoPicker, activityLevel, pickForLevel, autoLabel, LEVEL_LABEL, RECENT_MAX } from './bgm-auto.mjs';
 import { RULES, LISTS, MOODS, TIME_SLOTS, loadPrefs, savePrefs, nextFor, prevFor, fitsRule, timeSlot, activeMood, playlist, normTimeMoods, pickActivity, tabOf, effectiveTab } from './bgm-list.mjs';
 import { t as tr } from './i18n.mjs';
+import { TrackFetcher, wantWholeFetch } from './bgm-fetch.mjs';
 import { Lane, planXfade, shouldLeadEnd, takeover, XFADE, TAKEOVER_OUT, READY_TIMEOUT, SILENT } from './bgm-xfade.mjs';
 
 const KEY = 'ccviz.music';
 const FADE_IN = 2, FADE_STOP = 0.6, FADE_HOLD = 0.4, FADE_RESUME = 1.2; // 공용 버스(켜기·끄기·일시정지) 초
 const AUTO_TICK_MS = 2000;
+const PREFETCH_LEAD = 90; // 곡 끝 몇 초 전에 다음 곡을 미리 받나
+const FETCH_WAIT = 180; // 곡 통째 받기를 최대 몇 초 기다리나(넘으면 URL 로 스트리밍)
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
 const perfNow = () => performance.now() / 1000;
@@ -44,7 +47,10 @@ export class Music {
     b.id = 'bgm-b';
     b.preload = 'none';
     a.after(b);
-    this.decks = [a, b].map((el) => ({ el, lane: new Lane(0, 'eq'), gain: null, src: null, leadDone: false }));
+    this.decks = [a, b].map((el) => ({ el, lane: new Lane(0, 'eq'), gain: null, src: null, leadDone: false, url: null, loaded: null, pending: null }));
+    // 외부 접속은 곡을 통째 받아 Blob URL 로(스트리밍이 대역 경쟁으로 끊기던 것). 루프백은 예전처럼 URL 바로
+    this.fetcher = (() => { try { return wantWholeFetch(location) && typeof fetch === 'function' && typeof URL.createObjectURL === 'function' ? new TrackFetcher() : null; } catch (e) { return null; } })();
+    if (this.fetcher) this.fetcher.inUse = () => this.decks.map((d) => d.el.getAttribute('src')).filter(Boolean);
     this.decks[0].lane.snap(1);
     this.active = 0;          // 지금 곡 덱(구간 표시·ended·끝 미리 넘기기 기준)
     this.master = new Lane(0, 'lin'); // 켜기·끄기·일시정지 페이드(덱 크로스페이드와 따로)
@@ -370,9 +376,37 @@ export class Music {
     d.leadDone = false;
     d.el.loop = this.repeat;
     if (preload) d.el.preload = preload;
-    const src = trackUrl(t); // ?v=<내용 해시> — 1년 immutable 캐시
-    if (d.el.getAttribute('src') !== src) d.el.src = src;
-    else { try { d.el.currentTime = 0; } catch (e) {} }
+    const url = trackUrl(t); // ?v=<내용 해시> — 1년 immutable 캐시
+    if (d.url === url && d.pending) return; // 이미 받는 중
+    // 받던 곡을 더 안 쓰면(다른 덱도 안 씀) 그만 받아 대역을 새 곡에
+    if (this.fetcher && d.pending && d.url && d.url !== url && !this.decks.some((o) => o !== d && o.url === d.url)) this.fetcher.cancel(d.url);
+    d.url = url;
+    d.pending = null;
+    if (d.loaded === url && d.el.getAttribute('src')) { try { d.el.currentTime = 0; } catch (e) {} return; }
+    const f = this.fetcher;
+    const ready = f && f.peek(url);
+    if (!f || ready) { d.loaded = url; d.el.src = ready || url; return; }
+    // 다 받을 때까지 덱의 옛 src 는 그대로(재생은 모두 _fetched 를 거친다). 다 받으면(못 받으면 URL 로) 건다
+    if (preload !== 'auto' && !this.wantOn) return; // 소리 꺼 둔 사람: 켤 때(start) 받는다
+    const p = f.get(url).then((obj) => {
+      if (d.url !== url || d.pending !== p) return false; // 곡이 바뀌었거나 기다리다 URL 로 넘어감
+      d.pending = null;
+      d.loaded = url;
+      d.el.src = obj || url;
+      return !!obj;
+    });
+    d.pending = p;
+  }
+
+  /** 덱의 곡 받기가 끝날 때까지(최대 sec 초). 넘으면 URL 로 걸고(스트리밍) 진행. 덱이 비어 있으면 지금 받기 시작 */
+  async _fetched(i, sec) {
+    const d = this.decks[i];
+    if (!d.pending && d.url && d.loaded !== d.url && d.id) this._deckLoad(i, d.id, 'auto');
+    const p = d.pending;
+    if (!p) return true;
+    const ok = await Promise.race([p.then(() => true, () => true), sleep(sec).then(() => false)]);
+    if (!ok && d.pending === p) { d.pending = null; d.loaded = d.url; d.el.src = d.url; this._note({ ev: 'fetch-timeout', id: d.id }); }
+    return ok;
   }
 
   /** 재생 중이 아닐 때: 지금 덱에 바로 걸어 둠(꺼짐·일시정지·켜는 중) */
@@ -380,7 +414,7 @@ export class Music {
     const t = this._setCur(id);
     if (!t) return;
     const d = this.decks[this.active];
-    if (d.id !== t.id || d.el.getAttribute('src') !== trackUrl(t)) this._deckLoad(this.active, t.id, preload);
+    if (d.id !== t.id || d.url !== trackUrl(t) || (!d.pending && d.loaded !== d.url)) this._deckLoad(this.active, t.id, preload);
     else if (preload) d.el.preload = preload;
     d.el.loop = this.repeat;
   }
@@ -471,8 +505,26 @@ export class Music {
   _nextAfterEnd() {
     if (this.repeat) return null;
     this.pinned = null;
+    // 끝나기 전에 미리 받아 둔 다음 곡이 아직 기준에 맞으면 그 곡(받기를 새로 시작하지 않게)
+    const pre = this._pre;
+    this._pre = null;
+    if (pre && pre.from === this.cur && pre.rule === this.rule && pre.level === this.autoLevel && pre.list === this.list && pre.view === this.view && this._trackOf(pre.id)) return pre.id;
     if (this.rule === 'activity') return pickActivity(this._ctx());
     return nextFor(this._ctx());
+  }
+
+  /** 곡 끝 PREFETCH_LEAD 초 전: 다음 곡을 정해 미리 통째 받기(외부 접속만) */
+  _prefetchNext(d) {
+    if (!this.fetcher || this.repeat || this.pinned || d.el.loop || (this._pre && this._pre.from === this.cur)) return;
+    const left = (d.el.duration || NaN) - d.el.currentTime;
+    if (!(left <= PREFETCH_LEAD) || !(left > 0)) return;
+    let id = null;
+    try { id = this.rule === 'activity' ? pickActivity(this._ctx()) : nextFor(this._ctx()); } catch (e) {}
+    const t = id && this._trackOf(id);
+    if (!t) return;
+    this._pre = { id, from: this.cur, rule: this.rule, level: this.autoLevel, list: this.list, view: this.view };
+    this._note({ ev: 'prefetch', id });
+    this.fetcher.get(trackUrl(t));
   }
 
   /** 재생 위치: 구간 표시 + 끝 3초 전 다음 곡 미리 시작 */
@@ -480,6 +532,7 @@ export class Music {
     this._section();
     const d = this.decks[this.active];
     if (d.leadDone || this._xf || this._queued || !this.on || this.paused || d.el.paused) return;
+    this._prefetchNext(d);
     if (!shouldLeadEnd({ loop: d.el.loop, mode: !this.repeat, pos: d.el.currentTime, duration: d.el.duration })) return;
     d.leadDone = true;
     const id = this._nextAfterEnd();
@@ -576,6 +629,9 @@ export class Music {
     this._applyDeck(to, now0);
     this._changed();
     this._note({ ev: 'prep', from: fromId, to: id, kind });
+    // 통째 받기: 다 받을 때까지는 지금 곡이 계속 나온다(끊긴 스트림으로 넘어가지 않게). 너무 오래면 URL 로 걸린 채 진행
+    await this._fetched(to, FETCH_WAIT);
+    if (sid !== this._switchId) return;
     await this._ready(idle.el, READY_TIMEOUT);
     if (sid !== this._switchId) return;
     const out = this.decks[from];
@@ -798,7 +854,8 @@ export class Music {
     const ps = [];
     this.decks.forEach((d, i) => {
       if (!d.el.paused) return;
-      if (i === this.active || d.lane.target > 0 || d.lane.valueAt(now) > SILENT) ps.push(d.el.play());
+      // 받는 중인 덱은 다 받은 뒤 재생
+      if (i === this.active || d.lane.target > 0 || d.lane.valueAt(now) > SILENT) ps.push(this.fetcher ? this._fetched(i, FETCH_WAIT).then(() => d.el.play()) : d.el.play());
     });
     await Promise.all(ps);
   }
@@ -815,8 +872,17 @@ export class Music {
     if (!this._xf) { const now = this._now(); d.lane.snap(1, now); this._applyDeck(this.active, now); }
     this._renderEl();
     // play() 는 충분히 버퍼링될 때까지 끝나지 않는다(외부 접속에서 수십 초) — 그동안 '불러오는 중' 표시
-    this.loading = d.el.readyState < 3;
+    this.loading = d.el.readyState < 3 || !!this.fetcher;
     this._changed();
+    // 첫 곡: 통째 받기가 끝날 때까지 '불러오는 중'(끊기는 스트림으로 시작하지 않음). 기다리는 사이 곡이 바뀌면 그 곡을
+    if (this.fetcher) {
+      for (let k = 0; k < 3; k++) {
+        const i = this.active;
+        await this._fetched(i, FETCH_WAIT);
+        if (!this.on) { this.loading = false; this._changed(); return true; }
+        if (i === this.active && !this.decks[i].pending) break;
+      }
+    }
     try { await this.audio.play(); } catch (e) {
       // 켜는 사이 곡이 바뀌면(src 교체) play() 가 AbortError — 꺼진 것이 아니니 바뀐 곡으로 한 번 더
       let ok = false;
