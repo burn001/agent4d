@@ -1,6 +1,6 @@
 // 포그라운드 셸 실시간 출력: transcript 에 id 가 없는 tasks/<무작위 id>.output 을 결과 전인 포그라운드 Bash 에 잇는다.
 // 가짜 임시 폴더(CCVIZ_CLAUDE_TMP)에 출력 파일을 만들고·덧붙이고·지우며 라이브 런타임이 따라오는지 본다.
-import { test, before, after } from 'node:test';
+import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,6 +19,8 @@ const A = (msAgo, block, extra = {}) => ({ type: 'assistant', timestamp: T(msAgo
 const R = (msAgo, id, text, tur, extra = {}) => ({ type: 'user', timestamp: T(msAgo), ...base, ...extra, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text }] }, toolUseResult: tur });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// 묶음(npm test) 에서는 최상위 before 가 첫 시험 전에 한꺼번에 돌아 '몇 초 전' 시각이 낡는다 — describe 로 이 파일 시험 직전에 준비한다(11.15.)
+describe('§101 포그라운드 셸 실시간 출력', () => {
 before(async () => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'ccviz-fg-'));
   const projects = path.join(root, 'projects');
@@ -50,7 +52,7 @@ before(async () => {
   await rt.start();
 });
 
-after(() => { rt?.close(); fs.rmSync(root, { recursive: true, force: true }); });
+after(() => { delete process.env.CCVIZ_CLAUDE_TMP; rt?.close(); fs.rmSync(root, { recursive: true, force: true }); });
 
 async function waitFor(fn, ms = 6000) {
   const t0 = Date.now();
@@ -158,3 +160,4 @@ for (const via of ['session_id', 'outputFile']) {
     } finally { r2.close(); }
   });
 }
+});

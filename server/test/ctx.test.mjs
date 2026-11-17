@@ -7,7 +7,7 @@ import os from 'node:os';
 import { SessionIndex } from '../discovery.mjs';
 import { RootRuntime } from '../session.mjs';
 import { Graph } from '../graph.mjs';
-import { usageTokens, contextWindow, ctxValue, CtxTracker, seedDemoCtx, stepDemoCtx, CTX_1M, CTX_DEFAULT } from '../ctx.mjs';
+import { usageTokens, contextWindow, modelWindow, MODEL_WINDOWS, ctxValue, CtxTracker, seedDemoCtx, stepDemoCtx, CTX_1M, CTX_DEFAULT } from '../ctx.mjs';
 
 test('usage 합산: 입력 + 캐시 생성 + 캐시 읽기(출력 제외), 없거나 0 이면 null', () => {
   assert.equal(usageTokens({ input_tokens: 3, cache_creation_input_tokens: 1200, cache_read_input_tokens: 80000, output_tokens: 999 }), 81203);
@@ -16,22 +16,40 @@ test('usage 합산: 입력 + 캐시 생성 + 캐시 읽기(출력 제외), 없�
   assert.equal(usageTokens({ input_tokens: '5', cache_read_input_tokens: -3 }), 5);
 });
 
-test('창 판정: [1m] 표기·200k 초과 관측·실측 1M 계열·그 밖 200k 추정', () => {
+test('창 판정: [1m] 표기·공식 계열 표·200k 초과 관측·그 밖 알 수 없음', () => {
   assert.deepEqual(contextWindow('claude-sonnet-4-5[1m]'), { limit: CTX_1M, basis: 'tag', estimated: false });
   assert.deepEqual(contextWindow('claude-opus-5-5'), { limit: CTX_1M, basis: 'family', estimated: false });
   assert.equal(contextWindow('claude-opus-4-8').limit, CTX_1M);
-  assert.deepEqual(contextWindow('claude-sonnet-5-5'), { limit: CTX_DEFAULT, basis: 'default', estimated: true });
-  assert.deepEqual(contextWindow('claude-haiku-5-5', 250_000), { limit: CTX_1M, basis: 'observed', estimated: false });
-  assert.equal(contextWindow('', 0).limit, CTX_DEFAULT);
+  assert.deepEqual(contextWindow('claude-sonnet-5-5'), { limit: CTX_1M, basis: 'family', estimated: false });
+  assert.deepEqual(contextWindow('claude-fable-5-2'), { limit: CTX_1M, basis: 'family', estimated: false });
+  assert.deepEqual(contextWindow('claude-haiku-4-5'), { limit: CTX_DEFAULT, basis: 'family', estimated: false });
+  assert.deepEqual(contextWindow('claude-haiku-4-5', 250_000), { limit: CTX_1M, basis: 'observed', estimated: false });
+  assert.deepEqual(contextWindow('gpt-x', 250_000), { limit: CTX_1M, basis: 'observed', estimated: false });
+  assert.deepEqual(contextWindow('', 0), { limit: null, basis: 'unknown', estimated: false });
+  assert.deepEqual(contextWindow('claude-zeta-9'), { limit: null, basis: 'unknown', estimated: false });
   assert.equal(contextWindow('claude-1m-test').basis, 'tag');
-  assert.equal(contextWindow('claude-haiku-5-5-20261001').basis, 'default');
-  const v = ctxValue(150_000, 'claude-sonnet-5-5');
-  assert.deepEqual(v, { used: 150_000, limit: 200_000, pct: 75, estimated: true, basis: 'default' });
+  assert.equal(contextWindow('claude-haiku-5-5-20261001').limit, CTX_1M);
+  const v = ctxValue(150_000, 'claude-haiku-4-5');
+  assert.deepEqual(v, { used: 150_000, limit: 200_000, pct: 75, estimated: false, basis: 'family' });
+  // 모르는 모델: 비율·경고 없음(limit·pct null)
+  assert.deepEqual(ctxValue(179_000, 'claude-zeta-9'), { used: 179_000, limit: null, pct: null, estimated: false, basis: 'unknown' });
+  // 2026-11-15 오판 재현: Fable 5.2 하위 에이전트 179k → 18%(예전엔 200k 분모로 90%)
+  assert.equal(ctxValue(179_000, 'claude-fable-5-2').pct, 17.9);
+});
+
+test('modelWindow: 접두 판정·플랫폼 접두·경계', () => {
+  for (const id of ['claude-fable-5', 'claude-fable-5-1', 'claude-fable-5-2', 'claude-mythos-5-2', 'claude-opus-5', 'claude-opus-5-5', 'claude-sonnet-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-opus-4-6', 'claude-sonnet-4-6', 'anthropic.claude-opus-5-5', 'us.anthropic.claude-fable-5-2', 'claude-opus-5-5@20261101', 'Claude-Opus-5-5'])
+    assert.equal(modelWindow(id), CTX_1M, id);
+  for (const id of ['claude-haiku-4-5', 'claude-haiku-4-5-20251001', 'claude-sonnet-4-5', 'claude-opus-4-5', 'claude-opus-4-1', 'claude-sonnet-4-20250514', 'claude-3-7-sonnet'])
+    assert.equal(modelWindow(id), CTX_DEFAULT, id);
+  for (const id of ['', null, '<synthetic>', 'gpt-5', 'claude-opus-50', 'claude-fable-6', 'claude-haiku-6-0'])
+    assert.equal(modelWindow(id), null, String(id));
+  assert.ok(MODEL_WINDOWS.length > 0);
 });
 
 test('추적기: 같은 응답 블록 반복은 무시, compact 로 떨어지면 그대로, 200k 넘긴 뒤엔 1M 유지, <synthetic> 무시', () => {
   const t = new CtxTracker();
-  const m = (u, model = 'claude-sonnet-5-5') => ({ model, usage: { input_tokens: u } });
+  const m = (u, model = 'claude-haiku-4-5') => ({ model, usage: { input_tokens: u } });
   assert.equal(t.update('a', m(100_000)).pct, 50);
   assert.equal(t.update('a', m(100_000)), null);
   assert.equal(t.update('a', { model: '<synthetic>', usage: { input_tokens: 0 } }), null);
@@ -56,7 +74,7 @@ before(() => {
   const now = Date.now();
   const T = (sec) => new Date(now - 600_000 + sec * 1000).toISOString();
   const base = { sessionId: M, cwd, version: '2.1.309', entrypoint: 'cli' };
-  const A = (sec, id, used, text = '응답', extra = {}) => ({ type: 'assistant', timestamp: T(sec), ...base, ...extra, message: { id, role: 'assistant', model: 'claude-sonnet-5-5', content: [{ type: 'text', text }],
+  const A = (sec, id, used, text = '응답', extra = {}) => ({ type: 'assistant', timestamp: T(sec), ...base, ...extra, message: { id, role: 'assistant', model: 'claude-haiku-4-5', content: [{ type: 'text', text }],
     usage: { input_tokens: 2, cache_creation_input_tokens: 1000, cache_read_input_tokens: used - 1002, output_tokens: 50 } } });
   const recs = [
     { type: 'user', timestamp: T(1), ...base, message: { role: 'user', content: '시작' } },
@@ -80,7 +98,7 @@ for (const offline of [false, true]) {
     try {
       if (offline) await rt.loadOffline(); else await rt.start();
       const n = rt.graph.get(`s:${M}`);
-      assert.deepEqual(n.meta.ctx, { used: 24_000, limit: 200_000, pct: 12, estimated: true, basis: 'default', base: 24_000 });
+      assert.deepEqual(n.meta.ctx, { used: 24_000, limit: 200_000, pct: 12, estimated: false, basis: 'family', base: 24_000 });
       const seq = rt.graph.ring.filter((e) => e.nodeId === `s:${M}` && e.type === 'node-update' && e.patch?.meta?.ctx).map((e) => e.patch.meta.ctx.pct);
       assert.deepEqual(seq, [20, 75, 12]);
       // 기준선: 첫 응답(40k)을 유지하다 compact 뒤 값(24k)이 더 작으면 낮춤 — 라이브·재생 같은 값

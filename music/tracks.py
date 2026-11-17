@@ -14,6 +14,11 @@ web/assets/<곡>.json(합성 스크립트가 쓴 메타)에서 다시 읽는다.
   python music/tracks.py copy chillhop --from <폴더> --stage 1 --energy 0.4 --label 칠홉 --source "자체 작곡" --moods warm,focus \
       --label-en Chillhop --title-en "Slow Pour" --mood-en "chillhop / lo-fi jazz"   # 영어 화면용(없으면 아래 EN 표)
 
+  # §155 곡 CDN(Cloudflare R2 + Worker): 매니페스트 해시 기준으로 R2 에 없는 곡만 올리고, CDN 확인 뒤 매니페스트에 cdn_base 를 쓴다
+  python music/tracks.py upload                 # 버킷 agent4d-music(없으면 만들고 CORS GET·HEAD), 키 bgm/<hash>/<file>
+  python music/tracks.py upload --dry-run       # 올릴 곡만 보기
+  python music/tracks.py cdn-base off           # 매니페스트에서 cdn_base 빼기(모든 화면이 로컬 곡으로) · cdn-base <URL> 로 다시
+
 copy 는 compose_<id>.py → music/, bgm-<id>.mp3·bgm-<id>.json → web/assets/ 로 덮어쓴다(report.md·spectrogram.png 는 복사하지 않음).
 이미 있는 곡을 다시 copy 하면 옵션으로 준 값만 바뀐다. 매니페스트에서 곡을 빼려면 `remove <id>`(파일은 지우지 않음).
 """
@@ -24,12 +29,19 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
+import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 ASSETS = os.path.join(ROOT, "web", "assets")
 MANIFEST = os.path.join(ASSETS, "bgm-tracks.json")
+# 곡 CDN — 공개판 사용자도 같은 주소를 쓴다(Worker 소스 cloudflare/music, 버킷·곡은 계정 쪽, 레포엔 토큰 없음)
+CDN_BUCKET = "agent4d-music"
+CDN_BASE = "https://music.agent4d.workers.dev"
+CDN_PREFIX = "bgm/"
+CF_DIR = os.path.join(ROOT, "cloudflare", "music")  # cf auth activate <프로필> 로 이 폴더를 곡 CDN 계정에 묶는다
 
 # 처음 네 곡 기본값(매니페스트에 없을 때만 쓰임). stage = 자동 선곡 단계(정수 또는 목록), energy = 0～1(같은 단계 안 순서·단계 없을 때 추정)
 BUILTIN = [
@@ -225,7 +237,12 @@ def build_manifest(ents: list[dict] | None = None) -> dict:
             n = sec.get("name") if isinstance(sec, dict) else None
             if n and n not in SECTIONS_EN and not n.isascii():
                 print(f"  구간 이름 영어 없음: {t['id']} — {n} (SECTIONS_EN 에 더하십시오)", file=sys.stderr)
-    return {"version": 2, "default": read_manifest().get("default") or DEFAULT, "sections_en": SECTIONS_EN, "tracks": out}
+    prev = read_manifest()
+    m = {"version": 2, "default": prev.get("default") or DEFAULT}
+    if prev.get("cdn_base"):
+        m["cdn_base"] = prev["cdn_base"]  # upload·cdn-base 가 쓴 값 유지
+    m.update({"sections_en": SECTIONS_EN, "tracks": out})
+    return m
 
 
 def file_hash(path: str) -> str:
@@ -237,11 +254,195 @@ def file_hash(path: str) -> str:
     return h.hexdigest()[:16]
 
 
-def write_manifest(ents: list[dict] | None = None) -> dict:
-    m = build_manifest(ents)
+def save_manifest(m: dict) -> None:
     with open(MANIFEST, "w", encoding="utf-8", newline="\n") as fh:
         json.dump(m, fh, ensure_ascii=False, indent=2)
         fh.write("\n")
+
+
+def set_cdn_base(base: str | None) -> None:
+    """매니페스트 cdn_base 만 바꿈(곡 항목은 그대로, default 바로 뒤). None = 뺌"""
+    m = read_manifest()
+    out = {}
+    for k, v in m.items():
+        if k == "cdn_base":
+            continue
+        out[k] = v
+        if k == "default" and base:
+            out["cdn_base"] = base
+    if base:
+        out.setdefault("cdn_base", base)
+    save_manifest(out)
+    print(f"매니페스트 cdn_base: {base or '(없음 — 로컬 곡)'}")
+
+
+# ───────── R2 올리기(cf CLI — 레포에 Wrangler 설정 파일 없음) ─────────
+
+def cf_cmd() -> list[str]:
+    local = os.path.join(ROOT, "cloudflare", "node_modules", "cf", "bin", "cf")
+    if os.path.exists(local):
+        return ["node", local]
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        g = os.path.join(appdata, "npm", "node_modules", "cf", "bin", "cf")
+        if os.path.exists(g):
+            return ["node", g]
+    return ["cf"]
+
+
+def first_json(s: str):
+    for i, ch in enumerate(s or ""):
+        if ch in "[{":
+            try:
+                return json.JSONDecoder().raw_decode(s[i:])[0]
+            except ValueError:
+                return None
+    return None
+
+
+def run_cf(args: list[str], check: bool = True):
+    """cf 실행 → (0 성공 | 1 실패, 처음 JSON 값, 출력). cwd 는 cloudflare/music(cf auth activate 로 묶은 프로필을 쓰고, 상위 cloudflare.config.ts 는 읽지 않음). 비밀은 인자로 넘기지 않는다"""
+    r = subprocess.run(cf_cmd() + args, cwd=CF_DIR, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    out = (r.stdout or "") + (r.stderr or "")
+    data = first_json(r.stdout)
+    # Windows 에서 cf 가 끝날 때 libuv assert 로 코드가 0 이 아닐 수 있다 — 오류 상자(APIError·Error)가 없고 JSON 이 왔으면 성공
+    failed = "APIError" in out or "┌ Error" in out or (r.returncode != 0 and data is None)
+    if failed and check:
+        raise SystemExit(f"cf {' '.join(args[:3])} 실패:\n{out.strip()[-1500:]}")
+    return (1 if failed else 0), data, out
+
+
+def walk_keys(o, acc: set) -> set:
+    if isinstance(o, dict):
+        k = o.get("key")
+        if isinstance(k, str):
+            acc.add(k)
+        for v in o.values():
+            walk_keys(v, acc)
+    elif isinstance(o, list):
+        for v in o:
+            walk_keys(v, acc)
+    return acc
+
+
+def find_cursor(o):
+    if isinstance(o, dict):
+        if o.get("is_truncated") is False or o.get("truncated") is False:
+            return None
+        for k in ("cursor", "next_cursor"):
+            if isinstance(o.get(k), str) and o.get(k):
+                return o[k]
+        for v in o.values():
+            c = find_cursor(v)
+            if c:
+                return c
+    return None
+
+
+def ensure_bucket(bucket: str) -> None:
+    code, _, out = run_cf(["r2", "buckets", "get", bucket], check=False)
+    if code != 0:
+        if "10042" in out or "enable R2" in out:
+            raise SystemExit("R2 가 이 Cloudflare 계정에서 켜져 있지 않습니다(10042). 대시보드 R2 화면에서 한 번 켠 뒤 다시 실행하십시오.")
+        print(f"  버킷 만들기: {bucket}")
+        run_cf(["r2", "buckets", "create", "--name", bucket])
+    # 브라우저는 Worker 로 받지만(CORS 는 Worker 가 붙임) S3·r2.dev 로 열 때를 대비해 GET·HEAD 만 허용
+    rules = [{"allowed": {"origins": ["*"], "methods": ["GET", "HEAD"], "headers": ["Range", "If-None-Match", "If-Modified-Since"]},
+              "exposeHeaders": ["Content-Length", "Content-Range", "Accept-Ranges", "ETag"], "maxAgeSeconds": 86400}]
+    run_cf(["r2", "buckets", "cors", "update", bucket, "--rules", json.dumps(rules), "--force"])
+
+
+def remote_keys(bucket: str) -> set:
+    keys, cursor = set(), None
+    for _ in range(50):
+        args = ["r2", "objects", "list", "--bucket-name", bucket, "--prefix", CDN_PREFIX, "--per-page", "1000"]
+        if cursor:
+            args += ["--cursor", cursor]
+        _, data, _ = run_cf(args)
+        walk_keys(data, keys)
+        cursor = find_cursor(data)
+        if not cursor:
+            break
+    return keys
+
+
+def cdn_key(t: dict) -> str | None:
+    h, f = t.get("hash"), t.get("file")
+    return f"{CDN_PREFIX}{h}/{f}" if h and f else None
+
+
+def check_url(url: str, size: int) -> str | None:
+    """CDN 에서 곡 앞 2바이트(Range) — 문제 없으면 None, 아니면 이유"""
+    req = urllib.request.Request(url, headers={"Range": "bytes=0-1", "User-Agent": "agent4d-tracks"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            cr = r.headers.get("Content-Range") or ""
+            if r.status != 206 or not cr.endswith(f"/{size}"):
+                return f"HTTP {r.status} Content-Range {cr!r}"
+            if "immutable" not in (r.headers.get("Cache-Control") or ""):
+                return "Cache-Control 에 immutable 없음"
+            if (r.headers.get("Access-Control-Allow-Origin") or "") != "*":
+                return "CORS 헤더 없음"
+    except Exception as e:  # noqa: BLE001
+        return f"{type(e).__name__}: {e}"
+    return None
+
+
+def upload(bucket: str = CDN_BUCKET, base: str | None = CDN_BASE, dry: bool = False, only: list[str] | None = None) -> int:
+    m = read_manifest()
+    tracks = [t for t in m["tracks"] if not only or t["id"] in only]
+    todo, missing = [], []
+    for t in tracks:
+        key = cdn_key(t)
+        mp3 = os.path.join(ASSETS, t["file"])
+        if not key:
+            raise SystemExit(f"{t['id']}: 매니페스트에 hash 가 없습니다 — python music/tracks.py manifest")
+        if not os.path.exists(mp3):
+            missing.append(t["id"])
+            continue
+        if file_hash(mp3) != t["hash"]:
+            raise SystemExit(f"{t['file']} 내용이 매니페스트 해시와 다릅니다 — python music/tracks.py manifest 후 다시")
+        todo.append((t, key, mp3))
+    if missing:
+        print(f"  로컬 파일 없음(건너뜀): {', '.join(missing)}")
+    if dry:
+        mb = sum(os.path.getsize(p) for _, _, p in todo) / 1e6
+        print(f"[dry-run] 버킷 {bucket}: 확인할 곡 {len(todo)}개 {mb:.1f}MB — 키 예: {todo[0][1] if todo else '-'}")
+        return 0
+    ensure_bucket(bucket)
+    have = remote_keys(bucket)
+    sent = skipped = total = 0
+    for t, key, mp3 in todo:
+        if key in have:
+            skipped += 1
+            continue
+        size = os.path.getsize(mp3)
+        _, data, _ = run_cf(["r2", "objects", "put", key, "--bucket-name", bucket, "--file", mp3,
+                             "--content-type", "audio/mpeg", "--content-length", str(size)])
+        got = walk_keys(data, set())
+        if got and key not in got:
+            raise SystemExit(f"올린 키가 다릅니다: 기대 {key}, 응답 {sorted(got)} — cf CLI 키 인코딩 확인 필요")
+        sent += 1
+        total += size
+        print(f"  올림 {sent}: {key} ({size / 1e6:.1f}MB)")
+    have = remote_keys(bucket)
+    lost = [k for _, k, _ in todo if k not in have]
+    print(f"R2 {bucket}: 올림 {sent}곡 {total / 1e6:.1f}MB · 이미 있음 {skipped}곡 · 목록에 없음 {len(lost)}곡")
+    if lost:
+        raise SystemExit("목록에 없는 키: " + ", ".join(lost[:5]))
+    if base and todo:
+        _, key, mp3 = todo[0]
+        why = check_url(f"{base.rstrip('/')}/{key}", os.path.getsize(mp3))
+        if why:
+            raise SystemExit(f"CDN 주소 확인 실패({base}): {why} — Worker 배포(cd cloudflare/music && node ../node_modules/cf/bin/cf deploy) 후 다시. 매니페스트는 그대로")
+        if m.get("cdn_base") != base:
+            set_cdn_base(base)
+    return 0
+
+
+def write_manifest(ents: list[dict] | None = None) -> dict:
+    m = build_manifest(ents)
+    save_manifest(m)
     print(f"매니페스트: {os.path.relpath(MANIFEST, ROOT).replace(os.sep, "/")} — "
           + ", ".join(f"{t['id']}(단계 {t['stage']})" for t in m["tracks"]))
     return m
@@ -333,7 +534,25 @@ def main(argv=None) -> int:
     c.add_argument("--moods", help="무드 태그 calm·dreamy·warm·focus·bright·drive 중 쉼표로 여럿 (CONTRACT §146)")
     r = sub.add_parser("remove", help="매니페스트에서 곡 빼기(파일은 그대로)")
     r.add_argument("id")
+    u = sub.add_parser("upload", help="§155 R2 에 없는 곡만 올리고 CDN 확인 뒤 매니페스트 cdn_base 쓰기(cf CLI 로그인 필요)")
+    u.add_argument("--bucket", default=CDN_BUCKET)
+    u.add_argument("--base", default=CDN_BASE, help=f"CDN 주소(기본 {CDN_BASE}), none 이면 매니페스트를 건드리지 않음")
+    u.add_argument("--only", help="곡 id 쉼표 목록만")
+    u.add_argument("--dry-run", action="store_true")
+    cb = sub.add_parser("cdn-base", help="§155 매니페스트 cdn_base 만 바꾸기: https://… | off")
+    cb.add_argument("value")
     a = ap.parse_args(argv)
+    if a.cmd == "upload":
+        return upload(a.bucket, None if a.base in ("none", "") else a.base, a.dry_run, a.only.split(",") if a.only else None)
+    if a.cmd == "cdn-base":
+        v = a.value.strip()
+        if v.lower() in ("off", "none", "0"):
+            set_cdn_base(None)
+        elif v.startswith("https://"):
+            set_cdn_base(v.rstrip("/"))
+        else:
+            raise SystemExit("cdn-base 는 https://… 또는 off")
+        return 0
     ents = None
     if a.cmd == "copy":
         ents = copy_track(a.id, a.src, parse_stage(a.stage), a.energy, a.label, a.title, a.source,

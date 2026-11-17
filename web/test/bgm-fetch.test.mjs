@@ -113,3 +113,24 @@ test('cancel: 받는 중인 곡을 그만 받으면 null, 다시 부르면 새�
   assert.equal(k, 1, '그만둔 뒤 다시 시도하지 않음');
   assert.ok(await f.get('u'));
 });
+
+test('§155 get(url, {attempts, stallMs}): 곡마다 시도 수·멈춤 시간, 4xx 는 다시 시도 안 함, cancel 기록', async () => {
+  let k = 0;
+  const f = new TrackFetcher(opts(async (url, o) => { k++; return res(200, DATA, { cut: 200, hang: true, signal: o.signal }); }, { stallMs: 5000, attempts: 4 }));
+  assert.equal(await f.get('cdn', { attempts: 2, stallMs: 20 }), null);
+  assert.equal(k, 2, 'CDN 은 2번만');
+  let n = 0;
+  const g = new TrackFetcher(opts(async () => { n++; return res(404, new Uint8Array(0)); }, { attempts: 4 }));
+  assert.equal(await g.get('gone'), null);
+  assert.equal(n, 1, '404 는 한 번에 포기');
+  let m = 0;
+  const h = new TrackFetcher(opts(async () => { m++; return res(503, new Uint8Array(0)); }, { attempts: 3 }));
+  assert.equal(await h.get('busy'), null);
+  assert.equal(m, 3, '5xx 는 다시 시도');
+  const c = new TrackFetcher(opts(async (url, o) => res(200, DATA, { cut: 200, hang: true, signal: o.signal })));
+  const p = c.get('x');
+  await new Promise((r) => setTimeout(r, 5));
+  c.cancel('x');
+  assert.equal(await p, null);
+  assert.ok(c.cancelled.has('x'), '취소는 실패와 구별');
+});

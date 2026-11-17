@@ -120,14 +120,19 @@ export function ixSound(ev) {
 }
 
 /** 순수: 이벤트(+그 노드)에 맞는 소리. 소리 없으면 null */
+/** 노드 id·kind → 소리 객체 만드는 함수(같은 노드는 같은 음 높이·pan). main 0, 그 밖 −0.4～0.4 */
+function voiceOf(id, kind) {
+  const h = hashStr(id);
+  const pitchIndex = h % 7;
+  const pan = kind === 'main' ? 0 : Math.round((((h >>> 8) % 81) / 100 - 0.4) * 100) / 100;
+  return (name, priority, extra = {}) => ({ name, priority, pitchIndex, pan, key: id, ...extra });
+}
+
 export function eventToSound(ev, node) {
   if (!ev || !ev.type) return null;
   const id = ev.nodeId || (ev.node && ev.node.id) || '';
   const kind = (node && node.kind) || (ev.node && ev.node.kind) || null;
-  const h = hashStr(id);
-  const pitchIndex = h % 7;
-  const pan = kind === 'main' ? 0 : Math.round((((h >>> 8) % 81) / 100 - 0.4) * 100) / 100; // main 0, 그 밖 −0.4～0.4
-  const mk = (name, priority, extra = {}) => ({ name, priority, pitchIndex, pan, key: id, ...extra });
+  const mk = voiceOf(id, kind);
   if (ev.ix) { const s = ixSound(ev); if (s) return s[0] === '__none' ? null : mk(s[0], s[1], { cat: 'ix-' + ev.ix.cat }); if (ev.type === 'output') return null; }
   switch (ev.type) {
     case 'node-add': {
@@ -159,6 +164,101 @@ export function eventToSound(ev, node) {
     default:
       return null;
   }
+}
+
+// ───────────────────────── 상태 전이·차례 소리 ─────────────────────────
+// eventToSound 는 이벤트 하나만 보는 순수 함수라 '직전 상태'·'이 차례에서 처음' 을 모른다. CueTracker 가 노드별 상태를 들고 판정한다.
+//   메인(kind main) 만: active→idle = rest(차례 끝, 0.45초 미뤄 idle→active 깜빡임이면 취소), idle→active = wake(사용자·알림 입력 직후면 ix-chime·notify-in 이 이미 알리므로 안 냄),
+//   user origin task-notification = notify-in(백그라운드 작업 완료 알림 도착).
+//   모든 노드: 차례(사용자·알림 입력 또는 메인 idle→active 부터)마다 첫 thinking = think, 첫 assistant text = speak(P3 — 4배속↑ 솎임).
+export const CUE = {
+  deferMs: 450,   // rest·wake 를 미루는 시간(재생 배속으로 나눔)
+  userWinMs: 1500, // 입력 직후 이만큼 안의 idle→active 는 wake 를 내지 않음(배속으로 나눔)
+  gapMs: { rest: 4000, wake: 4000, 'notify-in': 1500, think: 600, speak: 600 }, // 같은 이름 최소 간격(벽시계)
+};
+const TURN_ORIGINS = new Set(['human', 'peer', 'task-notification']);
+export class CueTracker {
+  constructor(opts = {}) {
+    this.o = { ...CUE, ...opts, gapMs: { ...CUE.gapMs, ...(opts.gapMs || {}) } };
+    this.st = new Map();      // id → { status, think, text, inputAt }
+    this.pending = [];        // { at, id, s }
+    this.lastName = new Map();
+  }
+  _s(id) {
+    let s = this.st.get(id);
+    if (!s) { s = { status: null, think: false, text: false, inputAt: -Infinity }; this.st.set(id, s); }
+    return s;
+  }
+  _gapOk(name, now) {
+    const g = this.o.gapMs[name] || 0, l = this.lastName.get(name);
+    if (l != null && now - l < g) return false;
+    this.lastName.set(name, now);
+    return true;
+  }
+  _cancel(id, name) { this.pending = this.pending.filter((p) => !(p.id === id && (!name || p.s.name === name))); }
+  /**
+   * 이벤트를 본다(무음 이벤트도 상태는 고친다). emit 이 false 면 상태만 고치고 소리·예약 없음.
+   * 반환: 지금 낼 소리 배열(0～1개). 미룬 소리는 due(now) 로 꺼낸다.
+   */
+  note(ev, node, now, { speed = 1, emit = true } = {}) {
+    if (!ev || !ev.type) return [];
+    const id = ev.nodeId || (ev.node && ev.node.id) || '';
+    if (!id) return [];
+    const kind = (node && node.kind) || (ev.node && ev.node.kind) || null;
+    const k = Math.max(1, speed || 1);
+    const s = this._s(id);
+    const mk = voiceOf(id, kind);
+    const out = [];
+    const say = (name, p) => { if (emit && this._gapOk(name, now)) out.push(mk(name, p, { cat: 'cue' })); };
+    switch (ev.type) {
+      case 'node-add':
+        s.status = (ev.node && ev.node.status) || 'active'; s.think = s.text = false;
+        break;
+      case 'user':
+        if (!TURN_ORIGINS.has(ev.origin)) break;
+        s.think = s.text = false; s.inputAt = now;
+        this._cancel(id, 'wake');
+        if (ev.origin === 'task-notification' && kind === 'main') say('notify-in', 2);
+        break;
+      case 'node-update': {
+        const st = ev.patch && ev.patch.status;
+        if (!st) break;
+        const prev = s.status; s.status = st;
+        if (kind !== 'main') break;
+        if (st === 'idle' && prev === 'active') {
+          this._cancel(id, 'wake');
+          if (emit) this.pending.push({ at: now + this.o.deferMs / k, id, s: mk('rest', 2, { cat: 'cue' }) });
+        } else if (st === 'active' && prev === 'idle') {
+          s.think = s.text = false;
+          const flicker = this.pending.some((p) => p.id === id && p.s.name === 'rest');
+          this._cancel(id, 'rest');
+          if (!flicker && emit && now - s.inputAt > this.o.userWinMs / k) this.pending.push({ at: now + this.o.deferMs / k, id, s: mk('wake', 2, { cat: 'cue' }) });
+        }
+        break;
+      }
+      case 'thinking':
+        if (!s.think) { s.think = true; say('think', 3); }
+        break;
+      case 'text':
+        if (ev.role === 'system' || ev.role === 'user') break;
+        if (!s.text) { s.text = true; say('speak', 3); }
+        break;
+    }
+    return out;
+  }
+  /** 미룬 소리 중 때가 된 것(같은 이름 최소 간격을 지난 것만) */
+  due(now) {
+    const out = [];
+    const keep = [];
+    for (const p of this.pending) {
+      if (p.at > now) { keep.push(p); continue; }
+      if (this._gapOk(p.s.name, now)) out.push(p.s);
+    }
+    this.pending = keep;
+    return out;
+  }
+  nextDue() { return this.pending.length ? Math.min(...this.pending.map((p) => p.at)) : null; }
+  clear() { this.pending = []; }
 }
 
 // ───────────────────────── 레이트 리밋 ─────────────────────────
@@ -260,7 +360,7 @@ export const SOUNDS = {
   'machine-on': { dur: 0.16, register: 'low', desc: '짧은 노이즈 클릭 + 사각파 블립' },
   done: { dur: 0.85, register: 'mid', desc: '5도→근음 종지' },
   skill: { dur: 0.34, register: 'high', desc: '고음 3음 빠른 상행 + 고역 노이즈 반짝임' },
-  shell: { dur: 0.2, register: 'low', desc: '사각파 짧은 저음 2연타' },
+  shell: { dur: 0.2, register: 'mid', desc: '사각파 짧은 2연타(D4～D5 — 예전 D3 저음은 음악 없이 잘 안 들림, 2026-11-15)' },
   page: { dur: 0.24, register: 'mid', desc: '대역 노이즈 스윕(종이 넘김)' },
   type: { dur: 0.16, register: 'mid', desc: '고역 노이즈 클릭 2회' },
   type2: { dur: 0.22, register: 'mid', desc: '고역 노이즈 클릭 3회' },
@@ -273,8 +373,14 @@ export const SOUNDS = {
   pluck: { dur: 0.22, register: 'mid', desc: '짧은 감쇠 삼각파' },
   chime: { dur: 0.38, register: 'high', desc: '벨 1음' },
   tick: { dur: 0.06, register: 'mid', desc: '아주 짧은 클릭' },
-  'end-tick': { dur: 0.06, register: 'mid', desc: '작은 클릭, 게인 0.3' },
+  'end-tick': { dur: 0.07, register: 'mid', desc: '작은 클릭(게인 0.6) + 음계 사인 톡 — 예전 게인 0.3 은 사실상 무음(2026-11-15)' },
   blip: { dur: 0.07, register: 'high', desc: '아주 작은 블립' },
+  // 상태 전이·차례(CueTracker)
+  rest: { dur: 0.4, register: 'mid', desc: '메인 차례 끝(active→idle): 사인 5도→근음 하강 두 음, 부드럽게' },
+  wake: { dur: 0.3, register: 'mid', desc: '메인 스스로 깨어남(입력 없는 idle→active): 사인 근음→5도 상행 두 음, 작게' },
+  'notify-in': { dur: 0.34, register: 'mid', desc: '백그라운드 작업 완료 알림 도착(task-notification, 메인만): 작은 클릭 + 삼각파 퉁김 두 음 상행' },
+  think: { dur: 0.26, register: 'high', desc: '차례 첫 생각: 아주 작은 사인 한 음(느린 어택)' },
+  speak: { dur: 0.16, register: 'high', desc: '차례 첫 글 출력: 아주 작은 사인 톡 두 번' },
   stop: { dur: 0.3, register: 'low', desc: '중지됨: 사인 한 음이 5도 아래로 미끄러지며 꺼짐(lowpass, 작게)' },
   // 특별 상호작용
   'ix-push': { dur: 0.36, register: 'mid', desc: 'push: 대역 노이즈 상승 휘슁 + 사인 한 옥타브 상승' },
@@ -308,6 +414,11 @@ export const SOUNDS = {
   'lab-rig-stale': { dur: 0.22, register: 'high', desc: '기자재 정체: 노랑 두 번 깜빡에 맞춘 작은 틱 2' },
   'lab-lift': { dur: 0.4, register: 'low', desc: '퇴장 승강판: 저역 통과 톱니가 한 옥타브 내려가는 모터음 + 낮은 바람' },
 };
+
+// 2026-11-15 크기 조정(실측): end-tick 클릭 배율·음계 톡 세기, 새 소리 피크
+export const END_TICK_GAIN = 0.6;
+export const END_TICK_TONE = 0.1;
+export const CUE_GAIN = { rest: 0.12, wake: 0.1, 'notify-in': 0.18, think: 0.055, speak: 0.085 };
 
 const A = 0.005;  // attack
 const R = 0.03;   // 최소 release
@@ -495,11 +606,46 @@ export function synth(ctx, dest, name, t0, { notes = scaleNotes(null), pitchInde
       fm(ctx, mtof(noteFor(notes, 'high', pitchIndex)), t0, 0.36, dest, 0.17 * G, { ratio: 3, index: 1.3, idxDecay: 0.2 });
       return t0 + 0.38;
     case 'tick':
-    case 'end-tick': {
-      const k = name === 'end-tick' ? 0.3 : 1;
+      noise(ctx, t0, 0.035, dest, 0.12 * G, { type: 'bandpass', f: 3000, q: 2 });
+      osc(ctx, 'sine', 2000, t0, 0.035, dest, 0.05 * G);
+      return t0 + 0.06;
+    case 'end-tick': { // tick 의 0.6 배 + 음계 사인 톡(짧은 클릭만으로는 너무 작게 들림)
+      const k = END_TICK_GAIN;
       noise(ctx, t0, 0.035, dest, 0.12 * G * k, { type: 'bandpass', f: 3000, q: 2 });
       osc(ctx, 'sine', 2000, t0, 0.035, dest, 0.05 * G * k);
-      return t0 + 0.06;
+      osc(ctx, 'sine', mtof(n0 + 12), t0, 0.05, dest, END_TICK_TONE * G);
+      return t0 + 0.07;
+    }
+    // ---- 상태 전이·차례 ----
+    case 'rest': {
+      const r = noteFor(notes, 'mid', 0);
+      osc(ctx, 'sine', semis(r, 7), t0, 0.16, dest, CUE_GAIN.rest * G, { attack: 0.012 });
+      osc(ctx, 'sine', mtof(r), t0 + 0.13, 0.26, dest, CUE_GAIN.rest * 0.9 * G, { attack: 0.015 });
+      osc(ctx, 'triangle', mtof(r - 12), t0 + 0.13, 0.24, dest, CUE_GAIN.rest * 0.25 * G, { attack: 0.02 });
+      return t0 + 0.4;
+    }
+    case 'wake': {
+      const r = noteFor(notes, 'mid', 0);
+      osc(ctx, 'sine', mtof(r), t0, 0.12, dest, CUE_GAIN.wake * G, { attack: 0.01 });
+      osc(ctx, 'sine', semis(r, 7), t0 + 0.1, 0.18, dest, CUE_GAIN.wake * G, { attack: 0.01 });
+      return t0 + 0.3;
+    }
+    case 'notify-in': {
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(4500, t0); lp.frequency.exponentialRampToValueAtTime(900, t0 + 0.3); lp.connect(dest);
+      const r = noteFor(notes, 'mid', 2);
+      noise(ctx, t0, 0.02, dest, CUE_GAIN['notify-in'] * 0.5 * G, { type: 'bandpass', f: 2600, q: 2 });
+      osc(ctx, 'triangle', mtof(r), t0 + 0.01, 0.14, lp, CUE_GAIN['notify-in'] * G);
+      osc(ctx, 'triangle', mtof(up(notes, 'mid', 2, 2)), t0 + 0.12, 0.2, lp, CUE_GAIN['notify-in'] * G);
+      return t0 + 0.34;
+    }
+    case 'think':
+      osc(ctx, 'sine', mtof(noteFor(notes, 'high', (pitchIndex % 3) + 2)), t0, 0.22, dest, CUE_GAIN.think * G, { attack: 0.06 });
+      return t0 + 0.26;
+    case 'speak': {
+      const i0 = pitchIndex % 3;
+      osc(ctx, 'sine', mtof(noteFor(notes, 'high', i0)), t0, 0.05, dest, CUE_GAIN.speak * G);
+      osc(ctx, 'sine', mtof(up(notes, 'high', i0, 1)), t0 + 0.07, 0.06, dest, CUE_GAIN.speak * 0.85 * G);
+      return t0 + 0.16;
     }
     case 'blip':
       osc(ctx, 'sine', mtof(n0 + 12), t0, 0.05, dest, 0.06 * G);
@@ -666,10 +812,16 @@ export function synth(ctx, dest, name, t0, { notes = scaleNotes(null), pitchInde
 export const MAX_VOICES = 6;
 const KEY = 'ccviz.sfx';
 
-/** 재생 장치와 무관한 버스 연결: voice → sfxBus(volume×0.6, 음악 켜지면 −3dB) → compressor → destination */
+// 버스 이득: 음악이 켜져 있으면 −3dB(덕킹), 꺼져 있으면 +3dB(솔로 보정 — 2026-11-15 "음악을 끄면 효과음이 거의 안 들린다").
+//   압축기(threshold −18dB, ratio 4) 앞이라 큰 소리(오류·완료)는 덜 오르고 작은 소리(shell·page)가 거의 그대로 +3dB 오른다. 볼륨 1 에서도 피크 −5.5dBFS(헤드리스 실측)
+export const MUSIC_DUCK = 0.708;
+export const SOLO_BOOST = 1.413;
+export const busGain = (volume, musicOn) => volume * 0.6 * (musicOn ? MUSIC_DUCK : SOLO_BOOST);
+
+/** 재생 장치와 무관한 버스 연결: voice → sfxBus(busGain) → compressor → destination. 처음 값은 음악 꺼짐 기준 */
 export function createBus(ctx, volume = 0.5) {
   const bus = ctx.createGain();
-  bus.gain.value = volume * 0.6;
+  bus.gain.value = busGain(volume, false);
   const comp = ctx.createDynamicsCompressor();
   comp.threshold.value = -18; comp.ratio.value = 4; comp.knee.value = 6; comp.attack.value = 0.003; comp.release.value = 0.12;
   bus.connect(comp); comp.connect(ctx.destination);
@@ -687,6 +839,8 @@ export class Sfx {
     this._vol = 0.5;
     this.wantOn = false;
     this.limiter = new RateLimiter();
+    this.cues = new CueTracker();
+    this._cueTimer = null;
     this.voices = [];  // {g, priority, start, end}
     this.stats = { played: 0, dropped: 0, stolen: 0 };
     try {
@@ -711,11 +865,13 @@ export class Sfx {
     this.wantOn = this._on;
     if (this._on && this._ensure() && this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
     if (!this._on && this.ctx) { for (const v of this.voices) this._kill(v, 0.02); this.voices = []; }
+    if (!this._on) this._clearCues();
     this._save();
   }
   /** 시각화 일시정지: 켜짐 설정은 그대로 두고 소리만 막음(울리던 소리는 짧게 끊음). 저장하지 않는다 */
   setHold(on) {
     this.held = !!on;
+    if (this.held) this._clearCues();
     if (this.held && this.ctx) { for (const v of this.voices) this._kill(v, 0.05); this.voices = []; }
   }
   setVolume(v) {
@@ -723,11 +879,13 @@ export class Sfx {
     this._applyGain();
     this._save();
   }
+  /** 음악 켬/끔이 바뀌었을 때 sound.mjs 가 부른다(다음 소리를 기다리지 않고 버스 이득을 바로 맞춤) */
+  refreshGain() { this._applyGain(); }
   _applyGain() {
     if (!this._bus) return;
     let musicOn = false;
     try { musicOn = this.getMusicTime() != null; } catch (e) {}
-    const target = this._vol * 0.6 * (musicOn ? 0.708 : 1);
+    const target = busGain(this._vol, musicOn);
     const g = this._bus.bus.gain;
     g.cancelScheduledValues(this.ctx.currentTime);
     g.setTargetAtTime(target, this.ctx.currentTime, 0.03);
@@ -735,12 +893,19 @@ export class Sfx {
   _save() { try { this._storage && this._storage.setItem(KEY, JSON.stringify({ on: this._on, volume: this._vol })); } catch (e) {} }
 
   onEvent(ev, { node = null, speed = 1, quiet = false, replay = false } = {}) {
+    // 차례·상태 전이 장부는 무음 이벤트에서도 고친다(스크럽 뒤에도 '이 차례 첫 생각' 판정이 맞게)
+    const sp = replay ? speed : 1;
+    const hidden = typeof document !== 'undefined' && document.hidden;
+    const silent = !this._on || quiet || this.held || this.view === 'lab' || hidden;
+    const nowC = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const cues = this.cues.note(ev, node, nowC, { speed: sp, emit: !silent });
+    if (!silent) this._armCues(sp);
     if (!this._on || quiet || this.held) return false;
-    if (typeof document !== 'undefined' && document.hidden) return false;
+    if (hidden) return false;
     // 컨텍스트가 멈춘 동안(자동재생 대기·interrupted)은 쌓지 않는다 — 풀리면 한꺼번에 나므로(복원은 sound.mjs)
     if (this.ctx && this.ctx.state !== 'running' && this.ctx.state !== undefined) { this.ctx.resume().catch(() => {}); return false; }
     const lab = this.view === 'lab';
-    const s = lab ? labEventSound(ev, node, { view: 'lab' }) : eventToSound(ev, node);
+    const s = lab ? labEventSound(ev, node, { view: 'lab' }) : (eventToSound(ev, node) || cues[0] || null);
     if (!s) return false;
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const isLab = lab && Object.prototype.hasOwnProperty.call(LAB_SFX, s.name);
@@ -748,6 +913,23 @@ export class Sfx {
     if (!this.limiter.allow(s, now, replay ? speed : 1)) { this.stats.dropped++; return false; }
     return this.play(s.name, isLab ? { ...s, gain: LAB_SFX_GAIN[s.name] ?? 0.55 } : s);
   }
+  /** 미룬 상태 전이 소리(rest·wake)를 때가 되면 낸다 */
+  _armCues(speed) {
+    this._cueSpeed = speed;
+    const at = this.cues.nextDue();
+    if (at == null || this._cueTimer) return;
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    this._cueTimer = setTimeout(() => {
+      this._cueTimer = null;
+      const t = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      for (const s of this.cues.due(t)) {
+        if (!this._on || this.held || this.view === 'lab' || (typeof document !== 'undefined' && document.hidden)) continue;
+        if (this.limiter.allow(s, t, this._cueSpeed || 1)) this.play(s.name, s); else this.stats.dropped++;
+      }
+      this._armCues(this._cueSpeed);
+    }, Math.max(0, at - now) + 1);
+  }
+  _clearCues() { this.cues.clear(); if (this._cueTimer) { clearTimeout(this._cueTimer); this._cueTimer = null; } }
   _labGate() { return this._lg || (this._lg = new LabSoundGate()); }
   /**
    * 복셀 연구소 소리 바로 내기(기자재 상태 전이·승강판·플랫폼 연출 — 앱 이벤트가 아닌 렌더러 쪽 계기).
@@ -831,6 +1013,7 @@ export class Sfx {
 
   dispose() {
     this._on = false;
+    this._clearCues();
     for (const v of this.voices) this._kill(v, 0.02);
     this.voices = [];
     if (this.ctx) { try { this.ctx.close(); } catch (e) {} }

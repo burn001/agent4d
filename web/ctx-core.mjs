@@ -17,7 +17,7 @@ export const gaugeLevel = (pct) => limitLevel(pct);
  * 이전 30%(DROP_MIN_PCT) 이상에서 15%p 넘게, 그리고 이전의 70% 이하로 떨어졌을 때.
  */
 export function isCtxDrop(prev, next) {
-  if (!prev || !next || !isFinite(prev.pct) || !isFinite(next.pct)) return false;
+  if (!prev || !next || !Number.isFinite(prev.pct) || !Number.isFinite(next.pct)) return false; // pct null(창 모름)은 급락 아님
   return prev.pct >= DROP_MIN_PCT && prev.pct - next.pct >= 15 && next.pct <= prev.pct * 0.7;
 }
 
@@ -30,7 +30,7 @@ export function bandOf(pct) { let b = 0; for (const t of NOTE_BANDS) if (pct >= 
  * @returns {{kind:'drop', from, to} | {kind:'up', pct, level} | null}
  */
 export function ctxNote(prev, next) {
-  if (!next) return null;
+  if (!next || !Number.isFinite(next.pct)) return null; // 창을 모르면 패널 줄 없음
   if (isCtxDrop(prev, next)) return { kind: 'drop', from: prev.pct, to: next.pct };
   const b0 = prev ? bandOf(prev.pct) : 0, b1 = bandOf(next.pct);
   if (b1 > b0) return { kind: 'up', pct: next.pct, level: gaugeLevel(next.pct) };
@@ -47,11 +47,12 @@ export function pctText(p) {
   if (p == null || !isFinite(p)) return '—';
   return (p >= 10 ? Math.round(p) : Math.round(p * 10) / 10) + '%';
 }
-// 창 크기 근거(tag·observed·family·default) → 사전 sound.ctx.basis.<키>
-const basisText = (b) => (['tag', 'observed', 'family', 'default'].includes(b) ? tr(`sound.ctx.basis.${b}`) : '');
+// 창 크기 근거(tag·observed·family·unknown, 옛 기록 default) → 사전 sound.ctx.basis.<키>
+const basisText = (b) => (['tag', 'observed', 'family', 'default', 'unknown'].includes(b) ? tr(`sound.ctx.basis.${b}`) : '');
 /** 짧은 표시: `42% · 84k/200k` (추정이면 분모 뒤 `?`) */
 export function ctxShort(c) {
   if (!c) return '';
+  if (!c.limit) return `${fmtTokens(c.used)} · ${tr('sound.ctx.winUnknown')}`; // 창을 모름 — 비율 없이 토큰 수만
   return `${pctText(c.pct)} · ${fmtTokens(c.used)}/${fmtTokens(c.limit)}${c.estimated ? '?' : ''}`;
 }
 /** 툴팁 여러 줄: 사용량 · 창 근거 · 과열 단계(창 대비 %) · 출처 */
@@ -59,7 +60,7 @@ export function ctxTitle(c, name = '') {
   if (!c) return name ? `${name}\n${tr('sound.ctx.none')}` : tr('sound.ctx.none');
   return [
     name && name,
-    tr('sound.ctx.t.used', { pct: pctText(c.pct), used: fmtNum(Number(c.used)), limit: fmtNum(Number(c.limit)) }),
+    c.limit ? tr('sound.ctx.t.used', { pct: pctText(c.pct), used: fmtNum(Number(c.used)), limit: fmtNum(Number(c.limit)) }) : tr('sound.ctx.t.usedUnknown', { used: fmtNum(Number(c.used)) }),
     tr('sound.ctx.t.window', { basis: basisText(c.basis) || (c.estimated ? tr('sound.ctx.estimated') : '') }),
     tr('sound.ctx.t.heat', { stage: heatName(heatStageOf(c.pct)) }),
     tr('sound.ctx.t.source'),

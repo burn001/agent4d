@@ -47,7 +47,6 @@ import './heredoc-launch.test.mjs';
 import './jobs-keep.test.mjs'; // keepEnded
 // 목록에서 빠져 있던 것(따로 돌리면 통과) — npm test 가 이 파일만 돌린다
 import './clear-launcher.test.mjs';
-// fg-output.test.mjs 는 따로 돌리면 통과하나 묶어 돌리면 시각 의존으로 1건 실패 — 여기 넣지 않음
 import './jobs-files.test.mjs';
 import './session-end.test.mjs';
 import './bg-end.test.mjs';
@@ -68,3 +67,5 @@ import './replay-runner-spawn.test.mjs'; // 재생: 러너 시작 시각
 import './launcher-fg-timeout.test.mjs'; // 시간 한도로 넘어간 대기가 둘째 기동기로
 import './share.test.mjs'; // 범위 제한 공유 링크
 import './share-details.test.mjs'; // 잠금 등급 details
+import './fg-output.test.mjs'; // 포그라운드 셸 실시간 출력 (등록 누락 수리 11.15.)
+import './music-worker.test.mjs'; // 배경음악 CDN Worker (등록 누락 수리 11.15.)

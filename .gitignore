@@ -7,6 +7,8 @@ web/assets/bgm.wav
 cloudflare/.cloudflare/
 cloudflare/.wrangler/
 cloudflare/dist/
+cloudflare/music/.cloudflare/
+cloudflare/music/.wrangler/
 .dev.vars
 *.secrets.json
 
@@ -19,3 +21,6 @@ __pycache__/
 .DS_Store
 Thumbs.db
 .env
+
+# 코드맵 산출물(파생물, scripts/repo-map.mjs write) — 커밋 안 함
+/.codemap/

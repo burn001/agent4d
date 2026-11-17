@@ -154,3 +154,17 @@ export function noticeKey({ supported = true, enabled = null, device = null, err
   if (device.status === 'revoked') return 'revoked';
   return device.status === 'allowed' ? null : 'pending';
 }
+
+// 최근 메시지로 가기 단추: 스크롤 상태 판정(순수). 맨 아래 40px 안이면 '맨 아래'로 본다.
+export const BOTTOM_PX = 40;
+/** 스크롤 칸이 맨 아래에 붙어 있나({scrollTop, scrollHeight, clientHeight}) — 내용이 칸보다 짧으면 늘 참 */
+export const atBottom = (m, px = BOTTOM_PX) => !m || !(m.scrollHeight - m.clientHeight > 0) || m.scrollHeight - m.scrollTop - m.clientHeight < px;
+/** 새 메시지로 세는 줄(도구 줄·시스템 알림 묶음은 세지 않음) */
+const MSG_K = new Set(['mine', 'user', 'peer', 'assistant', 'ask']);
+const tsOf = (r) => { const v = Number(r && (r.ts ?? r.at)); return Number.isFinite(v) ? v : null; };
+/** 그린 줄 가운데 가장 늦은 메시지 시각(없으면 0) — 맨 아래를 본 순간의 기준점 */
+export const lastMsgTs = (rows) => (rows || []).reduce((m, r) => (MSG_K.has(r.k) && tsOf(r) != null && tsOf(r) > m ? tsOf(r) : m), 0);
+/** 기준점 뒤에 온 메시지 수 — 앞에 붙인 이전 대화(더 보기)는 기준점보다 이르므로 세지 않는다 */
+export const unseenCount = (rows, sinceTs) => (rows || []).filter((r) => MSG_K.has(r.k) && tsOf(r) != null && tsOf(r) > (sinceTs || 0)).length;
+/** 배지 글자: 0 이면 빈 글, 99 넘으면 '99+' */
+export const badgeText = (n) => (n > 99 ? '99+' : n > 0 ? String(n) : '');

@@ -176,3 +176,15 @@ python music/tracks.py manifest                         # 매니페스트만 다
 3. 이미 있는 곡의 단계를 바꾸려면(예: 새 곡이 와서 작은 도시를 활발 전용으로) `web/assets/bgm-tracks.json` 의 `stage`·`energy` 를 고친 뒤 `manifest` 를 돌립니다(메타 json 값만 다시 반영, 단계는 그대로 둠).
 4. 목록에서 빼기: `python music/tracks.py remove <id>`(파일은 지우지 않음).
 5. `npm test`(bgm·bgm-auto 시험이 다섯 곡 이상·stage·energy 를 검사).
+
+## 곡 CDN
+
+곡은 매니페스트 `cdn_base` 가 있으면 CDN(Cloudflare R2 + 전용 Worker `cloudflare/music`)의 `<cdn_base>/bgm/<hash>/<file>` 에서 받습니다.
+키에 내용 해시가 들어 있어 주소가 곧 내용입니다(1년 immutable). CDN 이 오류·시간 초과면 웹이 같은 곡을 로컬 `assets/` 주소로 바꿔 이어 틉니다.
+
+1. 곡 CDN 계정의 cf 프로필을 이 폴더에 묶습니다: `node cloudflare/node_modules/cf/bin/cf auth activate <프로필> cloudflare/music`(다른 폴더는 기존 프로필 그대로). 그 계정에서 R2 를 켜 둡니다(대시보드에서 한 번).
+2. Worker 배포: `cd cloudflare/music && node ../node_modules/cf/bin/cf deploy`(의존성은 `cloudflare/` 에서 `npm ci`).
+3. 곡 올리기: `python music/tracks.py upload --dry-run` 으로 확인한 뒤 `python music/tracks.py upload`.
+   R2 에 없는 키만 올리고, CDN 에서 첫 곡을 Range 로 받아 본 뒤에만 매니페스트에 `cdn_base` 를 씁니다.
+4. 새 곡을 `copy` 했거나 곡을 다시 합성했으면 `manifest` → `upload` 순서로 돌립니다(해시가 바뀐 곡만 새 키로 올라감).
+5. 끄기: 매니페스트에서 빼려면 `python music/tracks.py cdn-base off`, 한 브라우저만이면 주소에 `?bgmcdn=0`.

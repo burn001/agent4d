@@ -28,11 +28,23 @@ body.panel-collapsed #ix-pane { display: none; }
   font: 11.5px/1.4 "Cascadia Mono", Consolas, monospace; user-select: all; overflow-wrap: anywhere;
 }
 #ix-pane .ix-note small { display: block; color: var(--muted); font-size: 11px; }
+/* 대화 칸 + 최근 메시지로 단추(칸 아래 가운데에 뜸). 세로 스크롤은 이 칸 하나뿐 — 줄·코드 블록·카드 안쪽 세로 스크롤 없음(아래 flat 규칙) */
+#ix-pane .ix-feedw { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
 #ix-pane .ix-feed { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 6px 0 8px; overscroll-behavior: contain; }
+#ix-pane .ix-latest {
+  position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); z-index: 2; display: inline-flex; align-items: center; gap: 5px;
+  font: inherit; font-size: 12px; font-weight: 650; padding: 5px 12px 5px 9px; border-radius: 999px; border: none; cursor: pointer;
+  background: var(--accent); color: var(--bg); box-shadow: var(--shadow); white-space: nowrap; max-width: calc(100% - 24px);
+}
+#ix-pane .ix-latest[hidden] { display: none; }
+#ix-pane .ix-latest:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+#ix-pane .ix-latest-n { min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--bg); color: var(--accent); font-size: 11px; line-height: 17px; text-align: center; }
+#ix-pane .ix-latest-n[hidden] { display: none; }
+@media (max-width: 480px) { #ix-pane .ix-latest { padding: 7px 14px 7px 11px; font-size: 13px; } } /* 손가락 누름 자리 */
 #ix-pane .ix-empty { color: var(--muted); padding: 10px 12px; margin: 0; }
 #ix-pane .ix-row { padding: 5px 12px; }
 #ix-pane .ix-row b { font-size: 11px; font-weight: 650; color: var(--muted); margin-right: 6px; }
-#ix-pane .ix-row p { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24em; overflow-y: auto; }
+#ix-pane .ix-row p { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; } /* 높이 상한 없음(안쪽 스크롤 없음) */
 #ix-pane .ix-row.k-assistant b { color: var(--k-main); }
 /* 출처 꼬리표 · 사람 글(원문) · 다른 세션 · 시스템 알림 묶음 · 더 보기 */
 #ix-pane .ix-src { display: inline-block; font-size: 10px; line-height: 1.5; padding: 0 6px; margin-right: 4px; border-radius: 999px; background: var(--chip-bg); color: var(--muted); border: 1px solid var(--border); max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: 1px; }
@@ -75,3 +87,12 @@ body.panel-collapsed #ix-pane { display: none; }
 #ix-pane .ask-card.wait-flash { animation: ix-wait-flash 1.3s ease-in-out 2; box-shadow: 0 0 0 2px var(--warn, #f59e0b); }
 @keyframes ix-wait-flash { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--warn, #f59e0b) 55%, transparent); } }
 @media (prefers-reduced-motion: reduce) { #ix-pane .ask-card.wait-flash { animation: none; } }
+
+/* flat: 대화 칸 안의 어떤 것도 세로로 따로 스크롤하지 않는다(휠·손가락 세로 이동이 늘 대화 칸 전체로).
+   응답 본문·계획·미리보기·권한 코드 = 높이 상한 없음. 코드 블록 = 줄바꿈(가로 스크롤도 없음). 표·수식 = 가로만(세로는 숨김). */
+#ix-pane .ix-feed .ix-row .md, #ix-pane .ix-feed .plan-md, #ix-pane .ix-feed .ask-card { max-height: none; overflow: visible; overscroll-behavior: auto; }
+#ix-pane .md pre.md-pre, #ix-pane .ask-prev pre.md-pre, #ix-pane .perm-code pre.md-pre {
+  max-height: none; overflow: visible; white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal;
+}
+#ix-pane .md pre.md-pre code { white-space: inherit; overflow-wrap: anywhere; }
+#ix-pane .md .md-tablewrap, #ix-pane .md pre.md-math.md-math-ok { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; }

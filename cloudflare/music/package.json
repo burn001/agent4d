@@ -1,0 +1,11 @@
+{
+  "name": "agent4d-music-worker",
+  "type": "module",
+  "private": true,
+  "description": "Agent4D 배경음악 CDN Worker (R2) — 의존성은 상위 cloudflare/node_modules 를 쓴다(cd .. && npm ci)",
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "2.0.0-beta.v.4",
+    "cf": "1.0.0-beta.20",
+    "vite": "8.3.5"
+  }
+}

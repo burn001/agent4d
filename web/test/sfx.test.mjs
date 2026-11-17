@@ -1,7 +1,7 @@
 // node --test "web/test/sfx.test.mjs"   (소리 표 전 행, 속도별 솎아내기, 버킷·최소 간격, scaleNotes 화음표)
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { eventToSound, RateLimiter, scaleNotes, chordAtBar, noteFor, SOUNDS, CHORD_NOTES, REGISTERS, Sfx, hashStr } from '../sfx.mjs';
+import { eventToSound, RateLimiter, scaleNotes, chordAtBar, noteFor, SOUNDS, CHORD_NOTES, REGISTERS, Sfx, hashStr, busGain, MUSIC_DUCK, SOLO_BOOST, CueTracker, CUE, END_TICK_GAIN, CUE_GAIN } from '../sfx.mjs';
 
 const N = (kind, id = kind === 'main' ? 's:m' : 'a:' + kind) => ({ id, kind });
 
@@ -221,9 +221,9 @@ test('Sfx: 기본 꺼짐, quiet 무음, voice ≤ 6(P0 은 끼어듦), 볼륨·�
   // P0 은 언제나 들어감
   assert.equal(sfx.play('error', { priority: 0 }), true);
   assert.equal(sfx.voices.filter((v) => v.end > 0).length, 6);
-  // 볼륨: 버스 게인 = volume × 0.6, 음악 켜지면 ×0.708
+  // 볼륨: 버스 게인 = volume × 0.6, 음악 켜지면 ×0.708(−3dB), 꺼지면 ×1.413(+3dB 솔로 보정)
   sfx.setVolume(1);
-  assert.ok(Math.abs(sfx._bus.bus.gain.value - 0.6) < 1e-9);
+  assert.ok(Math.abs(sfx._bus.bus.gain.value - 0.6 * 1.413) < 1e-9);
   music = 12.3; sfx.setVolume(1);
   assert.ok(Math.abs(sfx._bus.bus.gain.value - 0.6 * 0.708) < 1e-9);
   // 저장: ccviz.sfx 만 씀(배경음악 ccviz.music 과 분리)
@@ -262,5 +262,127 @@ test('Sfx.onEvent: 32× 재생에서 초당 ≤ 4, 라이브(replay:false)는 �
     live.dispose();
   } finally { performance.now = realNow; }
   assert.ok(hashStr('a') !== hashStr('b'));
+  sfx.dispose();
+});
+
+test('Sfx 버스 이득: 음악 끔이 켬보다 크고(+6dB 차), 음악 켬/끔 전이 뒤 refreshGain 으로 바로 바뀜·컨텍스트·onEvent 그대로', () => {
+  assert.equal(MUSIC_DUCK, 0.708); assert.equal(SOLO_BOOST, 1.413);
+  assert.ok(busGain(0.5, false) > busGain(0.5, true));
+  assert.ok(Math.abs(20 * Math.log10(busGain(1, false) / busGain(1, true)) - 6) < 0.05, '켬↔끔 차 6dB');
+  const { Ctx } = fakeAudio();
+  let music = 10;
+  const sfx = new Sfx({ AudioCtx: Ctx, storage: null, getMusicTime: () => music });
+  sfx.setEnabled(true);
+  const realNow = performance.now.bind(performance);
+  let t = 0; performance.now = () => (t += 1000);
+  try {
+    assert.equal(sfx.onEvent({ type: 'tool-start', nodeId: 'a:1', cat: 'read' }, { node: { kind: 'subagent' } }), true);
+    assert.ok(Math.abs(sfx._bus.bus.gain.value - busGain(0.5, true)) < 1e-9, '음악 켬: −3dB');
+    music = null; sfx.refreshGain(); // 음악 끔(sound.mjs setMusicOn 이 부름)
+    assert.ok(Math.abs(sfx._bus.bus.gain.value - busGain(0.5, false)) < 1e-9, '음악 끔: 다음 소리 전에 바로 +3dB');
+    assert.equal(sfx.ctx.state, 'running');
+    assert.equal(sfx.enabled, true);
+    assert.equal(sfx.onEvent({ type: 'tool-start', nodeId: 'a:2', cat: 'read' }, { node: { kind: 'subagent' } }), true, '음악 꺼져도 효과음 울림');
+  } finally { performance.now = realNow; }
+  sfx.dispose();
+});
+
+// ───────── 상태 전이·차례 소리(CueTracker) ─────────
+test('§16.5 CueTracker: 메인 차례 끝 rest(깜빡임 취소)·입력 없는 깨어남 wake·알림 notify-in(메인만)', () => {
+  const M = N('main'), S = N('subagent');
+  const c = new CueTracker();
+  c.note({ type: 'node-add', nodeId: 's:m', node: { id: 's:m', kind: 'main', status: 'active' } }, M, 0);
+  // active→idle: 바로 내지 않고 deferMs 뒤
+  assert.deepEqual(c.note({ type: 'node-update', nodeId: 's:m', patch: { status: 'idle' } }, M, 1000), []);
+  assert.deepEqual(c.due(1000 + CUE.deferMs - 1), []);
+  const r = c.due(1000 + CUE.deferMs);
+  assert.equal(r.length, 1); assert.equal(r[0].name, 'rest'); assert.equal(r[0].priority, 2); assert.equal(r[0].pan, 0);
+  // 깜빡임(idle 직후 active): rest 취소, wake 도 없음
+  c.note({ type: 'node-update', nodeId: 's:m', patch: { status: 'active' } }, M, 9000);
+  c.note({ type: 'node-update', nodeId: 's:m', patch: { status: 'idle' } }, M, 20000);
+  c.note({ type: 'node-update', nodeId: 's:m', patch: { status: 'active' } }, M, 20060);
+  assert.deepEqual(c.due(30000), [], '깜빡임은 무음');
+  // 입력 직후 깨어남 = ix-chime 이 알리므로 wake 없음
+  c.note({ type: 'node-update', nodeId: 's:m', patch: { status: 'idle' } }, M, 40000); c.due(41000);
+  c.note({ type: 'user', nodeId: 's:m', origin: 'human' }, M, 50000);
+  c.note({ type: 'node-update', nodeId: 's:m', patch: { status: 'active' } }, M, 50010);
+  assert.deepEqual(c.due(60000), []);
+  // 같은 시각에 active 가 먼저, user 가 뒤에 와도 wake 취소
+  c.note({ type: 'node-update', nodeId: 's:m', patch: { status: 'idle' } }, M, 70000); c.due(71000);
+  c.note({ type: 'node-update', nodeId: 's:m', patch: { status: 'active' } }, M, 80000);
+  c.note({ type: 'user', nodeId: 's:m', origin: 'peer' }, M, 80000);
+  assert.deepEqual(c.due(90000), []);
+  // 입력 없는 깨어남 → wake
+  c.note({ type: 'node-update', nodeId: 's:m', patch: { status: 'idle' } }, M, 100000); c.due(101000);
+  c.note({ type: 'node-update', nodeId: 's:m', patch: { status: 'active' } }, M, 110000);
+  assert.deepEqual(c.due(110000 + CUE.deferMs).map((s) => s.name), ['wake']);
+  // task-notification: 메인만 notify-in, 하위 에이전트는 무음
+  assert.deepEqual(c.note({ type: 'user', nodeId: 's:m', origin: 'task-notification' }, M, 120000).map((s) => s.name), ['notify-in']);
+  assert.deepEqual(c.note({ type: 'user', nodeId: 'a:x', origin: 'task-notification' }, S, 130000), []);
+  // 같은 이름 최소 간격
+  assert.deepEqual(c.note({ type: 'user', nodeId: 's:m', origin: 'task-notification' }, M, 120000 + CUE.gapMs['notify-in'] - 1), []);
+  // 하위 에이전트의 active↔idle 은 무음
+  const d = new CueTracker();
+  d.note({ type: 'node-add', nodeId: 'a:x', node: { id: 'a:x', kind: 'subagent', status: 'active' } }, S, 0);
+  d.note({ type: 'node-update', nodeId: 'a:x', patch: { status: 'idle' } }, S, 1000);
+  d.note({ type: 'node-update', nodeId: 'a:x', patch: { status: 'active' } }, S, 9000);
+  assert.deepEqual(d.due(99999), []);
+  assert.equal(d.nextDue(), null);
+});
+
+test('§16.5 CueTracker: 차례마다 첫 thinking·첫 text 만(같은 차례 안 반복 무음), 입력·깨어남에서 차례 새로', () => {
+  const M = N('main'), S = N('subagent');
+  const c = new CueTracker();
+  c.note({ type: 'node-add', nodeId: 's:m', node: { id: 's:m', kind: 'main', status: 'active' } }, M, 0);
+  const names = (ev, t, node = M) => c.note(ev, node, t).map((s) => s.name);
+  assert.deepEqual(names({ type: 'thinking', nodeId: 's:m' }, 1000), ['think']);
+  assert.deepEqual(names({ type: 'thinking', nodeId: 's:m' }, 5000), [], '같은 차례 두 번째 생각');
+  assert.deepEqual(names({ type: 'text', nodeId: 's:m', role: 'assistant' }, 6000), ['speak']);
+  assert.deepEqual(names({ type: 'text', nodeId: 's:m', role: 'assistant' }, 9000), []);
+  assert.deepEqual(names({ type: 'text', nodeId: 's:m', role: 'system' }, 9500), [], '시스템 요약 글은 무음');
+  assert.deepEqual(names({ type: 'user', nodeId: 's:m', origin: 'system' }, 10000), [], 'system 입력은 차례를 안 바꿈');
+  assert.deepEqual(names({ type: 'thinking', nodeId: 's:m' }, 11000), []);
+  names({ type: 'user', nodeId: 's:m', origin: 'human' }, 20000);
+  assert.deepEqual(names({ type: 'thinking', nodeId: 's:m' }, 21000), ['think'], '새 차례');
+  assert.deepEqual(names({ type: 'text', nodeId: 's:m', role: 'assistant' }, 22000), ['speak']);
+  // 메인 idle→active 도 새 차례
+  c.note({ type: 'node-update', nodeId: 's:m', patch: { status: 'idle' } }, M, 30000); c.due(31000);
+  c.note({ type: 'node-update', nodeId: 's:m', patch: { status: 'active' } }, M, 40000);
+  assert.deepEqual(names({ type: 'thinking', nodeId: 's:m' }, 41000), ['think']);
+  // 하위 에이전트도 자기 차례 첫 번만(우선순위 3 = 4배속↑ 솎임)
+  const sub = c.note({ type: 'thinking', nodeId: 'a:x' }, S, 50000);
+  assert.equal(sub.length, 1); assert.equal(sub[0].priority, 3);
+  assert.deepEqual(c.note({ type: 'thinking', nodeId: 'a:x' }, S, 51000), []);
+  // emit:false(스크럽·무음) = 장부만 고치고 소리 없음 → 그 뒤 같은 차례에서도 다시 안 울림
+  const q = new CueTracker();
+  assert.deepEqual(q.note({ type: 'thinking', nodeId: 's:q' }, M, 0, { emit: false }), []);
+  assert.deepEqual(q.note({ type: 'thinking', nodeId: 's:q' }, M, 1000), []);
+  for (const n of ['rest', 'wake', 'notify-in', 'think', 'speak']) { assert.ok(SOUNDS[n], n); assert.ok(SOUNDS[n].dur <= 0.4, n); assert.ok(CUE_GAIN[n] > 0 && CUE_GAIN[n] <= 0.2, n); }
+});
+
+test('§16.5 Sfx.onEvent: 첫 생각 울림, 같은 차례 두 번째 무음, 8배속 재생에선 P3 솎임 · rest 는 미뤘다가 울림 · 크기 조정 값', async () => {
+  assert.equal(END_TICK_GAIN, 0.6);
+  assert.equal(SOUNDS.shell.register, 'mid', 'shell D4～D5');
+  const { Ctx } = fakeAudio();
+  const sfx = new Sfx({ AudioCtx: Ctx, storage: null });
+  sfx.setEnabled(true);
+  const M = { id: 's:m', kind: 'main' };
+  assert.equal(sfx.onEvent({ type: 'thinking', nodeId: 's:m' }, { node: M }), true);
+  assert.equal(sfx.onEvent({ type: 'thinking', nodeId: 's:m' }, { node: M }), false);
+  const r8 = new Sfx({ AudioCtx: Ctx, storage: null }); r8.setEnabled(true);
+  assert.equal(r8.onEvent({ type: 'thinking', nodeId: 's:r' }, { node: M, speed: 8, replay: true }), false, '8배속: P3 솎임');
+  r8.dispose();
+  // rest: 미룸 → 타이머로 울림
+  sfx.onEvent({ type: 'node-add', nodeId: 's:m', node: { id: 's:m', kind: 'main', status: 'active' } }, { node: M });
+  const before = sfx.stats.played;
+  assert.equal(sfx.onEvent({ type: 'node-update', nodeId: 's:m', patch: { status: 'idle' } }, { node: M }), false, '바로는 안 울림');
+  await new Promise((res) => setTimeout(res, CUE.deferMs + 150));
+  assert.equal(sfx.stats.played, before + 1, 'rest 울림');
+  // 끄면 미룬 소리 버림
+  sfx.onEvent({ type: 'node-update', nodeId: 's:m', patch: { status: 'active' } }, { node: M });
+  sfx.onEvent({ type: 'node-update', nodeId: 's:m', patch: { status: 'idle' } }, { node: M });
+  assert.ok(sfx.cues.nextDue() != null);
+  sfx.setEnabled(false);
+  assert.equal(sfx.cues.nextDue(), null);
   sfx.dispose();
 });

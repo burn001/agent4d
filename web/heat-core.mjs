@@ -71,7 +71,7 @@ export const NO_HEAT = Object.freeze({ heat: 0, stage: 0, pct: 0, estimated: fal
  * estimated(창 크기 추정, 200k 기본값)는 표현이 원하면 조금 약하게 그리는 데 쓸 수 있다 — 값 자체는 그대로.
  */
 export function heatOf(c) {
-  if (!c || !Number.isFinite(Number(c.pct))) return NO_HEAT;
+  if (!c || c.pct == null || !Number.isFinite(Number(c.pct))) return NO_HEAT; // 창을 모름(basis unknown, pct null) → 과열 없음
   const pct = ctxPctOf(c);
   return { heat: heatOfPct(pct), stage: heatStageOf(pct), pct, estimated: !!c.estimated, known: true };
 }

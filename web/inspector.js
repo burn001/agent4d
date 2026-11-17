@@ -433,6 +433,9 @@ export function mountInspector(h) {
     if (ctx && Number.isFinite(ctx.pct)) {
       const lv = gaugeLevel(ctx.pct);
       parts.push(`<section class="ins-sec"><h4>${esc(tr('cards.ins.h.ctx'))}</h4><div class="ins-gauge lv-${lv}" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(ctx.pct)}" aria-label="${esc(tr('cards.ins.ctxUse'))}"><i style="width:${Math.min(100, Math.max(0, ctx.pct)).toFixed(1)}%"></i></div><p class="ins-dim">${esc(tr('cards.ins.tokens', { n: ctxShort(ctx) }))}${ctx.estimated ? ' ' + esc(tr('cards.ins.ctxEst')) : ''}</p></section>`);
+    } else if (ctx && ctx.used) {
+      // 창을 모르는 모델(basis unknown): 막대 없이 토큰 수만
+      parts.push(`<section class="ins-sec"><h4>${esc(tr('cards.ins.h.ctx'))}</h4><p class="ins-dim">${esc(tr('cards.ins.tokens', { n: ctxShort(ctx) }))}</p></section>`);
     }
     // 추론 effort 한 줄(요청값·적용값). 메인도 글로(무늬 없음), 하위 노드인데 값이 없으면 '알 수 없음'
     const efl = effBodyHtml(n);

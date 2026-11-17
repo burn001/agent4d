@@ -10,7 +10,7 @@ import { renderPermCard, permOpenHtml, allowStep, ARM_MS } from './perm-card.mjs
 import './md-links.js'; // 각주 왕복 링크
 import './math.js'; // 수식 조판
 import { mountWaits } from './wait-ui.js'; // 입력 대기 배지
-import { signingString, b64u, hex, MODE_KEY, POLL_MS, CONFIRM_MS, isSlashCommand, slashKind, sessionOfNode, viewRows, noticeKey } from './interact-core.mjs';
+import { signingString, b64u, hex, MODE_KEY, POLL_MS, CONFIRM_MS, isSlashCommand, slashKind, sessionOfNode, viewRows, noticeKey, atBottom, lastMsgTs, unseenCount, badgeText } from './interact-core.mjs';
 
 const DB = 'agent4d-ix', STORE = 'keys', KEY = 'device';
 const $ = (s, el = document) => el.querySelector(s);
@@ -96,7 +96,10 @@ class Interact {
         <span class="ix-me" hidden></span>
       </div>
       <div class="ix-note" hidden></div>
-      <div class="ix-feed" role="log" aria-live="polite"></div>
+      <div class="ix-feedw">
+        <div class="ix-feed" role="log" aria-live="polite"></div>
+        <button type="button" class="ix-latest" hidden aria-label="${escapeHtml(t('ix.latest'))}" title="${escapeHtml(t('ix.latest'))}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 2.5v10M3.5 8.5 8 13l4.5-4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="ix-latest-l">${escapeHtml(t('ix.latest.short'))}</span><span class="ix-latest-n" hidden></span></button>
+      </div>
       <div class="ix-warn" role="alert" hidden></div>
       <form class="ix-form" autocomplete="off">
         <textarea rows="2" maxlength="4000" disabled></textarea>
@@ -105,8 +108,15 @@ class Interact {
     $('#stream', this.panel).after(pane);
     this.pane = pane;
     this.sel = $('#ix-session', pane); this.me = $('.ix-me', pane); this.note = $('.ix-note', pane);
-    this.feed = $('.ix-feed', pane); this.form = $('form', pane); this.warn = $('.ix-warn', pane); this.ta = $('textarea', pane); this.btn = $('button', this.form);
+    this.feed = $('.ix-feed', pane); this.latest = $('.ix-latest', pane); this.latestN = $('.ix-latest-n', pane); this.form = $('form', pane); this.warn = $('.ix-warn', pane); this.ta = $('textarea', pane); this.btn = $('button', this.form);
     this.sel.addEventListener('change', () => { this.manual = true; this._pick(this.sel.value || null); });
+    // 최근 메시지로 가기: 맨 아래에서 벗어나면 단추(새 메시지 수), 맨 아래면 따라감
+    this._stick = true; this._seenTs = 0; this._rows = []; this._jumpT = 0;
+    this.feed.addEventListener('scroll', () => this._onScroll(), { passive: true });
+    const cancelJump = () => { if (this._jumpT) { clearTimeout(this._jumpT); this._jumpT = 0; } };
+    for (const ev of ['wheel', 'touchstart', 'pointerdown']) this.feed.addEventListener(ev, cancelJump, { passive: true });
+    this.latest.addEventListener('click', () => this._toLatest(true));
+    if (typeof ResizeObserver === 'function') new ResizeObserver(() => { if (this._stick) this.feed.scrollTop = this.feed.scrollHeight; }).observe(this.feed);
     this.form.addEventListener('submit', (e) => { e.preventDefault(); this._send(); });
     // ·143.3 확인 단계 중 글을 고치면 확인을 풀고 다시 묻는다
     this.ta.addEventListener('input', () => {
@@ -276,7 +286,38 @@ class Interact {
   }
   /** 열린 계획·권한 창 상태: pend = 브리지에서 읽은 열린 창(toolUseId → view) · permSt = 보낸 상태 · permMsg = 사유/피드백 글 · permArm = 위험 허용 첫 누름 시각 · permDone = 답한 권한 카드(잠깐 보임) */
   _permReset() { this.pend = new Map(); this.permSt = new Map(); this.permMsg = new Map(); this.permArm = new Map(); this.permDone = new Map(); this.live = null; this._pendAt = 0; this._pendErr = null; }
-  _resetFeed() { this._permReset(); this.full = new Map(); this.before = null; this.openSys = new Set(); this._lastHtml = ''; this.items = []; this.next = null; this.local = []; this.holdLikely = false; this.picks = new Map(); this.askSent = new Map(); this._cards = new Map(); this.others = new Map(); this.feed.innerHTML = ''; }
+  _resetFeed() { this._permReset(); this.full = new Map(); this.before = null; this.openSys = new Set(); this._lastHtml = ''; this.items = []; this.next = null; this.local = []; this.holdLikely = false; this.picks = new Map(); this.askSent = new Map(); this._cards = new Map(); this.others = new Map(); this.feed.innerHTML = ''; this._rows = []; this._stick = true; this._seenTs = 0; this._latestUi(); }
+
+  /** 스크롤 상태: 맨 아래면 따라가기 켜고 본 자리(기준 시각)를 당긴다. 단추로 내려가는 중(부드러운 이동)에는 중간 자리를 '벗어남'으로 보지 않는다 */
+  _onScroll() {
+    const bottom = atBottom(this.feed);
+    if (bottom) { this._stick = true; if (this._jumpT) { clearTimeout(this._jumpT); this._jumpT = 0; } }
+    else if (!this._jumpT) this._stick = false;
+    this._latestUi();
+  }
+  /** 맨 아래로(단추면 부드럽게, 움직임 줄이기 설정이면 바로) */
+  _toLatest(smooth = false) {
+    this._stick = true;
+    const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    clearTimeout(this._jumpT);
+    if (smooth && !reduce && typeof this.feed.scrollTo === 'function') {
+      this._jumpT = setTimeout(() => { this._jumpT = 0; this._onScroll(); }, 1200); // 이동이 끝나지 못하면(내용이 계속 늘어남) 1.2초 뒤 실제 자리로 판정
+      this.feed.scrollTo({ top: this.feed.scrollHeight, behavior: 'smooth' });
+    } else { this._jumpT = 0; this.feed.scrollTop = this.feed.scrollHeight; }
+    this._latestUi();
+  }
+  /** 단추 보임·배지: 따라가는 중이면 숨기고 본 자리를 최신으로, 위를 보는 중이면 기준 시각 뒤 메시지 수 */
+  _latestUi() {
+    if (!this.latest) return;
+    const show = !this._stick && this._rows.length > 0;
+    if (!show) this._seenTs = Math.max(this._seenTs, lastMsgTs(this._rows));
+    const n = show ? unseenCount(this._rows, this._seenTs) : 0;
+    const bt = badgeText(n);
+    if (this.latest.hidden === show) this.latest.hidden = !show;
+    if (this.latestN.textContent !== bt) { this.latestN.textContent = bt; this.latestN.hidden = !bt; }
+    const lab = n ? t('ix.latest.n', { n: bt }) : t('ix.latest');
+    if (this.latest.getAttribute('aria-label') !== lab) { this.latest.setAttribute('aria-label', lab); this.latest.title = lab; }
+  }
 
   async _loadFeed() {
     if (!this.sid) return;
@@ -386,9 +427,10 @@ class Interact {
   _renderFeed() {
     const { rows, local } = viewRows(this.items, this.local, { aliasEn: this.device?.alias?.en, holdLikely: this.holdLikely });
     this.local = local;
-    const stick = this.feed.scrollHeight - this.feed.scrollTop - this.feed.clientHeight < 40;
-    if (!this.sid) { this.feed.innerHTML = ''; return; }
-    if (!rows.length) { this.feed.innerHTML = `<p class="ix-empty">${escapeHtml(t('ix.empty'))}</p>`; return; }
+    const stick = this._stick; // 따라가기 상태(스크롤 사건으로만 바뀜 — 다시 그리며 높이가 바뀌어도 흔들리지 않게)
+    this._rows = this.sid ? rows : [];
+    if (!this.sid) { this.feed.innerHTML = ''; this._latestUi(); return; }
+    if (!rows.length) { this.feed.innerHTML = `<p class="ix-empty">${escapeHtml(t('ix.empty'))}</p>`; this._latestUi(); return; }
     const tg = this.sessions.find((s) => s.sessionId === this.sid);
     const ctx = { t, mineAlias: aliasText(this.device?.alias), openSys: this.openSys, picks: this.picks, asked: this.askSent, canSend: this._can, cards: this._cards, full: this.full,
       others: this.others, rc: !!(tg && tg.remote), link: (tg && tg.remote) || null,
@@ -414,6 +456,7 @@ class Interact {
       }
       if (stick) this.feed.scrollTop = this.feed.scrollHeight;
     }
+    this._latestUi();
     this._applyFlash();
   }
 
@@ -542,6 +585,7 @@ class Interact {
     const lid = b64u(crypto.getRandomValues(new Uint8Array(9)));
     this.local.push({ lid, at: Date.now(), text, state: 'sending', msgId: null });
     if (override == null) this.ta.value = '';
+    this._stick = true; // 보내면 맨 아래로(내 글이 보이게)
     this._renderFeed();
     this.feed.scrollTop = this.feed.scrollHeight;
     let patch;

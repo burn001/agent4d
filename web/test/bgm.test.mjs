@@ -147,3 +147,69 @@ test('§130 버전 주소: 매니페스트 hash = 곡 내용 sha256 앞 16자, t
   assert.deepEqual(p.tracks.map(trackUrl), ['assets/a.mp3', 'assets/b.mp3', 'assets/c.mp3?v=abcdef0123456789']);
   assert.equal(trackUrl(null), null);
 });
+
+test('§155 곡 CDN: cdn_base 검사·키 bgm/<hash>/<file>·CDN 우선·끔 스위치·실패하면 한동안 로컬', async () => {
+  const { parseCdnBase, cdnObjectKey, cdnTrackUrl, cdnWanted, TrackSource, CDN_KEY, CDN_DOWN_MS } = await import('../bgm-core.mjs');
+  assert.equal(parseCdnBase('https://m.example.dev/'), 'https://m.example.dev');
+  assert.equal(parseCdnBase('https://m.example.dev/a/b//'), 'https://m.example.dev/a/b');
+  for (const v of [null, '', 'http://m.example.dev', 'https://m.example.dev/?x=1', 'https://u:p@m.example.dev', 'https://m.example.dev/#a', 'javascript:alert(1)', 12]) assert.equal(parseCdnBase(v), null, String(v));
+  const t = { id: 'lofi', file: 'bgm-lofi.mp3', hash: '0123456789abcdef' };
+  assert.equal(cdnObjectKey(t), 'bgm/0123456789abcdef/bgm-lofi.mp3');
+  assert.equal(cdnObjectKey({ ...t, hash: null }), null);
+  assert.equal(cdnObjectKey({ ...t, file: '../x.mp3' }), null);
+  assert.equal(cdnTrackUrl(t, 'https://m.example.dev/'), 'https://m.example.dev/bgm/0123456789abcdef/bgm-lofi.mp3');
+  assert.equal(cdnTrackUrl(t, null), null);
+  // 끔 스위치: ?bgmcdn=0|1 > localStorage ccviz.bgm.cdn > 켬
+  assert.equal(cdnWanted({ search: '' }), true);
+  assert.equal(cdnWanted({ search: '?bgmcdn=0' }), false);
+  assert.equal(cdnWanted({ search: '' }, (k) => (k === CDN_KEY ? '0' : null)), false);
+  assert.equal(cdnWanted({ search: '?t=x&bgmcdn=1' }, () => '0'), true);
+  assert.equal(cdnWanted({ search: '' }, () => { throw new Error('blocked'); }), true);
+  // 주소 고르기
+  let now = 1000;
+  const s = new TrackSource({ base: 'https://m.example.dev', enabled: true, now: () => now });
+  const cdn = 'https://m.example.dev/bgm/0123456789abcdef/bgm-lofi.mp3';
+  assert.equal(s.url(t), cdn);
+  assert.equal(s.url({ id: 'b', file: 'b.mp3' }), 'assets/b.mp3', '해시 없는 곡은 로컬');
+  assert.equal(s.local(t), 'assets/bgm-lofi.mp3?v=0123456789abcdef');
+  assert.equal(s.isCdn(cdn), true);
+  assert.equal(s.isCdn('assets/bgm-lofi.mp3?v=0123456789abcdef'), false);
+  assert.equal(s.isCdn('https://m.example.dev.evil/x'), false);
+  s.fail(cdn, 'error');
+  assert.equal(s.down, true);
+  assert.equal(s.url(t), s.local(t), '실패 뒤 로컬');
+  now += CDN_DOWN_MS + 1;
+  assert.equal(s.url(t), cdn, '시간이 지나면 다시 CDN');
+  assert.equal(new TrackSource({ base: 'https://m.example.dev', enabled: false }).url(t), s.local(t), '끄면 로컬');
+  assert.equal(new TrackSource({ base: null }).url(t), s.local(t), 'cdn_base 없으면 로컬');
+  assert.equal(parseManifest({ cdn_base: 'https://m.example.dev/', tracks: [t] }).cdnBase, 'https://m.example.dev');
+  assert.equal(parseManifest({ tracks: [t] }).cdnBase, null);
+});
+
+test('§155 레포: cdn_base 가 있으면 https·CSP media-src·connect-src 에 그 출처, tracks.py CDN_BASE 도 CSP 에', () => {
+  const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const csp = /Content-Security-Policy" content="([^"]+)"/.exec(html)[1];
+  const dir = (n) => (csp.split(';').map((x) => x.trim()).find((x) => x.startsWith(n + ' ')) || '').split(/\s+/);
+  const py = readFileSync(new URL('../../music/tracks.py', import.meta.url), 'utf8');
+  const base = /^CDN_BASE = "([^"]+)"/m.exec(py)[1];
+  const origins = [new URL(base).origin];
+  if (manifest.cdn_base) { assert.match(manifest.cdn_base, /^https:\/\//); origins.push(new URL(manifest.cdn_base).origin); }
+  for (const o of origins) {
+    assert.ok(dir('media-src').includes(o), `media-src 에 ${o}`);
+    assert.ok(dir('connect-src').includes(o), `connect-src 에 ${o}(외부 접속 통째 받기 fetch)`);
+  }
+});
+
+test('§155 audio.js 연결: 덱 주소는 TrackSource, 오류·시간 초과면 로컬로 되돌림, 통째 받기 실패도 로컬, play 한 번 더', () => {
+  const src = readFileSync(new URL('../audio.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(src, /trackUrl\(/, '덱 주소는 this._url(t) 로만');
+  assert.match(src, /new TrackSource\(\{ base: m\.cdnBase, enabled: cdnWanted\(location, lsGet\) \}\)/);
+  assert.match(src, /addEventListener\('error', \(\) => this\._cdnFallback\(i, 'error'\)\)/);
+  assert.match(src, /addEventListener\('loadstart', \(\) => this\._cdnWatch\(i\)\)/);
+  assert.match(src, /this\._cdnFallback\(i, 'timeout'\)/);
+  assert.match(src, /this\._cdnFallback\(i, 'stall'\)/, '재생 중 멈춤(waiting)도 로컬로');
+  assert.match(src, /f\.cancelled\.has\(url\)/, '취소는 되돌림 아님');
+  assert.match(src, /this\.source\.fail\(url, 'fetch'\)/);
+  assert.match(src, /el\.currentTime = pos/, '되돌린 뒤 재생 위치 이음');
+  assert.match(src, /async _playEl\(d\)/);
+});

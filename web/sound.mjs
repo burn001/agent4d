@@ -228,6 +228,7 @@ export class Sound {
     if (this.music) this.music.wantOn = this.wantMusic;
     if (!on) { this.musicBlocked = false; if (this.music) this.music.stop(); }
     else if (this.on && !this.held) this.restore(true);
+    if (this.sfx && typeof this.sfx.refreshGain === 'function') this.sfx.refreshGain(); // 음악 덕킹 −3dB ↔ 솔로 +3dB 를 바로
     this.render();
   }
 

@@ -407,6 +407,21 @@ async function cmdSet(o) {
   const list = load();
   const sh = findShare(list, key);
   if (!sh) { warn(tt('notFound', { key: key || '' })); return 2; }
+  if (o.expires != null || o.days != null || o.hours != null || o.minutes != null) {
+    // 만료 연장·단축(토큰·URL 그대로, 만료된 링크도 되살림 — 폐기된 링크는 안 됨). 기간은 지금부터
+    if (sh.revokedAt) { warn(tt('urlState', { state: statusOf(sh) })); return 1; }
+    const exp = o.expires != null ? parseKstTime(o.expires)
+      : Date.now() + (o.minutes != null ? Number(o.minutes) : o.hours != null ? Number(o.hours) * 60 : Number(o.days) * 1440) * 60_000;
+    const mins = (exp - Date.now()) / 60_000;
+    if (!Number.isFinite(mins) || mins < 1 || mins > 90 * 1440) { warn(tt('badPeriod')); return 2; }
+    const fa = Array.isArray(sh.frameAncestors) && sh.frameAncestors.length ? { fa: sh.frameAncestors } : {};
+    const w = await workerShare(readJson(CONFIG) || {}, { op: 'put', hash: sh.hash, id: sh.id, exp, ...fa });
+    if (!w.ok) { warn(tt('workerFail', { why: w.why })); return 1; }
+    sh.expiresAt = new Date(exp).toISOString();
+    save(list);
+    log(`${sh.alias || '-'}: ${tt('rowExpires', { v: kst(sh.expiresAt) })}`);
+    if (o.embed == null && o.redact == null && o.replay == null) return 0;
+  }
   if (o.embed != null) {
     // iframe 허용 출처: shares.json(로컬 서버)·Worker KV(fa) 둘 다 — 토큰·URL·만료 그대로
     const embed = parseEmbed(o.embed);

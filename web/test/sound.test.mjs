@@ -335,3 +335,18 @@ test('공유 링크 화면: 따로 저장(ccviz.sound.share)·처음엔 켬, 평
   assert.deepEqual(JSON.parse(st.getItem(SHARE_KEY)), { on: false });
   assert.deepEqual(JSON.parse(st.getItem(KEY)), { on: false }, '평소 키는 그대로');
 });
+
+test('음악 켬/끔(§85)은 효과음 버스 이득을 바로 다시 맞추고(§16.1) 효과음은 켜 둔 채', () => {
+  const f = fakes(); const storage = mem({ [KEY]: j({ on: true }) });
+  let refreshed = 0; f.sfx.refreshGain = () => { refreshed++; };
+  f.nav.userActivation.hasBeenActive = true;
+  const s = new Sound({ ...f, storage, search: '' });
+  s.setOn(true);
+  const before = refreshed;
+  s.setMusicOn(false);
+  assert.equal(refreshed, before + 1, '끌 때 한 번');
+  assert.equal(f.sfx.enabled, true, '음악을 꺼도 효과음은 켜짐');
+  assert.ok(!f.log.slice(-3).includes('sfx.off'));
+  s.setMusicOn(true);
+  assert.equal(refreshed, before + 2, '켤 때 한 번');
+});

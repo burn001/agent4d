@@ -46,6 +46,7 @@ export class TrackFetcher {
     this._cancel = new Map();  // url → 받기 그만두기
     this.inUse = () => [];     // 지금 덱에 걸린 objectURL 들(버리지 않음) — 부르는 쪽이 채움
     this.log = [];             // 시험·진단용 {url, ev, ...}
+    this.cancelled = new Set(); // cancel 로 끝난 url(실패와 구별 — CDN 되돌림은 실패에만)
   }
 
   /** 다 받은 곡의 objectURL(없으면 null) */
@@ -55,13 +56,17 @@ export class TrackFetcher {
     return u || null;
   }
 
-  /** 곡을 끝까지 받아 objectURL. 이미 받는 중이면 같은 약속 */
-  get(url) {
+  /**
+   * 곡을 끝까지 받아 objectURL. 이미 받는 중이면 같은 약속.
+   * o = {attempts, stallMs} 이 곡만 다르게(CDN 은 빨리 포기하고 로컬로). 4xx(408·429 제외)는 다시 시도하지 않는다
+   */
+  get(url, o = {}) {
     const hit = this.peek(url);
     if (hit) return Promise.resolve(hit);
     let p = this._pending.get(url);
     if (!p) {
-      p = this._download(url).then((blob) => {
+      this.cancelled.delete(url);
+      p = this._download(url, o).then((blob) => {
         if (this._pending.get(url) === p) { this._pending.delete(url); this._cancel.delete(url); }
         if (!blob) return null;
         const u = this._makeUrl(blob);
@@ -75,7 +80,7 @@ export class TrackFetcher {
   }
 
   /** 받는 중인 곡을 그만 받음(곡이 바뀌어 더는 안 쓸 때 — 대역을 다음 곡에). 약속은 null 로 끝난다 */
-  cancel(url) { const c = this._cancel.get(url); if (c) { this._note({ url, ev: 'cancel' }); this._cancel.delete(url); this._pending.delete(url); c(); } }
+  cancel(url) { const c = this._cancel.get(url); if (c) { this._note({ url, ev: 'cancel' }); this.cancelled.add(url); this._cancel.delete(url); this._pending.delete(url); c(); } }
 
   _note(o) { this.log.push({ t: Date.now(), ...o }); if (this.log.length > 40) this.log.shift(); }
 
@@ -90,18 +95,19 @@ export class TrackFetcher {
     }
   }
 
-  async _download(url) {
+  async _download(url, o = {}) {
+    const attempts = o.attempts || this.attempts, stallMs = o.stallMs || this.stallMs;
     let chunks = [], got = 0, total = null, type = 'audio/mpeg';
     const t0 = Date.now();
     let stopped = false, cur = null;
     this._cancel.set(url, () => { stopped = true; try { cur && cur.abort(); } catch (e) {} });
-    for (let a = 0; a < this.attempts && !stopped; a++) {
+    for (let a = 0; a < attempts && !stopped; a++) {
       if (a) await this._sleep(Math.min(8000, 1000 * 2 ** (a - 1)));
       if (stopped) break;
       const ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
       cur = ac;
       let timer = null;
-      const arm = () => { if (!ac) return; clearTimeout(timer); timer = setTimeout(() => ac.abort(), this.stallMs); };
+      const arm = () => { if (!ac) return; clearTimeout(timer); timer = setTimeout(() => ac.abort(), stallMs); };
       try {
         const headers = got > 0 ? { Range: `bytes=${got}-` } : {};
         arm();
@@ -114,7 +120,13 @@ export class TrackFetcher {
           if (got > 0) { chunks = []; got = 0; } // 이어 받기를 안 받아 줌: 처음부터
           const cl = Number(r.headers.get('content-length'));
           total = Number.isFinite(cl) && cl > 0 ? cl : null;
-        } else { try { r.body && r.body.cancel(); } catch (e) {} this._note({ url, ev: 'http', status: r.status, a }); continue; }
+        } else {
+          try { r.body && r.body.cancel(); } catch (e) {}
+          clearTimeout(timer);
+          this._note({ url, ev: 'http', status: r.status, a });
+          if (r.status >= 400 && r.status < 500 && r.status !== 408 && r.status !== 429) break; // 없는 곡·거부: 다시 해도 같음
+          continue;
+        }
         type = r.headers.get('content-type') || type;
         if (!r.body || typeof r.body.getReader !== 'function') {
           const buf = await r.arrayBuffer();

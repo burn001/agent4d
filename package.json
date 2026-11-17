@@ -1,6 +1,6 @@
 {
   "name": "agent4d",
-  "version": "0.7.9",
+  "version": "0.7.10",
   "description": "Agent4D — your coding agents in 3D space + time. Unofficial, local, read-only viewer for Claude Code sessions: main agent, subagents, workflows, claude -p runs and background jobs as one live tree in the browser",
   "private": true,
   "license": "Apache-2.0",
@@ -33,6 +33,6 @@
     "start": "node bin/agent4d.mjs start",
     "server": "node server/index.mjs",
     "demo": "node server/index.mjs --demo",
-    "test": "node --test server/test && node --test \"web/test/*.test.mjs\""
+    "test": "node --test server/test && node --test \"web/test/*.test.mjs\" && node --test \"scripts/test/*.test.mjs\""
   }
 }

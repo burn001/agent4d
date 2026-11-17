@@ -152,3 +152,17 @@ test('§127 mock: 하위 에이전트는 나타난 순서대로 오름·60·80·
   const again = ['a:1', 'a:2', 'a:3', 'a:4'].map((id) => addEv(mc2, id, 'subagent', 's:m'));
   assert.deepEqual(again, subs.slice(0, 4));
 });
+
+test('창을 모르는 모델(basis unknown, limit·pct null): 비율·패널 줄·과열 없이 토큰 수만', async () => {
+  const { heatOf, NO_HEAT } = await import('../heat-core.mjs');
+  const U = { used: 179_000, limit: null, pct: null, estimated: false, basis: 'unknown' };
+  assert.equal(gaugeLevel(U.pct), 'none');
+  assert.equal(ctxNote(null, U), null);
+  assert.equal(ctxNote(C(85), U), null);
+  assert.equal(isCtxDrop(C(85), U), false);
+  assert.equal(heatOf(U), NO_HEAT);
+  const s = ctxShort(U);
+  assert.ok(s.startsWith('179k · ') && !s.includes('%') && !s.includes('?'), s);
+  const t = ctxTitle(U);
+  assert.ok(t.includes('179,000') && !t.includes('null'), t);
+});

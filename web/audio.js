@@ -15,8 +15,11 @@
 //       (activity 작업 상태 · shuffle · loop 순차 루프 · mood 무드 고정 · time 시간대별 무드) + 한 곡 반복 토글 repeat.
 //       행을 눌러 고른 곡·'이전' 곡은 그 곡이 끝날 때까지 붙잡고(pinned — 작업 상태 기준의 단계 전환도 쉼), 끝나면 기준대로.
 //       예전 선택값 sel('auto'|'cycle'|'shuffle'|곡 id)은 읽기 전용 호환 값(getter)으로 남는다
+//   - 곡 CDN: 매니페스트 cdn_base 가 있으면 곡을 CDN(<cdn_base>/bgm/<hash>/<file>)에서 받는다(TrackSource).
+//       CDN 이 오류(요소 error·통째 받기 실패)거나 CDN_TIMEOUT 초 안에 메타데이터가 안 오면 같은 곡을 로컬 assets 주소로 다시 걸고
+//       (재생 위치·재생 중이면 재생 유지) 한동안(CDN_DOWN_MS) 로컬만 쓴다. ?bgmcdn=0 · localStorage ccviz.bgm.cdn='0' 이면 끔
 
-import { LAST_KEY, MIG_KEY, FALLBACK_TRACKS, parseManifest, optionList, modeLabel, stageLabel, sectionName, trackUrl } from './bgm-core.mjs';
+import { LAST_KEY, MIG_KEY, FALLBACK_TRACKS, parseManifest, optionList, modeLabel, stageLabel, sectionName, TrackSource, cdnWanted } from './bgm-core.mjs';
 import { AutoPicker, activityLevel, pickForLevel, autoLabel, LEVEL_LABEL, RECENT_MAX } from './bgm-auto.mjs';
 import { RULES, LISTS, MOODS, TIME_SLOTS, loadPrefs, savePrefs, nextFor, prevFor, fitsRule, timeSlot, activeMood, playlist, normTimeMoods, pickActivity, tabOf, effectiveTab } from './bgm-list.mjs';
 import { t as tr } from './i18n.mjs';
@@ -27,6 +30,8 @@ const KEY = 'ccviz.music';
 const FADE_IN = 2, FADE_STOP = 0.6, FADE_HOLD = 0.4, FADE_RESUME = 1.2; // 공용 버스(켜기·끄기·일시정지) 초
 const AUTO_TICK_MS = 2000;
 const PREFETCH_LEAD = 90; // 곡 끝 몇 초 전에 다음 곡을 미리 받나
+const CDN_TIMEOUT = 12; // CDN 곡이 받기 시작한 뒤 이 초 안에 메타데이터가 안 오면 로컬로
+const CDN_FETCH = { attempts: 2, stallMs: 10000 }; // CDN 통째 받기는 빨리 포기(로컬이 남아 있으므로)
 const FETCH_WAIT = 180; // 곡 통째 받기를 최대 몇 초 기다리나(넘으면 URL 로 스트리밍)
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
@@ -47,7 +52,19 @@ export class Music {
     b.id = 'bgm-b';
     b.preload = 'none';
     a.after(b);
-    this.decks = [a, b].map((el) => ({ el, lane: new Lane(0, 'eq'), gain: null, src: null, leadDone: false, url: null, loaded: null, pending: null }));
+    // CDN 곡은 다른 출처라, crossOrigin 없이 WebAudio(createMediaElementSource)에 물리면 Chrome 이 0 을 내보낸다(무음).
+    // CDN 은 Access-Control-Allow-Origin: * 이므로 anonymous 로 받는다. 같은 출처(로컬 곡·blob:)에는 영향 없음
+    for (const el of [a, b]) el.crossOrigin = 'anonymous';
+    this.decks = [a, b].map((el) => ({ el, lane: new Lane(0, 'eq'), gain: null, src: null, leadDone: false, url: null, loaded: null, pending: null, cdnTimer: null, stallTimer: null, fell: false }));
+    this.source = new TrackSource(); // 곡 주소(CDN 우선·실패하면 로컬). _probe 가 매니페스트 cdn_base 로 다시 만든다
+    this.decks.forEach((d, i) => {
+      d.el.addEventListener('error', () => this._cdnFallback(i, 'error'));
+      d.el.addEventListener('loadstart', () => this._cdnWatch(i));
+      d.el.addEventListener('loadedmetadata', () => { clearTimeout(d.cdnTimer); d.cdnTimer = null; });
+      // 재생 중 CDN 이 끊기면 브라우저는 error 없이 waiting 에 머문다 — CDN_TIMEOUT 초 동안 못 이어 가면 로컬로
+      for (const ev of ['waiting', 'stalled']) d.el.addEventListener(ev, () => this._cdnStallWatch(i));
+      for (const ev of ['playing', 'canplay']) d.el.addEventListener(ev, () => { clearTimeout(d.stallTimer); d.stallTimer = null; });
+    });
     // 외부 접속은 곡을 통째 받아 Blob URL 로(스트리밍이 대역 경쟁으로 끊기던 것). 루프백은 예전처럼 URL 바로
     this.fetcher = (() => { try { return wantWholeFetch(location) && typeof fetch === 'function' && typeof URL.createObjectURL === 'function' ? new TrackFetcher() : null; } catch (e) { return null; } })();
     if (this.fetcher) this.fetcher.inUse = () => this.decks.map((d) => d.el.getAttribute('src')).filter(Boolean);
@@ -201,7 +218,10 @@ export class Music {
       const r = await fetch('assets/bgm-tracks.json', { cache: 'no-cache' });
       if (r.ok) {
         const m = parseManifest(await r.json());
-        if (m) { this.tracks = m.tracks; this.def = m.def; this.sectionsEn = m.sectionsEn; ok = true; }
+        if (m) {
+          this.tracks = m.tracks; this.def = m.def; this.sectionsEn = m.sectionsEn; ok = true;
+          this.source = new TrackSource({ base: m.cdnBase, enabled: cdnWanted(location, lsGet) });
+        }
       }
     } catch (e) {}
     if (!ok) {
@@ -376,7 +396,7 @@ export class Music {
     d.leadDone = false;
     d.el.loop = this.repeat;
     if (preload) d.el.preload = preload;
-    const url = trackUrl(t); // ?v=<내용 해시> — 1년 immutable 캐시
+    const url = this._url(t); // CDN 주소(없거나 실패 뒤면 로컬 ?v=<내용 해시>) — 둘 다 1년 immutable 캐시
     if (d.url === url && d.pending) return; // 이미 받는 중
     // 받던 곡을 더 안 쓰면(다른 덱도 안 씀) 그만 받아 대역을 새 곡에
     if (this.fetcher && d.pending && d.url && d.url !== url && !this.decks.some((o) => o !== d && o.url === d.url)) this.fetcher.cancel(d.url);
@@ -388,14 +408,98 @@ export class Music {
     if (!f || ready) { d.loaded = url; d.el.src = ready || url; return; }
     // 다 받을 때까지 덱의 옛 src 는 그대로(재생은 모두 _fetched 를 거친다). 다 받으면(못 받으면 URL 로) 건다
     if (preload !== 'auto' && !this.wantOn) return; // 소리 꺼 둔 사람: 켤 때(start) 받는다
-    const p = f.get(url).then((obj) => {
+    const p = this._whole(t, url, () => d.url === url && d.pending === p).then(({ obj, url: got }) => {
       if (d.url !== url || d.pending !== p) return false; // 곡이 바뀌었거나 기다리다 URL 로 넘어감
       d.pending = null;
-      d.loaded = url;
-      d.el.src = obj || url;
+      d.url = got; // CDN 을 못 받아 로컬로 받았으면 로컬 주소
+      d.loaded = got;
+      d.el.src = obj || got;
       return !!obj;
     });
     d.pending = p;
+  }
+
+  /** 지금 쓸 곡 주소(CDN 우선, 끔·실패 뒤·해시 없음이면 로컬) */
+  _url(t) { return this.source.url(t); }
+
+  /**
+   * 곡 통째 받기 → {obj, url}. CDN 주소를 못 받으면(취소가 아니고 아직 그 곡이 필요하면) CDN 을 한동안 끄고
+   * 같은 곡을 로컬에서 받는다. obj 가 null 이면 부르는 쪽이 url 로 스트리밍
+   */
+  _whole(t, url, wanted) {
+    const f = this.fetcher;
+    const cdn = this.source.isCdn(url);
+    return f.get(url, cdn ? CDN_FETCH : undefined).then((obj) => {
+      if (obj || !cdn || f.cancelled.has(url) || !wanted()) return { obj, url };
+      this.source.fail(url, 'fetch');
+      this._note({ ev: 'cdn-fallback', id: t.id, via: 'fetch' });
+      const lu = this.source.local(t);
+      return f.get(lu).then((o) => ({ obj: o, url: lu }));
+    });
+  }
+
+  /** CDN 곡이 받기 시작했는데 CDN_TIMEOUT 초 안에 메타데이터가 안 오면 로컬로(preload none·metadata 로 쉬는 것은 받기를 다시 시작할 때까지 보류) */
+  _cdnWatch(i) {
+    const d = this.decks[i];
+    clearTimeout(d.cdnTimer);
+    d.cdnTimer = null;
+    const src = d.el.getAttribute('src') || '';
+    if (!this.source.isCdn(src)) return;
+    d.cdnTimer = setTimeout(() => {
+      d.cdnTimer = null;
+      const el = d.el;
+      if ((el.getAttribute('src') || '') !== src || el.readyState >= 1) return;
+      if (el.networkState !== 2) { el.addEventListener('progress', () => this._cdnWatch(i), { once: true }); return; } // 쉬는 중: 받기가 다시 움직이면 다시 잼
+      this._cdnFallback(i, 'timeout');
+    }, CDN_TIMEOUT * 1000);
+  }
+
+  /** 재생 중 멈춤(waiting·stalled): CDN 곡이 CDN_TIMEOUT 초 안에 다시 재생할 만큼 못 받으면 로컬로 */
+  _cdnStallWatch(i) {
+    const d = this.decks[i];
+    const src = d.el.getAttribute('src') || '';
+    if (!this.source.isCdn(src) || d.stallTimer) return;
+    d.stallTimer = setTimeout(() => {
+      d.stallTimer = null;
+      const el = d.el;
+      if ((el.getAttribute('src') || '') !== src || el.paused || el.readyState >= 3) return;
+      this._cdnFallback(i, 'stall');
+    }, CDN_TIMEOUT * 1000);
+  }
+
+  /** CDN 곡 실패(요소 error·시간 초과·멈춤): 같은 곡을 로컬 주소로 다시 건다 — 재생 위치를 잇고, 재생 중이었으면 계속 */
+  _cdnFallback(i, why) {
+    const d = this.decks[i];
+    const el = d.el;
+    const cur = el.getAttribute('src') || '';
+    if (!this.source.isCdn(cur)) return;
+    const t = this._trackOf(d.id);
+    if (!t) return;
+    clearTimeout(d.cdnTimer); d.cdnTimer = null;
+    clearTimeout(d.stallTimer); d.stallTimer = null;
+    this.source.fail(cur, why);
+    const lu = this.source.local(t);
+    let pos = 0;
+    try { pos = el.currentTime || 0; } catch (e) {}
+    const playing = !el.paused;
+    d.pending = null;
+    d.url = lu;
+    d.loaded = lu;
+    d.fell = true;
+    el.src = lu;
+    if (pos > 0.5) el.addEventListener('loadedmetadata', () => { try { el.currentTime = pos; } catch (e) {} }, { once: true });
+    if (playing) el.play().catch(() => {});
+    this._note({ ev: 'cdn-fallback', id: t.id, via: why, pos: +pos.toFixed(1) });
+  }
+
+  /** 덱 play. 그 사이 CDN 되돌림으로 src 가 로컬로 바뀌어 실패했으면 한 번 더 */
+  async _playEl(d) {
+    d.fell = false;
+    try { await d.el.play(); } catch (e) {
+      if (!d.fell) throw e;
+      d.fell = false;
+      await d.el.play();
+    }
   }
 
   /** 덱의 곡 받기가 끝날 때까지(최대 sec 초). 넘으면 URL 로 걸고(스트리밍) 진행. 덱이 비어 있으면 지금 받기 시작 */
@@ -414,7 +518,7 @@ export class Music {
     const t = this._setCur(id);
     if (!t) return;
     const d = this.decks[this.active];
-    if (d.id !== t.id || d.url !== trackUrl(t) || (!d.pending && d.loaded !== d.url)) this._deckLoad(this.active, t.id, preload);
+    if (d.id !== t.id || d.url !== this._url(t) || (!d.pending && d.loaded !== d.url)) this._deckLoad(this.active, t.id, preload);
     else if (preload) d.el.preload = preload;
     d.el.loop = this.repeat;
   }
@@ -524,7 +628,7 @@ export class Music {
     if (!t) return;
     this._pre = { id, from: this.cur, rule: this.rule, level: this.autoLevel, list: this.list, view: this.view };
     this._note({ ev: 'prefetch', id });
-    this.fetcher.get(trackUrl(t));
+    this._whole(t, this._url(t), () => true);
   }
 
   /** 재생 위치: 구간 표시 + 끝 3초 전 다음 곡 미리 시작 */
@@ -650,7 +754,7 @@ export class Music {
     if (plan.delay > 0) { await sleep(plan.delay); if (sid !== this._switchId) return; }
     if (!this.on || this.paused) return;
     this.ensureGraph();
-    try { await idle.el.play(); } catch (e) {
+    try { await this._playEl(idle); } catch (e) {
       if (sid !== this._switchId) return;
       // 새 곡을 못 틀었다: 나가던 곡을 되살림
       this.lastError = (e && e.name) || 'Error';
@@ -704,7 +808,9 @@ export class Music {
     if (el.networkState !== 2) { try { el.load(); } catch (e) {} } // 받는 중이 아니면(preload none·metadata 로 멈춤) 다시 받기 — 위치는 0
     return new Promise((res) => {
       const done = (ok) => { clearTimeout(tm); el.removeEventListener('canplay', on); el.removeEventListener('canplaythrough', on); el.removeEventListener('error', er); res(ok); };
-      const on = () => done(true), er = () => done(false);
+      let src0 = el.getAttribute('src');
+      // CDN 오류로 로컬 주소로 바뀌었으면(오류 처리기가 먼저 돈다) 계속 기다림
+      const on = () => done(true), er = () => { const s1 = el.getAttribute('src'); if (s1 !== src0 && !this.source.isCdn(s1)) { src0 = s1; return; } done(false); };
       const tm = setTimeout(() => done(false), sec * 1000);
       el.addEventListener('canplay', on); el.addEventListener('canplaythrough', on); el.addEventListener('error', er);
     });
@@ -855,7 +961,7 @@ export class Music {
     this.decks.forEach((d, i) => {
       if (!d.el.paused) return;
       // 받는 중인 덱은 다 받은 뒤 재생
-      if (i === this.active || d.lane.target > 0 || d.lane.valueAt(now) > SILENT) ps.push(this.fetcher ? this._fetched(i, FETCH_WAIT).then(() => d.el.play()) : d.el.play());
+      if (i === this.active || d.lane.target > 0 || d.lane.valueAt(now) > SILENT) ps.push(this.fetcher ? this._fetched(i, FETCH_WAIT).then(() => this._playEl(d)) : this._playEl(d));
     });
     await Promise.all(ps);
   }
@@ -883,8 +989,8 @@ export class Music {
         if (i === this.active && !this.decks[i].pending) break;
       }
     }
-    try { await this.audio.play(); } catch (e) {
-      // 켜는 사이 곡이 바뀌면(src 교체) play() 가 AbortError — 꺼진 것이 아니니 바뀐 곡으로 한 번 더
+    try { await this._playEl(this.decks[this.active]); } catch (e) {
+      // 켜는 사이 곡이 바뀌면(src 교체) play 가 AbortError — 꺼진 것이 아니니 바뀐 곡으로 한 번 더(CDN 되돌림은 _playEl 이 먼저 한 번 더)
       let ok = false;
       if (e && e.name === 'AbortError' && this.on) { try { await this.audio.play(); ok = true; } catch (e2) { e = e2; } }
       if (!ok) {

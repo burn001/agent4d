@@ -1,6 +1,7 @@
 {
   "version": 2,
   "default": "lofi",
+  "cdn_base": "https://music.agent4d.workers.dev",
   "sections_en": {
     "A": "A",
     "A · 다시": "A · again",

@@ -38,6 +38,71 @@ export function trackUrl(t) {
   return 'assets/' + t.file + (t.hash ? '?v=' + t.hash : '');
 }
 
+// 곡 CDN(Cloudflare R2 + 전용 Worker): 매니페스트 cdn_base 가 있으면 곡을 <cdn_base>/bgm/<hash>/<file> 에서 받는다.
+//   키에 내용 해시가 들어 있어 주소 = 내용(불변, 1년 immutable). 해시 없는 곡·CDN 끔·CDN 실패 뒤에는 로컬 assets 주소(trackUrl).
+//   끄기: URL ?bgmcdn=0(이 탭) · localStorage ccviz.bgm.cdn = '0'(이 브라우저). ?bgmcdn=1 은 저장값보다 우선해 켬
+export const CDN_KEY = 'ccviz.bgm.cdn';
+export const CDN_DOWN_MS = 10 * 60 * 1000; // CDN 실패 뒤 이만큼은 로컬만(지나면 다시 CDN)
+
+/** cdn_base 검사: https://호스트[/경로] 만(끝 / 없앰, 쿼리·조각·인증정보 불가). 아니면 null */
+export function parseCdnBase(v) {
+  if (typeof v !== 'string' || !v.trim()) return null;
+  let u;
+  try { u = new URL(v.trim()); } catch (e) { return null; }
+  if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash) return null;
+  return (u.origin + u.pathname).replace(/\/+$/, '');
+}
+
+/** R2 객체 키: bgm/<hash>/<file>. 해시 없으면 null */
+export function cdnObjectKey(t) {
+  if (!t || !t.file || !t.hash || !/^[0-9a-f]{8,64}$/.test(t.hash) || !/^[A-Za-z0-9._-]+$/.test(t.file)) return null;
+  return `bgm/${t.hash}/${t.file}`;
+}
+
+/** CDN 곡 주소(없으면 null) */
+export function cdnTrackUrl(t, base) {
+  const b = parseCdnBase(base), k = cdnObjectKey(t);
+  return b && k ? `${b}/${k}` : null;
+}
+
+/** 이 화면에서 CDN 을 쓰나: ?bgmcdn=0|1 > localStorage ccviz.bgm.cdn '0'|'1' > 켬 */
+export function cdnWanted(loc, lsGet = () => null) {
+  try {
+    const v = new URLSearchParams((loc && loc.search) || '').get('bgmcdn');
+    if (v === '0' || v === 'off') return false;
+    if (v === '1' || v === 'on') return true;
+  } catch (e) {}
+  let s = null;
+  try { s = lsGet(CDN_KEY); } catch (e) {}
+  return s !== '0';
+}
+
+/** 곡 주소 고르기: CDN 우선, 실패하면 CDN_DOWN_MS 동안 로컬 */
+export class TrackSource {
+  constructor({ base = null, enabled = true, now = () => Date.now() } = {}) {
+    this.base = parseCdnBase(base);
+    this.enabled = !!enabled && !!this.base;
+    this._now = now;
+    this.downUntil = 0;
+    this.fails = [];   // 진단용 {t, url, why}
+  }
+  get down() { return this.downUntil > this._now(); }
+  /** 로컬 주소(?v=) */
+  local(t) { return trackUrl(t); }
+  /** 지금 쓸 주소 */
+  url(t) {
+    if (this.enabled && !this.down) { const u = cdnTrackUrl(t, this.base); if (u) return u; }
+    return trackUrl(t);
+  }
+  isCdn(u) { return !!(this.base && typeof u === 'string' && u.startsWith(this.base + '/')); }
+  /** CDN 실패 기록: 한동안 로컬만 */
+  fail(u, why) {
+    this.downUntil = this._now() + CDN_DOWN_MS;
+    this.fails.push({ t: this._now(), url: u, why });
+    if (this.fails.length > 10) this.fails.shift();
+  }
+}
+
 /** bgm-tracks.json → {tracks, def}. id·file 이 없는 항목·중복 id 는 버림. 하나도 안 남으면 null */
 export function parseManifest(m) {
   if (!m || !Array.isArray(m.tracks)) return null;
@@ -70,7 +135,7 @@ export function parseManifest(m) {
   const def = tracks.some((t) => t.id === m.default) ? m.default : (tracks.some((t) => t.id === DEFAULT_TRACK) ? DEFAULT_TRACK : tracks[0].id);
   // 구간 이름(메타 json sections[].name) 영어 표 — 영어 화면에서만 audio.js 가 바꿔 보인다
   const sectionsEn = m.sections_en && typeof m.sections_en === 'object' && !Array.isArray(m.sections_en) ? m.sections_en : null;
-  return { tracks, def, sectionsEn };
+  return { tracks, def, sectionsEn, cdnBase: parseCdnBase(m.cdn_base) };
 }
 
 /** 구간 이름: 영어 화면이고 표에 있으면 영어, 아니면 그대로 */
