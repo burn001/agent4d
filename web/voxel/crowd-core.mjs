@@ -9,6 +9,9 @@
 //     오른쪽으로 비켜 선다(마주 오는 둘은 서로 반대쪽 → 관통 대신 스쳐 지나감, 뒤따르는 둘은 나란히)
 
 import { breakSlots } from './office-core.mjs';
+import { navClear } from './nav-core.mjs';
+
+const BOT_OFF = 0.9, BOT_CLR = 0.25; // 바퀴 로봇 곁 밀림 한도 · 가구와 떨어질 거리
 
 export const CROWD = {
   SLOT_GAP: 0.8,   // 다른 시설 예약 자리와 이보다 가까운 후보는 건너뜀
@@ -141,26 +144,34 @@ const together = (a, b) => (a.room && b.room && a.room === b.room) || (a.target 
  * 걷는 사람은 밀림의 앞뒤 성분을 진행 방향 오른쪽 비켜 서기로 바꾼다(앞뒤로 밀면 길을 되돌아가거나 관통). 같은 쪽으로 걷는 둘은 앞뒤로 벌어짐
  */
 /** solid(ch, x, z) → true 면 그 자리로는 밀지 않음(가구·벽 안 — 복셀 연구소처럼 큰 방은 nav-core navSolid, 없으면 예전대로) */
-export function separate(chars, dt, opt = CROWD, speed = 1, solid = null) {
+export function separate(chars, dt, opt = CROWD, speed = 1, solid = null, obs = null) {
   const list = [];
   for (const ch of chars) {
     if (!ch || ch.state === 'gone' || !ch.placed || ch.offstage || !ch.room) continue;
     if (ch.vanishT0 != null) continue;
     list.push(ch);
   }
-  if (list.length < 2 || !(dt > 0)) return false;
+  const nObs = obs ? obs.length : 0;
+  if ((list.length < 2 && !nObs) || !(dt > 0)) return false;
   const n = list.length;
   const px = new Float64Array(n), pz = new Float64Array(n), hit = new Uint8Array(n);
   const anc = list.map((c) => anchorOf(c, {}));
-  const w = list.map((c, i) => (pinned(c) || anc[i].arrive ? 0 : 1));
+  const pin = list.map((c) => pinned(c));
+  const w = list.map((c, i) => (pin[i] || anc[i].arrive ? 0 : 1));
+  const wo = nObs ? new Uint8Array(n) : null; // 바퀴 로봇에 밀린 사람(도착 중이어도 — 로봇 곁에 닿은 채 도착하지 않게)
   // 걷는 사람의 밀림: 앞뒤 성분 → 진행 방향 오른쪽(rx·rz = (-uz, ux)) 비켜 서기. 마주 오는 둘은 서로 반대쪽으로 비켜 스쳐 지나간다
-  const push = (i, mx, mz, follow) => {
+  const push = (i, mx, mz, follow, toPath = false) => {
     const A = anc[i];
     if (A.walk && !follow) {
       const along = mx * A.ux + mz * A.uz;
       mx -= along * A.ux; mz -= along * A.uz;
       const side = Math.abs(along), rx = -A.uz, rz = A.ux;
-      const sg = mx * rx + mz * rz < -1e-6 ? -1 : 1; // 이미 옆으로 밀리는 쪽이 있으면 그쪽, 없으면 오른쪽
+      const lat = mx * rx + mz * rz;
+      let sg = lat < -1e-6 ? -1 : 1; // 이미 옆으로 밀리는 쪽이 있으면 그쪽, 없으면 오른쪽
+      if (toPath && Math.abs(lat) < side * 0.5) { // 바퀴 로봇이 거의 정면: 길에서 이미 밀려난 쪽이 아니라 길 쪽으로 돌아 지나감(밀림 한도에 걸려 로봇을 뚫지 않게)
+        const c = list[i], off = (c.pos.x - A.x) * rx + (c.pos.z - A.z) * rz;
+        if (Math.abs(off) > 0.05) sg = off > 0 ? -1 : 1;
+      }
       mx += rx * side * sg; mz += rz * side * sg;
     }
     px[i] += mx; pz[i] += mz;
@@ -194,10 +205,30 @@ export function separate(chars, dt, opt = CROWD, speed = 1, solid = null) {
       push(j, ux * over * w[j] / ws, uz * over * w[j] / ws, false);
     }
   }
+  // 바퀴 로봇(obs = [{x,z,r,roomId}]) = 밀리지 않는 몸: 곁의 직원만 민다(걷는 사람은 위와 같이 옆으로 비켜 섬)
+  if (nObs) for (let i = 0; i < n; i++) {
+    if (pin[i]) continue;
+    const arr = !w[i]; // 도착 코앞: 움직이는 로봇에만 밀림(멈춰 일하는 로봇 곁이 목적지면 그 자리에 섬 — 밀면 영영 못 닿음)
+    const a = list[i], rid = a.room.id;
+    for (let k = 0; k < nObs; k++) {
+      const o = obs[k];
+      if (o.roomId !== rid || (o.ahead && anc[i].walk) || (arr && !o.moving)) continue; // 기다리는 로봇 앞 점(ahead)은 서 있는 사람만 민다(걷는 사람은 옆을 지나감)
+      const md = (anc[i].walk && !anc[i].arrive ? opt.WALK_D - 0.72 : 0) + 0.3 + (o.r ?? 0.42) + 0.04;
+      const dx = a.pos.x - o.x, dz = a.pos.z - o.z, d2 = dx * dx + dz * dz, near = md + 0.1;
+      if (d2 < (md + 0.4) * (md + 0.4)) wo[i] |= 2; // 로봇 곁(밀림 한도를 줄여 로봇 쪽으로 끌려 들어가지 않게)
+      if (d2 >= near * near) continue;
+      hit[i] = 1;
+      if (d2 >= md * md) continue;
+      const d = Math.sqrt(d2);
+      const ux = d < 1e-4 ? 1 : dx / d, uz = d < 1e-4 ? 0 : dz / d;
+      push(i, ux * (md - d), uz * (md - d), false, true);
+      wo[i] |= 1;
+    }
+  }
   const cap = opt.PUSH_V * Math.max(1, speed) * dt; // 빨리 감기면 걸음이 빨라진 만큼(재생 배속 1～6)
   let moved = false;
   for (let i = 0; i < n; i++) {
-    if (!w[i]) continue;
+    if (!w[i] && !(wo && (wo[i] & 1))) continue;
     const ch = list[i], A = anc[i];
     let mx = px[i], mz = pz[i];
     const m = Math.hypot(mx, mz);
@@ -208,9 +239,78 @@ export function separate(chars, dt, opt = CROWD, speed = 1, solid = null) {
       x += (A.x - x) * k; z += (A.z - z) * k;
     }
     const ox = x - A.x, oz = z - A.z, o = Math.hypot(ox, oz);
-    if (o > opt.MAX_OFF) { x = A.x + ox * opt.MAX_OFF / o; z = A.z + oz * opt.MAX_OFF / o; }
+    // 바퀴 로봇에 밀린 걷는 사람은 BOT_OFF 까지(로봇을 돌아 지나가게 — MAX_OFF 에 걸려 차체를 뚫었다), 가구·벽 곁(BOT_CLR 안)으로는 MAX_OFF 까지만
+    let mo = wo && (wo[i] & 1) && A.walk && o > opt.MAX_OFF && navClear(ch.room, x, z) >= BOT_CLR ? BOT_OFF : opt.MAX_OFF;
+    // 로봇에 밀려 MAX_OFF 밖에 있던 사람은 한도로 한 번에 끌려오지 않음(예전: 가구 곁·길 꺾임에서 0.9 → 0.42 순간 이동 → 기다리는 로봇 쪽으로 들어가 0.35 까지 붙음).
+    //   로봇 곁이면 지금 벗어난 만큼 유지, 아니면 밀림 속도(cap)로 천천히 돌아옴
+    if (o > mo && wo && A.walk) { const po = Math.hypot(ch.pos.x - A.x, ch.pos.z - A.z); if (po > mo) mo = Math.min(BOT_OFF, wo[i] & 2 ? po : Math.max(mo, po - cap)); }
+    if (o > mo) { x = A.x + ox * mo / o; z = A.z + oz * mo / o; }
     if (solid && solid(ch, x, z) && !solid(ch, ch.pos.x, ch.pos.z)) continue; // 밀려서 가구·벽 안으로 들어가지 않게
     if (Math.abs(x - ch.pos.x) > 1e-5 || Math.abs(z - ch.pos.z) > 1e-5) { ch.pos.x = x; ch.pos.z = z; moved = true; if (A.walk) ch.nudged = true; }
   }
   return moved;
+}
+
+/**
+ * 걷는 직원이 바퀴 로봇에게 길을 비켜 줌(잠깐 멈춤) — 순수. 3D(office.js)·2D(voxel2d.js) 공용.
+ *   obs = [{x,z,r,roomId,prio,fx,fz}] 바퀴 로봇(prio = 열린 호출을 들고 출동 중 — vx-bot-core roverPrio, fx·fz = 진행 방향)
+ *   걷는 직원의 진행 방향 앞 LOOK 안·옆 간격 HALF 안에 우선 로봇(지금 자리 또는 곧 갈 자리)이 있으면 ch.yieldUntil 까지 멈춘다(한 번 멈추면 적어도 MIN).
+ *   이미 NEAR 안으로 붙었으면 멈추지 않는다(멈추면 로봇 길을 막음 — 걸어서 빠져나감). 로봇이 멈춰 기다리는 중이면 우선 아님(roverObstacles).
+ *   o.path = [x0,z0, x1,z1, …] 로봇 길 위 앞 점(— 꺾이는 길을 따라 미리 봄, 없으면 fx·fz 곧은 앞)
+ *   우선순위(교착 없음): 우선 로봇은 옆 비킴이 되면 멈춘 직원 곁을 지나가고, 모자라면 멈춘다 — 멈춘 로봇은 우선이 아니라 직원이 먼저 지나간다.
+ *   직원은 우선 아닌 로봇을 기다리지 않는다(로봇이 기다림).
+ *   막힘 상한: 멈춘 시간이 MAX 를 넘으면 FREE 동안 양보하지 않고 걷는다(밀어내기 separate 가 옆으로 비켜 세움). 시간은 배속(1～6)으로 나눔.
+ *   반환 = 지금 멈춘 직원 수
+ */
+export const YIELD = { LOOK: 1.4, HALF: 0.8, MIN: 0.3, MAX: 1.5, FREE: 1.5, DECAY: 0.5, NEAR: 0.75, BEHIND_D: 1.25, PASS: 0.8, HOLD_MAX: 6 }; // BEHIND_D 멈춘 로봇 앞뒤에서 멈출 거리 · PASS 로봇 곁 지나갈 자리 · HOLD_MAX 멈춘 로봇 때문에 기다리는 상한(초)
+const PREDICT = [0, 0.6, 1.2]; // 로봇 진행 방향(fx·fz) 앞 거리(o.path 가 없을 때)
+export function botYield(chars, obs, now, dt, speed = 1, opt = YIELD) {
+  const k = Math.min(6, Math.max(1, speed));
+  let n = 0;
+  for (const ch of chars) {
+    if (!ch || !ch.room) continue;
+    const walking = isWalk(ch) && ch.path && ch.pi > 0 && ch.pi < ch.path.length && ch.vanishT0 == null;
+    if (!walking) { if (ch.yieldT) ch.yieldT = 0; if (ch.yieldUntil) ch.yieldUntil = 0; continue; }
+    let block = false, hold = false; // hold = 멈춘 로봇 때문(막힘 상한 MAX 를 세지 않음 — 로봇이 먼저 풀어 줌)
+    if (obs && obs.length && !(now < (ch.yieldFree || 0))) {
+      const q = ch.path[ch.pi], vx = q.x - ch.pos.x, vz = q.z - ch.pos.z, L = Math.hypot(vx, vz);
+      if (L > 1e-6) {
+        const ux = vx / L, uz = vz / L, rid = ch.room.id;
+        for (const o of obs) {
+          if (o.roomId !== rid) continue;
+          if (!o.prio) { // 우선 아닌(멈춰 기다리는) 로봇이라도 내가 그 뒤·옆 뒤에서 차체로 걸어 들어가면 멈춤 — 로봇은 제 뒤 직원을 기다리지 않으므로 서로 막힘 없음(좁은 통로에서 0.16 까지 붙음)
+            if (o.ahead || !o.moving) continue;
+            const dx = o.x - ch.pos.x, dz = o.z - ch.pos.z, f = dx * ux + dz * uz, lat = dx * -uz + dz * ux, back = -(dx * (o.fx || 0) + dz * (o.fz || 0));
+            if (!(f > 0 && f < opt.BEHIND_D && Math.abs(lat) < opt.HALF)) continue;
+            if (back < -0.45) { block = true; hold = true; break; }
+            // 멈춰 기다리는 로봇 앞으로 마주 걸어옴: 옆으로 돌아 지나갈 틈(로봇 곁 PASS 자리가 가구와 0.3)이 양쪽 다 없으면 멈춤(좁은 통로 — 지나가면 차체에 0.3 까지 붙음).
+            //   로봇은 막힘 풀기(다시 찾기 → 뒤로 비켜 섬)로 먼저 풀어 줌
+            if (o.waiting && back > 0.3) {
+              const nx = -uz, nz = ux, P = opt.PASS;
+              if (navClear(ch.room, o.x + nx * P, o.z + nz * P) < 0.3 && navClear(ch.room, o.x - nx * P, o.z - nz * P) < 0.3) { block = true; hold = true; break; }
+            }
+            continue;
+          }
+          if (Math.hypot(o.x - ch.pos.x, o.z - ch.pos.z) < opt.NEAR) continue; // 이미 붙어 있으면 멈추지 않고 빠져나감(멈추면 로봇 길을 막음)
+          const np = o.path ? o.path.length / 2 : 0; // 로봇 길 위 앞 점(꺾이는 길 — 모퉁이를 돌아 들어오는 로봇도 미리 봄)
+          for (let a = 0; a < (np ? np + 1 : PREDICT.length); a++) { // 지금 자리 + 로봇이 곧 갈 자리(옆에서 가로질러 오는 로봇도 길에 들어서기 전에 멈춤)
+            const px = np ? (a ? o.path[a * 2 - 2] : o.x) : o.x + (o.fx || 0) * PREDICT[a], pz = np ? (a ? o.path[a * 2 - 1] : o.z) : o.z + (o.fz || 0) * PREDICT[a];
+            const dx = px - ch.pos.x, dz = pz - ch.pos.z, f = dx * ux + dz * uz;
+            if (f <= 0 || f > opt.LOOK) continue;
+            if (Math.abs(dx * -uz + dz * ux) < opt.HALF) { block = true; break; }
+          }
+          if (block) break;
+        }
+      }
+    }
+    if (block) {
+      const was = now < (ch.yieldUntil || 0);
+      ch.yieldUntil = Math.max(ch.yieldUntil || 0, now + (was ? Math.max(dt * 1.5, 0.05) : opt.MIN / k));
+      if (!hold) ch.yieldT = (ch.yieldT || 0) + dt * k;
+      else if ((ch.holdT = (ch.holdT || 0) + dt * k) > opt.HOLD_MAX) { ch.yieldT = opt.MAX + 1e-3; ch.holdT = 0; } // 멈춘 로봇 때문이면 HOLD_MAX 까지(로봇 쪽 풀기가 끝내 안 되면 상한으로)
+      if (ch.yieldT > opt.MAX) { ch.yieldFree = now + opt.FREE / k; ch.yieldUntil = 0; ch.yieldT = 0; ch.yieldOver = (ch.yieldOver || 0) + 1; }
+    } else { if (ch.yieldT) ch.yieldT = Math.max(0, ch.yieldT - dt * k * opt.DECAY); if (ch.holdT) ch.holdT = 0; }
+    if (now < (ch.yieldUntil || 0)) n++;
+  }
+  return n;
 }

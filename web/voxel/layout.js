@@ -68,7 +68,7 @@ OFFICE_ST.workflow = OFFICE_ST.agent;
 const MEET_ST = {
   read: { spots: line(-6.6, -4.4, 0, 0.9, 2), face: -PI / 2, inward: [1, 0] },
   search: { spots: line(-6.6, 1.2, 0, 0.9, 2), face: -PI / 2, inward: [1, 0] },
-  shell: { spots: line(6.6, -2.6, 0, 0.9, 2), face: PI / 2, inward: [-1, 0] },
+  shell: { spots: line(4.6, -4.75, 0.9, 0, 2), face: PI, inward: [0, 1] }, // 뒤 벽 단말 함(MEET_FX.term) 앞
   skill: { spots: line(-5.45, -4.8, 0.9, 0, 2), face: PI, inward: [0, 1] },
 };
 

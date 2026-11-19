@@ -120,6 +120,11 @@ export class Vx2DExtra {
     R(o.x + 11.5, o.z + F.booth.z - 0.8, 0.95, 0.08, pal.booth); R(o.x + 11.5, o.z + F.booth.z + 0.8, 0.95, 0.08, pal.booth);
     R(o.x + F.dispatch.x, o.z + F.dispatch.z + (r.ext || 0), 1.5, 1.5, pal.pad);
     if (s > 6) { ctx.fillStyle = pal.paper; ctx.font = `700 ${Math.round(Math.min(14, s * 0.6))}px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; v._text(ctx, 'H', v._X(o.x + F.dispatch.x), v._Y(o.z + F.dispatch.z + (r.ext || 0))); }
+    // 서버랙(뒤 오른쪽 구석, 3D 와 같은 자리 — 셸 바퀴 로봇이 가는 곳): 몸통 + 앞면 장치 판 줄 + 옅은 LED
+    const K = F.rack, rx = o.x + K.x, rz = o.z + K.z;
+    R(rx, rz, K.w + 0.04, K.d + 0.04, pal.metal);
+    R(rx, rz, K.w - 0.06, K.d - 0.06, pal.metalDark);
+    if (s > 4) { R(rx, rz + K.d / 2 - 0.04, K.w - 0.12, 0.06, pal.metal); R(rx - 0.2, rz + K.d / 2 - 0.04, 0.1, 0.05, pal.ledIdle); }
   }
 
   // ---------------- 동적(세계 좌표) ----------------

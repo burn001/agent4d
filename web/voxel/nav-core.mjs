@@ -7,7 +7,7 @@
 //   · 출발점이 막힌 칸이면(밀어내기로 가구 곁에 섬) 가장 가까운 빈 칸으로 먼저 나오고, 도착점이 막힌 칸이면(가구 안 목표) 그 가구 앞 빈 칸(접근점)에서 멈춘다
 //   · 결정적: 같은 방·같은 끝점이면 늘 같은 길(힙 동률은 h → 넣은 순서). 결과는 방 캐시에 끝점 열쇠로 저장(목적지가 바뀔 때만 계산)
 // 라운지는 방 밖이라 라운지 둘레(라운지 가구 + 주변 방 상자)로 같은 격자를 따로 만든다(loungeNav·loungePath).
-import { OFFICE_FX } from './office-core.mjs';
+import { OFFICE_FX, MEET_FX } from './office-core.mjs';
 import { BAY, bayLocal, bayLine, PALLET } from './vx-proc-core.mjs';
 import { BATCH } from '../batch-core.mjs';
 import { quarter, rotXZ } from './xf.mjs';
@@ -24,6 +24,8 @@ export const NAV = {
   BIG_N: 40000,  // 이보다 칸이 많은 격자(복셀 연구소 ~290×290)는 가중 A*
   BIG_W: 1.6,    // 가중치
   SOFT: 4,       // 비싼 칸(softAt) 걸음 벌점
+  WIDE_R: 0.38,  // 바퀴 로봇(차체 반폭 ~0.39) 격자의 몸 반지름 — 좁으면 navPath 보통 격자로 물러섬
+  TIGHT_R: 0.36, // 바퀴 로봇 좁은 통로 격자: 칸 '가운데'가 가구·벽과 이만큼(차체 반폭) — 넓은 몸 격자(칸 전체)가 못 지나는 0.8～0.95 통로
 };
 const T = 0.12; // 벽 두께(props.js buildRoomStatic)
 
@@ -65,7 +67,8 @@ export function roomObstacles(room) {
     out.push(span(o.x + 11.0, o.x + 12.0, o.z + F.booth.z - 0.83, o.z + F.booth.z + 0.83, 'booth'));
     if (base.portal) out.push(box(base.portal.x, base.portal.z, 2.4, 0.9, 'portal'));
     if (base.bell) out.push(box(base.bell.x, base.bell.z, 0.5, 0.5, 'bell'));
-    for (const [px, pz] of [[11.1, -8.2], [-11.1, 8.3 + ext], [-7.4, -8.4]]) out.push(box(o.x + px, o.z + pz, 0.66, 0.66, 'plant'));
+    for (const [px, pz] of [[-11.1, 8.3 + ext], [-7.4, -8.4]]) out.push(box(o.x + px, o.z + pz, 0.66, 0.66, 'plant'));
+    out.push(box(o.x + F.rack.x, o.z + F.rack.z, F.rack.w, F.rack.d, 'serverRack')); // (예전 뒤 오른쪽 큰 화분 자리)
     const K = BATCH.DEVICE_K;
     for (const m of base.batches || []) out.push(span(m.x - 0.83 * K, m.x + 0.83 * K, m.z - 0.53 * K, m.z + 0.71 * K, 'batch')); // 복합기 + 앞 출력 받침
     for (const m of base.racks || []) out.push(span(m.x - 0.42, m.x + 0.42, m.z - 0.42, m.z + 0.43, 'rack'));
@@ -81,6 +84,7 @@ export function roomObstacles(room) {
     out.push(span(o.x - 7.92, o.x - 7.18, o.z + 1.7 - 0.72, o.z + 1.7 + 0.72, 'cabinet'));
     out.push(box(o.x - 5, zb6 + 0.55, 1.2, 0.6, 'toolbox'));
     out.push(box(o.x + 7.2, zb6 + 0.6, 0.66, 0.66, 'plant'));
+    { const M = MEET_FX.term; out.push(box(o.x + M.x, o.z + M.z, M.w, M.d, 'terminal')); } // 셸 단말 함
     if (base.board) out.push(span(base.board.x - 1.7, base.board.x + 1.7, zb6, zb6 + 0.33, 'board'));
   }
   return out;
@@ -105,19 +109,27 @@ export function loungeObstacles(lg, rooms = []) {
 
 // ───────────── 격자 ─────────────
 /** boxes(세계) · area(세계 범위) · (ox, oz) = 상대 좌표 기준(방 원점) → nav. 칸 경계는 기준점에서 CELL 배수 + OFF */
-export function buildNav(boxes, area, ox = 0, oz = 0, softAt = null) {
+export function buildNav(boxes, area, ox = 0, oz = 0, softAt = null, R = NAV.R, center = false) {
   const C = NAV.CELL, off = NAV.OFF;
   const gx0 = Math.floor((area.minX - ox - off) / C) * C + off, gz0 = Math.floor((area.minZ - oz - off) / C) * C + off;
   const nx = Math.max(1, Math.ceil((area.maxX - ox - gx0) / C)), nz = Math.max(1, Math.ceil((area.maxZ - oz - gz0) / C));
   const blocked = new Uint8Array(nx * nz);
-  const e = NAV.R + C / 2; // 칸 정사각형 전체가 R 밖이려면 칸 중심이 상자 + (R + 반 칸) 밖
+  // 칸 정사각형 전체가 R 밖이려면 칸 중심이 상자 + (R + 반 칸) 밖 · center = 칸 가운데만 상자에서 R(유클리드) 밖이면 빈 칸(좁은 통로용)
+  const e = center ? R : R + C / 2, R2 = R * R;
   const rel = [];
   for (const b of boxes) {
     const r = { minX: b.minX - ox, maxX: b.maxX - ox, minZ: b.minZ - oz, maxZ: b.maxZ - oz, kind: b.kind };
     rel.push(r);
     const i0 = Math.max(0, Math.floor((r.minX - e - gx0) / C - 0.5) + 1), i1 = Math.min(nx - 1, Math.ceil((r.maxX + e - gx0) / C - 0.5) - 1);
     const j0 = Math.max(0, Math.floor((r.minZ - e - gz0) / C - 0.5) + 1), j1 = Math.min(nz - 1, Math.ceil((r.maxZ + e - gz0) / C - 0.5) - 1);
-    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) blocked[j * nx + i] = 1;
+    if (!center) { for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) blocked[j * nx + i] = 1; continue; }
+    for (let j = j0; j <= j1; j++) {
+      const z = gz0 + (j + 0.5) * C, dz = Math.max(r.minZ - z, 0, z - r.maxZ), dz2 = dz * dz, row = j * nx;
+      for (let i = i0; i <= i1; i++) {
+        if (dz2 > 0) { const x = gx0 + (i + 0.5) * C, dx = Math.max(r.minX - x, 0, x - r.maxX); if (dx * dx + dz2 >= R2) continue; }
+        blocked[row + i] = 1;
+      }
+    }
   }
   // softAt(세계 x, z) → true 인 칸 = 비싼 칸(걸음마다 NAV.SOFT 더함) — 복셀 연구소 브리지 덱·경사로
   let soft = null;
@@ -125,7 +137,7 @@ export function buildNav(boxes, area, ox = 0, oz = 0, softAt = null) {
     soft = new Uint8Array(nx * nz);
     for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) if (!blocked[j * nx + i] && softAt(gx0 + (i + 0.5) * C + ox, gz0 + (j + 0.5) * C + oz)) soft[j * nx + i] = 1;
   }
-  return { nx, nz, gx0, gz0, blocked, soft, boxes: rel, cache: new Map() };
+  return { nx, nz, gx0, gz0, blocked, soft, boxes: rel, cache: new Map(), R, center };
 }
 
 const cx_ = (nav, i) => nav.gx0 + (i + 0.5) * NAV.CELL;
@@ -158,6 +170,7 @@ function nearestFree(nav, x, z) {
 // 방향: 0 +x, 1 -x, 2 +z, 3 -z
 const DI = [1, -1, 0, 0], DJ = [0, 0, 1, -1];
 
+let _heap = { f: new Float64Array(1024), h: new Float64Array(1024), s: new Int32Array(1024), q: new Int32Array(1024) }; // A* 힙 작업 배열(모든 격자가 함께 씀 — 늘기만 함)
 /** 칸 s → 칸 g 4방향 A*(꺾임 벌점). 칸 번호 배열 또는 null */
 function astar(nav, s, g) {
   if (s === g) return [s];
@@ -169,22 +182,41 @@ function astar(nav, s, g) {
   if (++S.gen >= 0x7ffffff0) { S.mark.fill(0); S.gen = 1; }
   const gen = S.gen, Gb = S.G, Pb = S.P, mark = S.mark; // mark: gen*2 = 열림(G·P 유효), gen*2+1 = 닫힘 — 세대마다 2 칸 씀
   const OPEN = gen * 2, CLOSED = gen * 2 + 1;
-  // 이진 힙(f, h, 순번)
-  const hf = [], hh = [], hs = [], hq = [];
-  let seq = 0;
-  const less = (a, b) => hf[a] < hf[b] || (hf[a] === hf[b] && (hh[a] < hh[b] || (hh[a] === hh[b] && hq[a] < hq[b])));
-  const swap = (a, b) => { let t = hf[a]; hf[a] = hf[b]; hf[b] = t; t = hh[a]; hh[a] = hh[b]; hh[b] = t; t = hs[a]; hs[a] = hs[b]; hs[b] = t; t = hq[a]; hq[a] = hq[b]; hq[b] = t; };
+  // 이진 힙(f, h, 순번) — 형식 배열 + 구멍 옮기기(예전 일반 배열·swap 과 같은 순서·같은 길, 2～3배 빠름)
+  let Hp = _heap;
+  let hf = Hp.f, hh = Hp.h, hs = Hp.s, hq = Hp.q, n = 0, seq = 0;
   const push = (f, h, st) => {
-    let i = hf.length; hf.push(f); hh.push(h); hs.push(st); hq.push(seq++);
-    while (i > 0) { const p = (i - 1) >> 1; if (!less(i, p)) break; swap(i, p); i = p; }
+    if (n === hf.length) { grow(); hf = Hp.f; hh = Hp.h; hs = Hp.s; hq = Hp.q; }
+    const q = seq++;
+    let i = n++;
+    while (i > 0) {
+      const p = (i - 1) >> 1, pf = hf[p];
+      if (!(f < pf || (f === pf && (h < hh[p] || (h === hh[p] && q < hq[p]))))) break;
+      hf[i] = pf; hh[i] = hh[p]; hs[i] = hs[p]; hq[i] = hq[p]; i = p;
+    }
+    hf[i] = f; hh[i] = h; hs[i] = st; hq[i] = q;
   };
   const pop = () => {
-    const st = hs[0], last = hf.length - 1;
-    if (last > 0) { hf[0] = hf[last]; hh[0] = hh[last]; hs[0] = hs[last]; hq[0] = hq[last]; }
-    hf.pop(); hh.pop(); hs.pop(); hq.pop();
-    let i = 0;
-    for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < hf.length && less(l, m)) m = l; if (r < hf.length && less(r, m)) m = r; if (m === i) break; swap(i, m); i = m; }
+    const st = hs[0], last = --n;
+    if (last > 0) {
+      const f = hf[last], h = hh[last], s2 = hs[last], q = hq[last];
+      let i = 0;
+      for (;;) {
+        const l = 2 * i + 1, r = l + 1;
+        let m = -1, mf = f, mh = h, mq = q;
+        if (l < n && (hf[l] < mf || (hf[l] === mf && (hh[l] < mh || (hh[l] === mh && hq[l] < mq))))) { m = l; mf = hf[l]; mh = hh[l]; mq = hq[l]; }
+        if (r < n && (hf[r] < mf || (hf[r] === mf && (hh[r] < mh || (hh[r] === mh && hq[r] < mq))))) m = r;
+        if (m < 0) break;
+        hf[i] = hf[m]; hh[i] = hh[m]; hs[i] = hs[m]; hq[i] = hq[m]; i = m;
+      }
+      hf[i] = f; hh[i] = h; hs[i] = s2; hq[i] = q;
+    }
     return st;
+  };
+  const grow = () => {
+    const c = hf.length * 2, nf = new Float64Array(c), nh = new Float64Array(c), ns = new Int32Array(c), nq = new Int32Array(c);
+    nf.set(hf); nh.set(hh); ns.set(hs); nq.set(hq);
+    Hp = _heap = { f: nf, h: nh, s: ns, q: nq };
   };
   // 큰 격자(연구소)는 가중 A*(h × BIG_W) — 펼침을 크게 줄이고 길은 그대로 장애물 밖(조금 덜 짧을 수 있음). 사무실 크기 격자는 그대로
   const hw = N > NAV.BIG_N ? NAV.BIG_W : 1;
@@ -192,7 +224,7 @@ function astar(nav, s, g) {
   const hs0 = H(s);
   for (let d = 0; d < 4; d++) { const st = s * 4 + d; Gb[st] = 0; Pb[st] = -1; mark[st] = OPEN; push(hs0, hs0, st); }
   let exp = 0, goal = -1;
-  while (hf.length) {
+  while (n) {
     const st = pop();
     if (mark[st] === CLOSED) continue;
     mark[st] = CLOSED;
@@ -340,6 +372,7 @@ function route_(nav, a, b, depth = 0) {
   const sa = nav.blocked[ca] ? nearestFree(nav, a.x, a.z) : ca;
   const sb = nav.blocked[cb] ? nearestFree(nav, b.x, b.z) : cb;
   if (sa < 0 || sb < 0) return null;
+  if (nav.reach && compOf(nav)[sa] !== compOf(nav)[sb]) return null; // 넓은 몸 격자: 이어지지 않은 칸이면 A* 전체 펼침 없이 바로 null(큰 사무실 86 ms → 0)
   const cells = astar(nav, sa, sb);
   if (!cells) return null;
   if (nav.ramps && nav.ramps.length && depth < 4) { const r = rampRoute(nav, cells, a, b, depth); if (r) return r; } // 연구소 경사로: 축을 따라 곧게
@@ -352,6 +385,38 @@ function route_(nav, a, b, depth = 0) {
   if (A !== a) pts.unshift(...(link(nav, A, a) || [{ x: a.x, z: a.z }]).reverse()); // 막힌 칸에서 나옴(짧은 걸음)
   if (B !== b) { const l = link(nav, B, b); if (l) pts.push(...l); } // 끝점이 R 밖이면 칸 가장자리에서 이어 정확히 그 자리, 아니면 접근점에서 멈춤
   return dedupe(pts);
+}
+
+/** 빈 칸 연결 덩어리 번호(4방향, 막힌 칸 = 0) — 격자마다 한 번 */
+function compOf(nav) {
+  if (nav._comp) return nav._comp;
+  // 줄 단위 구간(run) + 합치기-찾기(예전 칸마다 BFS 큰 사무실 ~1.4 ms → 몇 분의 1). 번호는 같음 비교에만 씀
+  const { nx, nz, blocked } = nav, comp = new Int32Array(nx * nz);
+  const rs = [], re = [], rr = [], par = [];
+  const find = (x) => { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; };
+  let pa = 0, pb = 0;
+  for (let j = 0; j < nz; j++) {
+    const row = j * nx, a = rs.length;
+    let i = 0, p = pa;
+    while (i < nx) {
+      if (blocked[row + i]) { i++; continue; }
+      const s0 = i;
+      while (i < nx && !blocked[row + i]) i++;
+      const e0 = i - 1, id = rs.length;
+      rs.push(s0); re.push(e0); rr.push(row); par.push(id);
+      while (p < pb && re[p] < s0) p++;
+      for (let k = p; k < pb && rs[k] <= e0; k++) { const x = find(k), y = find(id); if (x !== y) { if (x < y) par[y] = x; else par[x] = y; } }
+    }
+    pa = a; pb = rs.length;
+  }
+  const lab = new Int32Array(rs.length);
+  let id = 0;
+  for (let r = 0; r < rs.length; r++) {
+    const root = find(r);
+    if (!lab[root]) lab[root] = ++id;
+    comp.fill(lab[root], rr[r] + rs[r], rr[r] + re[r] + 1);
+  }
+  return (nav._comp = comp);
 }
 
 /** 점 → 가장 가까운 상자 거리 */
@@ -371,7 +436,7 @@ const segClear = (nav, p, q, r) => {
 };
 /** 빈 칸 가운데 F 에서 막힌 칸 안 점 p 로 가는 가로·세로 이음(p 뒤 점들, p 포함). p 가 가구·벽에서 R 안이거나 이음이 R 안을 지나면 null */
 function link(nav, F, p) {
-  const r = NAV.R - 1e-6;
+  const r = (nav.R ?? NAV.R) - 1e-6;
   if (clearance(nav, p.x, p.z) < r) return null;
   for (const c of [{ x: p.x, z: F.z }, { x: F.x, z: p.z }]) if (segClear(nav, F, c, r) && segClear(nav, c, p, r)) return [c, { x: p.x, z: p.z }];
   return null;
@@ -379,16 +444,47 @@ function link(nav, F, p) {
 
 // ───────────── 방 ─────────────
 const _rooms = new WeakMap(); // navBase(room) → {sig, nav}
+const _roomsWide = new WeakMap(); // 바퀴 로봇 격자
+const _roomsTight = new WeakMap(); // 바퀴 로봇 좁은 통로 격자
+/** 바퀴 로봇 격자 미룸(초, 벽시계): 배치가 QUIET 동안 그대로면 다시 만듦 · 바뀌는 중이어도 MAX 지나면 다시 만듦 */
+export const BOT_NAV = { QUIET: 0.6, MAX: 3 };
+let _botClock = null, _botNavGen = 0;
+const _botSigT = new WeakMap(); // navBase → {sig, t} 배치 판을 처음 본 때(벽시계)
+/** 바퀴 로봇 격자 시계(벽시계 초). null = 미룸 없음(시험 기본 — 배치가 바뀌면 바로 다시 만듦) */
+export function botNavClock(t) { _botClock = t == null ? null : t; }
+/** 바퀴 로봇 격자를 다시 만든 횟수(바뀌면 길 다시 찾기) */
+export function botNavGen() { return _botNavGen; }
 function roomSig(base) {
   const o = base.origin, d = base.door;
   return [base.type, base.ext || 0, (base.bounds.maxX - base.bounds.minX).toFixed(3), (base.bounds.maxZ - base.bounds.minZ).toFixed(3),
     d ? (d.x - o.x).toFixed(3) : '', base.leadDesk ? 1 : 0, (base.desks || []).length, (base.racks || []).length, (base.batches || []).length,
     (base.screens || []).length, (base.bays || []).join('.'), (base.tables || []).length, base.navSig || ''].join('|');
 }
-/** 방 격자(캐시). 원점 기준 상대 좌표 */
-export function roomNav(room) {
+/** 방 격자(캐시). 원점 기준 상대 좌표. wide = 바퀴 로봇용 넓은 몸 격자(가구·벽과 NAV.WIDE_R 거리 — 사무실·회의실만) */
+export function roomNav(room, wide = false) {
   const base = navBase(room);
   if (!base || !base.origin || !base.bounds) return null;
+  if (wide) { // true = 넓은 몸(칸 전체 WIDE_R) · 'tight' = 좁은 통로(칸 가운데 TIGHT_R)
+    if (base.type === 'lab') return null;
+    const tight = wide === 'tight', memo = tight ? _roomsTight : _roomsWide;
+    const sig = roomSig(base), c = memo.get(base), o = base.origin, T = _botClock;
+    if (c && c.sig === sig) { c.nav.stale = false; return c.nav; }
+    // 배치가 자라는 동안(직원 수백이 차례로 들어옴 — 0.3초마다 바뀜)은 지난 격자를 씀: 잠잠해진 뒤(QUIET) 또는 MAX 마다 한 번 다시 만듦
+    if (T != null) { // 배치 판(sig)을 처음 본 때 — 넓은 몸·좁은 통로 격자가 함께 씀(늦게 처음 묻는 격자도 같은 때부터 잼)
+      const q = _botSigT.get(base);
+      if (!q || q.sig !== sig) _botSigT.set(base, { sig, t: T });
+    }
+    if (c && T != null && c.ox === o.x && c.oz === o.z) {
+      const pt = _botSigT.get(base).t;
+      if (T - pt < BOT_NAV.QUIET && T - c.t < BOT_NAV.MAX && T >= c.t) { c.nav.stale = true; return c.nav; } // stale = 새 자리가 격자 밖일 수 있음(navReach)
+    }
+    const b = base.bounds, M = NAV.MARGIN;
+    const nav = buildNav(roomObstacles(room), { minX: b.minX - M, maxX: b.maxX + M, minZ: b.minZ - M, maxZ: b.maxZ + M }, o.x, o.z, null, tight ? NAV.TIGHT_R : NAV.WIDE_R, tight);
+    nav.reach = true; // 이어지지 않은 끝점은 바로 null(다음 격자로 물러섬)
+    memo.set(base, { sig, nav, ox: o.x, oz: o.z, t: T ?? 0 });
+    if (c) _botNavGen++; // 다시 만듦 → 바퀴 로봇 길 다시 찾기(vx-bots·vx2d-bots 가 봄)
+    return nav;
+  }
   const sig = roomSig(base);
   const c = _rooms.get(base);
   if (c && c.sig === sig) return c.nav;
@@ -434,13 +530,15 @@ const toLocalPt = (room, p) => {
  * 방 안 a → b 걷는 길(세계 좌표 [{x,z}], 첫 점 = a, 끝 점 = b 또는 b 가 가구 안이면 그 앞 접근점). 격자 밖·길 없음 → null.
  * 돌린 방은 지역 좌표에서 찾아 돌린다.
  */
-export function navPath(a, b, room) {
-  const nav = roomNav(room);
+export function navPath(a, b, room, wide = false, discs = null) {
+  let nav = roomNav(room, wide);
   if (!nav) return null;
   const base = navBase(room), o = base.origin;
   const rot = base !== room;
   const la = rot ? toLocalPt(room, a) : a, lb = rot ? toLocalPt(room, b) : b;
-  const rel = navRoute(nav, { x: la.x - o.x, z: la.z - o.z }, { x: lb.x - o.x, z: lb.z - o.z });
+  const A = { x: la.x - o.x, z: la.z - o.z }, B = { x: lb.x - o.x, z: lb.z - o.z };
+  if (discs && discs.length) { nav = withDiscs(nav, discs, room, base, A, B); if (!nav) return null; }
+  const rel = discs && discs.length ? route_(nav, A, B) : navRoute(nav, A, B);
   if (!rel) return null;
   const k = rot ? quarter(room.xf.k) : 0;
   const out = rel.map((p) => {
@@ -454,9 +552,68 @@ export function navPath(a, b, room) {
   return out;
 }
 
+/**
+ * discs(세계 [{x,z,r}] — 길을 막고 선 사람·멈춘 로봇)를 잠깐 막은 격자 사본(길 캐시 없음, 막힘 풀기 다시 찾기용 — 드묾).
+ * 칸을 막는 거리 = r + 격자 몸 반지름(칸 전체 격자는 + 반 칸). 출발점이 원 곁·안이면(바로 곁에 붙음) 원의 내 쪽 절반은 비워 둠.
+ * 끝점이 원 안이면 null(그 사람이 비키기 전엔 닿을 수 없음 — 기다림)
+ */
+function withDiscs(nav, discs, room, base, A, B) {
+  const C = NAV.CELL, rot = base !== room, o = base.origin, blocked = nav.blocked.slice(), extra = (nav.R ?? NAV.R) + (nav.center ? 0 : C / 2);
+  for (const d of discs) {
+    const l = rot ? toLocalPt(room, d) : d, x = l.x - o.x, z = l.z - o.z;
+    const r = (d.r ?? 0.3) + extra, dA = Math.hypot(A.x - x, A.z - z);
+    if (Math.hypot(B.x - x, B.z - z) < r) return null;
+    const inside = dA < r + C; // 출발점이 원 곁·안(바로 곁에 붙음): 원의 내 쪽 절반(그 사람보다 내게 가까운 칸)은 비워 둠 — 물러나 돌아가는 길
+    const i0 = Math.max(0, Math.floor((x - r - nav.gx0) / C)), i1 = Math.min(nav.nx - 1, Math.floor((x + r - nav.gx0) / C));
+    const j0 = Math.max(0, Math.floor((z - r - nav.gz0) / C)), j1 = Math.min(nav.nz - 1, Math.floor((z + r - nav.gz0) / C));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const cx = nav.gx0 + (i + 0.5) * C, cz = nav.gz0 + (j + 0.5) * C, dx = cx - x, dz = cz - z;
+      if (dx * dx + dz * dz >= r * r) continue;
+      if (inside && Math.hypot(cx - A.x, cz - A.z) < dA) continue;
+      blocked[j * nav.nx + i] = 1;
+    }
+  }
+  return { ...nav, blocked, cache: new Map(), _comp: null, reach: true };
+}
+
+/**
+ * 바퀴 로봇이 a 에서 b 쪽으로 '닿을 수 있는' 가장 가까운 자리(세계 {x,z}, 좁은 통로 격자 'tight').
+ * a 와 b 가 이어져 있으면 null(그대로 가면 됨). 이어지지 않았으면 a 덩어리 칸 가운데 b 에서 maxR 안 가장 가까운 칸, 없으면 undefined.
+ * (큰 사무실 — 랙 둘레가 백그라운드 랙·화면 열로 막혀 차체가 못 들어가는 방: 그 앞에서 멈춰 팔을 뻗는다)
+ */
+export function navReach(room, a, b, maxR = 2.4) {
+  const base = navBase(room);
+  if (!base || !base.origin) return undefined;
+  const o = base.origin, rot = base !== room;
+  const la = rot ? toLocalPt(room, a) : a, lb = rot ? toLocalPt(room, b) : b;
+  const ax = la.x - o.x, az = la.z - o.z, bx = lb.x - o.x, bz = lb.z - o.z;
+  const wn = roomNav(room, true); // 넓은 몸 격자에서 이어져 있으면 좁은 통로 격자는 만들지도 않음(보통 사무실)
+  if (wn) { const ca = cellOf(wn, ax, az), cb = cellOf(wn, bx, bz); if (ca >= 0 && cb >= 0 && !wn.blocked[ca] && !wn.blocked[cb] && compOf(wn)[ca] === compOf(wn)[cb]) return null; }
+  const nav = roomNav(room, 'tight');
+  if (!nav) return undefined;
+  const ca = cellOf(nav, ax, az), cb = cellOf(nav, bx, bz);
+  if (ca < 0 || cb < 0) return nav.stale ? null : undefined; // 지난 격자(배치가 자라는 중) 밖의 새 자리 = 막지 않음(길은 다음 격자로)
+  const sa = nav.blocked[ca] ? nearestFree(nav, ax, az) : ca, sb = nav.blocked[cb] ? nearestFree(nav, bx, bz) : cb;
+  if (sa < 0) return undefined;
+  const comp = compOf(nav), id = comp[sa];
+  if (sb >= 0 && comp[sb] === id) return null;
+  const C = NAV.CELL, rr = Math.ceil(maxR / C), fi = (bx - nav.gx0) / C - 0.5, fj = (bz - nav.gz0) / C - 0.5, ci = Math.round(fi), cj = Math.round(fj);
+  let best = -1, bd = Infinity;
+  for (let j = Math.max(0, cj - rr); j <= Math.min(nav.nz - 1, cj + rr); j++) for (let i = Math.max(0, ci - rr); i <= Math.min(nav.nx - 1, ci + rr); i++) {
+    const k = j * nav.nx + i;
+    if (comp[k] !== id) continue;
+    const d = (i - fi) * (i - fi) + (j - fj) * (j - fj);
+    if (d < bd) { bd = d; best = k; }
+  }
+  if (best < 0 || Math.sqrt(bd) * C > maxR) return undefined;
+  let p = { x: cx_(nav, best % nav.nx) + o.x, z: cz_(nav, (best / nav.nx) | 0) + o.z };
+  if (rot) p = rotXZ(p.x, p.z, quarter(room.xf.k), room.xf.px, room.xf.pz);
+  return p;
+}
+
 /** 서 있을 자리: b 가 가구·벽 곁(막힌 칸)이면 가장 가까운 빈 칸 가운데(face 등 나머지 필드 유지), 아니면 b 그대로 */
-export function navSpot(room, b) {
-  const nav = roomNav(room);
+export function navSpot(room, b, mode = false) { // mode = roomNav 격자('tight' = 바퀴 로봇 차체)
+  const nav = roomNav(room, mode);
   if (!nav || !b) return b;
   const base = navBase(room), o = base.origin, rot = base !== room;
   const lb = rot ? toLocalPt(room, b) : b;
@@ -491,6 +648,30 @@ export function navSolid(room, x, z) {
     nav.solid = S;
   }
   return nav.solid[c] === 1;
+}
+/**
+ * (x, z)(세계) 에서 가장 가까운 가구·벽 상자까지 거리(상자 안 = 음수). 방 없음 → Infinity.
+ * 바퀴 로봇 옆 비킴 한도(차체가 가구에 닿지 않게) — 상자 수만큼 O(n)(사무실 ~40)
+ */
+export function navClear(room, x, z) {
+  const nav = roomNav(room);
+  if (!nav) return Infinity;
+  const base = navBase(room), o = base.origin, rot = base !== room;
+  const l = rot ? toLocalPt(room, { x, z }) : { x, z };
+  return clearance(nav, l.x - o.x, l.z - o.z);
+}
+/**
+ * (cx, cz) 둘레 R 안의 상자만 골라 둔 거리 함수 (x, z)(세계) → 거리(R 밖 상자는 무시 — R 안 점의 판정용). 큰 사무실(상자 수백)에서 여러 점을 볼 때
+ */
+export function navClearNear(room, cx, cz, R) {
+  const nav = roomNav(room);
+  if (!nav) return () => Infinity;
+  const base = navBase(room), o = base.origin, rot = base !== room;
+  const loc = (x, z) => (rot ? toLocalPt(room, { x, z }) : { x, z });
+  const c = loc(cx, cz), lx = c.x - o.x, lz = c.z - o.z, near = [];
+  for (const b of nav.boxes) if (b.minX - R <= lx && lx <= b.maxX + R && b.minZ - R <= lz && lz <= b.maxZ + R) near.push(b);
+  const sub = { boxes: near };
+  return (x, z) => { const l = loc(x, z); return near.length ? clearance(sub, l.x - o.x, l.z - o.z) : Infinity; };
 }
 /** 꺾은선 pts(세계) 가운데 상자 안을 지나는 점이 있는지(0.1 간격 표본, from 번째 점부터) */
 export function navPathBlocked(room, pts, from = 0) {

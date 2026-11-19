@@ -5,7 +5,7 @@
 //      특별 상호작용 시설(발송대·문서고/금고·원격 부스·분류 컨베이어·신호등 보드)·의뢰인 화상 스크린.
 import * as THREE from 'three';
 import { quarter, wallHigh, windowWall } from './xf.mjs';
-import { OFFICE_FX } from './office-core.mjs';
+import { OFFICE_FX, MEET_FX } from './office-core.mjs';
 import { BATCH } from '../batch-core.mjs';
 import { leftAxis } from './vx-effort-core.mjs'; // 책상 소품(자리 분위기) 지역 좌표
 const DEVICE_K = BATCH.DEVICE_K; // v0.4.1 기동기 0.75배
@@ -441,10 +441,24 @@ function buildOfficeFurniture(room, pal, b, C, wwall = 'back') {
   L.box(room.bell.x, 0.6, room.bell.z, 0.07, 1.2, 0.07, C(pal.metal));
   L.box(room.bell.x, 1.22, room.bell.z, 0.5, 0.05, 0.07, C(pal.metal));
   // 화분(큰 것 둘 + 탕비실 옆)
-  plant(L, o.x + 11.1, o.z - 8.2, pal, C, true);
+  serverRack(L, G, o.x + F.rack.x, o.z + F.rack.z, pal, C); // 셸 로봇이 가는 서버랙(예전 큰 화분 자리)
   plant(L, o.x - 11.1, o.z + 8.3 + ext, pal, C, true);
   plant(L, o.x - 7.4, o.z - 8.4, pal, C);
 }
+
+/** 서버랙(뒤 오른쪽 구석, 앞 = +z): 몸통·윗 띠·문틀·장치 판 6 + 옅은 LED(작업 중 점등은 vx-bots.js) */
+function serverRack(L, G, x, z, pal, C) {
+  const R = OFFICE_FX.rack, fz = z + R.d / 2;
+  L.box(x, R.h / 2, z, R.w, R.h, R.d, C(pal.metalDark));
+  L.box(x, R.h + 0.02, z, R.w + 0.04, 0.05, R.d + 0.04, C(pal.metal));
+  for (const s of [-1, 1]) L.box(x + s * (R.w / 2 - 0.02), R.h / 2, fz + 0.01, 0.04, R.h - 0.1, 0.03, C(pal.metal));
+  for (let i = 0; i < RACK_UNITS; i++) {
+    const yy = 0.3 + i * 0.26;
+    L.box(x, yy, fz, R.w - 0.12, 0.18, 0.02, C(pal.metal));
+    G.box(x - 0.2, yy, fz + 0.012, 0.1, 0.05, 0.015, C(pal.ledIdle));
+  }
+}
+export const RACK_UNITS = 6;
 
 /** 금고: 몸통 + 방 안쪽(+x)을 보는 둥근 문(십자로 쌓은 판) — 바퀴는 동적 */
 function vault(L, x, z, pal, C) {
@@ -470,6 +484,21 @@ function buildMeetingFurniture(room, pal, b, C) {
   cabinet(L, o.x - 7.5, o.z + 1.7, 1.4, pal, C);
   toolbox(L, o.x - 5, zb + 0.55, pal, C);
   plant(L, o.x + 7.2, zb + 0.6, pal, C, true);
+  meetTerminal(L, b.glow, o.x + MEET_FX.term.x, o.z + MEET_FX.term.z, pal, C); // 셸 바퀴 로봇이 가는 단말 함
+}
+
+/** 회의실 셸 단말 함(뒤 벽, 앞 = +z): 몸통·윗판·꺼진 화면·장치 판 + 옅은 LED(작업 중 점등은 vx-bots.js) */
+function meetTerminal(L, G, x, z, pal, C) {
+  const M = MEET_FX.term, fz = z + M.d / 2;
+  L.box(x, M.h / 2, z, M.w, M.h, M.d, C(pal.metalDark));
+  L.box(x, M.h + 0.02, z, M.w + 0.04, 0.05, M.d + 0.04, C(pal.metal));
+  L.box(x, M.screenY, fz + 0.01, M.screenW + 0.08, M.screenH + 0.08, 0.03, C(pal.metal));
+  G.box(x, M.screenY, fz + 0.025, M.screenW, M.screenH, 0.015, C(pal.screenOff));
+  for (let i = 0; i < M.units; i++) {
+    const yy = M.y0 + i * M.step;
+    L.box(x, yy, fz + 0.01, M.w - 0.14, 0.16, 0.02, C(pal.metal));
+    G.box(x - 0.42, yy, fz + 0.022, 0.1, 0.05, 0.015, C(pal.ledIdle));
+  }
 }
 
 /** 바닥 통로 띠 */

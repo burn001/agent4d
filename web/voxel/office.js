@@ -12,10 +12,11 @@ import { Character, drawCharacter, drawCharacterFar } from './character.js';
 import { crewSpots } from './character-core.mjs';
 import { roleOf, overseeSpot, launcherDash, SUMMON_CATS, summonAtPortal, noteSummon } from './office-core.mjs';
 import { wardrobe, headExtra } from './appearance-core.mjs';
-import { SpotBook, takeStation, takeBreak, releaseSpot, separate } from './crowd-core.mjs'; // 겹침 막기
+import { SpotBook, takeStation, takeBreak, releaseSpot, separate, botYield } from './crowd-core.mjs'; // 겹침 막기
 import { VxHolo } from './vx-holo.js';
 import { VxFlow } from './vx-flow.js';
 import { VxIx } from './vx-ix.js';
+import { VxBots } from './vx-bots.js'; // 도구 로봇 팀
 import { VxClient } from './vx-client.js';
 import { Bubbles, esc, trunc } from './bubbles.js';
 import { VxQuips } from './quips.js'; // 생각·말풍선
@@ -173,6 +174,7 @@ export class VoxelView {
     this.holo = new VxHolo(this);
     this.flow = new VxFlow(this);
     this.ix = new VxIx(this);
+    this.bots = new VxBots(this); // 도구별 로봇(탐색 드론·바퀴 작업 로봇·정찰 드론·책상 팔)
     this.client = new VxClient(this);
     this.procs = new VxProcs(this);
     this.stencil = new VxStencil(this);
@@ -256,7 +258,7 @@ export class VoxelView {
     this.effects = [];
     this.spots.clear();
     this.bubbles.clear(); this.quips.clear();
-    this.holo.clear(); this.flow.clear(); this.ix.clear(); this.client.clear(); this.procs.clear();
+    this.holo.clear(); this.flow.clear(); this.ix.clear(); this.client.clear(); this.procs.clear(); this.bots.clear();
     this.tired.clear(); // 다음 값은 바로 목표(재생 seek·보관함 열기)
     this._lblUsed = null;
     this.focusId = null; this.hoverId = null;
@@ -296,7 +298,7 @@ export class VoxelView {
         if (recent) ch.startAtDoor = true;
         else { ch.state = 'gone'; ch.released = true; ch.goneAt = now; }
       }
-      for (const t of node.openTools || []) { ch.addTool(t.toolUseId, t.cat, t.tool, now - 1, true); this.holo.start(node.id, t, { quiet: true }); }
+      for (const t of node.openTools || []) { ch.addTool(t.toolUseId, t.cat, t.tool, now - 1, true); this.holo.start(node.id, t, { quiet: true }); this.bots.start(node.id, t, true); }
       if ((node.openTools || []).length) ch.snapNext = !spawn;
       this.chars.set(node.id, ch);
     }
@@ -338,7 +340,7 @@ export class VoxelView {
         if (!ended) { if (m.released) this.layoutDirty = true; m.endWall = null; m.released = false; }
         m.flashUntil = now + 0.35;
       }
-      if (isEnded(n)) this.holo.endAll(id, n.status === 'error' ? 'error' : n.status === 'stopped' ? 'stopped' : 'ok');
+      if (isEnded(n)) { this.holo.endAll(id, n.status === 'error' ? 'error' : n.status === 'stopped' ? 'stopped' : 'ok'); this.bots.endAll(id); }
       this._kidsDirty = true;
       this._batchDirty(id); this._batchDirty(n.parentId);
       if (n.kind === 'claude-p' || n.kind === 'monitor') this.layoutDirty = true;
@@ -363,7 +365,7 @@ export class VoxelView {
     if (ch) this._releaseStation(ch);
     this._removing.delete(id);
     this.nodes.delete(id); this.chars.delete(id); this.machines.delete(id); this.vis.delete(id);
-    this.holo.removeNode(id); this.ix.dropNode(id); this.client.desks.delete(id); this.procs.dropNode(id); this.quips.dropNode(id);
+    this.holo.removeNode(id); this.ix.dropNode(id); this.bots.dropNode(id); this.client.desks.delete(id); this.procs.dropNode(id); this.quips.dropNode(id);
     if (this._effTw) { this._effTw.forget(id + '|f'); this._effTw.forget(id + '|c'); } // 게이지 보간 장부
     this.layoutDirty = true; this._kidsDirty = true;
     this._settleUntil = (this._now || 0) + 0.7;
@@ -383,6 +385,7 @@ export class VoxelView {
     const tid = ev.toolUseId || 'anon' + Math.random();
     ch.addTool(tid, ev.cat || 'other', ev.tool, now, quiet);
     this.holo.start(nodeId, { ...ev, toolUseId: tid }, { quiet, speed: this.ts });
+    this.bots.start(nodeId, { ...ev, toolUseId: tid }, quiet); // 같은 종류 로봇이 나가 있으면 이어받음
     if (quiet) ch.snapNext = true;
   }
 
@@ -393,6 +396,7 @@ export class VoxelView {
     const found = ch.endTool(ev.toolUseId, ev.ok, now);
     if (!found && ev.ok === false) ch.errFlashUntil = now + 0.6;
     if (ev.toolUseId) this.holo.end(nodeId, ev.toolUseId, ev.ok === false ? 'error' : ev.stopped ? 'stopped' : 'ok', ev.result || ev.text || '');
+    this.bots.end(nodeId, ev);
   }
 
   /** 흐름 연출(app.onEvent, 라이브·재생·mock 같은 길 — quiet 제외): 바닥 패킷·특별 상호작용·의뢰인 창구 */
@@ -406,7 +410,7 @@ export class VoxelView {
   /** ⚙ 생각·말풍선 켬/끔: 떠 있는 말풍선을 비운다(켜면 대사, 끄면 예전 말풍선이 다음 이벤트부터) */
   onQuipsToggle() { this.bubbles.bubbles.clear(); }
   /** 측정용(확인 스크립트): 홀로그램·흐름·상호작용 수 */
-  vxStats() { return { holo: { ...this.holo.stats }, flow: { ...this.flow.stats }, ix: { ...this.ix.stats, on: this.ix.on }, procs: { ...this.procs.stats }, dyn: this.dLit.n + this.dGlow.n, stat: this.sLit.n + this.sGlow.n + this.sGlass.n }; }
+  vxStats() { return { holo: { ...this.holo.stats }, flow: { ...this.flow.stats }, ix: { ...this.ix.stats, on: this.ix.on }, bots: { ...this.bots.stats, drawn: this.bots.drawn || 0 }, procs: { ...this.procs.stats }, dyn: this.dLit.n + this.dGlow.n, stat: this.sLit.n + this.sGlow.n + this.sGlass.n }; }
 
   /** 말풍선. type = tool|text|user|result. tool 이면 cat 동사를 앞에 붙인다(예: "읽기 · SKILL.md") */
   say(nodeId, text, { type = 'text', cat = null, ok = null } = {}) {
@@ -1064,7 +1068,9 @@ export class VoxelView {
       if (ch.spawnMode === 'enter' && !ch.placed && !ch.spawnFrom) ch.appearT0 = now;
       ch.update(ctx);
     }
-    separate(this.chars.values(), dt, undefined, Math.min(6, this.ts || 1), this._crowdSolid || null); // 가벼운 밀어내기(관통·겹침 줄임) · 하위 표현이 가구 안 판정을 주면 그쪽으로 밀지 않음
+    const botObs = this.bots.obstacles(now); // 바퀴 로봇 = 밀리지 않는 몸 · 출동 중이면 걷는 직원이 잠깐 비켜 줌
+    separate(this.chars.values(), dt, undefined, Math.min(6, this.ts || 1), this._crowdSolid || null, botObs); // 가벼운 밀어내기(관통·겹침 줄임) · 하위 표현이 가구 안 판정을 주면 그쪽으로 밀지 않음
+    botYield(this.chars.values(), botObs, now, dt, this.ts || 1);
     // 제거된 노드: 다 나간 직원·꺼진 기계는 이제 지운다
     if (this._removing.size) for (const id of [...this._removing]) {
       const ch = this.chars.get(id), m = this.machines.get(id);
@@ -1079,6 +1085,7 @@ export class VoxelView {
       const f = CAT_FACILITY[ch.workCat];
       if (f && ch.room._act) ch.room._act[f] = 1;
     }
+    this.bots.step(now, dt); // 로봇 장부 한 걸음(서류함 서랍 등 시설 활동도 여기서)
 
     this._drawDynamic(now, dt);
     this._holoPass(now, dt); // 홀로그램(모니터·기동기 대시보드) — 하위 표현이 덮어씀(연구소: 반지름 보간 자리)
@@ -1221,6 +1228,7 @@ export class VoxelView {
     this.procs.drawAll(B, now);    // 분리 프로세스 생산 라인·전광판·들여다보기 빛줄
     this.sess.drawDynamic(B, now); // 캐비닛 경고등·창·서류 더미·종이비행기
     this.ix.draw(B, now);          // 특별 상호작용 은유(발송대·문서고·부스·컨베이어·신호등)
+    this.bots.draw(B, now);        // 도구 로봇 팀
     this.client.draw(B, now);      // 의뢰인 창구
     this.client._overlay();        // 스크린 이름표·집기 사각형
     // 효과

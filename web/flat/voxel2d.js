@@ -31,8 +31,9 @@ import { VxSessCore, PLANE_DUR, ease } from '../voxel/vx-sess-core.mjs';
 import { quarter, windowWall } from '../voxel/xf.mjs';
 import { Vx2DExtra } from './vx2d-extra.js';
 import { Vx2DProcs } from './vx2d-proc.js'; // 분리 프로세스 = 생산 라인 · 들여다보기 심부름
+import { Vx2DBots } from './vx2d-bots.js'; // 도구 로봇 팀(3D 와 같은 장부·자리·길)
 import { roleOf, overseeSpot, SUMMON_CATS, summonAtPortal, noteSummon } from '../voxel/office-core.mjs';
-import { SpotBook, takeStation, takeBreak, releaseSpot, separate } from '../voxel/crowd-core.mjs'; // 겹침 막기(3D 와 같음)
+import { SpotBook, takeStation, takeBreak, releaseSpot, separate, botYield } from '../voxel/crowd-core.mjs'; // 겹침 막기(3D 와 같음)
 import { watchPhase } from '../voxel/vx-proc-core.mjs';
 import { t as tr } from '../i18n.mjs';
 import { VxQuips } from '../voxel/quips.js'; // 생각·말풍선
@@ -101,6 +102,7 @@ export class Voxel2DView extends FlatView {
     this._layoutVer = 0;
     this.vx = new Vx2DExtra(this); // 바닥 조명 라인·패킷·홀로그램 모니터·특별 상호작용·의뢰인 창구
     this.vxp = new Vx2DProcs(this); // 생산 라인
+    this.bots = new Vx2DBots(this); // 도구 로봇 팀
     this.tired = new TiredBook(); // 직원별 과열 보간·몸짓(3D 와 같은 규칙)
     this._stencilOff = onStencil(() => { this._staticVer = (this._staticVer || 0) + 1; this.invalidate(); }); // ⚙ 켬/끔
     this.applyTheme();
@@ -212,6 +214,7 @@ export class Voxel2DView extends FlatView {
         m.flashUntil = now + 0.35;
       }
       if (n.kind === 'claude-p' || n.kind === 'monitor') this.layoutDirty = true;
+      if (ended && this.bots) this.bots.endAll(id); // 열린 호출을 닫고 로봇은 평소처럼 복귀
     }
     if ('parentId' in patch) this.layoutDirty = true;
   }
@@ -233,6 +236,7 @@ export class Voxel2DView extends FlatView {
     this.chars.delete(id); this.machines.delete(id);
     if (this._effTw) { this._effTw.forget(id + '|f'); this._effTw.forget(id + '|c'); } // 게이지 보간 장부
     if (this.vxp) this.vxp.dropNode(id);
+    if (this.bots) this.bots.dropNode(id);
     if (this.quips) this.quips.dropNode(id);
     super._dropNode(id);
     this._settleUntil = this.animT + 0.7;
@@ -245,6 +249,7 @@ export class Voxel2DView extends FlatView {
     if (this.quips) this.quips.clear();
     if (this.vx) this.vx.clear();
     if (this.vxp) this.vxp.clear();
+    if (this.bots) this.bots.clear();
     if (this.tired) this.tired.clear(); // 다음 값은 바로 목표(재생 seek·보관함 열기)
     super.reset();
   }
@@ -279,14 +284,17 @@ export class Voxel2DView extends FlatView {
     const ch = this._adding ? null : this.chars.get(nodeId);
     if (ch) {
       if (ch.state === 'gone') return;
-      ch.addTool(ev.toolUseId || 'anon' + Math.random(), ev.cat || 'other', ev.tool, this._now, quiet);
+      const tid = ev.toolUseId || 'anon' + Math.random();
+      ch.addTool(tid, ev.cat || 'other', ev.tool, this._now, quiet);
       if (quiet) ch.snapNext = true;
-    } else if (!this._adding) { const m = this.machines.get(nodeId); if (m) m.flashUntil = this._now + 0.3; }
+      this.bots.start(nodeId, { ...ev, toolUseId: tid }, quiet); // 같은 종류 로봇이 나가 있으면 이어받음
+    } else if (this._adding && this.chars.has(nodeId)) this.bots.start(nodeId, ev, true); // 스냅샷의 열린 도구(3D 와 같음 — 자리가 없으면 출동 없음)
+    else if (!this._adding) { const m = this.machines.get(nodeId); if (m) m.flashUntil = this._now + 0.3; }
     super.toolStart(nodeId, ev, quiet);
   }
   toolEnd(nodeId, ev) {
     const ch = this.chars.get(nodeId);
-    if (ch) { const found = ch.endTool(ev.toolUseId, ev.ok, this._now); if (!found && ev.ok === false) ch.errFlashUntil = this._now + 0.6; }
+    if (ch) { const found = ch.endTool(ev.toolUseId, ev.ok, this._now); if (!found && ev.ok === false) ch.errFlashUntil = this._now + 0.6; this.bots.end(nodeId, ev); }
     else { const m = this.machines.get(nodeId); if (m) m.flashUntil = this._now + 0.3; }
     super.toolEnd(nodeId, ev);
   }
@@ -588,6 +596,8 @@ export class Voxel2DView extends FlatView {
     if (this.vsess.stepMoves(now)) { this._staticVer = (this._staticVer || 0) + 1; this._layoutVer++; level = 2; }
     this.vx.step(now, dt); // 팀장 심부름·모니터 열림
     this.vxp.step(now, dt); // 들여다보기 → 심부름 · 생산 라인 장부
+    this.bots.step(now, dt); // 도구 로봇 팀
+    level = Math.max(level, this.bots.animating());
     if (!this.reduced) level = Math.max(level, this.vxp.animating(now));
     this.vsess.stepConflicts(now);
     if (this.vsess.pairs.length && !this.reduced) level = Math.max(level, 1);
@@ -608,7 +618,9 @@ export class Voxel2DView extends FlatView {
       if (ch.state !== st0) { const v = this.vis.get(ch.id); if (v) this.lastLabelPass = 0; }
       if (!this.reduced && (ch.state === 'work' || ch.sup)) level = Math.max(level, 1); // 지휘·감독 손짓도
     }
-    if (separate(this.chars.values(), dt, undefined, Math.min(6, this.ts || 1))) level = Math.max(level, 1); // 가벼운 밀어내기
+    const botObs = this.bots.obstacles(now); // 바퀴 로봇 = 밀리지 않는 몸 · 출동 중이면 걷는 직원이 잠깐 비켜 줌(3D 와 같음)
+    if (separate(this.chars.values(), dt, undefined, Math.min(6, this.ts || 1), null, botObs)) level = Math.max(level, 1); // 가벼운 밀어내기
+    if (botYield(this.chars.values(), botObs, now, dt, this.ts || 1)) level = Math.max(level, 1);
     this.quips.frame(now); // 생각 풍선·등장·퇴장 대사
     if (this._syncActors(now)) level = 2;
     if (!this.reduced) level = Math.max(level, this.vx.animating(now));
@@ -737,12 +749,14 @@ export class Voxel2DView extends FlatView {
     drawRings(this, ctx, now, s);
     this.vxp.drawPulses(ctx, now, s); // 자리에서 보기·백그라운드 들여다보기 빛줄
     this.vx.drawIx(ctx, now, s);        // 특별 상호작용 은유
+    this.bots.draw(ctx, now, s);        // 도구 로봇 팀(캐릭터 위 — 드론은 머리 위를 난다)
     this.vx.drawClient(ctx, now, s);    // 의뢰인 창구
     this._drawPlanes(ctx, s, now); // 종이비행기
     const anchor = (v) => v._ap || v._sp;
     this._drawSpawnLinks(ctx, anchor); // 띄움 점선
     this._font = null; // 위에서 ctx.font 를 직접 바꿨으므로 공용 setFont 기억을 비움
     drawCards(this, ctx, now, s, anchor, true);
+    this.bots.drawTop(ctx, now, s); // 아주 먼 축소: 로봇 점(카드 위)
     this.bubbles.place(now, anchor);
     ctx.globalAlpha = 1;
   }
@@ -1290,6 +1304,14 @@ export class Voxel2DView extends FlatView {
     if (ch.sup && ch.target && ch.target.type === 'oversee' && R > 3) {
       const w = Math.min(1, Math.sin(Math.min(1, ch.sup.k) * Math.PI) * 1.8);
       const sx = x - dv.z * R * 0.55, sy = y + dv.x * R * 0.55, ex = sx + dv.x * R * 1.5 * w, ey = sy + dv.z * R * 1.5 * w;
+      ctx.strokeStyle = body; ctx.lineWidth = Math.max(1.2, R * 0.32); ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke(); ctx.lineCap = 'butt';
+      ctx.fillStyle = ap.skin; ctx.beginPath(); ctx.arc(ex, ey, R * 0.2, 0, Math.PI * 2); ctx.fill();
+    }
+    // 로봇에게 지시: 오른팔을 잠깐 앞으로 뻗음(3D 와 같은 ch.cmdUntil)
+    if (ch.cmdUntil > now && R > 3 && !this.reduced) {
+      const w = Math.sin(Math.min(1, (ch.cmdUntil - now) / 0.75) * Math.PI);
+      const sx = x - dv.z * R * 0.55, sy = y + dv.x * R * 0.55, ex = sx + dv.x * R * 1.3 * w, ey = sy + dv.z * R * 1.3 * w;
       ctx.strokeStyle = body; ctx.lineWidth = Math.max(1.2, R * 0.32); ctx.lineCap = 'round';
       ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke(); ctx.lineCap = 'butt';
       ctx.fillStyle = ap.skin; ctx.beginPath(); ctx.arc(ex, ey, R * 0.2, 0, Math.PI * 2); ctx.fill();

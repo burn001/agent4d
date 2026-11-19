@@ -357,6 +357,11 @@ export class Character {
       if (this.state === 'enter' && !this.path && (this.appearT0 == null || now - this.appearT0 >= APPEAR)) { this.state = 'seated'; this.target = null; }
       return;
     }
+    if (this.yieldUntil && now < this.yieldUntil && this.state !== 'enter') { // 바퀴 로봇에게 길 비켜 주기(crowd-core botYield): 제자리에 서서 다리를 모음
+      const tg = Math.round(this.phase / PI) * PI, st = dt * 8;
+      this.phase += Math.max(-st, Math.min(st, tg - this.phase));
+      return;
+    }
     const wk = this.walkK > 0 ? this.walkK : 1; // 지친 직원은 조금 느리게(vx-heat-core TiredBook 이 채움)
     let step = WALK_SPEED * clamp(ts, 1, 6) * dt * wk;
     this.phase += dt * WALK_SPEED * clamp(ts, 1, 6) * 2.4 * wk;

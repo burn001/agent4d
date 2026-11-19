@@ -120,6 +120,8 @@ function poseBase(ch, fx, t) {
   const atDesk = tt === 'desk' && (ch.state === 'seated' || ch.state === 'work');
   // 의뢰서 카드 읽기(팀장, 도구 없을 때)
   if (atDesk && ch.readUntil > t && !(ch.state === 'work' && cat)) { P.armL = P.armR = -1.15; P.rollL = 0.35; P.rollR = -0.35; P.headP = 0.22; P.card = true; return P; }
+  // 로봇에게 지시: 오른팔을 앞으로 뻗어 가리킨 뒤 내림(0.75초 ÷ 배속)
+  if (atDesk && ch.cmdUntil > t) { const w = Math.sin(Math.min(1, (ch.cmdUntil - t) / 0.75) * PI); P.armR = -0.4 - 1.25 * w; P.rollR = -0.25 * w; P.armL = -0.9; P.rollL = 0.2; P.headP = -0.06 * w; P.headY = -0.25 * w; return P; }
   if (atDesk && ch.state === 'work' && cat) {
     // 홀로그램 모니터 조작
     switch (cat) {
